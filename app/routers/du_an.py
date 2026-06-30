@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 from ..database import get_db
 from ..config import settings
+from ..luu_tru import luu, xoa, ton_tai, phan_hoi_tai
 from ..rbac import yeu_cau, kiem_han_muc
 from ..audit import ghi_audit
 from ..deps import nhan_vien_id_cua
@@ -451,14 +452,8 @@ async def them_tai_lieu(da_id: int, ten: str = Form(...), loai: str = Form("KHAC
         loai = "KHAC"
     duong_dan, kt = None, 0
     if file is not None:
-        base = (getattr(settings, "storage_dir", None) or os.environ.get("STORAGE_DIR") or "/tmp")
-        thu_muc = os.path.join(base, "du_an", str(da_id))
-        os.makedirs(thu_muc, exist_ok=True)
-        safe = f"{uuid.uuid4().hex}_{os.path.basename(file.filename or 'file')}"
-        duong_dan = os.path.join(thu_muc, safe)
         data = await file.read()
-        with open(duong_dan, "wb") as f:
-            f.write(data)
+        duong_dan = luu(data, "du_an", da_id, file.filename, file.content_type)
         kt = len(data)
     t = DuAnTaiLieu(du_an_id=da_id, loai=loai, ten=ten, ma_so=ma_so, phien_ban=phien_ban,
                     ngay=date.today(), duong_dan=duong_dan, kich_thuoc=kt,
@@ -488,11 +483,8 @@ def xoa_tai_lieu(tl_id: int, db: Session = Depends(get_db),
     t = db.get(DuAnTaiLieu, tl_id)
     if t is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy tài liệu")
-    if t.duong_dan and os.path.exists(t.duong_dan):
-        try:
-            os.remove(t.duong_dan)
-        except OSError:
-            pass
+    if t.duong_dan:
+        xoa(t.duong_dan)
     db.delete(t); db.commit()
     return {"da_xoa": True}
 
@@ -500,9 +492,9 @@ def xoa_tai_lieu(tl_id: int, db: Session = Depends(get_db),
 @router.get("/tai-lieu/{tl_id}/tai-ve")
 def tai_ve(tl_id: int, db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
     t = db.get(DuAnTaiLieu, tl_id)
-    if t is None or not t.duong_dan or not os.path.exists(t.duong_dan):
+    if t is None or not t.duong_dan or not ton_tai(t.duong_dan):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không có tệp đính kèm")
-    return FileResponse(t.duong_dan, filename=os.path.basename(t.duong_dan).split("_", 1)[-1])
+    return phan_hoi_tai(t.duong_dan)
 
 
 # ----- KPI -----

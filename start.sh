@@ -22,4 +22,11 @@ if [ "${SEED_DEMO:-1}" != "0" ]; then
   echo "==> Tạo 13 tài khoản demo (mật khẩu: matkhau123) — đặt SEED_DEMO=0 để tắt"
   python -m scripts.tao_user_demo || true
 fi
+
+# Quản trị tài khoản theo biến môi trường (đổi mật khẩu demo / tạo sếp thật)
+if [ -n "${DEMO_PASSWORD:-}" ] || { [ -n "${ADMIN_EMAIL:-}" ] && [ -n "${ADMIN_PASSWORD:-}" ]; }; then
+  echo "==> Cập nhật tài khoản theo biến môi trường (DEMO_PASSWORD / ADMIN_*)"
+  python -m scripts.quan_tri_tk || true
+fi
+
 exec uvicorn app.main:app --host 0.0.0.0 --port "${PORT:-8000}"

@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 from ..database import get_db
 from ..config import settings
+from ..luu_tru import luu, xoa, ton_tai, phan_hoi_tai
 from ..rbac import yeu_cau
 from ..deps import nhan_vien_id_cua
 from ..audit import ghi_audit
@@ -27,15 +28,10 @@ LOAI_TEP = {"PO", "HOP_DONG", "KHAC"}
 
 
 async def _luu_tep(file: UploadFile, doi_tuong: str, doi_tuong_id: int):
-    """Lưu tệp tải lên vào storage_dir/<doi_tuong>/<id>/, trả (đường dẫn, kích thước)."""
-    thu_muc = os.path.join(settings.storage_dir, doi_tuong.lower(), str(doi_tuong_id))
-    os.makedirs(thu_muc, exist_ok=True)
-    safe = f"{uuid.uuid4().hex}_{os.path.basename(file.filename or 'file')}"
-    duong_dan = os.path.join(thu_muc, safe)
+    """Lưu tệp tải lên (R2/S3 nếu có cấu hình, ngược lại lưu đĩa); trả (tham_chiếu, kích_thước)."""
     data = await file.read()
-    with open(duong_dan, "wb") as f:
-        f.write(data)
-    return duong_dan, len(data)
+    ref = luu(data, doi_tuong.lower(), doi_tuong_id, file.filename, file.content_type)
+    return ref, len(data)
 
 
 # ============ (1) TỆP PO / HỢP ĐỒNG (đơn hàng) ============
@@ -68,10 +64,9 @@ def ds_tep(dh_id: int, db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, 
 @router.get("/tep/{tep_id}/tai-ve")
 def tai_ve(tep_id: int, db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
     tep = db.get(TepDinhKem, tep_id)
-    if tep is None or not os.path.exists(tep.duong_dan):
+    if tep is None or not ton_tai(tep.duong_dan):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy tệp")
-    return FileResponse(tep.duong_dan, filename=tep.ten_file,
-                        media_type=tep.content_type or "application/octet-stream")
+    return phan_hoi_tai(tep.duong_dan, tep.ten_file, tep.content_type)
 
 
 # ============ (2) EMAIL CHÀO HÀNG (CÓ DUYỆT + ĐÍNH KÈM) ============

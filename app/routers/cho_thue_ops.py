@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 from ..database import get_db
 from ..config import settings
+from ..luu_tru import luu, xoa, ton_tai, phan_hoi_tai
 from ..rbac import yeu_cau
 from ..deps import nhan_vien_id_cua
 from ..audit import ghi_audit
@@ -614,14 +615,9 @@ NHOM_TL = {"BIEU_MAU", "CO_CQ", "BAN_VE", "CODE", "KHAC"}
 
 
 async def _luu_tep_ct(file: UploadFile, ts_id: int):
-    thu_muc = os.path.join(settings.storage_dir, "cho_thue_da", str(ts_id))
-    os.makedirs(thu_muc, exist_ok=True)
-    safe = f"{uuid.uuid4().hex}_{os.path.basename(file.filename or 'file')}"
-    dd = os.path.join(thu_muc, safe)
     data = await file.read()
-    with open(dd, "wb") as f:
-        f.write(data)
-    return dd, len(data)
+    ref = luu(data, "cho_thue_da", ts_id, file.filename, file.content_type)
+    return ref, len(data)
 
 
 @router.post("/du-an/{ts_id}/tai-lieu", status_code=201)
@@ -658,8 +654,7 @@ def tai_tai_lieu_ct(tep_id: int, db: Session = Depends(get_db), _=Depends(yeu_ca
     t = db.get(TepDinhKem, tep_id)
     if t is None or t.doi_tuong != "CHO_THUE_DA":
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy tài liệu")
-    return FileResponse(t.duong_dan, filename=t.ten_file,
-                        media_type=t.content_type or "application/octet-stream")
+    return phan_hoi_tai(t.duong_dan, t.ten_file, t.content_type)
 
 
 @router.delete("/tai-lieu/{tep_id}")
@@ -668,10 +663,7 @@ def xoa_tai_lieu_ct(tep_id: int, db: Session = Depends(get_db),
     t = db.get(TepDinhKem, tep_id)
     if t is None or t.doi_tuong != "CHO_THUE_DA":
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy tài liệu")
-    try:
-        os.remove(t.duong_dan)
-    except OSError:
-        pass
+    xoa(t.duong_dan)
     db.delete(t)
     ghi_audit(db, nd.id, "XOA", "tep_dinh_kem", tep_id)
     db.commit()
