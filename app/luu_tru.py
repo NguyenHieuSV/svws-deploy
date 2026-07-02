@@ -38,14 +38,18 @@ def dung_r2() -> bool:
 
 
 def _client():
-    import boto3  # nạp trễ — chỉ khi dùng R2
+    import boto3  # nạp trễ — chỉ khi dùng R2/B2
+    from botocore.config import Config
     c = _cfg()
+    # R2 dùng "auto"; Backblaze B2 cần đúng region trong endpoint (vd "us-west-004").
+    region = (os.environ.get("R2_REGION") or "auto").strip()
     cli = boto3.client(
         "s3",
         endpoint_url=c["endpoint"],
         aws_access_key_id=c["key"],
         aws_secret_access_key=c["secret"],
-        region_name="auto",
+        region_name=region,
+        config=Config(signature_version="s3v4"),
     )
     return cli, c["bucket"]
 
