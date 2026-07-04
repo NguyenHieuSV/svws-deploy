@@ -196,6 +196,9 @@
       <script>(function(){try{if(location.protocol==='http:'||location.protocol==='https:'){var a=document.getElementById('api');if(a)a.value=location.origin;}}catch(e){}})();</script>
       <div class="login-foot">Khi chạy backend cục bộ (<code>make run</code>), giữ nguyên giá trị này.</div>
     </details>
+    <div class="login-foot" style="text-align:center;margin-top:14px">
+      <a href="huong-dan" target="_blank" style="color:var(--teal);font-weight:600;text-decoration:none">📖 Hướng dẫn sử dụng</a>
+    </div>
   </div>
 </div>
 
@@ -216,6 +219,7 @@
       <select id="rolePicker" data-nocbx onchange="switchRole(this.value)"></select>
     </div>
     <div class="whoami"><b id="waName">—</b><br><span id="waRole">—</span></div>
+    <button class="icon-btn" onclick="window.open('huong-dan','_blank')" title="Mở hướng dẫn sử dụng">📖 Hướng dẫn</button>
     <button class="icon-btn" onclick="logout()">Đăng xuất</button>
   </header>
   <main class="main" id="main"></main>

@@ -16,6 +16,7 @@ for r in (auth, kho, ncc, du_an, ban_hang, ke_toan, tai_chinh, nhan_su, cho_thue
 
 
 _HTML = os.path.join(os.path.dirname(__file__), "..", "svws_app.html")
+_HUONG_DAN = os.path.join(os.path.dirname(__file__), "..", "huong_dan.html")
 
 
 @app.get("/")
@@ -23,6 +24,13 @@ def goc():
     if os.path.exists(_HTML):
         return FileResponse(_HTML, media_type="text/html; charset=utf-8")
     return {"he_thong": "SVWS", "trang_thai": "ok"}
+
+
+@app.get("/huong-dan")
+def huong_dan():
+    if os.path.exists(_HUONG_DAN):
+        return FileResponse(_HUONG_DAN, media_type="text/html; charset=utf-8")
+    return {"he_thong": "SVWS", "trang_thai": "chua co huong dan"}
 
 
 @app.get("/health")
