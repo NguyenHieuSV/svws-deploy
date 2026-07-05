@@ -328,6 +328,7 @@ class KhachHang(Base):
     ten: Mapped[str] = mapped_column(String(200))
     ma_so_thue: Mapped[str | None] = mapped_column(String(20), nullable=True)
     dien_thoai: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    nguoi_lien_he: Mapped[str | None] = mapped_column(String(120), nullable=True)
     phan_loai_abc: Mapped[str | None] = mapped_column(String(1), nullable=True)
     email: Mapped[str | None] = mapped_column(String(120), nullable=True)
     khong_nhan_email: Mapped[bool] = mapped_column(Boolean, default=False)

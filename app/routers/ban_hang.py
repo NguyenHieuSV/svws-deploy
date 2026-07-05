@@ -37,7 +37,8 @@ def ds_kh(q: str | None = None, db: Session = Depends(get_db),
 def tao_kh(data: KhachHangVao, db: Session = Depends(get_db),
            nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
     kh = KhachHang(ma=data.ma, ten=data.ten, ma_so_thue=data.ma_so_thue,
-                   dien_thoai=data.dien_thoai, email=data.email, phan_loai_abc=data.phan_loai_abc,
+                   dien_thoai=data.dien_thoai, nguoi_lien_he=data.nguoi_lien_he,
+                   email=data.email, phan_loai_abc=data.phan_loai_abc,
                    nguoi_phu_trach=nhan_vien_id_cua(db, nd.id))
     db.add(kh); db.flush()
     ghi_audit(db, nd.id, "TAO", "khach_hang", kh.id, moi={"ten": data.ten})

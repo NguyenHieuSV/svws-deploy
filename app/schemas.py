@@ -244,6 +244,7 @@ class KhachHangVao(BaseModel):
     ten: str
     ma_so_thue: str | None = None
     dien_thoai: str | None = None
+    nguoi_lien_he: str | None = None
     email: str | None = None
     phan_loai_abc: str | None = None
     khong_nhan_email: bool = False
@@ -255,6 +256,8 @@ class KhachHangRa(BaseModel):
     ma: str | None
     ten: str
     email: str | None = None
+    dien_thoai: str | None = None
+    nguoi_lien_he: str | None = None
     phan_loai_abc: str | None = None
     khong_nhan_email: bool = False
 
