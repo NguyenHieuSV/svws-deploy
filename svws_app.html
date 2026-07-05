@@ -6462,11 +6462,145 @@ async function daTienDo(h){
     </div></div>`;
 }
 
+/* ===== An toàn: thư viện huấn luyện (chuẩn VN) + form biện pháp thi công ===== */
+const AT_BP={
+ tren_cao:{ten:"Làm việc trên cao (≥ 2m)",can_cu:"QCVN 18:2021/BXD — An toàn trong thi công xây dựng; Luật ATVSLĐ 84/2015/QH13; NĐ 44/2016/NĐ-CP (huấn luyện nhóm 3)",
+  dieu_kien:"Bắt buộc lập biện pháp và cấp phép khi làm việc ở độ cao từ 2m trở lên hoặc dưới 2m nhưng phía dưới có vật cản nguy hiểm.",
+  moi_nguy:["Ngã cao","Rơi dụng cụ, vật liệu trúng người phía dưới","Sập, gãy giàn giáo/thang","Điện giật khi gần đường dây"],
+  bien_phap:["Người làm việc đã huấn luyện ATVSLĐ nhóm 3 và có thẻ an toàn còn hiệu lực; sức khỏe đạt yêu cầu, không sử dụng rượu bia.","Giàn giáo/thang/sàn thao tác được lắp dựng đúng thiết kế, có kiểm tra nghiệm thu trước khi sử dụng (biên bản đính kèm).","Lan can an toàn cao ≥ 1m, có thanh chắn giữa và tấm chặn chân tại mọi mép sàn hở.","Dây an toàn toàn thân 2 móc, neo vào điểm chắc chắn phía trên vị trí làm việc; kiểm tra dây trước mỗi ca.","Khoanh vùng cảnh báo phía dưới khu vực làm việc, cấm người qua lại; biển báo 'Nguy hiểm - làm việc trên cao'.","Dụng cụ cầm tay có dây đeo chống rơi; vật tư đưa lên/xuống bằng túi kéo hoặc tời, cấm ném.","Không làm việc trên cao khi mưa, gió cấp 5 trở lên, thiếu ánh sáng.","Giữ khoảng cách an toàn với đường dây điện theo quy định (≥ 2m với hạ áp; xa hơn với trung/cao áp) hoặc cắt điện.","Có người giám sát an toàn thường trực bên dưới trong suốt thời gian làm việc.","Phương án cứu hộ khi có người bị treo trên dây an toàn (giải cứu trong 15 phút)."],
+  ptbh:["Dây an toàn toàn thân 2 móc","Mũ bảo hộ có quai cằm","Giày chống trượt","Găng tay","Kính bảo hộ","Túi đựng dụng cụ chống rơi"]},
+ kg_han_hep:{ten:"Làm việc trong không gian hạn hẹp (bể, hầm, hố ga, silo)",can_cu:"QCVN 34:2018/BLĐTBXH — An toàn lao động khi làm việc trong không gian hạn chế; Luật ATVSLĐ 84/2015/QH13",
+  dieu_kien:"Bắt buộc cấp GIẤY PHÉP VÀO KHÔNG GIAN HẠN CHẾ trước khi vào bể xử lý, hầm bơm, hố ga, đường ống lớn, silo hóa chất.",
+  moi_nguy:["Thiếu oxy (< 19,5%)","Khí độc H2S, CH4, CO tích tụ","Ngạt, ngộ độc cấp","Đuối nước khi nước tràn vào đột ngột","Điện giật thiết bị chìm","Kẹt, khó thoát hiểm"],
+  bien_phap:["Cô lập hoàn toàn: khóa van, bịt đường ống dẫn vào, cắt điện thiết bị trong bể và treo thẻ LOTO (khóa - treo thẻ).","Thông gió cưỡng bức tối thiểu 15 phút trước khi vào và duy trì liên tục trong suốt thời gian làm việc.","Đo khí TRƯỚC KHI VÀO và định kỳ 30 phút/lần: O₂ 19,5–23,5%; H₂S < 10 ppm; CO < 35 ppm; khí cháy < 10% LEL — ghi kết quả vào giấy phép.","Người vào đã huấn luyện nhóm 3 về không gian hạn chế; đeo dây cứu hộ nối với tời/tripod đặt ngoài cửa.","Bố trí ÍT NHẤT 1 NGƯỜI CANH GÁC thường trực tại cửa, giữ liên lạc liên tục (gọi - đáp), tuyệt đối không rời vị trí và KHÔNG tự ý vào cứu.","Đèn chiếu sáng an toàn 24V hoặc đèn pin phòng nổ; thiết bị điện cầm tay dùng nguồn 24V/có RCD.","Chuẩn bị sẵn thiết bị cứu hộ: tripod + tời, SCBA hoặc mặt nạ dưỡng khí, cáng, bộ sơ cấp cứu tại miệng bể.","Thời gian làm việc liên tục trong KGHC không quá 60 phút, luân phiên người.","Ngừng việc ngay và rút ra ngoài khi chỉ số khí vượt ngưỡng hoặc có dấu hiệu chóng mặt, buồn nôn.","Phương án cứu nạn khẩn cấp đã phổ biến cho cả đội; số điện thoại cấp cứu 115 và y tế gần nhất niêm yết tại chỗ."],
+  ptbh:["Máy đo đa khí (O₂/H₂S/CO/LEL) đã hiệu chuẩn","Dây cứu hộ + đai toàn thân","Tripod + tời cứu hộ","Mặt nạ phòng độc/SCBA dự phòng","Quần áo, ủng, găng chống hóa chất","Đèn phòng nổ"]},
+ dien:{ten:"Làm việc với hệ thống điện",can_cu:"QCVN 01:2020/BCT — Quy chuẩn kỹ thuật quốc gia về an toàn điện; Luật ATVSLĐ 84/2015/QH13",
+  dieu_kien:"Áp dụng khi lắp đặt, sửa chữa, bảo trì tủ điện, động cơ, biến tần, hệ thống điện công trình/trạm xử lý.",
+  moi_nguy:["Điện giật","Phóng hồ quang","Cháy nổ tủ điện","Máy khởi động bất ngờ khi đang sửa"],
+  bien_phap:["Chỉ người có chứng chỉ/bậc an toàn điện phù hợp mới được thao tác; có phiếu công tác/lệnh công tác.","Thực hiện đúng trình tự CẮT ĐIỆN — THỬ HẾT ĐIỆN bằng bút thử đã kiểm chứng — TIẾP ĐẤT (khi cần) — treo biển 'CẤM ĐÓNG ĐIỆN, CÓ NGƯỜI ĐANG LÀM VIỆC'.","Khóa - treo thẻ (LOTO) tại thiết bị đóng cắt; chìa khóa do người làm việc giữ.","Dùng dụng cụ cách điện đạt chuẩn, còn hạn kiểm định; thảm/ghế cách điện khi thao tác tủ.","Không làm việc với điện khi tay ướt, nền ẩm không có biện pháp; che chắn phần mang điện lân cận.","Làm việc có điện phải có phương án riêng được duyệt và tối thiểu 2 người.","Kiểm tra RCD/ELCB của nguồn thi công; dây dẫn tạm treo cao, tránh ngập nước.","Sau khi xong: tháo tiếp đất, tháo biển, kiểm tra không còn người/dụng cụ mới đóng điện lại theo lệnh."],
+  ptbh:["Găng cách điện đúng cấp điện áp","Giày/ủng cách điện","Mũ bảo hộ","Kính chống hồ quang","Bút thử điện","Bộ khóa - thẻ LOTO"]},
+ hoa_chat:{ten:"Làm việc với hóa chất (PAC, polymer, clo, axit/kiềm)",can_cu:"Luật Hóa chất 06/2007/QH12; NĐ 113/2017/NĐ-CP; QCVN 05A:2020/BCT về hóa chất nguy hiểm",
+  dieu_kien:"Áp dụng khi pha chế, châm, bốc dỡ, vận chuyển hoặc xử lý sự cố tràn đổ hóa chất tại trạm xử lý.",
+  moi_nguy:["Bỏng hóa chất da/mắt","Hít hơi khí độc (Cl₂, hơi axit)","Cháy nổ, phản ứng sinh nhiệt khi pha trộn sai","Tràn đổ ra môi trường"],
+  bien_phap:["Đọc MSDS của từng hóa chất TRƯỚC khi thao tác; MSDS in sẵn tại kho và vị trí châm.","Người thao tác đã huấn luyện an toàn hóa chất theo NĐ 113/2017/NĐ-CP.","Pha loãng đúng nguyên tắc: RÓT AXIT/KIỀM VÀO NƯỚC, tuyệt đối không làm ngược lại; dùng dụng cụ định lượng.","Khu vực pha chế thông thoáng, có quạt hút; cấm lửa, cấm ăn uống hút thuốc.","Vòi rửa mắt và tắm khẩn cấp trong bán kính 10m, kiểm tra hoạt động trước ca làm việc.","Bồn, van, đường ống dán nhãn tên hóa chất và mũi tên chiều dòng chảy; không dùng chai lọ nước uống đựng hóa chất.","Có bộ ứng phó tràn đổ (cát/chất hấp thụ, xẻng nhựa, túi thu gom) tại kho và điểm châm.","Chất thải, bao bì hóa chất thu gom vào khu vực chất thải nguy hại, giao đơn vị có chức năng xử lý.","Sự cố tiếp xúc: xối nước liên tục ≥ 15 phút, đưa đi y tế kèm theo MSDS của hóa chất."],
+  ptbh:["Kính chống hóa chất/kính kín","Mặt nạ phòng độc đúng phin lọc","Găng chống hóa chất (nitrile/cao su)","Tạp dề/quần áo chống hóa chất","Ủng cao su"]},
+ han_cat:{ten:"Hàn cắt — công việc phát sinh nhiệt (Hot work)",can_cu:"Luật PCCC 27/2001/QH10 (sửa đổi 2013); TCVN 3146:1986 an toàn hàn điện; QCVN 18:2021/BXD",
+  dieu_kien:"Bắt buộc cấp GIẤY PHÉP HÀN CẮT khi hàn, cắt, mài phát tia lửa ngoài xưởng chuyên dụng, đặc biệt gần vật liệu dễ cháy hoặc trong khu vực trạm xử lý.",
+  moi_nguy:["Cháy nổ do tia lửa bén vào vật liệu dễ cháy","Bỏng","Điện giật từ máy hàn","Khói hàn độc hại","Nổ chai khí nén"],
+  bien_phap:["Thợ hàn có chứng chỉ nghề và huấn luyện nhóm 3; giấy phép hàn cắt ký trước khi bắt đầu, hiệu lực trong ca.","Dọn sạch hoặc che chắn vật liệu dễ cháy trong bán kính 10m; che bạt chống cháy các khe hở sàn.","Bố trí bình chữa cháy ≥ 2 bình (bột + CO₂) và NGƯỜI TRỰC CHÁY trong suốt quá trình và 30 phút sau khi kết thúc.","Máy hàn có dây tiếp đất; kìm hàn, cáp hàn cách điện tốt, không quấn cáp quanh người.","Chai oxy - gas để đứng, cố định, cách nhau ≥ 5m và cách nguồn lửa ≥ 10m; có van chống cháy ngược.","Khu vực hàn thông thoáng hoặc có hút khói cục bộ; hàn trong không gian hạn hẹp phải kết hợp giấy phép KGHC.","Không hàn cắt bồn/đường ống chưa làm sạch hóa chất, khí dễ cháy bên trong (phải giải phóng khí và đo LEL).","Kết thúc: kiểm tra lại toàn bộ khu vực, tưới ẩm nếu cần, xác nhận không còn tàn lửa trước khi rời."],
+  ptbh:["Mặt nạ hàn đúng độ tối","Găng da dài","Tạp dề + ống tay da","Giày da cao cổ","Nút tai chống ồn khi mài","Khẩu trang lọc khói hàn"]}
+};
+function _atThuVienHtml(){
+  const box=(t,c)=>`<details style="border:1px solid var(--line);border-radius:9px;margin:8px 0"><summary style="cursor:pointer;padding:10px 14px;font-weight:600;font-size:13px">${t}</summary><div style="padding:2px 16px 12px;font-size:13px;line-height:1.6">${c}</div></details>`;
+  return `<div class="panel"><div class="panel-h"><h3>📚 Thư viện huấn luyện an toàn (chuẩn Việt Nam)</h3></div><div class="panel-b" style="padding:10px 16px">
+  ${box("1. Khung pháp lý bắt buộc",`<ul style="margin:4px 0;padding-left:18px">
+    <li><b>Luật ATVSLĐ 84/2015/QH13</b> — nghĩa vụ huấn luyện, khám sức khỏe, quan trắc môi trường lao động.</li>
+    <li><b>NĐ 44/2016/NĐ-CP</b> (sửa đổi bởi NĐ 140/2018) — quy định chi tiết huấn luyện ATVSLĐ theo 6 nhóm.</li>
+    <li><b>TT 06/2020/TT-BLĐTBXH</b> — danh mục công việc có yêu cầu nghiêm ngặt về ATVSLĐ (trên cao, không gian hạn hẹp, điện, hóa chất, hàn cắt, thiết bị áp lực...).</li>
+    <li><b>NĐ 39/2016/NĐ-CP</b> — khai báo, điều tra, thống kê tai nạn lao động.</li>
+    <li><b>QCVN 18:2021/BXD</b> (xây dựng) · <b>QCVN 34:2018/BLĐTBXH</b> (không gian hạn chế) · <b>QCVN 01:2020/BCT</b> (an toàn điện) · <b>NĐ 113/2017/NĐ-CP</b> (hóa chất).</li></ul>`)}
+  ${box("2. Sáu nhóm huấn luyện theo NĐ 44/2016/NĐ-CP",`<table style="font-size:12.5px"><thead><tr><th>Nhóm</th><th>Đối tượng</th><th>Lần đầu</th><th>Định kỳ</th></tr></thead><tbody>
+    <tr><td><b>1</b></td><td>Người quản lý (Giám đốc, trưởng phòng phụ trách sản xuất/dự án)</td><td>≥ 16 giờ</td><td>2 năm/lần</td></tr>
+    <tr><td><b>2</b></td><td>Cán bộ chuyên trách/bán chuyên trách ATVSLĐ</td><td>≥ 48 giờ</td><td>2 năm/lần</td></tr>
+    <tr><td><b>3</b></td><td>Người làm công việc nghiêm ngặt (trên cao, KGHC, điện, hóa chất, hàn cắt...) — cấp <b>Thẻ an toàn</b></td><td>≥ 24 giờ</td><td>2 năm/lần</td></tr>
+    <tr><td><b>4</b></td><td>Người lao động còn lại</td><td>≥ 16 giờ</td><td>Nhắc lại ít nhất 1 lần/năm</td></tr>
+    <tr><td><b>5</b></td><td>Người làm công tác y tế cơ sở</td><td>≥ 56 giờ</td><td>2 năm/lần</td></tr>
+    <tr><td><b>6</b></td><td>An toàn - vệ sinh viên</td><td>≥ 4 giờ (ngoài nội dung nhóm của mình)</td><td>2 năm/lần</td></tr></tbody></table>
+    <div style="color:var(--muted);margin-top:6px">Huấn luyện định kỳ tối thiểu bằng 50% thời lượng lần đầu. Nhân sự SVWS làm hiện trường (NV Kỹ thuật, NV Dự án, Thủ kho hóa chất) thuộc <b>nhóm 3</b> — bắt buộc có Thẻ an toàn.</div>`)}
+  ${box("3. Chương trình huấn luyện nội bộ ngành xử lý nước (khuyến nghị)",`<ul style="margin:4px 0;padding-left:18px">
+    <li><b>An toàn hóa chất &amp; MSDS</b> (PAC, polymer, clo, axit/kiềm) — trước khi giao việc + nhắc lại 6 tháng.</li>
+    <li><b>Khí độc H₂S/CH₄ &amp; không gian hạn hẹp</b> — bắt buộc trước khi vào bể/hầm; diễn tập cứu hộ 6 tháng/lần.</li>
+    <li><b>An toàn điện &amp; LOTO</b> (khóa - treo thẻ) — cho kỹ thuật điện, vận hành trạm.</li>
+    <li><b>Làm việc trên cao</b> — kiểm tra dây an toàn, giàn giáo trước mỗi đợt thi công.</li>
+    <li><b>PCCC &amp; sơ cấp cứu</b> — phối hợp PCCC địa phương, tối thiểu 1 lần/năm; đội PCCC cơ sở có chứng nhận.</li></ul>`)}
+  ${box("4. Hồ sơ an toàn phải lưu (phục vụ thanh tra)",`<ul style="margin:4px 0;padding-left:18px">
+    <li>Sổ theo dõi huấn luyện + chứng nhận/Thẻ an toàn nhóm 3 (scan lưu tab Document của dự án).</li>
+    <li>Giấy phép làm việc đã ký (trên cao, KGHC, hàn cắt, điện) — lưu theo dự án tối thiểu 1 năm.</li>
+    <li>Biên bản kiểm định thiết bị có yêu cầu nghiêm ngặt (bình áp lực, tời nâng, giàn giáo).</li>
+    <li>Kết quả khám sức khỏe định kỳ + khám bệnh nghề nghiệp (người tiếp xúc hóa chất).</li>
+    <li>Kết quả quan trắc môi trường lao động hằng năm; biên bản diễn tập ứng cứu khẩn cấp.</li></ul>`)}
+  </div></div>`;
+}
+function _atBienPhapHtml(){
+  return `<div class="panel"><div class="panel-h"><h3>📝 Biện pháp thi công an toàn / Giấy phép làm việc</h3></div>
+    <div class="note">Chọn loại công việc → điền thông tin → <b>Xuất bản in</b>: form kèm sẵn checklist biện pháp theo đúng quy chuẩn, in ký tại công trường rồi scan đính kèm vào tab Document.</div>
+    <div class="panel-b" style="padding:12px 16px;display:flex;flex-wrap:wrap;gap:8px">
+      ${Object.entries(AT_BP).map(([k,v])=>`<button class="btn-sm ghost" onclick="atMoBP('${k}')">${v.ten}</button>`).join('')}
+    </div></div>`;
+}
+function atMoBP(loai){
+  const bp=AT_BP[loai]; if(!bp)return;
+  S._atBPLoai=loai;
+  const nay=new Date().toISOString().slice(0,10);
+  _ktModal("📝 "+bp.ten,`
+    <div class="note" style="margin-bottom:10px"><b>Căn cứ:</b> ${bp.can_cu}.<br>${bp.dieu_kien}</div>
+    <div class="formrow">
+      <div class="f" style="flex:2"><label>Dự án / địa điểm</label><input id="bp_da" value="${((S.daCt&&(S.daCt.ma+' — '+S.daCt.ten))||'').replace(/"/g,'&quot;')}"></div>
+      <div class="f"><label>Vị trí cụ thể</label><input id="bp_vt" placeholder="VD: Bể điều hòa, mái nhà kỹ thuật..."></div></div>
+    <div class="formrow">
+      <div class="f"><label>Ngày thực hiện</label><input id="bp_ngay" type="date" value="${nay}"></div>
+      <div class="f"><label>Từ giờ</label><input id="bp_gio1" type="time" value="08:00"></div>
+      <div class="f"><label>Đến giờ</label><input id="bp_gio2" type="time" value="17:00"></div>
+      <div class="f"><label>Số người</label><input id="bp_sn" type="number" min="1" value="2"></div></div>
+    <div class="formrow">
+      <div class="f"><label>Đơn vị thi công</label><input id="bp_dv" value="Đội kỹ thuật SVWS"></div>
+      <div class="f"><label>Người phụ trách thi công</label><input id="bp_pt"></div>
+      <div class="f"><label>Giám sát an toàn</label><input id="bp_gs"></div></div>
+    <label>Mô tả công việc</label><input id="bp_mota" placeholder="VD: Vệ sinh màng MBR trong bể sinh học...">
+    <button class="btn-sm" style="margin-top:14px" onclick="atXuatBP()">🖨 Xuất bản in (PDF)</button>`);
+}
+function atXuatBP(){
+  const bp=AT_BP[S._atBPLoai]; if(!bp)return;
+  const g=id=>gv(id)||'';
+  const ngayVN=g('bp_ngay')?g('bp_ngay').split('-').reverse().join('/'):'…';
+  const cb=arr=>arr.map(x=>`<tr><td style="width:26px;text-align:center;font-size:15px">☐</td><td>${x}</td></tr>`).join('');
+  const html=`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${bp.ten}</title><style>
+    @page{size:A4;margin:13mm}
+    body{font-family:"Times New Roman",serif;color:#111;font-size:12.5px;line-height:1.45;margin:0}
+    h1{text-align:center;font-size:16px;margin:4px 0;text-transform:uppercase}
+    .sub{text-align:center;font-style:italic;margin:0 0 8px;font-size:11.5px}
+    h2{font-size:12.5px;margin:10px 0 3px;text-transform:uppercase;border-bottom:1px solid #999;padding-bottom:2px}
+    table{width:100%;border-collapse:collapse}
+    table.inf td{padding:2px 6px;vertical-align:top}
+    table.ck td{border:1px solid #777;padding:3px 6px}
+    .hd{display:flex;justify-content:space-between;font-weight:700;font-size:11.5px;border-bottom:2px solid #111;padding-bottom:4px;margin-bottom:6px}
+    .sig{display:flex;justify-content:space-between;margin-top:18px;text-align:center;font-size:12px}
+    .sig div{width:31%}
+    .warn{border:1.5px solid #b00;padding:6px 10px;margin:8px 0;font-size:12px}
+  </style></head><body>
+  <div class="hd"><span>CÔNG TY TNHH GIẢI PHÁP KỸ THUẬT SÓNG VIỆT</span><span>Số: ……/BPTC-AT</span></div>
+  <h1>Biện pháp thi công an toàn / Giấy phép làm việc<br>${bp.ten}</h1>
+  <p class="sub">Căn cứ: ${bp.can_cu}</p>
+  <h2>I. Thông tin chung</h2>
+  <table class="inf">
+    <tr><td style="width:50%"><b>Dự án/địa điểm:</b> ${g('bp_da')||'…'}</td><td><b>Vị trí cụ thể:</b> ${g('bp_vt')||'…'}</td></tr>
+    <tr><td><b>Ngày:</b> ${ngayVN} — <b>Từ</b> ${g('bp_gio1')||'…'} <b>đến</b> ${g('bp_gio2')||'…'}</td><td><b>Số người làm việc:</b> ${g('bp_sn')||'…'}</td></tr>
+    <tr><td><b>Đơn vị thi công:</b> ${g('bp_dv')||'…'}</td><td><b>Phụ trách thi công:</b> ${g('bp_pt')||'…'}</td></tr>
+    <tr><td colspan="2"><b>Giám sát an toàn:</b> ${g('bp_gs')||'…'}</td></tr>
+    <tr><td colspan="2"><b>Mô tả công việc:</b> ${g('bp_mota')||'…'}</td></tr></table>
+  <h2>II. Mối nguy chính</h2>
+  <p>${bp.moi_nguy.join(' · ')}</p>
+  <h2>III. Biện pháp an toàn bắt buộc (đánh dấu ☑ từng mục trước khi bắt đầu)</h2>
+  <table class="ck"><tbody>${cb(bp.bien_phap)}</tbody></table>
+  <h2>IV. Phương tiện bảo hộ cá nhân bắt buộc</h2>
+  <table class="ck"><tbody>${cb(bp.ptbh)}</tbody></table>
+  <div class="warn"><b>CAM KẾT:</b> Chúng tôi đã kiểm tra và xác nhận đầy đủ các biện pháp trên trước khi bắt đầu công việc; NGỪNG NGAY công việc khi điều kiện an toàn thay đổi và báo cáo giám sát an toàn. Giấy phép chỉ có hiệu lực trong thời gian ghi ở mục I.</div>
+  <div class="sig">
+    <div><b>NGƯỜI PHỤ TRÁCH THI CÔNG</b><br><i>(Ký, ghi rõ họ tên)</i><br><br><br>${g('bp_pt')}</div>
+    <div><b>GIÁM SÁT AN TOÀN</b><br><i>(Ký, ghi rõ họ tên)</i><br><br><br>${g('bp_gs')}</div>
+    <div><b>CHỈ HUY TRƯỞNG / QUẢN LÝ DỰ ÁN</b><br><i>(Ký duyệt cho phép)</i><br><br><br></div>
+  </div>
+  <script>window.onload=function(){window.print();}<\/script></body></html>`;
+  const w=window.open('','_blank'); if(!w)return toast("Trình duyệt chặn cửa sổ mới — cho phép popup để in","err");
+  w.document.write(html); w.document.close();
+}
+
 /* --- Tab An toàn --- */
 async function daAnToan(h){
   const canOp=can("du_an","THAO_TAC");
   let d; try{ d = S.mode==="live" ? await api(`/du-an/${S.daId}/an-toan`) : _daDemoAT(); }catch(e){h.innerHTML=`<div class="empty" style="color:#dc2626;padding:16px">${e.detail||e.message}</div>`;return;}
-  let html=`<div style="display:flex;flex-wrap:wrap;gap:8px;padding:0 0 12px">
+  let html=_atThuVienHtml()+_atBienPhapHtml();
+  html+=`<div style="display:flex;flex-wrap:wrap;gap:8px;padding:0 0 12px">
     ${_tcCard("Tổng mối nguy",d.tong)}${_tcCard("Đang mở",d.mo,'',d.mo?'#dc2626':'#16a34a')}
     ${_tcCard("Rủi ro CAO",d.theo_muc_rui_ro.CAO||0,'',(d.theo_muc_rui_ro.CAO||0)?'#dc2626':'#16a34a')}</div>`;
   if(canOp){
