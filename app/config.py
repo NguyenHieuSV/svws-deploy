@@ -7,7 +7,7 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+psycopg2://svws:svws@localhost:5432/svws"
     jwt_secret: str = "doi-secret-nay-trong-production"
     jwt_algorithm: str = "HS256"
-    jwt_expire_minutes: int = 8 * 60
+    jwt_expire_minutes: int = 30 * 24 * 60   # 30 ngày — "ghi nhớ đăng nhập" trên trình duyệt
 
     # Lưu trữ tệp (PO/Hợp đồng). Prod: trỏ sang mount S3/MinIO.
     storage_dir: str = "./storage"

@@ -481,6 +481,7 @@ async function doLogin(){
     S={mode:"live",api:api_,token:access_token,page:"dashboard"};
     const q=await api("/auth/quyen-cua-toi");
     S.role=q.vai_tro; S.roleName=q.ten_vai_tro; S.email=q.email; S.perm=q.quyen;
+    try{localStorage.setItem('svws_email',email);localStorage.setItem('svws_token',access_token);localStorage.setItem('svws_api',api_);}catch(_){}
     startApp();
   }catch(e){
     const m=$("#loginErr"); m.classList.add('err');
@@ -6446,8 +6447,30 @@ function viewGeneric(m,mod){
 function countEndpoints(){return "các";}
 function head(title,sub){return `<div class="crumb">SVWS · ${S.roleName}</div>
   <div class="h-row"><h2>${title}</h2><p>${sub}</p></div>`;}
-function logout(){S={mode:"demo",api:"",token:"",role:"",perm:{},page:"dashboard"};
+function logout(){
+  try{localStorage.removeItem('svws_token');}catch(_){}
+  S={mode:"demo",api:"",token:"",role:"",perm:{},page:"dashboard"};
   $("#app").classList.add('hidden');$("#login").classList.remove('hidden');$("#demoPill").classList.add('hidden');}
+
+/* ---------- Ghi nhớ đăng nhập: điền sẵn email + tự vào lại bằng token đã lưu ---------- */
+(function(){
+  try{
+    const em=localStorage.getItem('svws_email');
+    if(em){const e=document.getElementById('email'); if(e&&!e.value)e.value=em;}
+    const tk=localStorage.getItem('svws_token');
+    if(tk&&(location.protocol==='http:'||location.protocol==='https:')){
+      const api_=(localStorage.getItem('svws_api')||location.origin).replace(/\/$/,'');
+      S={mode:"live",api:api_,token:tk,page:"dashboard"};
+      api("/auth/quyen-cua-toi").then(q=>{
+        S.role=q.vai_tro;S.roleName=q.ten_vai_tro;S.email=q.email;S.perm=q.quyen;
+        startApp();
+      }).catch(()=>{ // token hết hạn / máy chủ đổi — quay về màn đăng nhập
+        try{localStorage.removeItem('svws_token');}catch(_){}
+        S={mode:"demo",api:"",token:"",role:"",perm:{},page:"dashboard"};
+      });
+    }
+  }catch(_){}
+})();
 
 /* Enter để đăng nhập */
 document.addEventListener('keydown',e=>{if(e.key==='Enter'&&!$("#login").classList.contains('hidden'))doLogin();});
