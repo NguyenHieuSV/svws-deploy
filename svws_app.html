@@ -1819,6 +1819,7 @@ function bhSwitch(t){S.bhTab=t;S.khSel=null;cdSelKH=[];viewBanHang($("#main"));}
 /* --- Tab Báo giá --- */
 async function bhBaoGia(host){
   if(S.bgfEdit) return bgfEditor(host);
+  if(S.bgnEdit) return bgnEditor(host);
   let drafts=DEMO.bgf||[];
   if(S.mode==="live"){ try{drafts=await api("/ban-hang/bao-gia-form");}catch(e){} }
   S._bgfList=drafts;
@@ -1854,7 +1855,7 @@ async function bhBaoGia(host){
     ? `Hạn mức duyệt của bạn: ${HANMUC.bao_gia[S.role]===null?'không giới hạn':vnd(HANMUC.bao_gia[S.role])}.`
     : (can("ban_hang","THAO_TAC")?"Bạn soạn được báo giá nhưng không có quyền duyệt.":"Bạn chỉ được xem.");
   host.innerHTML=draftPanel+`<div class="panel"><div class="panel-h"><h3>Báo giá nội bộ (luồng duyệt)</h3><div class="spacer"></div>
-    ${can("ban_hang","THAO_TAC")?'<button class="btn-sm ghost" onclick="bgMoTao()">+ Báo giá nội bộ</button>':''}</div>
+    ${can("ban_hang","THAO_TAC")?'<button class="btn-sm ghost" onclick="bgnMoi()">+ Báo giá nội bộ</button>':''}</div>
     <div class="note">${gateNote}</div>
     <div class="panel-b"><table><thead><tr><th>Số</th><th>Khách hàng</th><th class="num">Giá trị</th><th>Trạng thái</th><th>Hành động</th></tr></thead>
     <tbody>${body}</tbody></table></div></div>`;
@@ -2073,74 +2074,78 @@ function _bgfPrint(d){
   w.document.write(html); w.document.close();
 }
 
-/* --- Tạo báo giá mới --- */
-let _bgKh=[],_bgHh=[],_bgSeq=0;
-async function bgMoTao(){
-  _bgKh=await _crmKhList();
-  _bgHh=S.mode==="live"?await api("/kho/hang-hoa").catch(()=>[]):DEMO.hang_hoa;
-  if(!_bgKh.length)return toast("Chưa có khách hàng — hãy tạo ở tab Khách hàng trước","err");
-  if(!_bgHh.length)return toast("Chưa có hàng hóa trong Kho — hãy thêm ở phân hệ Kho hàng trước","err");
-  _bgSeq=0;
-  _ktModal("Tạo báo giá mới",`
-    <label>Khách hàng</label>
-    <select id="bg_kh">${_bgKh.map(k=>`<option value="${k.id}">${k.ten}${k.ma?' ('+k.ma+')':''}</option>`).join('')}</select>
-    <div style="margin:14px 0 6px;font-weight:700;font-size:13px">Các dòng báo giá</div>
-    <div id="bg_lines"></div>
-    <button class="btn-sm ghost" onclick="bgThemDong()">+ Thêm dòng</button>
-    <div style="margin-top:14px;font-size:15px">Tổng giá trị: <b id="bg_tong">0 ₫</b></div>
-    <button class="btn-sm" style="margin-top:14px" onclick="bgTao()">Gửi báo giá (chờ duyệt)</button>`);
-  bgThemDong();
+/* --- Báo giá nội bộ: form toàn trang (giống form báo giá gửi khách) --- */
+async function bgnMoi(){
+  const kh=await _crmKhList();
+  const hhs=S.mode==="live"?await api("/kho/hang-hoa").catch(()=>[]):DEMO.hang_hoa;
+  if(!kh.length)return toast("Chưa có khách hàng — hãy tạo ở tab Khách hàng trước","err");
+  if(!hhs.length)return toast("Chưa có hàng hóa trong Kho — hãy thêm ở phân hệ Kho hàng trước","err");
+  S._bgnKh=kh;S._bgnHh=hhs;
+  const h0=hhs[0];
+  S.bgnEdit={d:{khach_hang_id:kh[0].id,
+    items:[{hang_hoa_id:h0.id,so_luong:1,don_gia:h0.gia_ban||0}]}};
+  viewBanHang($("#main"));
 }
-function bgThemDong(){
-  const i=++_bgSeq;
-  const div=document.createElement('div');
-  div.id='bg_row_'+i;
-  div.style.cssText='display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap';
-  div.innerHTML=`
-    <select id="bg_hh_${i}" style="flex:2;min-width:180px" onchange="bgChonHH(${i})">
-      ${_bgHh.map(h=>`<option value="${h.id}" data-gia="${h.gia_ban||0}">${h.ten} (${h.ma||h.id})</option>`).join('')}</select>
-    <input id="bg_sl_${i}" type="number" min="0.01" step="any" value="1" placeholder="SL" style="width:90px" oninput="bgTinhTong()">
-    <input id="bg_dg_${i}" type="number" min="0" step="any" placeholder="Đơn giá" style="width:140px" oninput="bgTinhTong()">
-    <button class="btn-sm ghost" style="color:var(--red)" onclick="document.getElementById('bg_row_${i}').remove();bgTinhTong()">✕</button>`;
-  document.getElementById('bg_lines').appendChild(div);
-  bgChonHH(i);
+async function bgnEditor(host){
+  if(!S._bgnKh){S._bgnKh=await _crmKhList();
+    S._bgnHh=S.mode==="live"?await api("/kho/hang-hoa").catch(()=>[]):DEMO.hang_hoa;}
+  const kh=S._bgnKh,hhs=S._bgnHh,d=S.bgnEdit.d;
+  const tong=d.items.reduce((s,it)=>s+(Number(it.so_luong)||0)*(Number(it.don_gia)||0),0);
+  const hhOpt=sel=>hhs.map(h=>`<option value="${h.id}" ${h.id===sel?'selected':''}>${h.ten} (${h.ma||h.id})</option>`).join('');
+  const dvCua=id=>{const h=hhs.find(x=>x.id===id);return h?(h.don_vi||''):'';};
+  const itemRows=d.items.map((it,i)=>`<tr>
+    <td style="color:var(--muted)">${i+1}</td>
+    <td><select onchange="bgnChonHH(${i},this.value)" style="min-width:200px">${hhOpt(it.hang_hoa_id)}</select></td>
+    <td><input type="number" min="0.01" step="any" value="${it.so_luong}" oninput="bgnSet(${i},'so_luong',this.value)" style="width:80px"></td>
+    <td style="color:var(--muted)">${dvCua(it.hang_hoa_id)||'—'}</td>
+    <td><input type="number" min="0" step="any" value="${it.don_gia}" oninput="bgnSet(${i},'don_gia',this.value)" style="width:140px"></td>
+    <td class="num" id="bgn_tt_${i}">${vnd((Number(it.so_luong)||0)*(Number(it.don_gia)||0))}</td>
+    <td><button class="btn-sm ghost" style="color:var(--red)" onclick="bgnXoaDong(${i})">✕</button></td></tr>`).join('');
+  host.innerHTML=`
+  <div style="margin-bottom:12px"><button class="btn-sm ghost" onclick="bgnDong()">← Quay lại danh sách</button></div>
+  <div class="panel"><div class="panel-h"><h3>Soạn báo giá nội bộ</h3><div class="spacer"></div>
+    <button class="btn-sm" onclick="bgnGui()">Gửi duyệt</button></div>
+  <div class="note">Báo giá nội bộ gắn với hàng hóa trong Kho để đi tiếp luồng <b>duyệt theo hạn mức → tạo đơn hàng → xuất kho</b>. Tổng giá trị (chưa VAT) là căn cứ xét hạn mức duyệt.</div>
+  <div class="panel-b" style="padding:14px 18px">
+    <div style="max-width:420px"><label>Khách hàng</label>
+      <select onchange="S.bgnEdit.d.khach_hang_id=Number(this.value)">${kh.map(k=>`<option value="${k.id}" ${k.id===d.khach_hang_id?'selected':''}>${k.ten}${k.ma?' ('+k.ma+')':''}</option>`).join('')}</select></div>
+    <div style="margin:16px 0 6px;font-weight:700;font-size:13px">CHI TIẾT HÀNG HÓA</div>
+    <div style="overflow-x:auto"><table><thead><tr><th>#</th><th>Hàng hóa (từ Kho)</th><th>SL</th><th>Đơn vị</th><th>Đơn giá (VND)</th><th class="num">Thành tiền</th><th></th></tr></thead>
+    <tbody>${itemRows}</tbody></table></div>
+    <button class="btn-sm ghost" style="margin-top:8px" onclick="bgnThemDong()">+ Thêm dòng</button>
+    <div style="display:flex;justify-content:flex-end;margin-top:14px">
+      <table style="width:auto;min-width:300px">
+        <tr><td><b>TỔNG GIÁ TRỊ (chưa VAT):</b></td><td class="num" id="bgn_tot" style="font-size:16px"><b>${vnd(tong)}</b></td></tr>
+      </table></div>
+  </div></div>`;
 }
-function bgChonHH(i){
-  const sel=document.getElementById('bg_hh_'+i);
-  const gia=sel.options[sel.selectedIndex]?.dataset?.gia||0;
-  document.getElementById('bg_dg_'+i).value=gia;
-  bgTinhTong();
-}
-function _bgDongData(){
-  const rows=[];
-  document.querySelectorAll('#bg_lines [id^="bg_row_"]').forEach(div=>{
-    const i=div.id.replace('bg_row_','');
-    const hh=Number(document.getElementById('bg_hh_'+i)?.value);
-    const sl=Number(document.getElementById('bg_sl_'+i)?.value);
-    const dg=Number(document.getElementById('bg_dg_'+i)?.value);
-    if(hh&&sl>0&&dg>=0)rows.push({hang_hoa_id:hh,so_luong:sl,don_gia:dg});
-  });
-  return rows;
-}
-function bgTinhTong(){
-  const t=_bgDongData().reduce((s,r)=>s+r.so_luong*r.don_gia,0);
-  const el=document.getElementById('bg_tong'); if(el)el.textContent=vnd(t);
-}
-async function bgTao(){
-  const khId=Number(document.getElementById('bg_kh').value);
-  const rows=_bgDongData();
+function bgnSet(i,f,v){const it=S.bgnEdit.d.items[i];if(!it)return;it[f]=v;
+  const el=document.getElementById('bgn_tt_'+i);
+  if(el)el.textContent=vnd((Number(it.so_luong)||0)*(Number(it.don_gia)||0));
+  const tong=S.bgnEdit.d.items.reduce((s,x)=>s+(Number(x.so_luong)||0)*(Number(x.don_gia)||0),0);
+  const g=document.getElementById('bgn_tot');if(g)g.innerHTML='<b>'+vnd(tong)+'</b>';}
+function bgnChonHH(i,val){const h=(S._bgnHh||[]).find(x=>x.id===Number(val));if(!h)return;
+  const it=S.bgnEdit.d.items[i];it.hang_hoa_id=h.id;it.don_gia=h.gia_ban||0;viewBanHang($("#main"));}
+function bgnThemDong(){const hhs=S._bgnHh||[];const h0=hhs[0]||{};
+  S.bgnEdit.d.items.push({hang_hoa_id:h0.id||null,so_luong:1,don_gia:h0.gia_ban||0});viewBanHang($("#main"));}
+function bgnXoaDong(i){S.bgnEdit.d.items.splice(i,1);if(!S.bgnEdit.d.items.length)bgnThemDong();else viewBanHang($("#main"));}
+function bgnDong(){S.bgnEdit=null;viewBanHang($("#main"));}
+async function bgnGui(){
+  const d=S.bgnEdit.d;
+  const rows=d.items.filter(it=>it.hang_hoa_id&&Number(it.so_luong)>0&&Number(it.don_gia)>=0)
+    .map(it=>({hang_hoa_id:Number(it.hang_hoa_id),so_luong:Number(it.so_luong),don_gia:Number(it.don_gia)}));
   if(!rows.length)return toast("Cần ít nhất 1 dòng hàng hợp lệ (số lượng > 0)","err");
   if(S.mode==="live"){
-    try{await api("/ban-hang/bao-gia",{method:'POST',body:JSON.stringify({khach_hang_id:khId,chi_tiet:rows})});}
+    try{await api("/ban-hang/bao-gia",{method:'POST',body:JSON.stringify({khach_hang_id:d.khach_hang_id,chi_tiet:rows})});}
     catch(e){return toast(e.detail||e.message,"err");}
   }else{
-    const kh=_bgKh.find(k=>k.id===khId);
+    const kh=(S._bgnKh||[]).find(k=>k.id===d.khach_hang_id);
     const tong=rows.reduce((s,r)=>s+r.so_luong*r.don_gia,0);
     const id=Math.max(0,...DEMO.bao_gia.map(b=>b.id))+1;
-    DEMO.bao_gia.unshift({id,so:"BG-"+String(id).padStart(4,'0'),khach:kh?kh.ten:("KH #"+khId),tong_tien:tong,trang_thai:"CHO_DUYET"});
+    DEMO.bao_gia.unshift({id,so:"BG-"+String(id).padStart(4,'0'),khach:kh?kh.ten:("KH #"+d.khach_hang_id),tong_tien:tong,trang_thai:"CHO_DUYET"});
   }
-  document.getElementById('ktModal')?.remove();
-  toast("Đã tạo báo giá — chờ duyệt"+(S.mode==="demo"?" (demo)":""),"ok");
+  S.bgnEdit=null;
+  toast("Đã gửi báo giá nội bộ — chờ duyệt"+(S.mode==="demo"?" (demo)":""),"ok");
   viewBanHang($("#main"));
 }
 async function duyetBG(id,amount){
