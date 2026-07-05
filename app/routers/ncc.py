@@ -16,7 +16,8 @@ from ..models import (NguoiDung, NhaCungCap, DonMua, DonMuaCt, DanhGiaNcc, YeuCa
                       TonKho, PhieuKho, PhieuKhoCt, CongNo, ThanhToan, HangHoa, BaoGiaNcc, Rfq, RfqLog)
 from ..schemas import (NccVao, NccRa, DanhGiaVao, DonMuaVao, DonMuaRa, YeuCauMuaRa,
                        NhanHangVao, DonMuaChiTietRa, ThuTienVao,
-                       YeuCauMuaVao, YeuCauMuaItemVao, TaoPoTuDeXuatVao, LyDoVao, BaoGiaVao, BaoGiaRa,
+                       YeuCauMuaVao, YeuCauMuaItemVao, TaoPoTuDeXuatVao, LyDoVao,
+                       BaoGiaNccVao as BaoGiaVao, BaoGiaNccRa as BaoGiaRa,
                        RfqVao, GuiRfqVao, RfqRa, RfqLogRa, RfqNoiDungVao,
                        PoNoiDungVao, GuiPoVao, PoPdfVao)
 from ..kho_service import nhap_ton

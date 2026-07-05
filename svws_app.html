@@ -444,19 +444,25 @@ const $=s=>document.querySelector(s);
 const vnd=n=>new Intl.NumberFormat('vi-VN').format(Math.round(n))+" ₫";
 function toast(msg,type){const t=document.createElement('div');t.className='toast '+(type||'');t.textContent=msg;
   $("#toast").appendChild(t);setTimeout(()=>t.remove(),3800);}
+function _fmtLoi(detail,status){
+  if(Array.isArray(detail))   // lỗi validate 422 của FastAPI: [{loc,msg,...},...]
+    return detail.map(x=>((x.loc||[]).slice(1).join('.')||'dữ liệu')+': '+(x.msg||'')).join(' · ');
+  if(detail&&typeof detail==='object')return JSON.stringify(detail);
+  return detail||('Lỗi '+status);
+}
 async function api(path,opts={}){
   const h=Object.assign({'Content-Type':'application/json'},opts.headers||{});
   if(S.token) h['Authorization']='Bearer '+S.token;
   const r=await fetch(S.api+path,Object.assign({},opts,{headers:h}));
   const txt=await r.text(); let data; try{data=JSON.parse(txt)}catch{data=txt}
-  if(!r.ok){const e=new Error((data&&data.detail)||('Lỗi '+r.status));e.status=r.status;e.detail=(data&&data.detail);throw e;}
+  if(!r.ok){const m=_fmtLoi(data&&data.detail,r.status);const e=new Error(m);e.status=r.status;e.detail=m;throw e;}
   return data;
 }
 async function apiUpload(path,formData){
   const h={}; if(S.token) h['Authorization']='Bearer '+S.token;   // KHÔNG set Content-Type để trình duyệt tự thêm boundary
   const r=await fetch(S.api+path,{method:'POST',headers:h,body:formData});
   const txt=await r.text(); let data; try{data=JSON.parse(txt)}catch{data=txt}
-  if(!r.ok){const e=new Error((data&&data.detail)||('Lỗi '+r.status));e.status=r.status;e.detail=(data&&data.detail);throw e;}
+  if(!r.ok){const m=_fmtLoi(data&&data.detail,r.status);const e=new Error(m);e.status=r.status;e.detail=m;throw e;}
   return data;
 }
 function can(mod,lvl){return RANK[S.perm[pmod(mod)]||"KHONG"]>=RANK[lvl];}

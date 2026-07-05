@@ -634,7 +634,10 @@ class GiaiDoanVao(BaseModel):
     ly_do_thua: str | None = None
 
 
-class BaoGiaVao(BaseModel):
+# LƯU Ý: đây là báo giá của NHÀ CUNG CẤP — tên phải khác BaoGiaVao/BaoGiaRa
+# của Bán hàng (trước đây trùng tên làm class sau đè class trước,
+# khiến POST /ban-hang/bao-gia validate sai schema).
+class BaoGiaNccVao(BaseModel):
     nha_cung_cap_id: int
     hang_hoa_id: int
     don_gia: Decimal = Field(gt=0)
@@ -645,7 +648,7 @@ class BaoGiaVao(BaseModel):
     ghi_chu: str | None = None
 
 
-class BaoGiaRa(BaseModel):
+class BaoGiaNccRa(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int
     nha_cung_cap_id: int
