@@ -2135,9 +2135,42 @@ async function bhKhachHang(host){
     <td>${k.phan_loai_abc?`<span class="badge b-info">Hạng ${k.phan_loai_abc}</span>`:'—'}</td>
     <td><button class="btn-sm ghost" onclick="openKH(${k.id})">Hồ sơ & liên lạc</button></td></tr>`).join('');
   host.innerHTML=`<div class="note" style="padding:0 0 12px">Mọi khách hàng, trao đổi và tệp đều nằm trong hệ thống. Email gửi từ địa chỉ công ty <b>sv-sales@watersolutions.company</b> và được ghi nhật ký — không dùng mail cá nhân.</div>
-    <div class="panel"><div class="panel-h"><h3>Danh sách khách hàng</h3></div>
+    <div class="panel"><div class="panel-h"><h3>Danh sách khách hàng</h3><div class="spacer"></div>
+    ${can("ban_hang","THAO_TAC")?'<button class="btn-sm" onclick="khMoTao()">+ Thêm khách hàng</button>':''}</div>
     <div class="panel-b"><table><thead><tr><th>Mã</th><th>Tên</th><th>Email</th><th>Hạng</th><th></th></tr></thead>
     <tbody>${rows||'<tr><td colspan="5" class="empty">Chưa có khách hàng.</td></tr>'}</tbody></table></div></div>`;
+}
+
+/* --- Thêm khách hàng mới --- */
+function khMoTao(){
+  _ktModal("Thêm khách hàng mới",`
+    <label>Tên khách hàng <span style="color:var(--red)">*</span></label><input id="kh_ten" placeholder="VD: Cty TNHH ABC">
+    <label>Mã khách hàng (bỏ trống sẽ để —)</label><input id="kh_ma" placeholder="VD: KH-08">
+    <label>Email</label><input id="kh_email" type="email" placeholder="lienhe@khach.vn">
+    <label>Điện thoại</label><input id="kh_dt" placeholder="VD: 0903 xxx xxx">
+    <label>Mã số thuế</label><input id="kh_mst" placeholder="VD: 0301234567">
+    <label>Hạng khách hàng</label>
+    <select id="kh_abc"><option value="">— Chưa xếp (hệ thống tự phân loại sau)</option>
+      <option value="A">A — quan trọng</option><option value="B">B — trung bình</option><option value="C">C — nhỏ</option></select>
+    <button class="btn-sm" style="margin-top:14px" onclick="khTao()">Lưu khách hàng</button>`);
+}
+async function khTao(){
+  const ten=$("#kh_ten").value.trim(), ma=$("#kh_ma").value.trim(),
+        email=$("#kh_email").value.trim(), dt=$("#kh_dt").value.trim(),
+        mst=$("#kh_mst").value.trim(), abc=$("#kh_abc").value;
+  if(!ten)return toast("Tên khách hàng là bắt buộc","err");
+  if(email&&!email.includes('@'))return toast("Email không hợp lệ","err");
+  if(S.mode==="live"){
+    try{await api("/ban-hang/khach-hang",{method:'POST',body:JSON.stringify(
+      {ten,ma:ma||null,email:email||null,dien_thoai:dt||null,ma_so_thue:mst||null,phan_loai_abc:abc||null})});}
+    catch(e){return toast(e.detail||e.message,"err");}
+  }else{
+    const id=Math.max(0,...DEMO.khach.map(k=>k.id))+1;
+    DEMO.khach.push({id,ma:ma||("KH-"+String(id).padStart(2,'0')),ten,email,phan_loai_abc:abc||null});
+  }
+  document.getElementById('ktModal')?.remove();
+  toast("Đã thêm khách hàng "+ten+(S.mode==="demo"?" (demo)":""),"ok");
+  viewBanHang($("#main"));
 }
 function openKH(id){S.bhTab="khach_hang";S.khSel=id;viewBanHang($("#main"));}
 function backKH(){S.khSel=null;viewBanHang($("#main"));}
