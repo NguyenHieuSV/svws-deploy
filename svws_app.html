@@ -2533,8 +2533,19 @@ async function hdLuu(trangThai){
 }
 async function hdPdf(){
   const ok=await hdLuu("DA_XUAT"); if(!ok)return;
-  _hdPrint(S.hdEdit.d);
-  toast("Đã mở bản in — chọn 'Save as PDF' trong hộp thoại in","ok");
+  _hdChonNgu(S.hdEdit.d);
+}
+function _hdChonNgu(d){
+  S._hdPdfD=d;
+  _ktModal("Xuất PDF hợp đồng — chọn ngôn ngữ",`
+    <p style="margin:0 0 14px">Bản in sẽ theo ngôn ngữ nào?</p>
+    <button class="btn-sm" onclick="_hdXuat(true)">🌐 Song ngữ (Việt – Anh)</button>
+    <button class="btn-sm ghost" style="margin-left:8px" onclick="_hdXuat(false)">🇻🇳 Đơn ngữ (Tiếng Việt)</button>`);
+}
+function _hdXuat(song){
+  document.getElementById('ktModal')?.remove();
+  _hdPrint(S._hdPdfD,song);
+  toast("Đã mở bản in "+(song?"song ngữ":"tiếng Việt")+" — chọn 'Save as PDF' trong hộp thoại in","ok");
 }
 function hdSua(id){const g=(S._hdList||[]).find(x=>x.id===id)||(DEMO.bgf||[]).find(x=>x.id===id);
   if(!g)return;
@@ -2559,7 +2570,7 @@ function hdSua(id){const g=(S._hdList||[]).find(x=>x.id===id)||(DEMO.bgf||[]).fi
   S.hdEdit={id:g.id,d};
   viewBanHang($("#main"));}
 function hdPdfTu(id){const g=(S._hdList||[]).find(x=>x.id===id)||(DEMO.bgf||[]).find(x=>x.id===id);
-  if(!g)return;_hdPrint(g.noi_dung||{});}
+  if(!g)return;_hdChonNgu(g.noi_dung||{});}
 async function hdXoa(id){
   const g=(S._hdList||[]).find(x=>x.id===id)||(DEMO.bgf||[]).find(x=>x.id===id);
   if(!g)return;
@@ -2568,15 +2579,18 @@ async function hdXoa(id){
   else{const i=(DEMO.bgf||[]).findIndex(x=>x.id===id);if(i>=0)DEMO.bgf.splice(i,1);}
   toast("Đã xóa hợp đồng","ok");viewBanHang($("#main"));
 }
-function _hdPrint(d){
+function _hdPrint(d,song){
+  const sn=song!==false;   // true = song ngữ VN-EN, false = chỉ tiếng Việt
   const money=n=>Math.round(Number(n)||0).toLocaleString('en-US');
   const br=s=>(s||'').replace(/</g,'&lt;').split('\n').map(x=>x.trim()).filter(Boolean);
-  const vnEn=(vn,en)=>br(vn).map(x=>`<p class="vn">${x}</p>`).join('')+br(en).map(x=>`<p class="en">${x}</p>`).join('');
+  const vnEn=(vn,en)=>br(vn).map(x=>`<p class="vn">${x}</p>`).join('')+(sn?br(en).map(x=>`<p class="en">${x}</p>`).join(''):'');
+  const tenVN=t=>(t||'').split(' / ')[0];   // "ĐIỀU 5: ... / RESPONSIBILITIES..." -> phần VN
+  const h2=t=>sn?t:tenVN(t);
   const ngayD=d.ngay?d.ngay.split('-'):['','',''];
   const ngayVN=`ngày ${ngayD[2]||'…'} tháng ${ngayD[1]||'…'} năm ${ngayD[0]||'…'}`;
   const benBlock=(nhan,nhanEn,b)=>`
     <p class="vn" style="margin-top:10px"><b>${nhan} : ${(b.ten||'').toUpperCase()}</b></p>
-    ${b.ten_en?`<p class="en"><b>${nhanEn}: ${(b.ten_en||'').toUpperCase()}</b></p>`:`<p class="en"><b>${nhanEn}:</b></p>`}
+    ${sn?(b.ten_en?`<p class="en"><b>${nhanEn}: ${(b.ten_en||'').toUpperCase()}</b></p>`:`<p class="en"><b>${nhanEn}:</b></p>`):''}
     <table class="bt">
       <tr><td>Đại diện bởi</td><td>: ${b.dai_dien||''}</td><td>Chức vụ</td><td>: ${b.chuc_vu||''}</td></tr>
       <tr><td>Địa chỉ</td><td colspan="3">: ${b.dia_chi||''}</td></tr>
@@ -2589,7 +2603,7 @@ function _hdPrint(d){
     : `<tr><td style="text-align:center">${++stt}</td><td>${r.ten||''}</td><td>${r.thong_so||''}</td>
        <td style="text-align:center">${r.so_luong||''}</td><td style="text-align:center">${r.ncc||''}</td></tr>`).join('');
   const dks=(d.dieu_khoan||[]).filter(dk=>((dk.vn||'')+(dk.en||'')).trim()).map(dk=>`
-    <h2>${dk.ten}</h2>${vnEn(dk.vn,dk.en)}`).join('');
+    <h2>${h2(dk.ten)}</h2>${vnEn(dk.vn,dk.en)}`).join('');
   const donGia=Number(d.d2_don_gia)||0, tamUng=Number(d.d3_tam_ung)||0;
   const html=`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${d.so||'Hop dong'}</title><style>
     @page{size:A4;margin:16mm}
@@ -2612,44 +2626,44 @@ function _hdPrint(d){
     .sig div{width:45%;font-weight:700}
   </style></head><body>
   <h1>${d.tieu_de_vn||'HỢP ĐỒNG DỊCH VỤ'}</h1>
-  <h1 class="en">${d.tieu_de_en||'SERVICE CONTRACT'}</h1>
-  <p class="so">(Số / No.: <b>${d.so||''}</b>)</p>
+  ${sn?`<h1 class="en">${d.tieu_de_en||'SERVICE CONTRACT'}</h1>`:''}
+  <p class="so">(Số${sn?' / No.':''}: <b>${d.so||''}</b>)</p>
   <ul>
     <li>Căn cứ Bộ luật dân sự số 91/2015/QH13 của nước CHXHCN Việt Nam ban hành ngày 24/11/2015, hiệu lực từ ngày 01/01/2017.</li>
-    <li class="en">Pursuant to the Civil Code No. 91/2015/QH13 of the Socialist Republic of Vietnam, promulgated on November 24, 2015, effective from January 1, 2017.</li>
+    ${sn?'<li class="en">Pursuant to the Civil Code No. 91/2015/QH13 of the Socialist Republic of Vietnam, promulgated on November 24, 2015, effective from January 1, 2017.</li>':''}
     <li>Căn cứ Luật Thương mại của nước CHXHCN Việt Nam được Quốc hội thông qua ngày 14/6/2005.</li>
-    <li class="en">Pursuant to the Commercial Law of the Socialist Republic of Vietnam passed by the National Assembly on June 14, 2005.</li>
+    ${sn?'<li class="en">Pursuant to the Commercial Law of the Socialist Republic of Vietnam passed by the National Assembly on June 14, 2005.</li>':''}
     <li>Dựa vào khả năng và nhu cầu của cả hai bên.</li>
-    <li class="en">Based on the capabilities and needs of both parties.</li>
+    ${sn?'<li class="en">Based on the capabilities and needs of both parties.</li>':''}
   </ul>
   <p class="vn">Hôm nay, ${ngayVN}, chúng tôi gồm có:</p>
-  <p class="en">Today, ${d.ngay||''}, we are:</p>
+  ${sn?`<p class="en">Today, ${d.ngay||''}, we are:</p>`:''}
   ${benBlock('BÊN A (Bên Mua)','PARTY A (the Buyer)',d.benA||{})}
   ${benBlock('BÊN B (Bên Bán)','PARTY B (the Seller)',d.benB||{})}
   <p class="vn">Các Bên đồng ý ký kết Hợp Đồng này với các điều kiện và điều khoản sau:</p>
-  <p class="en">The Parties agree to sign this contract with the following terms and conditions:</p>
-  <h2>ĐIỀU 1: NỘI DUNG HỢP ĐỒNG / SCOPE OF THE CONTRACT</h2>
+  ${sn?'<p class="en">The Parties agree to sign this contract with the following terms and conditions:</p>':''}
+  <h2>${h2('ĐIỀU 1: NỘI DUNG HỢP ĐỒNG / SCOPE OF THE CONTRACT')}</h2>
   ${vnEn(d.d1_vn,d.d1_en)}
-  ${tbRows?`<table class="it"><thead><tr><th style="width:30px">No.</th><th style="width:24%">Tên thiết bị/<br>Equipment</th><th>Thông số kỹ thuật/<br>Technical specifications</th><th style="width:74px">Số lượng/<br>Qty</th><th style="width:74px">NCC/<br>Origin</th></tr></thead><tbody>${tbRows}</tbody></table>`:''}
-  <h2>ĐIỀU 2: ĐƠN GIÁ VÀ TIÊU CHÍ NGHIỆM THU / UNIT PRICE AND ACCEPTANCE CRITERIA</h2>
-  <p class="vn"><b>2.1 Đơn giá / Unit price</b></p>
+  ${tbRows?`<table class="it"><thead><tr><th style="width:30px">${sn?'No.':'STT'}</th><th style="width:24%">Tên thiết bị${sn?'/<br>Equipment':''}</th><th>Thông số kỹ thuật${sn?'/<br>Technical specifications':''}</th><th style="width:74px">Số lượng${sn?'/<br>Qty':''}</th><th style="width:74px">NCC${sn?'/<br>Origin':''}</th></tr></thead><tbody>${tbRows}</tbody></table>`:''}
+  <h2>${h2('ĐIỀU 2: ĐƠN GIÁ VÀ TIÊU CHÍ NGHIỆM THU / UNIT PRICE AND ACCEPTANCE CRITERIA')}</h2>
+  <p class="vn"><b>2.1 Đơn giá${sn?' / Unit price':''}</b></p>
   ${donGia?`<p class="vn">Đơn giá dịch vụ: <b>${money(donGia)} ${d.d2_don_gia_dv||'VND'}</b> (Bằng chữ: ${docSoVN(donGia)}${(d.d2_don_gia_dv||'').includes('/')?' trên '+(d.d2_don_gia_dv||'').split('/')[1]:''}).</p>
-  <p class="en">Service unit price: <b>${(d.d2_don_gia_dv||'VND').split('/')[0]} ${money(donGia)}${(d.d2_don_gia_dv||'').includes('/')?'/'+(d.d2_don_gia_dv||'').split('/')[1]:''}</b>.</p>`:''}
+  ${sn?`<p class="en">Service unit price: <b>${(d.d2_don_gia_dv||'VND').split('/')[0]} ${money(donGia)}${(d.d2_don_gia_dv||'').includes('/')?'/'+(d.d2_don_gia_dv||'').split('/')[1]:''}</b>.</p>`:''}`:''}
   ${vnEn(d.d2_ghi_chu_vn,d.d2_ghi_chu_en)}
-  <p class="vn"><b>2.2 Tiêu chí nghiệm thu, xuất hóa đơn / Acceptance and invoicing criteria</b></p>
+  <p class="vn"><b>2.2 Tiêu chí nghiệm thu, xuất hóa đơn${sn?' / Acceptance and invoicing criteria':''}</b></p>
   ${vnEn(d.d2_nghiem_thu_vn,d.d2_nghiem_thu_en)}
-  <h2>ĐIỀU 3: PHƯƠNG THỨC VÀ ĐIỀU KIỆN THANH TOÁN / PAYMENT METHOD AND CONDITIONS</h2>
+  <h2>${h2('ĐIỀU 3: PHƯƠNG THỨC VÀ ĐIỀU KIỆN THANH TOÁN / PAYMENT METHOD AND CONDITIONS')}</h2>
   <p class="vn">Hình thức thanh toán: ${d.d3_hinh_thuc_vn||''}</p>
-  <p class="en">Payment method: ${d.d3_hinh_thuc_en||''}</p>
+  ${sn?`<p class="en">Payment method: ${d.d3_hinh_thuc_en||''}</p>`:''}
   ${tamUng?`<p class="vn">Điều kiện tạm ứng: Bên A tạm ứng cho bên B số tiền đặt cọc: <b>${money(tamUng)} VNĐ</b> (Bằng chữ: ${docSoVN(tamUng)}) ngay sau khi ký hợp đồng.</p>
-  <p class="en">Advance: Party A shall advance to Party B a deposit of <b>VND ${money(tamUng)}</b> immediately upon signing this Contract.</p>`:''}
+  ${sn?`<p class="en">Advance: Party A shall advance to Party B a deposit of <b>VND ${money(tamUng)}</b> immediately upon signing this Contract.</p>`:''}`:''}
   ${vnEn(d.d3_dieu_khoan_vn,d.d3_dieu_khoan_en)}
-  <h2>ĐIỀU 4: THỜI GIAN & ĐỊA ĐIỂM CUNG CẤP LẮP ĐẶT / TIME AND PLACE OF SUPPLY AND INSTALLATION</h2>
+  <h2>${h2('ĐIỀU 4: THỜI GIAN & ĐỊA ĐIỂM CUNG CẤP LẮP ĐẶT / TIME AND PLACE OF SUPPLY AND INSTALLATION')}</h2>
   ${vnEn(d.d4_vn,d.d4_en)}
   ${dks}
   <div class="sig">
-    <div>FOR PARTY A<br><br><br><br><br>${(d.benA&&d.benA.dai_dien)||''}</div>
-    <div>FOR PARTY B<br><br><br><br><br>${(d.benB&&d.benB.dai_dien)||''}</div>
+    <div>${sn?'FOR PARTY A':'ĐẠI DIỆN BÊN A'}<br><br><br><br><br>${(d.benA&&d.benA.dai_dien)||''}</div>
+    <div>${sn?'FOR PARTY B':'ĐẠI DIỆN BÊN B'}<br><br><br><br><br>${(d.benB&&d.benB.dai_dien)||''}</div>
   </div>
   <script>window.onload=function(){window.print();}<\/script></body></html>`;
   const w=window.open('','_blank'); if(!w)return toast("Trình duyệt chặn cửa sổ mới — cho phép popup để xuất PDF","err");
