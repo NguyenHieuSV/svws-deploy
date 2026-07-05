@@ -352,6 +352,41 @@ def phan_tich_lai(ll_id: int, db: Session = Depends(get_db),
             "tom_tat": ll.ai_tom_tat, "tra_loi": ll.ai_tra_loi, **kq}
 
 
+from pydantic import BaseModel as _CVBase
+
+
+class CongViecVao(_CVBase):
+    tieu_de: str
+    mo_ta: str | None = None
+    khach_hang_id: int | None = None
+    uu_tien: str = "TRUNG"          # CAO (SLA 4h) / TRUNG (24h) / THAP (48h)
+    han_xu_ly: datetime | None = None
+
+
+_SLA_GIO = {"CAO": 4, "TRUNG": 24, "THAP": 48}
+
+
+@router.post("/cong-viec", status_code=201)
+def tao_cong_viec(data: CongViecVao, db: Session = Depends(get_db),
+                  nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    """Nhân viên sales tự thêm việc (ngoài các việc tự sinh từ thư phản hồi).
+    Không nhập hạn → tự tính theo SLA của độ ưu tiên."""
+    if data.uu_tien not in _SLA_GIO:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Ưu tiên phải là CAO/TRUNG/THAP")
+    if data.khach_hang_id and db.get(KhachHang, data.khach_hang_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy khách hàng")
+    han = data.han_xu_ly or (datetime.now(timezone.utc) + timedelta(hours=_SLA_GIO[data.uu_tien]))
+    cv = CongViec(loai="THU_CONG", tieu_de=data.tieu_de, mo_ta=data.mo_ta,
+                  khach_hang_id=data.khach_hang_id, uu_tien=data.uu_tien,
+                  han_xu_ly=han, trang_thai="MO",
+                  nguoi_phu_trach=nhan_vien_id_cua(db, nd.id))
+    db.add(cv); db.flush()
+    ghi_audit(db, nd.id, "TAO", "cong_viec", cv.id, moi={"tieu_de": data.tieu_de})
+    db.commit(); db.refresh(cv)
+    return {"id": cv.id, "tieu_de": cv.tieu_de, "uu_tien": cv.uu_tien,
+            "han_xu_ly": cv.han_xu_ly, "trang_thai": cv.trang_thai}
+
+
 @router.get("/cong-viec")
 def ds_cong_viec(cua_toi: bool = False, qua_han: bool = False, mo: bool = True,
                  db: Session = Depends(get_db),

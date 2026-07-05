@@ -836,7 +836,7 @@ async function _crmCreateCare(khId,loai,nd,ngay){
   if(S.mode!=="live"){
     const id=Math.max(0,...((DEMO.cham_soc||[]).map(c=>c.id)))+1;
     (DEMO.cham_soc=DEMO.cham_soc||[]).push({id,khach_hang_id:Number(khId),loai,noi_dung:nd,
-      ngay_hen:ngay||new Date().toISOString().slice(0,10),trang_thai:"CHO",csat:null,created_at:new Date().toISOString().slice(0,16)});
+      ngay_hen:ngay||new Date().toISOString().slice(0,10),trang_thai:"CHO",csat:null,created_at:_gioLocal()});
     toast("Đã tạo việc (demo)","ok");viewCRM($("#main"));return;
   }
   try{await api("/crm/cham-soc",{method:'POST',body:JSON.stringify({khach_hang_id:Number(khId),loai,noi_dung:nd,ngay_hen:ngay||null})});
@@ -3184,11 +3184,12 @@ async function bhCongViec(host){
       <td>${stt}</td><td>${act||'—'}</td></tr>`;
   }).join('');
   host.innerHTML=`<div class="note" style="padding:0 0 12px">Việc tự sinh từ thư phản hồi, gán cho người phụ trách kèm hạn xử lý (SLA theo độ khẩn: Cao 4h · Trung 24h · Thấp 48h). Việc quá hạn được tô đỏ để leo thang.</div>
-    <div class="panel"><div class="panel-h"><h3>Công việc từ phản hồi</h3><div class="spacer"></div>
-      <select onchange="S.cvFilter=this.value;viewBanHang($('#main'))" style="margin-right:8px">
+    <div class="panel"><div class="panel-h"><h3>Công việc từ phản hồi & việc tự thêm</h3><div class="spacer"></div>
+      <select onchange="S.cvFilter=this.value;viewBanHang($('#main'))" style="margin-right:8px" data-nocbx>
         <option value="mo"${S.cvFilter==="mo"?" selected":""}>Đang mở</option>
         <option value="cua_toi"${S.cvFilter==="cua_toi"?" selected":""}>Của tôi</option>
-        <option value="qua_han"${S.cvFilter==="qua_han"?" selected":""}>Quá hạn</option></select></div>
+        <option value="qua_han"${S.cvFilter==="qua_han"?" selected":""}>Quá hạn</option></select>
+      ${canOp?'<button class="btn-sm" onclick="cvMoThem()">+ Thêm việc</button>':''}</div>
     <div class="panel-b"><table><thead><tr><th>Việc</th><th>Khách</th><th>Ưu tiên</th><th>Hạn xử lý (SLA)</th><th>Trạng thái</th><th>Hành động</th></tr></thead>
     <tbody>${rows||'<tr><td colspan="6" class="empty" style="padding:24px">Chưa có công việc.</td></tr>'}</tbody></table></div></div>`;
 }
@@ -3197,6 +3198,49 @@ async function capNhatCV(id,tt){
     toast("Đã cập nhật","ok");viewBanHang($("#main"));}catch(e){toast(e.detail||e.message,"err");} return; }
   const c=(DEMO.cong_viec||[]).find(x=>x.id===id); if(c){c.trang_thai=tt; c.hoan_thanh_luc=(tt==="XONG")?new Date().toISOString().slice(0,16):null;}
   toast("Đã cập nhật (demo)","ok"); viewBanHang($("#main"));
+}
+
+/* Giờ địa phương dạng "YYYY-MM-DDTHH:mm" (tránh lệch múi giờ khi parse lại) */
+function _gioLocal(offsetMs){const d=new Date(Date.now()+(offsetMs||0)-new Date().getTimezoneOffset()*60000);return d.toISOString().slice(0,16);}
+
+/* --- Thêm công việc thủ công (sales tự tạo) --- */
+async function cvMoThem(){
+  const khs=await _crmKhList(); S._cvKhs=khs;
+  _ktModal("Thêm công việc mới",`
+    <label>Tiêu đề công việc <span style="color:var(--red)">*</span></label>
+    <input id="cv_td" placeholder="VD: Gọi lại báo giá cho khách, chuẩn bị demo...">
+    <label>Mô tả chi tiết</label><input id="cv_mt" placeholder="Ghi chú thêm (không bắt buộc)">
+    <label>Khách hàng liên quan</label>
+    <select id="cv_kh" data-nocbx><option value="">— Không gắn khách nào</option>
+      ${khs.map(k=>`<option value="${k.id}">${k.ten}</option>`).join('')}</select>
+    <label>Độ ưu tiên (quyết định hạn SLA)</label>
+    <select id="cv_ut" data-nocbx>
+      <option value="CAO">CAO — xử lý trong 4 giờ</option>
+      <option value="TRUNG" selected>TRUNG — xử lý trong 24 giờ</option>
+      <option value="THAP">THẤP — xử lý trong 48 giờ</option></select>
+    <label>Hạn xử lý (bỏ trống = tự tính theo ưu tiên)</label>
+    <input id="cv_han" type="datetime-local">
+    <button class="btn-sm" style="margin-top:14px" onclick="cvTao()">Thêm việc (bắt đầu đếm SLA)</button>`);
+}
+async function cvTao(){
+  const td=gv('cv_td'),mt=gv('cv_mt'),khId=Number(gv('cv_kh'))||null,ut=gv('cv_ut')||'TRUNG',han=gv('cv_han')||null;
+  if(!td)return toast("Nhập tiêu đề công việc","err");
+  if(S.mode==="live"){
+    try{await api("/ban-hang/cong-viec",{method:'POST',body:JSON.stringify(
+      {tieu_de:td,mo_ta:mt||null,khach_hang_id:khId,uu_tien:ut,han_xu_ly:han})});}
+    catch(e){return toast(e.detail||e.message,"err");}
+  }else{
+    const gio={CAO:4,TRUNG:24,THAP:48}[ut]||24;
+    const hanTinh=han||_gioLocal(gio*36e5);
+    const kh=(S._cvKhs||[]).find(k=>k.id===khId);
+    const id=Math.max(0,...((DEMO.cong_viec||[]).map(c=>c.id)),0)+1;
+    (DEMO.cong_viec=DEMO.cong_viec||[]).unshift({id,loai:"THU_CONG",tieu_de:td,mo_ta:mt||null,
+      khach_hang_id:khId,khach_ten:kh?kh.ten:null,uu_tien:ut,han_xu_ly:hanTinh,trang_thai:"MO"});
+  }
+  document.getElementById('ktModal')?.remove();
+  S.cvFilter="mo";
+  toast("Đã thêm việc — đang đếm SLA"+(S.mode==="demo"?" (demo)":""),"ok");
+  viewBanHang($("#main"));
 }
 
 /* --- Tab Cơ hội (pipeline CRM) --- */
