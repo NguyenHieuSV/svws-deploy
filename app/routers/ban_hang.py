@@ -6,6 +6,7 @@ Module BÁN HÀNG — lát cắt dọc thứ tư, minh họa LIÊN THÔNG rõ nh
 from decimal import Decimal
 from datetime import date, timedelta
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from ..database import get_db
 from ..rbac import yeu_cau, kiem_han_muc
@@ -67,6 +68,30 @@ def sua_kh(kh_id: int, data: KhachHangSua, db: Session = Depends(get_db),
     ghi_audit(db, nd.id, "SUA", "khach_hang", kh.id, cu=cu, moi=doi)
     db.commit(); db.refresh(kh)
     return kh
+
+
+@router.delete("/khach-hang/{kh_id}")
+def xoa_kh(kh_id: int, db: Session = Depends(get_db),
+           nd: NguoiDung = Depends(yeu_cau(MODULE, "DUYET"))):
+    """Xóa khách hàng CHƯA có giao dịch. Đã có báo giá/đơn hàng/công nợ
+    thì CSDL chặn (giữ vết kế toán) — trả lỗi hướng dẫn rõ."""
+    kh = db.get(KhachHang, kh_id)
+    if kh is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy khách hàng")
+    ten_cu, ma_cu = kh.ten, kh.ma
+    try:
+        db.delete(kh)
+        db.flush()
+        ghi_audit(db, nd.id, "XOA", "khach_hang", kh_id,
+                  cu={"ten": ten_cu, "ma": ma_cu})
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"Khách '{ten_cu}' đã có giao dịch (báo giá / đơn hàng / công nợ / "
+            "nhật ký liên lạc) nên không thể xóa — dữ liệu kế toán phải giữ vết.")
+    return {"ok": True, "ten": ten_cu}
 
 
 # ----- Báo giá -----

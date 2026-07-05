@@ -2136,7 +2136,8 @@ async function bhKhachHang(host){
     <td>${k.email?k.email:'<span style="color:var(--amber)">chưa có email</span>'}</td>
     <td>${k.phan_loai_abc?`<span class="badge b-info">Hạng ${k.phan_loai_abc}</span>`:'—'}</td>
     <td style="white-space:nowrap"><button class="btn-sm ghost" onclick="openKH(${k.id})">Hồ sơ & liên lạc</button>
-      ${canOp?`<button class="btn-sm ghost" onclick="khMoSua(${k.id})">✏️ Sửa</button>`:''}</td></tr>`).join('');
+      ${canOp?`<button class="btn-sm ghost" onclick="khMoSua(${k.id})">✏️ Sửa</button>`:''}
+      ${can("ban_hang","DUYET")?`<button class="btn-sm ghost" style="color:var(--red)" onclick="khXoa(${k.id})">🗑 Xóa</button>`:''}</td></tr>`).join('');
   host.innerHTML=`<div class="note" style="padding:0 0 12px">Mọi khách hàng, trao đổi và tệp đều nằm trong hệ thống. Email gửi từ địa chỉ công ty <b>sv-sales@watersolutions.company</b> và được ghi nhật ký — không dùng mail cá nhân.</div>
     <div class="panel"><div class="panel-h"><h3>Danh sách khách hàng</h3><div class="spacer"></div>
     ${can("ban_hang","THAO_TAC")?'<button class="btn-sm" onclick="khMoTao()">+ Thêm khách hàng</button>':''}</div>
@@ -2214,6 +2215,23 @@ async function khSua(id){
   }
   document.getElementById('ktModal')?.remove();
   toast("Đã cập nhật khách hàng"+(S.mode==="demo"?" (demo)":""),"ok");
+  viewBanHang($("#main"));
+}
+
+/* --- Xóa khách hàng --- */
+async function khXoa(id){
+  const kh=(S._khList||[]).find(k=>k.id===id)||(DEMO.khach||[]).find(k=>k.id===id);
+  if(!kh)return;
+  if(!confirm("Xóa khách hàng \""+kh.ten+"\"?\n\nChỉ xóa được khách CHƯA có giao dịch. Khách đã có báo giá / đơn hàng / công nợ sẽ bị hệ thống từ chối để giữ vết kế toán."))return;
+  if(S.mode==="live"){
+    try{await api("/ban-hang/khach-hang/"+id,{method:'DELETE'});}
+    catch(e){return toast(e.detail||e.message,"err");}
+  }else{
+    const coGD=(DEMO.bao_gia||[]).some(b=>b.khach===kh.ten)||(DEMO.don_hang||[]).some(o=>o.khach===kh.ten);
+    if(coGD)return toast("Khách '"+kh.ten+"' đã có giao dịch (báo giá / đơn hàng) nên không thể xóa (demo)","err");
+    const i=DEMO.khach.findIndex(k=>k.id===id); if(i>=0)DEMO.khach.splice(i,1);
+  }
+  toast("Đã xóa khách hàng "+kh.ten+(S.mode==="demo"?" (demo)":""),"ok");
   viewBanHang($("#main"));
 }
 function openKH(id){S.bhTab="khach_hang";S.khSel=id;viewBanHang($("#main"));}
