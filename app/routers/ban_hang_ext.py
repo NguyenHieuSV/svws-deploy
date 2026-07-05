@@ -483,6 +483,30 @@ def danh_dau_xu_ly(ll_id: int, db: Session = Depends(get_db),
 _GIAI_DOAN = ["MOI", "QUAN_TAM", "BAO_GIA", "DAM_PHAN", "THANG", "THUA"]
 
 
+class CoHoiVao(_CVBase):
+    tieu_de: str
+    khach_hang_id: int | None = None
+    giai_doan: str = "MOI"          # MOI/QUAN_TAM/BAO_GIA/DAM_PHAN/THANG/THUA
+    gia_tri_dk: float | None = None
+
+
+@router.post("/co-hoi", status_code=201)
+def tao_co_hoi(data: CoHoiVao, db: Session = Depends(get_db),
+               nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    """Sales tự thêm cơ hội (ngoài các cơ hội tự sinh từ thư phản hồi)."""
+    if data.giai_doan not in ("MOI", "QUAN_TAM", "BAO_GIA", "DAM_PHAN", "THANG", "THUA"):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Giai đoạn không hợp lệ")
+    if data.khach_hang_id and db.get(KhachHang, data.khach_hang_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy khách hàng")
+    ch = CoHoi(tieu_de=data.tieu_de, khach_hang_id=data.khach_hang_id,
+               giai_doan=data.giai_doan, gia_tri_dk=data.gia_tri_dk or 0,
+               nguon="THU_CONG", nguoi_phu_trach=nhan_vien_id_cua(db, nd.id))
+    db.add(ch); db.flush()
+    ghi_audit(db, nd.id, "TAO", "co_hoi", ch.id, moi={"tieu_de": data.tieu_de})
+    db.commit(); db.refresh(ch)
+    return {"id": ch.id, "tieu_de": ch.tieu_de, "giai_doan": ch.giai_doan}
+
+
 @router.get("/co-hoi")
 def ds_co_hoi(giai_doan: str | None = None, cua_toi: bool = False,
               db: Session = Depends(get_db), nd: NguoiDung = Depends(yeu_cau(MODULE, "XEM"))):

@@ -3273,9 +3273,43 @@ async function bhCoHoi(host){
   host.innerHTML=`<div class="note" style="padding:0 0 12px">Cơ hội tự sinh từ thư <b>Quan tâm / Hỏi kỹ thuật / Hẹn gặp</b>; thư Quan tâm còn được tạo sẵn <b>nháp báo giá</b>. Kéo cơ hội qua các giai đoạn để theo dõi chuyển đổi.</div>
     <div class="panel"><div class="panel-h"><h3>Pipeline cơ hội</h3></div><div class="panel-b" style="padding-bottom:6px">${chips}</div></div>
     <div class="panel"><div class="panel-h"><h3>Danh sách cơ hội</h3><div class="spacer"></div>
-      <select onchange="S.chFilter=this.value;viewBanHang($('#main'))"><option value="">Tất cả giai đoạn</option>${GD_LIST.map(g=>`<option value="${g}"${S.chFilter===g?' selected':''}>${GD_NHAN[g]}</option>`).join('')}</select></div>
+      <select onchange="S.chFilter=this.value;viewBanHang($('#main'))" data-nocbx style="margin-right:8px"><option value="">Tất cả giai đoạn</option>${GD_LIST.map(g=>`<option value="${g}"${S.chFilter===g?' selected':''}>${GD_NHAN[g]}</option>`).join('')}</select>
+      ${canOp?'<button class="btn-sm" onclick="coHoiMoThem()">+ Thêm cơ hội</button>':''}</div>
     <div class="panel-b"><table><thead><tr><th>Cơ hội</th><th>Khách</th><th>Giai đoạn</th><th>Giá trị dự kiến</th><th>Liên kết</th><th>Hành động</th></tr></thead>
-    <tbody>${rows||'<tr><td colspan="6" class="empty" style="padding:24px">Chưa có cơ hội. Đồng bộ thư phản hồi để tự tạo.</td></tr>'}</tbody></table></div></div>`;
+    <tbody>${rows||'<tr><td colspan="6" class="empty" style="padding:24px">Chưa có cơ hội — bấm "+ Thêm cơ hội" để tạo, hoặc đồng bộ thư phản hồi để tự sinh.</td></tr>'}</tbody></table></div></div>`;
+}
+/* --- Thêm cơ hội thủ công (coHoi* — tránh trùng tên với chTao của Cấu hình) --- */
+async function coHoiMoThem(){
+  const khs=await _crmKhList(); S._coHoiKhs=khs;
+  _ktModal("Thêm cơ hội mới",`
+    <label>Tên cơ hội <span style="color:var(--red)">*</span></label>
+    <input id="coh_td" placeholder="VD: Hệ xử lý nước thải 500 m³/ngày cho nhà máy X">
+    <label>Khách hàng</label>
+    <select id="coh_kh" data-nocbx><option value="">— Chưa xác định</option>
+      ${khs.map(k=>`<option value="${k.id}">${k.ten}</option>`).join('')}</select>
+    <label>Giai đoạn</label>
+    <select id="coh_gd" data-nocbx>${GD_LIST.filter(g=>g!=='THANG'&&g!=='THUA').map(g=>`<option value="${g}">${GD_NHAN[g]}</option>`).join('')}</select>
+    <label>Giá trị dự kiến (VND)</label>
+    <input id="coh_gt" type="number" min="0" step="any" placeholder="VD: 500000000">
+    <button class="btn-sm" style="margin-top:14px" onclick="coHoiTao()">Thêm cơ hội</button>`);
+}
+async function coHoiTao(){
+  const td=gv('coh_td'),khId=Number(gv('coh_kh'))||null,gd=gv('coh_gd')||'MOI',gt=Number(gv('coh_gt'))||0;
+  if(!td)return toast("Nhập tên cơ hội","err");
+  if(S.mode==="live"){
+    try{await api("/ban-hang/co-hoi",{method:'POST',body:JSON.stringify(
+      {tieu_de:td,khach_hang_id:khId,giai_doan:gd,gia_tri_dk:gt||null})});}
+    catch(e){return toast(e.detail||e.message,"err");}
+  }else{
+    const kh=(S._coHoiKhs||[]).find(k=>k.id===khId);
+    const id=Math.max(0,...((DEMO.co_hoi||[]).map(c=>c.id)),0)+1;
+    (DEMO.co_hoi=DEMO.co_hoi||[]).unshift({id,tieu_de:td,khach_hang_id:khId,khach_ten:kh?kh.ten:null,
+      giai_doan:gd,gia_tri_dk:gt,nguon:"THU_CONG"});
+  }
+  document.getElementById('ktModal')?.remove();
+  S.chFilter="";
+  toast("Đã thêm cơ hội"+(S.mode==="demo"?" (demo)":""),"ok");
+  viewBanHang($("#main"));
 }
 async function chuyenGD(id){
   const gd=gv('ch_gd_'+id), valEl=document.getElementById('ch_val_'+id);
