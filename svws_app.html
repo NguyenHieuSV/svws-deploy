@@ -366,7 +366,7 @@ const DEMO = {
     {id:1,hang_hoa_id:2,ten_hh:"Hóa chất PAC",so_luong:200,don_gia:200000,nha_cung_cap_id:1,don_hang_id:2,ngay_can:"2026-07-01",ly_do:"Phục vụ đơn DH-0002",trang_thai:"MOI",don_mua_id:null},
     {id:2,hang_hoa_id:1,ten_hh:"Bơm chìm 3kW",so_luong:3,don_gia:11000000,nha_cung_cap_id:2,don_hang_id:1,ngay_can:"2026-06-28",ly_do:"Thay bơm hỏng tại công trình",trang_thai:"DA_DUYET",don_mua_id:null},
   ],
-  bao_gia:[
+  bao_gia_ncc:[
     {id:1,nha_cung_cap_id:2,hang_hoa_id:2,don_gia:190000,hieu_luc_den:"2026-08-31",nguon:"THU_CONG"},
   ],
   chien_dich:[
@@ -1834,10 +1834,82 @@ async function bhBaoGia(host){
   const gateNote = HANMUC.bao_gia[S.role]!==undefined
     ? `Hạn mức duyệt của bạn: ${HANMUC.bao_gia[S.role]===null?'không giới hạn':vnd(HANMUC.bao_gia[S.role])}.`
     : (can("ban_hang","THAO_TAC")?"Bạn soạn được báo giá nhưng không có quyền duyệt.":"Bạn chỉ được xem.");
-  host.innerHTML=`<div class="panel"><div class="panel-h"><h3>Báo giá</h3></div>
+  host.innerHTML=`<div class="panel"><div class="panel-h"><h3>Báo giá</h3><div class="spacer"></div>
+    ${can("ban_hang","THAO_TAC")?'<button class="btn-sm" onclick="bgMoTao()">+ Tạo báo giá</button>':''}</div>
     <div class="note">${gateNote}</div>
     <div class="panel-b"><table><thead><tr><th>Số</th><th>Khách hàng</th><th class="num">Giá trị</th><th>Trạng thái</th><th>Hành động</th></tr></thead>
     <tbody>${body}</tbody></table></div></div>`;
+}
+
+/* --- Tạo báo giá mới --- */
+let _bgKh=[],_bgHh=[],_bgSeq=0;
+async function bgMoTao(){
+  _bgKh=await _crmKhList();
+  _bgHh=S.mode==="live"?await api("/kho/hang-hoa").catch(()=>[]):DEMO.hang_hoa;
+  if(!_bgKh.length)return toast("Chưa có khách hàng — hãy tạo ở tab Khách hàng trước","err");
+  if(!_bgHh.length)return toast("Chưa có hàng hóa trong Kho — hãy thêm ở phân hệ Kho hàng trước","err");
+  _bgSeq=0;
+  _ktModal("Tạo báo giá mới",`
+    <label>Khách hàng</label>
+    <select id="bg_kh">${_bgKh.map(k=>`<option value="${k.id}">${k.ten}${k.ma?' ('+k.ma+')':''}</option>`).join('')}</select>
+    <div style="margin:14px 0 6px;font-weight:700;font-size:13px">Các dòng báo giá</div>
+    <div id="bg_lines"></div>
+    <button class="btn-sm ghost" onclick="bgThemDong()">+ Thêm dòng</button>
+    <div style="margin-top:14px;font-size:15px">Tổng giá trị: <b id="bg_tong">0 ₫</b></div>
+    <button class="btn-sm" style="margin-top:14px" onclick="bgTao()">Gửi báo giá (chờ duyệt)</button>`);
+  bgThemDong();
+}
+function bgThemDong(){
+  const i=++_bgSeq;
+  const div=document.createElement('div');
+  div.id='bg_row_'+i;
+  div.style.cssText='display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap';
+  div.innerHTML=`
+    <select id="bg_hh_${i}" style="flex:2;min-width:180px" onchange="bgChonHH(${i})">
+      ${_bgHh.map(h=>`<option value="${h.id}" data-gia="${h.gia_ban||0}">${h.ten} (${h.ma||h.id})</option>`).join('')}</select>
+    <input id="bg_sl_${i}" type="number" min="0.01" step="any" value="1" placeholder="SL" style="width:90px" oninput="bgTinhTong()">
+    <input id="bg_dg_${i}" type="number" min="0" step="any" placeholder="Đơn giá" style="width:140px" oninput="bgTinhTong()">
+    <button class="btn-sm ghost" style="color:var(--red)" onclick="document.getElementById('bg_row_${i}').remove();bgTinhTong()">✕</button>`;
+  document.getElementById('bg_lines').appendChild(div);
+  bgChonHH(i);
+}
+function bgChonHH(i){
+  const sel=document.getElementById('bg_hh_'+i);
+  const gia=sel.options[sel.selectedIndex]?.dataset?.gia||0;
+  document.getElementById('bg_dg_'+i).value=gia;
+  bgTinhTong();
+}
+function _bgDongData(){
+  const rows=[];
+  document.querySelectorAll('#bg_lines [id^="bg_row_"]').forEach(div=>{
+    const i=div.id.replace('bg_row_','');
+    const hh=Number(document.getElementById('bg_hh_'+i)?.value);
+    const sl=Number(document.getElementById('bg_sl_'+i)?.value);
+    const dg=Number(document.getElementById('bg_dg_'+i)?.value);
+    if(hh&&sl>0&&dg>=0)rows.push({hang_hoa_id:hh,so_luong:sl,don_gia:dg});
+  });
+  return rows;
+}
+function bgTinhTong(){
+  const t=_bgDongData().reduce((s,r)=>s+r.so_luong*r.don_gia,0);
+  const el=document.getElementById('bg_tong'); if(el)el.textContent=vnd(t);
+}
+async function bgTao(){
+  const khId=Number(document.getElementById('bg_kh').value);
+  const rows=_bgDongData();
+  if(!rows.length)return toast("Cần ít nhất 1 dòng hàng hợp lệ (số lượng > 0)","err");
+  if(S.mode==="live"){
+    try{await api("/ban-hang/bao-gia",{method:'POST',body:JSON.stringify({khach_hang_id:khId,chi_tiet:rows})});}
+    catch(e){return toast(e.detail||e.message,"err");}
+  }else{
+    const kh=_bgKh.find(k=>k.id===khId);
+    const tong=rows.reduce((s,r)=>s+r.so_luong*r.don_gia,0);
+    const id=Math.max(0,...DEMO.bao_gia.map(b=>b.id))+1;
+    DEMO.bao_gia.unshift({id,so:"BG-"+String(id).padStart(4,'0'),khach:kh?kh.ten:("KH #"+khId),tong_tien:tong,trang_thai:"CHO_DUYET"});
+  }
+  document.getElementById('ktModal')?.remove();
+  toast("Đã tạo báo giá — chờ duyệt"+(S.mode==="demo"?" (demo)":""),"ok");
+  viewBanHang($("#main"));
 }
 async function duyetBG(id,amount){
   if(S.mode==="live"){ try{await api(`/ban-hang/bao-gia/${id}/duyet`,{method:'POST'});
@@ -2582,7 +2654,7 @@ async function nccDxTaoPO(id){
 function _goiYDemo(hid, sl){
   const sups=(DEMO.ncc.suppliers||[]).filter(s=>!s.blacklist); const today=new Date();
   const gls={}; (DEMO.don_mua||[]).forEach(p=>(p.chi_tiet||[]).forEach(ct=>{if(ct.hang_hoa_id===hid)gls[p.nha_cung_cap_id]=ct.don_gia;}));
-  const gbg={}; (DEMO.bao_gia||[]).forEach(b=>{if(b.hang_hoa_id===hid && (!b.hieu_luc_den||new Date(b.hieu_luc_den)>=today)){const cur=gbg[b.nha_cung_cap_id]; if(!cur||b.id>cur.id)gbg[b.nha_cung_cap_id]={id:b.id,gia:b.don_gia,hl:b.hieu_luc_den};}});
+  const gbg={}; (DEMO.bao_gia_ncc||[]).forEach(b=>{if(b.hang_hoa_id===hid && (!b.hieu_luc_den||new Date(b.hieu_luc_den)>=today)){const cur=gbg[b.nha_cung_cap_id]; if(!cur||b.id>cur.id)gbg[b.nha_cung_cap_id]={id:b.id,gia:b.don_gia,hl:b.hieu_luc_den};}});
   const dh={}; (DEMO.don_mua||[]).forEach(p=>{if(p.ngay_giao_thuc&&p.ngay_hen_giao){const t=dh[p.nha_cung_cap_id]||{t:0,d:0};t.t++;if(new Date(p.ngay_giao_thuc)<=new Date(p.ngay_hen_giao))t.d++;dh[p.nha_cung_cap_id]=t;}});
   const giaDung=id=>gbg[id]?gbg[id].gia:(gls[id]||null);
   const prices=sups.map(s=>giaDung(s.id)).filter(Boolean); const gmin=prices.length?Math.min(...prices):null;
@@ -2613,7 +2685,7 @@ async function nccLuuBaoGia(id){
   delete (window.DXAI||{})[id];
   if(S.mode==="live"){ try{await api("/ncc/bao-gia",{method:'POST',body:JSON.stringify({nha_cung_cap_id:ncc,hang_hoa_id:hh,don_gia:gia,hieu_luc_den:hl,nguon:"THU_CONG"})});
     toast("Đã lưu báo giá — AI & gợi ý sẽ dùng giá chào này","ok");viewNCC($("#main"));}catch(e){toast(e.detail||e.message,"err");} return; }
-  DEMO.bao_gia=DEMO.bao_gia||[]; DEMO.bao_gia.push({id:Date.now(),nha_cung_cap_id:ncc,hang_hoa_id:hh,don_gia:gia,hieu_luc_den:hl,nguon:"THU_CONG"});
+  DEMO.bao_gia_ncc=DEMO.bao_gia_ncc||[]; DEMO.bao_gia_ncc.push({id:Date.now(),nha_cung_cap_id:ncc,hang_hoa_id:hh,don_gia:gia,hieu_luc_den:hl,nguon:"THU_CONG"});
   toast("Đã lưu báo giá (demo) — gợi ý đã cập nhật","ok"); viewNCC($("#main"));
 }
 function rfqAll(id,on){const el=document.getElementById('rfq_ncc_'+id);if(!el)return;Array.from(el.options).forEach(o=>o.selected=on);}
@@ -2673,7 +2745,7 @@ function _poBodyDemo(po,f){
   L.push("Công ty Song Việt Water Solutions (SVWS) xác nhận đặt hàng theo đơn dưới đây:","");
   L.push("ĐƠN ĐẶT HÀNG (PO)",`- Số PO: ${po.so}`,`- Ngày: ${today}`,`- Nhà cung cấp: ${sup.ten||''}`);
   const ln0=(po.chi_tiet||[])[0];
-  const bgs=ln0?(DEMO.bao_gia||[]).filter(b=>b.hang_hoa_id===ln0.hang_hoa_id&&b.nha_cung_cap_id===po.nha_cung_cap_id&&(!b.hieu_luc_den||new Date(b.hieu_luc_den)>=new Date())):[];
+  const bgs=ln0?(DEMO.bao_gia_ncc||[]).filter(b=>b.hang_hoa_id===ln0.hang_hoa_id&&b.nha_cung_cap_id===po.nha_cung_cap_id&&(!b.hieu_luc_den||new Date(b.hieu_luc_den)>=new Date())):[];
   const bg=bgs.length?bgs[bgs.length-1]:null;
   if(bg)L.push(`- Tham chiếu báo giá${bg.hieu_luc_den?`, hiệu lực đến ${bg.hieu_luc_den}`:''}`);
   L.push("","CHI TIẾT HÀNG HÓA"); let tong=0;
@@ -2774,7 +2846,7 @@ async function nccBaoGia(host){
   let hhs = S.mode==="live" ? await api("/kho/hang-hoa").catch(()=>[]) : DEMO.hang_hoa;
   let quotes, rfqs;
   if(S.mode==="live"){ try{quotes=await api("/ncc/bao-gia");}catch(e){toast(e.detail||e.message,"err");quotes=[];} try{rfqs=await api("/ncc/rfq");}catch{rfqs=[];} }
-  else { quotes=(DEMO.bao_gia||[]); rfqs=(DEMO.rfq||[]); }
+  else { quotes=(DEMO.bao_gia_ncc||[]); rfqs=(DEMO.rfq||[]); }
   const hhName=id=>{const h=hhs.find(x=>x.id===id);return h?h.ten:("HH #"+id);};
   const supName=id=>{const s=sups.find(x=>x.id===id);return s?s.ten:("NCC #"+id);};
   const today=new Date();
@@ -2834,7 +2906,7 @@ async function nccBgCreate(){
   if(!hh||!ncc||gia<=0){toast("Chọn hàng hóa, NCC và đơn giá > 0","err");return;}
   if(S.mode==="live"){ try{await api("/ncc/bao-gia",{method:'POST',body:JSON.stringify({hang_hoa_id:hh,nha_cung_cap_id:ncc,don_gia:gia,so_luong_toi_thieu:mn,hieu_luc_den:hl,nguon:"THU_CONG"})});
     toast("Đã lưu báo giá","ok");viewNCC($("#main"));}catch(e){toast(e.detail||e.message,"err");} return; }
-  DEMO.bao_gia=DEMO.bao_gia||[]; DEMO.bao_gia.push({id:Date.now(),hang_hoa_id:hh,nha_cung_cap_id:ncc,don_gia:gia,so_luong_toi_thieu:mn,hieu_luc_den:hl,nguon:"THU_CONG"});
+  DEMO.bao_gia_ncc=DEMO.bao_gia_ncc||[]; DEMO.bao_gia_ncc.push({id:Date.now(),hang_hoa_id:hh,nha_cung_cap_id:ncc,don_gia:gia,so_luong_toi_thieu:mn,hieu_luc_den:hl,nguon:"THU_CONG"});
   toast("Đã lưu báo giá (demo)","ok"); viewNCC($("#main"));
 }
 async function nccDxTaoPOChon(id){
