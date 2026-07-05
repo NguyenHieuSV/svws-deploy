@@ -2127,14 +2127,16 @@ async function xemKetQuaCD(id){
 async function bhKhachHang(host){
   if(S.khSel) return bhKhachHangDetail(host, S.khSel);
   let list=DEMO.khach;
-  if(S.mode==="live"){ try{const r=await api("/ban-hang/khach-hang");
-    list=r.map(k=>({id:k.id,ma:k.ma,ten:k.ten,nguoi_lien_he:k.nguoi_lien_he,email:k.email,phan_loai_abc:k.phan_loai_abc}));}catch(e){toast(e.detail||e.message,"err");} }
+  if(S.mode==="live"){ try{list=await api("/ban-hang/khach-hang");}catch(e){toast(e.detail||e.message,"err");} }
+  S._khList=list;
+  const canOp=can("ban_hang","THAO_TAC");
   const rows=list.map(k=>`<tr>
     <td><b>${k.ma||'—'}</b></td><td>${k.ten}</td>
     <td>${k.nguoi_lien_he||'—'}</td>
     <td>${k.email?k.email:'<span style="color:var(--amber)">chưa có email</span>'}</td>
     <td>${k.phan_loai_abc?`<span class="badge b-info">Hạng ${k.phan_loai_abc}</span>`:'—'}</td>
-    <td><button class="btn-sm ghost" onclick="openKH(${k.id})">Hồ sơ & liên lạc</button></td></tr>`).join('');
+    <td style="white-space:nowrap"><button class="btn-sm ghost" onclick="openKH(${k.id})">Hồ sơ & liên lạc</button>
+      ${canOp?`<button class="btn-sm ghost" onclick="khMoSua(${k.id})">✏️ Sửa</button>`:''}</td></tr>`).join('');
   host.innerHTML=`<div class="note" style="padding:0 0 12px">Mọi khách hàng, trao đổi và tệp đều nằm trong hệ thống. Email gửi từ địa chỉ công ty <b>sv-sales@watersolutions.company</b> và được ghi nhật ký — không dùng mail cá nhân.</div>
     <div class="panel"><div class="panel-h"><h3>Danh sách khách hàng</h3><div class="spacer"></div>
     ${can("ban_hang","THAO_TAC")?'<button class="btn-sm" onclick="khMoTao()">+ Thêm khách hàng</button>':''}</div>
@@ -2175,6 +2177,45 @@ async function khTao(){
   toast("Đã thêm khách hàng "+ten+(S.mode==="demo"?" (demo)":""),"ok");
   viewBanHang($("#main"));
 }
+
+/* --- Sửa thông tin khách hàng --- */
+async function khMoSua(id){
+  let kh=(S._khList||[]).find(k=>k.id===id)||(DEMO.khach||[]).find(k=>k.id===id);
+  if(!kh&&S.mode==="live"){try{const all=await api("/ban-hang/khach-hang");kh=all.find(k=>k.id===id);}catch{}}
+  if(!kh)return toast("Không tìm thấy khách hàng","err");
+  const esc=v=>(v||'').toString().replace(/"/g,'&quot;');
+  _ktModal("Sửa thông tin — "+kh.ten,`
+    <label>Tên khách hàng <span style="color:var(--red)">*</span></label><input id="ks_ten" value="${esc(kh.ten)}">
+    <label>Mã khách hàng</label><input id="ks_ma" value="${esc(kh.ma)}">
+    <label>Người liên hệ</label><input id="ks_nlh" value="${esc(kh.nguoi_lien_he)}" placeholder="VD: Anh Nam — Trưởng phòng kỹ thuật">
+    <label>Email</label><input id="ks_email" type="email" value="${esc(kh.email)}">
+    <label>Điện thoại</label><input id="ks_dt" value="${esc(kh.dien_thoai)}">
+    <label>Mã số thuế</label><input id="ks_mst" value="${esc(kh.ma_so_thue)}">
+    <label>Hạng khách hàng</label>
+    <select id="ks_abc"><option value="">— Chưa xếp</option>
+      <option value="A" ${kh.phan_loai_abc==='A'?'selected':''}>A — quan trọng</option>
+      <option value="B" ${kh.phan_loai_abc==='B'?'selected':''}>B — trung bình</option>
+      <option value="C" ${kh.phan_loai_abc==='C'?'selected':''}>C — nhỏ</option></select>
+    <button class="btn-sm" style="margin-top:14px" onclick="khSua(${id})">Lưu thay đổi</button>`);
+}
+async function khSua(id){
+  const ten=$("#ks_ten").value.trim(), ma=$("#ks_ma").value.trim(),
+        nlh=$("#ks_nlh").value.trim(), email=$("#ks_email").value.trim(),
+        dt=$("#ks_dt").value.trim(), mst=$("#ks_mst").value.trim(), abc=$("#ks_abc").value;
+  if(!ten)return toast("Tên khách hàng là bắt buộc","err");
+  if(email&&!email.includes('@'))return toast("Email không hợp lệ","err");
+  if(S.mode==="live"){
+    try{await api("/ban-hang/khach-hang/"+id,{method:'PATCH',body:JSON.stringify(
+      {ten,ma:ma||null,nguoi_lien_he:nlh||null,email:email||null,dien_thoai:dt||null,ma_so_thue:mst||null,phan_loai_abc:abc||null})});}
+    catch(e){return toast(e.detail||e.message,"err");}
+  }else{
+    const kh=(DEMO.khach||[]).find(k=>k.id===id);
+    if(kh)Object.assign(kh,{ten,ma:ma||kh.ma,nguoi_lien_he:nlh||null,email,dien_thoai:dt||null,ma_so_thue:mst||null,phan_loai_abc:abc||null});
+  }
+  document.getElementById('ktModal')?.remove();
+  toast("Đã cập nhật khách hàng"+(S.mode==="demo"?" (demo)":""),"ok");
+  viewBanHang($("#main"));
+}
 function openKH(id){S.bhTab="khach_hang";S.khSel=id;viewBanHang($("#main"));}
 function backKH(){S.khSel=null;viewBanHang($("#main"));}
 
@@ -2213,7 +2254,8 @@ async function bhKhachHangDetail(host, khId){
 
   host.innerHTML=`<div style="margin-bottom:12px"><button class="btn-sm ghost" onclick="backKH()">← Danh sách khách hàng</button></div>
     <div class="panel"><div class="panel-h"><h3>${kh.ten}</h3><div class="spacer"></div>
-      ${unsub?`<span class="badge b-cho">Đã hủy nhận email marketing</span> `:''}${kh.phan_loai_abc?`<span class="badge b-info">Hạng ${kh.phan_loai_abc}</span>`:''}</div>
+      ${unsub?`<span class="badge b-cho">Đã hủy nhận email marketing</span> `:''}${kh.phan_loai_abc?`<span class="badge b-info">Hạng ${kh.phan_loai_abc}</span>`:''}
+      ${canOp?`<button class="btn-sm ghost" onclick="khMoSua(${khId})">✏️ Sửa thông tin</button>`:''}</div>
       <div class="note">Mã: ${kh.ma||'—'}${kh.nguoi_lien_he?` · Người liên hệ: <b>${kh.nguoi_lien_he}</b>`:''}${kh.dien_thoai?` · ĐT: <b>${kh.dien_thoai}</b>`:''} · Email: ${kh.email?`<b>${kh.email}</b>`:'<span style="color:var(--amber)">chưa có</span>'}${unsub?' · <span style="color:var(--muted)">không gửi chiến dịch marketing; vẫn trả lời 1:1 khi khách liên hệ</span>':''}</div></div>
     ${sendPanel}${logPanel}
     <div class="panel"><div class="panel-h"><h3>Nhật ký liên lạc</h3></div>

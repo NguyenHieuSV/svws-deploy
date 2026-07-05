@@ -14,7 +14,7 @@ from ..audit import ghi_audit
 from ..kho_service import xuat_ton
 from ..models import (NguoiDung, KhachHang, HangHoa, BaoGia, BaoGiaCt,
                       DonHang, DonHangCt, PhieuKho, PhieuKhoCt, HoaDon, CongNo)
-from ..schemas import (KhachHangVao, KhachHangRa, BaoGiaVao, BaoGiaRa, DonHangRa)
+from ..schemas import (KhachHangVao, KhachHangSua, KhachHangRa, BaoGiaVao, BaoGiaRa, DonHangRa)
 
 router = APIRouter(prefix="/ban-hang", tags=["ban_hang"])
 MODULE = "ban_hang"
@@ -42,6 +42,29 @@ def tao_kh(data: KhachHangVao, db: Session = Depends(get_db),
                    nguoi_phu_trach=nhan_vien_id_cua(db, nd.id))
     db.add(kh); db.flush()
     ghi_audit(db, nd.id, "TAO", "khach_hang", kh.id, moi={"ten": data.ten})
+    db.commit(); db.refresh(kh)
+    return kh
+
+
+@router.patch("/khach-hang/{kh_id}", response_model=KhachHangRa)
+def sua_kh(kh_id: int, data: KhachHangSua, db: Session = Depends(get_db),
+           nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    kh = db.get(KhachHang, kh_id)
+    if kh is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy khách hàng")
+    doi = data.model_dump(exclude_unset=True)
+    if not doi:
+        return kh
+    if "ma" in doi and doi["ma"]:
+        trung = db.query(KhachHang).filter(KhachHang.ma == doi["ma"],
+                                           KhachHang.id != kh.id).first()
+        if trung:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                f"Mã '{doi['ma']}' đã dùng cho khách khác")
+    cu = {t: getattr(kh, t) for t in doi}
+    for t, v in doi.items():
+        setattr(kh, t, v)
+    ghi_audit(db, nd.id, "SUA", "khach_hang", kh.id, cu=cu, moi=doi)
     db.commit(); db.refresh(kh)
     return kh
 

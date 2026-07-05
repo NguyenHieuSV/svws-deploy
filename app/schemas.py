@@ -250,6 +250,18 @@ class KhachHangVao(BaseModel):
     khong_nhan_email: bool = False
 
 
+class KhachHangSua(BaseModel):
+    """Cập nhật khách hàng — chỉ gửi trường cần đổi."""
+    ma: str | None = None
+    ten: str | None = None
+    ma_so_thue: str | None = None
+    dien_thoai: str | None = None
+    nguoi_lien_he: str | None = None
+    email: str | None = None
+    phan_loai_abc: str | None = None
+    khong_nhan_email: bool | None = None
+
+
 class KhachHangRa(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int
@@ -258,6 +270,7 @@ class KhachHangRa(BaseModel):
     email: str | None = None
     dien_thoai: str | None = None
     nguoi_lien_he: str | None = None
+    ma_so_thue: str | None = None
     phan_loai_abc: str | None = None
     khong_nhan_email: bool = False
 
