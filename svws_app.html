@@ -2233,8 +2233,9 @@ async function bhDonHang(host){
       ${canUp?`<button class="btn-sm ghost" onclick="hdSua(${g.id})">✏️ Sửa</button>`:''}
       <button class="btn-sm ghost" onclick="hdPdfTu(${g.id})">🖨 PDF</button>
       ${canUp?`<button class="btn-sm ghost" style="color:var(--red)" onclick="hdXoa(${g.id})">🗑</button>`:''}</td></tr>`;}).join('');
-  const hdPanel=`<div class="panel"><div class="panel-h"><h3>Hợp đồng đã soạn</h3></div>
-    <div class="note">Bấm <b>📄 Tạo Hợp đồng</b> trên từng đơn hàng bên dưới để soạn hợp đồng theo mẫu, lưu tạm và xuất PDF. Bản hợp đồng đã ký (scan) thì đính kèm vào đơn hàng bằng khung <b>Tải lên</b> với loại "Hợp đồng".</div>
+  const hdPanel=`<div class="panel"><div class="panel-h"><h3>Hợp đồng đã soạn</h3><div class="spacer"></div>
+    ${canUp?'<button class="btn-sm" onclick="hdMoiTrong()">+ Tạo hợp đồng</button>':''}</div>
+    <div class="note">Bấm <b>+ Tạo hợp đồng</b> (chọn khách) hoặc <b>📄 Tạo Hợp đồng</b> trên từng đơn hàng bên dưới (tự điền theo đơn). Lưu tạm để sửa nhiều lần, Xuất PDF khi hoàn tất. Bản hợp đồng đã ký (scan) thì đính kèm vào đơn hàng bằng khung <b>Tải lên</b> với loại "Hợp đồng".</div>
     <div class="panel-b"><table><thead><tr><th>Số HĐ</th><th>Bên A (khách)</th><th>Đơn hàng</th><th class="num">Giá trị</th><th>Trạng thái</th><th></th></tr></thead>
     <tbody>${hdRows||'<tr><td colspan="6" class="empty">Chưa có hợp đồng nào.</td></tr>'}</tbody></table></div></div>`;
   host.innerHTML = `<div class="note" style="padding:0 0 12px">Mỗi đơn hiển thị <b>Mã Bán hàng</b> làm khóa liên kết sang Mua hàng, kèm <b>giá vốn</b> (tổng PO mua liên kết) và <b>lãi/lỗ</b>. Đính kèm PO khách & hợp đồng ngay trên đơn.</div>${hdPanel}${cards||'<div class="panel"><div class="empty">Chưa có đơn hàng nào.<br><span style="font-size:12.5px;color:var(--muted)">Đơn hàng được tạo từ <b>báo giá nội bộ đã duyệt</b>: sang tab Báo giá → bấm "→ Tạo đơn hàng" trên báo giá Đã duyệt. Sau đó quay lại đây để đính kèm PO/Hợp đồng.</span></div></div>'}`;
@@ -2338,6 +2339,24 @@ function hdMoi(oid){
   const kh=S.mode==="live"
     ? (S._dhKhs||[]).find(k=>k.id===o.khach_hang_id)
     : (DEMO.khach||[]).find(k=>k.ten===o.khach);
+  _hdBatDau(kh, o);
+}
+async function hdMoiTrong(){
+  const kh=await _crmKhList();
+  if(!kh.length)return toast("Chưa có khách hàng — hãy tạo ở tab Khách hàng trước","err");
+  S._hdKhList=kh;
+  _ktModal("Tạo hợp đồng mới — chọn khách hàng",`
+    <label>Khách hàng (Bên A)</label>
+    <select id="hd_kh_chon">${kh.map(k=>`<option value="${k.id}">${k.ten}${k.ma?' ('+k.ma+')':''}</option>`).join('')}</select>
+    <button class="btn-sm" style="margin-top:14px" onclick="hdMoiTuKhach()">Soạn hợp đồng</button>`);
+}
+function hdMoiTuKhach(){
+  const khId=Number(document.getElementById('hd_kh_chon').value);
+  const kh=(S._hdKhList||[]).find(k=>k.id===khId);
+  document.getElementById('ktModal')?.remove();
+  _hdBatDau(kh, null);
+}
+function _hdBatDau(kh, o){
   const nay=new Date();
   const mmyyyy=String(nay.getMonth()+1).padStart(2,'0')+nay.getFullYear();
   S.hdEdit={id:null,d:{
@@ -2345,9 +2364,9 @@ function hdMoi(oid){
     so:`SV-${(kh&&kh.ma)?kh.ma.replace(/^KH-?/,''):'KH'}-01-${mmyyyy}`,
     ngay:nay.toISOString().slice(0,10),
     tieu_de_vn:"HỢP ĐỒNG DỊCH VỤ", tieu_de_en:"SERVICE CONTRACT",
-    don_hang_so:o.so||('DH-'+o.id),
-    khach_hang_id:o.khach_hang_id||(kh?kh.id:null),
-    benA:{ten:(kh?kh.ten:o.khach)||"",ten_en:"",dai_dien:(kh&&kh.nguoi_lien_he)||"",chuc_vu:"",
+    don_hang_so:o?(o.so||('DH-'+o.id)):"",
+    khach_hang_id:(o&&o.khach_hang_id)||(kh?kh.id:null),
+    benA:{ten:(kh?kh.ten:(o?o.khach:""))||"",ten_en:"",dai_dien:(kh&&kh.nguoi_lien_he)||"",chuc_vu:"",
       dia_chi:"",dien_thoai:(kh&&kh.dien_thoai)||"",mst:(kh&&kh.ma_so_thue)||"",tai_khoan:""},
     benB:Object.assign({},HD_BENB_MD),
     d1_vn:"Hợp Đồng dịch vụ này quy định các điều khoản thỏa thuận cơ bản về: hệ thống mà bên B sẽ cung cấp/đầu tư, tiêu chí nghiệm thu, đơn giá dịch vụ, phương thức thanh toán, trách nhiệm và nghĩa vụ của các bên, chấm dứt hợp đồng và các điều khoản khác. Quy cách hệ thống cụ thể như sau:",
@@ -2406,7 +2425,7 @@ function hdEditor(host){
     </div></details>`).join('');
   host.innerHTML=`
   <div style="margin-bottom:12px"><button class="btn-sm ghost" onclick="hdDong()">← Quay lại danh sách</button></div>
-  <div class="panel"><div class="panel-h"><h3>${S.hdEdit.id?'Sửa hợp đồng':'Soạn hợp đồng'} song ngữ — đơn hàng ${d.don_hang_so||''}</h3><div class="spacer"></div>
+  <div class="panel"><div class="panel-h"><h3>${S.hdEdit.id?'Sửa hợp đồng':'Soạn hợp đồng'} song ngữ${d.don_hang_so?' — đơn hàng '+d.don_hang_so:''}</h3><div class="spacer"></div>
     <button class="btn-sm ghost" onclick="hdLuu()">💾 Lưu tạm</button>
     <button class="btn-sm" onclick="hdPdf()">🖨 Xuất PDF</button></div>
   <div class="panel-b" style="padding:14px 18px">
