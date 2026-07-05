@@ -13,9 +13,10 @@ from ..rbac import yeu_cau, kiem_han_muc
 from ..deps import nhan_vien_id_cua
 from ..audit import ghi_audit
 from ..kho_service import xuat_ton
-from ..models import (NguoiDung, KhachHang, HangHoa, BaoGia, BaoGiaCt,
+from ..models import (NguoiDung, KhachHang, HangHoa, BaoGia, BaoGiaCt, BaoGiaForm,
                       DonHang, DonHangCt, PhieuKho, PhieuKhoCt, HoaDon, CongNo)
-from ..schemas import (KhachHangVao, KhachHangSua, KhachHangRa, BaoGiaVao, BaoGiaRa, DonHangRa)
+from ..schemas import (KhachHangVao, KhachHangSua, KhachHangRa, BaoGiaVao, BaoGiaRa,
+                       BaoGiaFormVao, BaoGiaFormRa, DonHangRa)
 
 router = APIRouter(prefix="/ban-hang", tags=["ban_hang"])
 MODULE = "ban_hang"
@@ -92,6 +93,53 @@ def xoa_kh(kh_id: int, db: Session = Depends(get_db),
             f"Khách '{ten_cu}' đã có giao dịch (báo giá / đơn hàng / công nợ / "
             "nhật ký liên lạc) nên không thể xóa — dữ liệu kế toán phải giữ vết.")
     return {"ok": True, "ten": ten_cu}
+
+
+# ----- Báo giá soạn theo mẫu (lưu tạm & xuất PDF) -----
+@router.get("/bao-gia-form", response_model=list[BaoGiaFormRa])
+def ds_bao_gia_form(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
+    return db.query(BaoGiaForm).order_by(BaoGiaForm.id.desc()).limit(200).all()
+
+
+@router.post("/bao-gia-form", response_model=BaoGiaFormRa, status_code=201)
+def tao_bao_gia_form(data: BaoGiaFormVao, db: Session = Depends(get_db),
+                     nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    bgf = BaoGiaForm(so=data.so, khach_hang_id=data.khach_hang_id,
+                     noi_dung=data.noi_dung, trang_thai=data.trang_thai or "NHAP",
+                     nguoi_tao=nhan_vien_id_cua(db, nd.id))
+    db.add(bgf); db.flush()
+    ghi_audit(db, nd.id, "TAO", "bao_gia_form", bgf.id, moi={"so": data.so})
+    db.commit(); db.refresh(bgf)
+    return bgf
+
+
+@router.patch("/bao-gia-form/{bgf_id}", response_model=BaoGiaFormRa)
+def sua_bao_gia_form(bgf_id: int, data: BaoGiaFormVao, db: Session = Depends(get_db),
+                     nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    bgf = db.get(BaoGiaForm, bgf_id)
+    if bgf is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy báo giá nháp")
+    bgf.so = data.so
+    bgf.khach_hang_id = data.khach_hang_id
+    bgf.noi_dung = data.noi_dung
+    if data.trang_thai:
+        bgf.trang_thai = data.trang_thai
+    ghi_audit(db, nd.id, "SUA", "bao_gia_form", bgf.id, moi={"so": data.so})
+    db.commit(); db.refresh(bgf)
+    return bgf
+
+
+@router.delete("/bao-gia-form/{bgf_id}")
+def xoa_bao_gia_form(bgf_id: int, db: Session = Depends(get_db),
+                     nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    bgf = db.get(BaoGiaForm, bgf_id)
+    if bgf is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy báo giá nháp")
+    so_cu = bgf.so
+    db.delete(bgf)
+    ghi_audit(db, nd.id, "XOA", "bao_gia_form", bgf_id, cu={"so": so_cu})
+    db.commit()
+    return {"ok": True}
 
 
 # ----- Báo giá -----

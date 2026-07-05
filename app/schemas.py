@@ -275,6 +275,23 @@ class KhachHangRa(BaseModel):
     khong_nhan_email: bool = False
 
 
+class BaoGiaFormVao(BaseModel):
+    """Báo giá mẫu chuyên nghiệp — form tự do lưu trong noi_dung."""
+    so: str | None = None
+    khach_hang_id: int | None = None
+    noi_dung: dict
+    trang_thai: str | None = None   # NHAP / DA_XUAT
+
+
+class BaoGiaFormRa(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    so: str | None
+    khach_hang_id: int | None
+    noi_dung: dict
+    trang_thai: str
+
+
 class BaoGiaCtVao(BaseModel):
     hang_hoa_id: int
     so_luong: Decimal = Field(gt=0)

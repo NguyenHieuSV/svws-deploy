@@ -335,6 +335,17 @@ class KhachHang(Base):
     nguoi_phu_trach: Mapped[int | None] = mapped_column(ForeignKey("nhan_vien.id"), nullable=True)
 
 
+class BaoGiaForm(Base):
+    """Báo giá soạn theo mẫu chuyên nghiệp — lưu tạm & xuất PDF."""
+    __tablename__ = "bao_gia_form"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    so: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    khach_hang_id: Mapped[int | None] = mapped_column(ForeignKey("khach_hang.id"), nullable=True)
+    noi_dung: Mapped[dict] = mapped_column(JSONB)
+    trang_thai: Mapped[str] = mapped_column(String(20), default="NHAP")
+    nguoi_tao: Mapped[int | None] = mapped_column(ForeignKey("nhan_vien.id"), nullable=True)
+
+
 class BaoGia(Base):
     __tablename__ = "bao_gia"
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
