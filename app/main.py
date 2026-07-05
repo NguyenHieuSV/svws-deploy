@@ -19,17 +19,24 @@ _HTML = os.path.join(os.path.dirname(__file__), "..", "svws_app.html")
 _HUONG_DAN = os.path.join(os.path.dirname(__file__), "..", "huong_dan.html")
 
 
+# no-cache: trình duyệt phải hỏi lại server mỗi lần mở (ETag 304 nếu chưa đổi)
+# -> người dùng luôn nhận bản mới nhất ngay sau khi deploy, khỏi Ctrl+F5.
+_NO_CACHE = {"Cache-Control": "no-cache"}
+
+
 @app.get("/")
 def goc():
     if os.path.exists(_HTML):
-        return FileResponse(_HTML, media_type="text/html; charset=utf-8")
+        return FileResponse(_HTML, media_type="text/html; charset=utf-8",
+                            headers=_NO_CACHE)
     return {"he_thong": "SVWS", "trang_thai": "ok"}
 
 
 @app.get("/huong-dan")
 def huong_dan():
     if os.path.exists(_HUONG_DAN):
-        return FileResponse(_HUONG_DAN, media_type="text/html; charset=utf-8")
+        return FileResponse(_HUONG_DAN, media_type="text/html; charset=utf-8",
+                            headers=_NO_CACHE)
     return {"he_thong": "SVWS", "trang_thai": "chua co huong dan"}
 
 
