@@ -16,6 +16,9 @@ def dang_nhap(form: OAuth2PasswordRequestForm = Depends(), db: Session = Depends
     nd = db.query(NguoiDung).filter_by(email=form.username).first()
     if not nd or not kiem_mat_khau(form.password, nd.mat_khau_hash):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Sai email hoặc mật khẩu")
+    if nd.trang_thai != "HOAT_DONG":
+        raise HTTPException(status.HTTP_403_FORBIDDEN,
+                            "Tài khoản đã bị khóa. Liên hệ Admin/CEO để mở lại.")
     return TokenRa(access_token=tao_token(nd.id))
 
 

@@ -525,7 +525,7 @@ function go(mod){ S.khSel=null; if(!S.perm[pmod(mod)]){toast("Bạn không có q
   S.page=mod; $("#pageTitle").textContent=MODULES[mod].label; highlight();
   $("#sidebar").classList.remove('open');
   const m=$("#main"); m.scrollTop=0;
-  ({dashboard:viewDashboard,dieu_hanh:viewDieuHanh,crm:viewCRM,cho_thue:viewChoThue,kho:viewKho,ban_hang:viewBanHang,de_xuat:viewDeXuat,ncc:viewNCC,ke_toan:viewKeToan,tai_chinh:viewTaiChinh,nhan_su:viewNhanSu,du_an:viewDuAn}[mod]||viewGeneric)(m,mod);
+  ({dashboard:viewDashboard,dieu_hanh:viewDieuHanh,crm:viewCRM,cho_thue:viewChoThue,kho:viewKho,ban_hang:viewBanHang,de_xuat:viewDeXuat,ncc:viewNCC,ke_toan:viewKeToan,tai_chinh:viewTaiChinh,nhan_su:viewNhanSu,du_an:viewDuAn,cau_hinh:viewCauHinh}[mod]||viewGeneric)(m,mod);
 }
 
 /* ---------- Tổng quan ---------- */
@@ -5298,6 +5298,109 @@ function _daDemoAT(){return {tong:2,mo:2,theo_muc_rui_ro:{CAO:1,TRUNG:1,THAP:0},
 function _daDemoTL(){return {theo_loai:{BAN_VE:1,THIET_BI:1,VAT_TU:1,BB_GIAO_NHAN:1,NGHIEM_THU:1},danh_sach:[{id:1,loai:"BAN_VE",ten:"Bản vẽ P&ID",ma_so:"DWG-001",phien_ban:"A",ngay:"2026-08-01",co_file:true}]};}
 function _daDemoKPI(){return {binh_quan_dat:97.3,danh_sach:[{id:1,ten:"Tiến độ đúng hạn",don_vi:"%",chieu:"CAO",muc_tieu:100,thuc_te:95,trong_so:2,dat_phan_tram:95}]};}
 function _daDemoBC(){return {tien_do:42.9,moc:{tong:4,theo_trang_thai:{HOAN_THANH:2}},an_toan:{tong:2,mo:2,theo_muc_rui_ro:{CAO:1,TRUNG:1}},tai_lieu:{tong:5,theo_loai:{BAN_VE:1}},kpi:{binh_quan_dat:97.3,so_kpi:3},ngan_sach:{du_toan:6000000000,chi_phi_thuc_te:3000000000,con_lai:3000000000,vuot:false}};}
+
+/* ---------- Cấu hình: quản lý người dùng (CEO / ADMIN) ---------- */
+let DEMO_USERS=[
+  {id:1,email:"ceo@svws.vn",vai_tro:"CEO",ten_vai_tro:"Giám đốc",trang_thai:"HOAT_DONG"},
+  {id:2,email:"admin@svws.vn",vai_tro:"ADMIN",ten_vai_tro:"Admin / IT",trang_thai:"HOAT_DONG"},
+  {id:3,email:"ketoan1@svws.vn",vai_tro:"NV_KT",ten_vai_tro:"NV Kế toán",trang_thai:"HOAT_DONG"},
+  {id:4,email:"thukho@svws.vn",vai_tro:"THUKHO",ten_vai_tro:"Thủ kho",trang_thai:"KHOA"}];
+async function viewCauHinh(m){
+  m.innerHTML=head("Cấu hình","Quản lý tài khoản người dùng hệ thống");
+  if(S.role!=="CEO"&&S.role!=="ADMIN"){
+    m.innerHTML+=`<div class="panel"><div class="empty"><div class="big">Không đủ quyền</div>
+      Chỉ Giám đốc (CEO) hoặc Admin / IT được quản lý người dùng.</div></div>`;return;}
+  let users,roles;
+  if(S.mode==="live"){
+    try{[users,roles]=await Promise.all([api("/cau-hinh/nguoi-dung"),api("/cau-hinh/vai-tro")]);}
+    catch(e){m.innerHTML+=`<div class="panel"><div class="empty">${e.message||'Lỗi tải danh sách'}</div></div>`;return;}
+  }else{users=DEMO_USERS;roles=Object.keys(ROLE_NAME).map(r=>({ma:r,ten:ROLE_NAME[r]}));}
+  S._chUsers=users;S._chRoles=roles;
+  const hoatDong=users.filter(u=>u.trang_thai==="HOAT_DONG").length;
+  m.innerHTML+=`<div class="cards">
+    <div class="stat accent"><div class="k">Tổng tài khoản</div><div class="v">${users.length}</div><div class="d">Trong hệ thống</div></div>
+    <div class="stat"><div class="k">Đang hoạt động</div><div class="v small">${hoatDong}</div><div class="d" style="color:var(--green)">Đăng nhập được</div></div>
+    <div class="stat"><div class="k">Bị khóa</div><div class="v small">${users.length-hoatDong}</div><div class="d" style="color:var(--red)">Không đăng nhập được</div></div>
+  </div>
+  <div class="panel"><div class="panel-h"><h3>Người dùng</h3>
+    <button class="btn-sm" onclick="chMoTao()">+ Tạo người dùng</button></div>
+  <div class="panel-b"><table><thead>
+    <tr><th>Email</th><th>Vai trò</th><th>Trạng thái</th><th>Hành động</th></tr></thead><tbody>
+    ${users.map(u=>`<tr>
+      <td><b>${u.email}</b></td>
+      <td>${u.ten_vai_tro} <span class="muted">(${u.vai_tro})</span></td>
+      <td>${u.trang_thai==="HOAT_DONG"?'<span class="badge b-ok">Hoạt động</span>':'<span class="badge b-tc">🔒 Khóa</span>'}</td>
+      <td style="white-space:nowrap">
+        <button class="btn-sm ghost" onclick="chMoDoiVT(${u.id})">Vai trò</button>
+        <button class="btn-sm ghost" onclick="chMoDatMK(${u.id})">Đặt lại MK</button>
+        <button class="btn-sm ghost" onclick="chKhoa(${u.id})">${u.trang_thai==="HOAT_DONG"?'Khóa':'Mở khóa'}</button>
+      </td></tr>`).join('')}
+  </tbody></table></div></div>
+  ${S.mode==="demo"?`<div class="panel"><div class="panel-b" style="color:var(--muted);font-size:12.5px">
+    Chế độ demo: thao tác chỉ mô phỏng, không lưu. Đăng nhập tài khoản CEO/Admin thật để quản lý người dùng thực.</div></div>`:''}`;
+}
+function _chRoleOpts(sel){return S._chRoles.map(r=>`<option value="${r.ma}" ${r.ma===sel?'selected':''}>${r.ten} (${r.ma})</option>`).join('');}
+function chMoTao(){
+  _ktModal("Tạo người dùng mới",`
+    <label>Email</label><input id="ch_email" type="email" placeholder="ten@svws.vn">
+    <label>Mật khẩu ban đầu (tối thiểu 6 ký tự)</label><input id="ch_mk" type="text" placeholder="Người dùng nên đổi sau khi nhận">
+    <label>Vai trò</label><select id="ch_vt">${_chRoleOpts("NV_KD")}</select>
+    <button class="btn-sm" style="margin-top:14px" onclick="chTao()">Tạo tài khoản</button>`);
+}
+async function chTao(){
+  const email=$("#ch_email").value.trim().toLowerCase(),mk=$("#ch_mk").value,vt=$("#ch_vt").value;
+  if(!email.includes('@'))return toast("Email không hợp lệ","err");
+  if(mk.length<6)return toast("Mật khẩu tối thiểu 6 ký tự","err");
+  if(S.mode==="live"){
+    try{await api("/cau-hinh/nguoi-dung",{method:'POST',body:JSON.stringify({email,mat_khau:mk,vai_tro:vt})});}
+    catch(e){return toast(e.message,"err");}
+  }else{
+    if(DEMO_USERS.some(u=>u.email===email))return toast("Email đã tồn tại","err");
+    DEMO_USERS.push({id:Math.max(...DEMO_USERS.map(u=>u.id))+1,email,vai_tro:vt,ten_vai_tro:ROLE_NAME[vt]||vt,trang_thai:"HOAT_DONG"});
+  }
+  document.getElementById('ktModal')?.remove();
+  toast("Đã tạo tài khoản "+email+(S.mode==="demo"?" (demo — không lưu)":""));go('cau_hinh');
+}
+function chMoDoiVT(id){
+  const u=S._chUsers.find(x=>x.id===id);if(!u)return;
+  _ktModal("Đổi vai trò — "+u.email,`
+    <label>Vai trò mới</label><select id="ch_vt2">${_chRoleOpts(u.vai_tro)}</select>
+    <button class="btn-sm" style="margin-top:14px" onclick="chDoiVT(${id})">Lưu</button>`);
+}
+async function chDoiVT(id){
+  const vt=$("#ch_vt2").value,u=S._chUsers.find(x=>x.id===id);
+  if(S.mode==="live"){
+    try{await api("/cau-hinh/nguoi-dung/"+id,{method:'PATCH',body:JSON.stringify({vai_tro:vt})});}
+    catch(e){return toast(e.message,"err");}
+  }else{u.vai_tro=vt;u.ten_vai_tro=ROLE_NAME[vt]||vt;}
+  document.getElementById('ktModal')?.remove();
+  toast("Đã đổi vai trò"+(S.mode==="demo"?" (demo)":""));go('cau_hinh');
+}
+function chMoDatMK(id){
+  const u=S._chUsers.find(x=>x.id===id);if(!u)return;
+  _ktModal("Đặt lại mật khẩu — "+u.email,`
+    <label>Mật khẩu mới (tối thiểu 6 ký tự)</label><input id="ch_mk2" type="text">
+    <button class="btn-sm" style="margin-top:14px" onclick="chDatMK(${id})">Đặt lại</button>`);
+}
+async function chDatMK(id){
+  const mk=$("#ch_mk2").value;
+  if(mk.length<6)return toast("Mật khẩu tối thiểu 6 ký tự","err");
+  if(S.mode==="live"){
+    try{await api("/cau-hinh/nguoi-dung/"+id+"/dat-lai-mat-khau",{method:'POST',body:JSON.stringify({mat_khau_moi:mk})});}
+    catch(e){return toast(e.message,"err");}
+  }
+  document.getElementById('ktModal')?.remove();
+  toast("Đã đặt lại mật khẩu"+(S.mode==="demo"?" (demo)":""));
+}
+async function chKhoa(id){
+  const u=S._chUsers.find(x=>x.id===id);if(!u)return;
+  const tt=u.trang_thai==="HOAT_DONG"?"KHOA":"HOAT_DONG";
+  if(S.mode==="live"){
+    try{await api("/cau-hinh/nguoi-dung/"+id,{method:'PATCH',body:JSON.stringify({trang_thai:tt})});}
+    catch(e){return toast(e.message,"err");}
+  }else{u.trang_thai=tt;}
+  toast((tt==="KHOA"?"Đã khóa ":"Đã mở khóa ")+u.email+(S.mode==="demo"?" (demo)":""));go('cau_hinh');
+}
 
 /* ---------- Module khác (khung) ---------- */
 function viewGeneric(m,mod){

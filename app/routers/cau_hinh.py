@@ -12,8 +12,9 @@ from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..models import NguoiDung, VaiTro, PhanQuyen
-from ..rbac import yeu_cau
+from ..rbac import yeu_cau, chi_vai_tro
 from ..audit import ghi_audit
+from ..security import bam_mat_khau
 
 router = APIRouter(prefix="/cau-hinh", tags=["cau_hinh"])
 
@@ -130,3 +131,126 @@ def dat_quyen(
               moi={"vai_tro": vt.ma, "module": p.module, "muc": p.muc})
     db.commit()
     return {"vai_tro": vt.ma, "module": p.module, "muc": p.muc}
+
+
+# ============================================================
+# QUẢN LÝ NGƯỜI DÙNG — chỉ CEO và ADMIN (tạo tài khoản, đổi vai
+# trò, khóa/mở, đặt lại mật khẩu). Mật khẩu KHÔNG ghi vào audit.
+# ============================================================
+TRANG_THAI_HOP_LE = {"HOAT_DONG", "KHOA"}
+
+
+def _nd_ra(u: NguoiDung) -> dict:
+    return {"id": u.id, "email": u.email, "vai_tro": u.vai_tro.ma,
+            "ten_vai_tro": u.vai_tro.ten, "trang_thai": u.trang_thai}
+
+
+@router.get("/vai-tro")
+def danh_sach_vi_tri(
+    nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN")),
+    db: Session = Depends(get_db),
+):
+    """Danh sách vị trí để chọn khi tạo/sửa người dùng."""
+    return [{"ma": v.ma, "ten": v.ten} for v in db.query(VaiTro).order_by(VaiTro.id).all()]
+
+
+@router.get("/nguoi-dung")
+def danh_sach_nguoi_dung(
+    nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN")),
+    db: Session = Depends(get_db),
+):
+    return [_nd_ra(u) for u in db.query(NguoiDung).order_by(NguoiDung.id).all()]
+
+
+class TaoNguoiDung(BaseModel):
+    email: str
+    mat_khau: str
+    vai_tro: str
+
+
+@router.post("/nguoi-dung")
+def tao_nguoi_dung(
+    p: TaoNguoiDung,
+    nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN")),
+    db: Session = Depends(get_db),
+):
+    email = p.email.strip().lower()
+    if "@" not in email or len(email) < 5:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Email không hợp lệ.")
+    if len(p.mat_khau) < 6:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Mật khẩu tối thiểu 6 ký tự.")
+    if db.query(NguoiDung).filter_by(email=email).first():
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Email '{email}' đã tồn tại.")
+    vt = db.query(VaiTro).filter_by(ma=p.vai_tro).first()
+    if not vt:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy vị trí.")
+    u = NguoiDung(email=email, mat_khau_hash=bam_mat_khau(p.mat_khau),
+                  vai_tro_id=vt.id, trang_thai="HOAT_DONG")
+    db.add(u)
+    db.flush()
+    ghi_audit(db, nd.id, "TAO", "nguoi_dung", u.id,
+              moi={"email": email, "vai_tro": vt.ma})
+    db.commit()
+    db.refresh(u)
+    return _nd_ra(u)
+
+
+class SuaNguoiDung(BaseModel):
+    vai_tro: str | None = None
+    trang_thai: str | None = None
+
+
+@router.patch("/nguoi-dung/{nguoi_dung_id}")
+def sua_nguoi_dung(
+    nguoi_dung_id: int,
+    p: SuaNguoiDung,
+    nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN")),
+    db: Session = Depends(get_db),
+):
+    u = db.get(NguoiDung, nguoi_dung_id)
+    if not u:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy người dùng.")
+    cu = {"vai_tro": u.vai_tro.ma, "trang_thai": u.trang_thai}
+    if p.vai_tro is not None:
+        if u.id == nd.id:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                "Không thể tự đổi vai trò của chính mình.")
+        vt = db.query(VaiTro).filter_by(ma=p.vai_tro).first()
+        if not vt:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy vị trí.")
+        u.vai_tro_id = vt.id
+    if p.trang_thai is not None:
+        if p.trang_thai not in TRANG_THAI_HOP_LE:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Trạng thái không hợp lệ.")
+        if u.id == nd.id and p.trang_thai == "KHOA":
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                "Không thể tự khóa tài khoản của chính mình.")
+        u.trang_thai = p.trang_thai
+    ghi_audit(db, nd.id, "SUA", "nguoi_dung", u.id, cu=cu,
+              moi={"vai_tro": p.vai_tro, "trang_thai": p.trang_thai})
+    db.commit()
+    db.refresh(u)
+    return _nd_ra(u)
+
+
+class DatLaiMatKhau(BaseModel):
+    mat_khau_moi: str
+
+
+@router.post("/nguoi-dung/{nguoi_dung_id}/dat-lai-mat-khau")
+def dat_lai_mat_khau(
+    nguoi_dung_id: int,
+    p: DatLaiMatKhau,
+    nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN")),
+    db: Session = Depends(get_db),
+):
+    if len(p.mat_khau_moi) < 6:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Mật khẩu tối thiểu 6 ký tự.")
+    u = db.get(NguoiDung, nguoi_dung_id)
+    if not u:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy người dùng.")
+    u.mat_khau_hash = bam_mat_khau(p.mat_khau_moi)
+    ghi_audit(db, nd.id, "SUA", "nguoi_dung", u.id,
+              moi={"dat_lai_mat_khau": True})
+    db.commit()
+    return {"ok": True, "email": u.email}
