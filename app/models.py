@@ -335,6 +335,20 @@ class KhachHang(Base):
     nguoi_phu_trach: Mapped[int | None] = mapped_column(ForeignKey("nhan_vien.id"), nullable=True)
 
 
+class SanPhamNcc(Base):
+    """Danh mục sản phẩm của nhà cung cấp — dữ liệu cho mua hàng & dự toán."""
+    __tablename__ = "san_pham_ncc"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    nha_cung_cap_id: Mapped[int] = mapped_column(ForeignKey("nha_cung_cap.id", ondelete="CASCADE"))
+    ten: Mapped[str] = mapped_column(String(250))
+    ma_sp: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    mo_ta: Mapped[str | None] = mapped_column(Text, nullable=True)
+    nha_san_xuat: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    don_vi: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    don_gia: Mapped[Decimal] = mapped_column(Numeric(18, 0), default=0)
+    ghi_chu: Mapped[str | None] = mapped_column(String(300), nullable=True)
+
+
 class BaoGiaForm(Base):
     """Báo giá soạn theo mẫu chuyên nghiệp — lưu tạm & xuất PDF."""
     __tablename__ = "bao_gia_form"

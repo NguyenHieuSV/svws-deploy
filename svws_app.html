@@ -3369,10 +3369,11 @@ async function bhTongQuan(host){
 async function viewNCC(m){
   if(!S.nccTab)S.nccTab="ncc";
   m.innerHTML=head("Nhà cung cấp","Mua hàng: hồ sơ NCC · đơn mua duyệt theo hạn mức · nhận hàng (nhập kho) · công nợ phải trả");
-  const tabs=[["ncc","Nhà cung cấp"],["po","Đơn mua (PO)"],["bao_gia","Báo giá"],["cong_no","Công nợ phải trả"],["kiem_soat","Kiểm soát"]];
+  const tabs=[["ncc","Nhà cung cấp"],["san_pham","Sản phẩm NCC"],["po","Đơn mua (PO)"],["bao_gia","Báo giá"],["cong_no","Công nợ phải trả"],["kiem_soat","Kiểm soát"]];
   m.innerHTML+=`<div class="tabs">${tabs.map(([k,l])=>`<button class="${S.nccTab===k?'active':''}" onclick="nccSwitch('${k}')">${l}</button>`).join('')}</div><div id="nccBody"></div>`;
   const host=$("#nccBody");
   if(S.nccTab==="ncc") await nccSuppliers(host);
+  else if(S.nccTab==="san_pham") await nccSanPham(host);
   else if(S.nccTab==="po") await nccPO(host);
   else if(S.nccTab==="bao_gia") await nccBaoGia(host);
   else if(S.nccTab==="cong_no") await nccCongNo(host);
@@ -3382,6 +3383,99 @@ function nccSwitch(t){S.nccTab=t;S.poRecv=null;viewNCC($("#main"));}
 const stars=n=>{const f=Math.round(n);return '★★★★★☆☆☆☆☆'.slice(5-f,10-f);};
 async function _nccSups(){ if(S.mode==="live"){ try{return await api("/ncc/nha-cung-cap");}catch{return [];} } return DEMO.ncc.suppliers; }
 async function _nccOrders(){ if(S.mode==="live"){ try{return await api("/ban-hang/don-hang");}catch{return [];} } return DEMO.don_hang; }
+
+/* --- Tab Sản phẩm NCC: danh mục SP làm dữ liệu mua hàng & dự toán --- */
+function _spnDemoInit(){
+  if(DEMO.spn)return;
+  DEMO.spn=[
+    {id:1,nha_cung_cap_id:1,ten_ncc:"Cty Hóa chất Việt Mỹ",ten:"Hóa chất keo tụ PAC 31%",ma_sp:"PAC-31",mo_ta:"Dạng bột vàng chanh, bao 25kg, dùng keo tụ nước thải",nha_san_xuat:"Việt Trì Chemical",don_vi:"kg",don_gia:18000,ghi_chu:""},
+    {id:2,nha_cung_cap_id:1,ten_ncc:"Cty Hóa chất Việt Mỹ",ten:"Polymer Anion A1110",ma_sp:"PAM-A1110",mo_ta:"Trợ lắng anion, bao 25kg",nha_san_xuat:"SNF France",don_vi:"kg",don_gia:95000,ghi_chu:""},
+    {id:3,nha_cung_cap_id:2,ten_ncc:"TM Thiết bị Đông Á",ten:"Bơm định lượng hóa chất",ma_sp:"DLX-MA/AD",mo_ta:"Q=0–8 L/h, P=10 bar, đầu PVDF",nha_san_xuat:"Etatron Italy",don_vi:"cái",don_gia:6500000,ghi_chu:""},
+    {id:4,nha_cung_cap_id:2,ten_ncc:"TM Thiết bị Đông Á",ten:"Màng RO công nghiệp 8040",ma_sp:"BW30-400",mo_ta:"Màng BW 400 ft², áp thấp",nha_san_xuat:"DuPont FilmTec",don_vi:"cái",don_gia:14500000,ghi_chu:""}];
+}
+async function nccSanPham(host){
+  const canOp=can("ncc","THAO_TAC");
+  const sups=await _nccSups(); S._spnSups=sups;
+  let list=[];
+  if(S.mode==="live"){
+    const qs=[]; if(S.spnNcc)qs.push('ncc_id='+S.spnNcc); if(S.spnQ)qs.push('q='+encodeURIComponent(S.spnQ));
+    try{list=await api("/ncc/san-pham"+(qs.length?'?'+qs.join('&'):''));}catch(e){toast(e.detail||e.message,"err");}
+  }else{
+    _spnDemoInit(); list=DEMO.spn;
+    if(S.spnNcc)list=list.filter(x=>x.nha_cung_cap_id===Number(S.spnNcc));
+    if(S.spnQ){const q=S.spnQ.toLowerCase();list=list.filter(x=>(x.ten+' '+(x.ma_sp||'')+' '+(x.nha_san_xuat||'')).toLowerCase().includes(q));}
+  }
+  S._spnList=list;
+  const rows=list.map(x=>`<tr>
+    <td style="color:var(--muted);font-size:12.5px">${x.ten_ncc||'—'}</td>
+    <td><b>${x.ten}</b>${x.ghi_chu?`<div style="color:var(--muted);font-size:11.5px">${x.ghi_chu}</div>`:''}</td>
+    <td>${x.ma_sp||'—'}</td>
+    <td style="max-width:260px">${x.mo_ta||'—'}</td>
+    <td>${x.nha_san_xuat||'—'}</td>
+    <td>${x.don_vi||'—'}</td>
+    <td class="num"><b>${vnd(x.don_gia||0)}</b></td>
+    <td style="white-space:nowrap">${canOp?`<button class="btn-sm ghost" onclick="spnMo(${x.id})">✏️</button>
+      <button class="btn-sm ghost" style="color:var(--red)" onclick="spnXoa(${x.id})">🗑</button>`:'—'}</td></tr>`).join('');
+  host.innerHTML=`
+    <div class="note" style="padding:0 0 12px">Danh mục sản phẩm của từng nhà cung cấp — nguồn dữ liệu cho <b>đề xuất mua hàng</b> và <b>dự toán giá vốn khi lập báo giá</b> cho khách. Cập nhật đơn giá mỗi khi có báo giá mới từ NCC.</div>
+    <div class="panel"><div class="panel-h"><h3>Sản phẩm nhà cung cấp</h3><div class="spacer"></div>
+      <select data-nocbx style="margin-right:8px" onchange="S.spnNcc=this.value;viewNCC($('#main'))">
+        <option value="">— Tất cả NCC —</option>
+        ${sups.map(s=>`<option value="${s.id}" ${String(s.id)===String(S.spnNcc||'')?'selected':''}>${s.ten}</option>`).join('')}</select>
+      <input placeholder="Tìm tên / mã SP / NSX..." value="${(S.spnQ||'').replace(/"/g,'&quot;')}" style="width:190px;margin-right:8px"
+        onkeydown="if(event.key==='Enter'){S.spnQ=this.value;viewNCC($('#main'))}" onblur="S.spnQ=this.value">
+      ${canOp?'<button class="btn-sm" onclick="spnMo()">+ Thêm sản phẩm</button>':''}</div>
+    <div class="panel-b"><table><thead><tr><th>Nhà cung cấp</th><th>Tên sản phẩm</th><th>Mã SP</th><th>Mô tả</th><th>Nhà sản xuất</th><th>ĐVT</th><th class="num">Đơn giá (VND)</th><th></th></tr></thead>
+    <tbody>${rows||'<tr><td colspan="8" class="empty">Chưa có sản phẩm nào — bấm "+ Thêm sản phẩm".</td></tr>'}</tbody></table></div></div>`;
+}
+function spnMo(id){
+  const sups=S._spnSups||[];
+  if(!sups.length)return toast("Chưa có nhà cung cấp — tạo NCC trước","err");
+  const x=id?(S._spnList||[]).find(s=>s.id===id):null;
+  const esc=v=>(v==null?'':String(v)).replace(/"/g,'&quot;');
+  S._spnEditId=id||null;
+  _ktModal((x?"Sửa":"Thêm")+" sản phẩm nhà cung cấp",`
+    <label>Nhà cung cấp <span style="color:var(--red)">*</span></label>
+    <select id="sp_ncc" data-nocbx>${sups.map(s=>`<option value="${s.id}" ${x&&x.nha_cung_cap_id===s.id?'selected':''}>${s.ten}</option>`).join('')}</select>
+    <div class="formrow">
+      <div class="f" style="flex:2"><label>Tên sản phẩm <span style="color:var(--red)">*</span></label><input id="sp_ten" value="${esc(x?.ten)}" placeholder="VD: Hóa chất keo tụ PAC 31%"></div>
+      <div class="f"><label>Mã SP</label><input id="sp_ma" value="${esc(x?.ma_sp)}" placeholder="VD: PAC-31"></div></div>
+    <label>Mô tả (quy cách, thông số)</label><input id="sp_mota" value="${esc(x?.mo_ta)}" placeholder="VD: Dạng bột, bao 25kg, xuất xứ...">
+    <div class="formrow">
+      <div class="f" style="flex:2"><label>Nhà sản xuất</label><input id="sp_nsx" value="${esc(x?.nha_san_xuat)}" placeholder="VD: DuPont FilmTec"></div>
+      <div class="f"><label>Đơn vị tính</label><input id="sp_dvt" value="${esc(x?.don_vi)}" placeholder="kg / cái / bộ"></div>
+      <div class="f"><label>Đơn giá (VND)</label><input id="sp_gia" type="number" min="0" step="any" value="${esc(x?.don_gia)}"></div></div>
+    <label>Ghi chú</label><input id="sp_ghichu" value="${esc(x?.ghi_chu)}" placeholder="VD: giá đã gồm vận chuyển, MOQ 100kg...">
+    <button class="btn-sm" style="margin-top:14px" onclick="spnLuu()">${x?'Lưu thay đổi':'Thêm sản phẩm'}</button>`);
+}
+async function spnLuu(){
+  const ten=gv('sp_ten'); if(!ten)return toast("Tên sản phẩm là bắt buộc","err");
+  const body={nha_cung_cap_id:Number(gv('sp_ncc')),ten,ma_sp:gv('sp_ma')||null,mo_ta:gv('sp_mota')||null,
+    nha_san_xuat:gv('sp_nsx')||null,don_vi:gv('sp_dvt')||null,don_gia:Number(gv('sp_gia'))||0,ghi_chu:gv('sp_ghichu')||null};
+  if(S.mode==="live"){
+    try{
+      if(S._spnEditId)await api("/ncc/san-pham/"+S._spnEditId,{method:'PATCH',body:JSON.stringify(body)});
+      else await api("/ncc/san-pham",{method:'POST',body:JSON.stringify(body)});
+    }catch(e){return toast(e.detail||e.message,"err");}
+  }else{
+    _spnDemoInit();
+    const ncc=(S._spnSups||[]).find(s=>s.id===body.nha_cung_cap_id);
+    if(S._spnEditId){const sp=DEMO.spn.find(s=>s.id===S._spnEditId);
+      if(sp)Object.assign(sp,body,{ten_ncc:ncc?ncc.ten:''});}
+    else{const nid=Math.max(0,...DEMO.spn.map(s=>s.id))+1;
+      DEMO.spn.push(Object.assign({id:nid,ten_ncc:ncc?ncc.ten:''},body));}
+  }
+  document.getElementById('ktModal')?.remove();
+  toast((S._spnEditId?"Đã cập nhật":"Đã thêm")+" sản phẩm "+ten+(S.mode==="demo"?" (demo)":""),"ok");
+  viewNCC($("#main"));
+}
+async function spnXoa(id){
+  const x=(S._spnList||[]).find(s=>s.id===id); if(!x)return;
+  if(!confirm("Xóa sản phẩm \""+x.ten+"\" của "+(x.ten_ncc||'NCC')+"?"))return;
+  if(S.mode==="live"){try{await api("/ncc/san-pham/"+id,{method:'DELETE'});}catch(e){return toast(e.detail||e.message,"err");}}
+  else{const i=DEMO.spn.findIndex(s=>s.id===id);if(i>=0)DEMO.spn.splice(i,1);}
+  toast("Đã xóa sản phẩm","ok");viewNCC($("#main"));
+}
 
 /* --- Tab Nhà cung cấp --- */
 async function nccSuppliers(host){

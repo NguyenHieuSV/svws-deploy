@@ -49,6 +49,90 @@ def ds_ncc(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
     return db.query(NhaCungCap).order_by(NhaCungCap.id).all()
 
 
+# ===== Danh mục SẢN PHẨM của NCC (dữ liệu mua hàng & dự toán báo giá) =====
+from pydantic import BaseModel as _SPBase
+from ..models import SanPhamNcc
+
+
+class SanPhamNccVao(_SPBase):
+    nha_cung_cap_id: int
+    ten: str
+    ma_sp: str | None = None
+    mo_ta: str | None = None
+    nha_san_xuat: str | None = None
+    don_vi: str | None = None
+    don_gia: float = 0
+    ghi_chu: str | None = None
+
+
+def _spn_ra(sp: SanPhamNcc, ten_ncc: str | None = None):
+    return {"id": sp.id, "nha_cung_cap_id": sp.nha_cung_cap_id, "ten_ncc": ten_ncc,
+            "ten": sp.ten, "ma_sp": sp.ma_sp, "mo_ta": sp.mo_ta,
+            "nha_san_xuat": sp.nha_san_xuat, "don_vi": sp.don_vi,
+            "don_gia": float(sp.don_gia or 0), "ghi_chu": sp.ghi_chu}
+
+
+@router.get("/san-pham")
+def ds_san_pham(ncc_id: int | None = None, q: str | None = None,
+                db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
+    qr = db.query(SanPhamNcc)
+    if ncc_id:
+        qr = qr.filter(SanPhamNcc.nha_cung_cap_id == ncc_id)
+    if q:
+        like = f"%{q.strip()}%"
+        qr = qr.filter((SanPhamNcc.ten.ilike(like)) | (SanPhamNcc.ma_sp.ilike(like))
+                       | (SanPhamNcc.nha_san_xuat.ilike(like)))
+    ten_ncc = {n.id: n.ten for n in db.query(NhaCungCap).all()}
+    return [_spn_ra(sp, ten_ncc.get(sp.nha_cung_cap_id))
+            for sp in qr.order_by(SanPhamNcc.nha_cung_cap_id, SanPhamNcc.ten).limit(500).all()]
+
+
+@router.post("/san-pham", status_code=201)
+def tao_san_pham(data: SanPhamNccVao, db: Session = Depends(get_db),
+                 nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    ncc = db.get(NhaCungCap, data.nha_cung_cap_id)
+    if ncc is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy nhà cung cấp")
+    if not data.ten.strip():
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Tên sản phẩm là bắt buộc")
+    sp = SanPhamNcc(nha_cung_cap_id=data.nha_cung_cap_id, ten=data.ten.strip(),
+                    ma_sp=data.ma_sp, mo_ta=data.mo_ta, nha_san_xuat=data.nha_san_xuat,
+                    don_vi=data.don_vi, don_gia=data.don_gia, ghi_chu=data.ghi_chu)
+    db.add(sp); db.flush()
+    ghi_audit(db, nd.id, "TAO", "san_pham_ncc", sp.id, moi={"ten": sp.ten, "ncc": ncc.ten})
+    db.commit(); db.refresh(sp)
+    return _spn_ra(sp, ncc.ten)
+
+
+@router.patch("/san-pham/{sp_id}")
+def sua_san_pham(sp_id: int, data: SanPhamNccVao, db: Session = Depends(get_db),
+                 nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    sp = db.get(SanPhamNcc, sp_id)
+    if sp is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy sản phẩm")
+    cu = {"ten": sp.ten, "don_gia": float(sp.don_gia or 0)}
+    sp.nha_cung_cap_id = data.nha_cung_cap_id
+    sp.ten = data.ten.strip(); sp.ma_sp = data.ma_sp; sp.mo_ta = data.mo_ta
+    sp.nha_san_xuat = data.nha_san_xuat; sp.don_vi = data.don_vi
+    sp.don_gia = data.don_gia; sp.ghi_chu = data.ghi_chu
+    ghi_audit(db, nd.id, "SUA", "san_pham_ncc", sp.id, cu=cu,
+              moi={"ten": sp.ten, "don_gia": data.don_gia})
+    db.commit(); db.refresh(sp)
+    ncc = db.get(NhaCungCap, sp.nha_cung_cap_id)
+    return _spn_ra(sp, ncc.ten if ncc else None)
+
+
+@router.delete("/san-pham/{sp_id}")
+def xoa_san_pham(sp_id: int, db: Session = Depends(get_db),
+                 nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    sp = db.get(SanPhamNcc, sp_id)
+    if sp is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy sản phẩm")
+    ghi_audit(db, nd.id, "XOA", "san_pham_ncc", sp_id, cu={"ten": sp.ten})
+    db.delete(sp); db.commit()
+    return {"ok": True}
+
+
 # ----- THAO_TAC: tạo NCC -----
 @router.post("/nha-cung-cap", response_model=NccRa, status_code=201)
 def tao_ncc(data: NccVao, db: Session = Depends(get_db),
