@@ -2426,6 +2426,7 @@ function hdEditor(host){
   host.innerHTML=`
   <div style="margin-bottom:12px"><button class="btn-sm ghost" onclick="hdDong()">← Quay lại danh sách</button></div>
   <div class="panel"><div class="panel-h"><h3>${S.hdEdit.id?'Sửa hợp đồng':'Soạn hợp đồng'} song ngữ${d.don_hang_so?' — đơn hàng '+d.don_hang_so:''}</h3><div class="spacer"></div>
+    <button class="btn-sm ghost" id="hdDichBtn" onclick="hdDich()">🌐 Dịch sang tiếng Anh</button>
     <button class="btn-sm ghost" onclick="hdLuu()">💾 Lưu tạm</button>
     <button class="btn-sm" onclick="hdPdf()">🖨 Xuất PDF</button></div>
   <div class="panel-b" style="padding:14px 18px">
@@ -2479,6 +2480,33 @@ function hdSetD(f,v){S.hdEdit.d[f]=v;}
 function hdSetBen(khoa,f,v){S.hdEdit.d[khoa][f]=v;}
 function hdTb(i,f,v){const r=S.hdEdit.d.tb[i];if(r)r[f]=v;}
 function hdDk(i,f,v){const r=S.hdEdit.d.dieu_khoan[i];if(r)r[f]=v;}
+async function hdDich(){
+  if(S.mode!=="live")return toast("Dịch tự động chỉ hoạt động ở bản chạy thật (máy chủ cần khóa AI)","err");
+  const d=S.hdEdit.d;
+  // gom các cặp VN -> EN cần dịch (chỉ ô VN có nội dung)
+  const cap=[];
+  const themCap=(getVn,setEn)=>{const v=(getVn()||'').trim();if(v)cap.push({vn:v,setEn});};
+  themCap(()=>d.d1_vn, v=>d.d1_en=v);
+  themCap(()=>d.d2_ghi_chu_vn, v=>d.d2_ghi_chu_en=v);
+  themCap(()=>d.d2_nghiem_thu_vn, v=>d.d2_nghiem_thu_en=v);
+  themCap(()=>d.d3_hinh_thuc_vn, v=>d.d3_hinh_thuc_en=v);
+  themCap(()=>d.d3_dieu_khoan_vn, v=>d.d3_dieu_khoan_en=v);
+  themCap(()=>d.d4_vn, v=>d.d4_en=v);
+  (d.dieu_khoan||[]).forEach(dk=>{themCap(()=>dk.vn, v=>dk.en=v);});
+  if(!cap.length)return toast("Không có nội dung tiếng Việt để dịch","err");
+  if(!confirm("Dịch "+cap.length+" mục nội dung tiếng Việt sang tiếng Anh và GHI ĐÈ các ô tiếng Anh tương ứng?"))return;
+  const btn=document.getElementById('hdDichBtn');
+  if(btn){btn.disabled=true;btn.textContent="⏳ Đang dịch...";}
+  try{
+    const r=await api("/ban-hang/hop-dong/dich",{method:'POST',body:JSON.stringify({texts:cap.map(c=>c.vn)})});
+    (r.texts||[]).forEach((en,i)=>{if(cap[i])cap[i].setEn(en);});
+    toast("Đã dịch xong "+cap.length+" mục — kiểm tra lại trước khi xuất PDF","ok");
+    viewBanHang($("#main"));
+  }catch(e){
+    toast(e.detail||e.message,"err");
+    if(btn){btn.disabled=false;btn.textContent="🌐 Dịch sang tiếng Anh";}
+  }
+}
 function hdTbThem(nhom){S.hdEdit.d.tb.push(nhom?{nhom:true,ten:""}:{ten:"",thong_so:"",so_luong:"",ncc:""});viewBanHang($("#main"));}
 function hdTbXoa(i){S.hdEdit.d.tb.splice(i,1);viewBanHang($("#main"));}
 function hdDong(){S.hdEdit=null;viewBanHang($("#main"));}

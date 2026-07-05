@@ -102,6 +102,39 @@ def lay_ai_provider() -> AIProvider:
     return AnthropicAIProvider() if settings.ai_provider.upper() == "ANTHROPIC" else FakeAIProvider()
 
 
+def dich_vn_sang_en(texts: list[str]) -> list[str] | None:
+    """Dịch danh sách đoạn văn hợp đồng VN -> EN bằng Claude.
+    Trả None nếu chưa cấu hình ANTHROPIC_API_KEY hoặc gọi API thất bại."""
+    if not settings.anthropic_api_key:
+        return None
+    import urllib.request
+    sys_p = ("Bạn là biên dịch viên hợp đồng thương mại chuyên nghiệp. "
+             "Người dùng gửi một MẢNG JSON các đoạn văn tiếng Việt của một hợp đồng dịch vụ. "
+             "Dịch TỪNG phần tử sang tiếng Anh pháp lý trang trọng, giữ nguyên số liệu, tên riêng, "
+             "ký hiệu kỹ thuật và các dấu xuống dòng (\\n). "
+             "CHỈ trả về đúng một mảng JSON các chuỗi đã dịch, cùng số phần tử và cùng thứ tự, "
+             "không thêm bất kỳ chữ nào khác.")
+    body = {"model": settings.anthropic_model, "max_tokens": 8000, "system": sys_p,
+            "messages": [{"role": "user", "content": json.dumps(texts, ensure_ascii=False)}]}
+    req = urllib.request.Request(
+        "https://api.anthropic.com/v1/messages",
+        data=json.dumps(body).encode("utf-8"),
+        headers={"content-type": "application/json",
+                 "x-api-key": settings.anthropic_api_key,
+                 "anthropic-version": "2023-06-01"})
+    try:
+        with urllib.request.urlopen(req, timeout=90) as r:
+            data = json.loads(r.read().decode("utf-8"))
+        txt = "".join(b.get("text", "") for b in data.get("content", []) if b.get("type") == "text")
+        txt = txt.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+        out = json.loads(txt)
+        if isinstance(out, list) and len(out) == len(texts):
+            return [str(x) for x in out]
+    except Exception:
+        pass
+    return None
+
+
 # ============ AI SOURCING AGENT — tự tìm/khuyến nghị NCC cho 1 đề xuất ============
 def _ung_vien_nganh(ten: str):
     t = (ten or "").lower()

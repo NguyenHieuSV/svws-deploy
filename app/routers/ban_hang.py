@@ -95,6 +95,29 @@ def xoa_kh(kh_id: int, db: Session = Depends(get_db),
     return {"ok": True, "ten": ten_cu}
 
 
+# ----- Dịch nội dung hợp đồng VN -> EN (AI) -----
+from pydantic import BaseModel as _BM
+from ..ai_gateway import dich_vn_sang_en
+
+
+class DichVao(_BM):
+    texts: list[str]
+
+
+@router.post("/hop-dong/dich")
+def dich_hop_dong(p: DichVao, nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    if not p.texts:
+        return {"texts": []}
+    if len(p.texts) > 40 or sum(len(t) for t in p.texts) > 30000:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Nội dung quá dài để dịch một lần.")
+    kq = dich_vn_sang_en(p.texts)
+    if kq is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Máy chủ chưa cấu hình ANTHROPIC_API_KEY nên không dịch tự động được. "
+                            "Thêm biến môi trường này trong Render → svws-app → Environment.")
+    return {"texts": kq}
+
+
 # ----- Báo giá soạn theo mẫu (lưu tạm & xuất PDF) -----
 @router.get("/bao-gia-form", response_model=list[BaoGiaFormRa])
 def ds_bao_gia_form(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
