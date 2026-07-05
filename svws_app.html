@@ -6250,8 +6250,16 @@ async function viewDuAn(m){
   const canOp=can("du_an","THAO_TAC");
   let html="";
   if(canOp){
-    html+=`<div class="panel"><div class="panel-h"><h3>Dự án mới</h3></div><div class="panel-b">
-      <div class="formrow"><div class="f"><label>Mã dự án</label><input id="da_ma" placeholder="DA-2026-01"></div>
+    const bgSo=await _daBaoGiaDaDv();
+    const bgOpts=bgSo.map(s=>`<option value="${s}">${s}</option>`).join('');
+    html+=`<div class="panel"><div class="panel-h"><h3>Dự án mới</h3></div>
+      <div class="note">Mã dự án lấy theo <b>Số báo giá</b> bắt đầu bằng <b>DA</b> (dự án) hoặc <b>DV</b> (dịch vụ) — chọn báo giá là mã tự điền. Báo giá đánh số khác DA/DV sẽ không hiện trong danh sách này.</div>
+      <div class="panel-b" style="padding:12px 18px">
+      <div class="formrow">
+        <div class="f" style="flex:1.4"><label>Số báo giá (DA…/DV…)</label>
+          <select id="da_bg" data-nocbx onchange="daTuBaoGia(this.value)">
+            <option value="">${bgSo.length?'— Chọn báo giá —':'— Chưa có báo giá số DA/DV —'}</option>${bgOpts}</select></div>
+        <div class="f"><label>Mã dự án (tự điền từ báo giá)</label><input id="da_ma" placeholder="VD: DA-2026-01"></div>
         <div class="f" style="flex:2"><label>Tên dự án</label><input id="da_ten" placeholder="Trạm XLNT 1.200 m³/ngày"></div>
         <button class="btn-sm" style="align-self:end" onclick="daTao()">Tạo dự án</button></div></div></div>`;
   }
@@ -6267,9 +6275,29 @@ async function viewDuAn(m){
     <tbody>${rows||'<tr><td colspan="7" class="empty">Chưa có dự án. Tạo dự án mới để bắt đầu.</td></tr>'}</tbody></table></div></div>`;
   m.innerHTML+=html;
 }
+/* Số báo giá bắt đầu bằng DA/DV -> dùng làm mã dự án */
+async function _daBaoGiaDaDv(){
+  let so=[];
+  if(S.mode==="live"){
+    try{const a=await api("/ban-hang/bao-gia-form");
+      so.push(...a.filter(g=>!(g.noi_dung&&g.noi_dung.loai==='HOP_DONG')).map(g=>g.so||(g.noi_dung&&g.noi_dung.so)).filter(Boolean));}catch(_){}
+    try{const b=await api("/ban-hang/bao-gia"); so.push(...b.map(x=>x.so).filter(Boolean));}catch(_){}
+  }else{
+    so.push(...(DEMO.bgf||[]).filter(g=>!(g.noi_dung&&g.noi_dung.loai==='HOP_DONG')).map(g=>g.so).filter(Boolean));
+    so.push(...(DEMO.bao_gia||[]).map(b=>b.so).filter(Boolean));
+  }
+  return [...new Set(so)].filter(s=>/^(DA|DV)/i.test(String(s)));
+}
+function daTuBaoGia(so){
+  if(!so)return;
+  if(!/^(DA|DV)/i.test(so))return toast("Số báo giá phải bắt đầu bằng DA hoặc DV","err");
+  const e=document.getElementById('da_ma'); if(e)e.value=so;
+}
 async function daTao(){
   const body={ma:gv('da_ma')||null,ten:gv('da_ten')};
   if(!body.ten){toast("Nhập tên dự án","err");return;}
+  const bgChon=gv('da_bg');
+  if(bgChon&&body.ma!==bgChon)body.ma=bgChon;   // đã gắn báo giá thì mã theo đúng số báo giá
   if(S.mode!=="live"){toast("Đã tạo (demo)","ok");return;}
   try{const d=await api("/du-an",{method:'POST',body:JSON.stringify(body)});toast("Đã tạo dự án","ok");daOpen(d.id);}catch(e){toast(e.detail||e.message,"err");}
 }
