@@ -141,6 +141,18 @@ def den_han(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
     ).order_by(ChamSocKH.ngay_hen).all()
 
 
+# ----- Danh sách TOÀN BỘ khiếu nại (mới + đang xử lý + đã xong) để theo dõi SLA -----
+@router.get("/khieu-nai")
+def ds_khieu_nai(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
+    rows = (db.query(ChamSocKH).filter(ChamSocKH.loai == "KHIEU_NAI")
+            .order_by(ChamSocKH.id.desc()).limit(200).all())
+    return [{"id": r.id, "khach_hang_id": r.khach_hang_id, "noi_dung": r.noi_dung,
+             "trang_thai": r.trang_thai,
+             "csat": float(r.csat) if r.csat is not None else None,
+             "created_at": r.created_at.isoformat() if r.created_at else None}
+            for r in rows]
+
+
 # ----- Khiếu nại quá hạn SLA 24h (chưa xử lý sau 1 ngày) -----
 @router.get("/khieu-nai/qua-han")
 def khieu_nai_qua_han(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):

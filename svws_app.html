@@ -785,26 +785,44 @@ async function crmChamSoc(host){
 
 async function crmKhieuNai(host){
   const canDo=can("crm","THAO_TAC");
-  let data={so_khieu_nai_qua_han_24h:0,danh_sach:[]};
-  if(S.mode==="live"){ try{data=await api("/crm/khieu-nai/qua-han");}catch(e){toast(e.detail||e.message,"err");} }
-  else { const ds=(DEMO.cham_soc||[]).filter(c=>c.loai==="KHIEU_NAI"&&c.trang_thai==="CHO");
-    data={so_khieu_nai_qua_han_24h:ds.length,danh_sach:ds.map(c=>({id:c.id,khach_hang_id:c.khach_hang_id,noi_dung:c.noi_dung}))}; }
-  const rows=data.danh_sach.map(c=>`<tr><td>${_crmKhName(c.khach_hang_id)}</td><td>${c.noi_dung||''}</td>
-    <td><span class="badge b-tc">Quá hạn 24h</span></td>
-    <td>${canDo?`<button class="btn-sm" onclick="crmHoanThanh(${c.id})">Đã xử lý</button>`:`<span ${_MU}>—</span>`}</td></tr>`).join('')
-    ||`<tr><td colspan="4" ${_MU}>Không có khiếu nại quá hạn</td></tr>`;
-  const khOpts=(await _crmKhList()).map(k=>`<option value="${k.id}">${k.ten}</option>`).join('');
+  const khs=await _crmKhList();
+  const tenKH=id=>{const k=khs.find(x=>x.id===Number(id));return k?k.ten:("KH #"+id);};
+  let ds=[];
+  if(S.mode==="live"){ try{ds=await api("/crm/khieu-nai");}catch(e){toast(e.detail||e.message,"err");} }
+  else ds=(DEMO.cham_soc||[]).filter(c=>c.loai==="KHIEU_NAI")
+        .map(c=>({...c,created_at:c.created_at||c.ngay_hen})).sort((a,b)=>b.id-a.id);
+  const now=Date.now();
+  const gioTroi=c=>c.created_at?Math.floor((now-new Date(c.created_at).getTime())/36e5):0;
+  const rows=ds.map(c=>{
+    let sla,act='—';
+    if(c.trang_thai==="CHO"){
+      const g=gioTroi(c);
+      sla=g>=24?`<span class="badge b-tc">⚠ Quá hạn ${g-24>0?(g-24)+'h':''}</span>`
+               :`<span class="badge b-cho">⏱ Còn ${24-g}h / SLA 24h</span>`;
+      if(canDo)act=`<button class="btn-sm" onclick="crmHoanThanh(${c.id})">Đã xử lý</button>`;
+    }else{
+      sla=`<span class="badge b-ok">Đã xử lý${c.csat?' · CSAT '+c.csat+'★':''}</span>`;
+    }
+    return `<tr><td>${tenKH(c.khach_hang_id)}</td><td>${c.noi_dung||''}</td>
+      <td style="white-space:nowrap;color:var(--muted);font-size:12px">${(c.created_at||'').toString().replace('T',' ').slice(0,16)}</td>
+      <td>${sla}</td><td>${act}</td></tr>`;
+  }).join('')||`<tr><td colspan="5" ${_MU}>Chưa có khiếu nại nào — ghi nhận ở khung bên trên.</td></tr>`;
+  const dangCho=ds.filter(c=>c.trang_thai==="CHO").length;
+  const quaHan=ds.filter(c=>c.trang_thai==="CHO"&&gioTroi(c)>=24).length;
+  const khOpts=khs.map(k=>`<option value="${k.id}">${k.ten}</option>`).join('');
   host.innerHTML=`
-    <div class="cards"><div class="stat"><div class="k">Khiếu nại quá hạn SLA 24h</div>
-      <div class="v">${data.so_khieu_nai_qua_han_24h}</div><div class="d" style="color:var(--red)">Cần xử lý ngay</div></div></div>
-    <div class="panel"><div class="panel-h"><h3>Danh sách khiếu nại quá hạn</h3></div>
-      <div class="panel-b"><table><thead><tr><th>Khách hàng</th><th>Nội dung</th><th>SLA</th><th></th></tr></thead>
-        <tbody>${rows}</tbody></table></div></div>
+    <div class="cards">
+      <div class="stat"><div class="k">Đang chờ xử lý</div><div class="v">${dangCho}</div><div class="d">Trong vòng SLA 24h</div></div>
+      <div class="stat"><div class="k">Quá hạn SLA 24h</div><div class="v">${quaHan}</div><div class="d" style="color:var(--red)">Cần xử lý ngay</div></div>
+    </div>
     ${canDo?`<div class="panel"><div class="panel-h"><h3>Ghi nhận khiếu nại mới</h3></div><div class="panel-b">
       <div class="formrow"><div class="f"><label>Khách hàng</label><select id="kn_kh">${khOpts}</select></div>
         <div class="f" style="flex:2"><label>Nội dung khiếu nại</label><input id="kn_nd" placeholder="Mô tả vấn đề khách phản ánh…"></div></div>
       <button class="btn-sm" onclick="crmTaoKhieuNai()">+ Ghi nhận (bắt đầu đếm SLA 24h)</button>
-    </div></div>`:''}`;
+    </div></div>`:''}
+    <div class="panel"><div class="panel-h"><h3>Danh sách khiếu nại (mới nhất trên cùng)</h3></div>
+      <div class="panel-b"><table><thead><tr><th>Khách hàng</th><th>Nội dung</th><th>Ghi nhận lúc</th><th>SLA</th><th></th></tr></thead>
+        <tbody>${rows}</tbody></table></div></div>`;
 }
 
 /* --- Hành động CRM --- */
@@ -818,7 +836,7 @@ async function _crmCreateCare(khId,loai,nd,ngay){
   if(S.mode!=="live"){
     const id=Math.max(0,...((DEMO.cham_soc||[]).map(c=>c.id)))+1;
     (DEMO.cham_soc=DEMO.cham_soc||[]).push({id,khach_hang_id:Number(khId),loai,noi_dung:nd,
-      ngay_hen:ngay||new Date().toISOString().slice(0,10),trang_thai:"CHO",csat:null,created_at:new Date().toISOString().slice(0,10)});
+      ngay_hen:ngay||new Date().toISOString().slice(0,10),trang_thai:"CHO",csat:null,created_at:new Date().toISOString().slice(0,16)});
     toast("Đã tạo việc (demo)","ok");viewCRM($("#main"));return;
   }
   try{await api("/crm/cham-soc",{method:'POST',body:JSON.stringify({khach_hang_id:Number(khId),loai,noi_dung:nd,ngay_hen:ngay||null})});
