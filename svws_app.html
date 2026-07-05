@@ -281,7 +281,7 @@ function ico(){return '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="
 const ROLE_NAME = {CEO:"Giám đốc",TP_KD:"Trưởng P. Kinh doanh",NV_KD:"NV Kinh doanh",
   NV_CRM:"NV Chăm sóc KH",TP_CU:"Trưởng P. Cung ứng",NV_MUA:"NV Mua hàng",THUKHO:"Thủ kho",
   KTT:"Kế toán trưởng",NV_KT:"NV Kế toán",TP_DA:"Trưởng dự án",NV_DA:"NV Dự án",
-  NV_THUE:"NV Cho thuê",NV_HCNS:"NV Hành chính-NS",ADMIN:"Admin / IT"};
+  NV_KTH:"NV Kỹ thuật",NV_THUE:"NV Cho thuê",NV_HCNS:"NV Hành chính-NS",ADMIN:"Admin / IT"};
 
 /* Ma trận quyền (đồng bộ với SVWS_seed_rbac) — dùng cho chế độ demo */
 const X="XEM",T="THAO_TAC",D="DUYET",A="QUAN_TRI";
@@ -297,6 +297,7 @@ const DEMO_PERM = {
   NV_KT:{ban_hang:X,ke_toan:T,tai_chinh:T,kho:X,ncc:X,du_an:X,tai_lieu:X,dashboard:X},
   TP_DA:{tai_chinh:X,kho:X,du_an:D,cho_thue:X,tai_lieu:T,dashboard:X},
   NV_DA:{kho:X,du_an:T,tai_lieu:T,dashboard:X},
+  NV_KTH:{du_an:T,cho_thue:T,kho:X,ban_hang:X,tai_lieu:T,dashboard:X},
   NV_THUE:{crm:X,kho:T,cho_thue:T,tai_lieu:T,dashboard:X},
   NV_HCNS:{nhan_su:T,tai_lieu:T,dashboard:X},
   ADMIN:{nhan_su:X,ban_hang:X,crm:X,ke_toan:X,tai_chinh:X,kho:X,ncc:X,du_an:X,cho_thue:X,tai_lieu:X,dashboard:X,cau_hinh:A},
@@ -4991,6 +4992,12 @@ const DEMO_JD={
   quyen_han:["Lập báo giá, đơn hàng (chờ duyệt).","Đề xuất chiết khấu trong khung."],
   yeu_cau:{hoc_van:"Cao đẳng/Đại học.",kinh_nghiem:"≥ 1 năm bán hàng kỹ thuật.",ky_nang:["Tư vấn giải pháp","Giao tiếp","Lập báo giá","Chăm sóc khách hàng"]},
   kpis:[{id:11,ten:"Doanh số cá nhân / chỉ tiêu",don_vi:"%",trong_so:45,muc_tieu:100,chieu:"CAO",chu_ky:"THANG"},{id:12,ten:"Số báo giá gửi đi",don_vi:"báo giá",trong_so:20,muc_tieu:12,chieu:"CAO",chu_ky:"THANG"},{id:13,ten:"Số cơ hội mới vào phễu",don_vi:"cơ hội",trong_so:20,muc_tieu:10,chieu:"CAO",chu_ky:"THANG"},{id:14,ten:"Công nợ quá hạn KH phụ trách",don_vi:"triệu",trong_so:15,muc_tieu:0,chieu:"THAP",chu_ky:"THANG"}]},
+ NV_KTH:{vai_tro:"NV_KTH",ten_vai_tro:"NV Kỹ thuật",chuc_danh:"Nhân viên Kỹ thuật",cap_bac:"Nhân viên",bao_cao_cho:"TP_DA",
+  muc_dich:"Lắp đặt, vận hành, bảo trì và xử lý sự cố các hệ thống xử lý nước/nước thải tại công trình và trạm cho thuê; hỗ trợ kỹ thuật cho kinh doanh và dự án.",
+  trach_nhiem:["Lắp đặt, đấu nối thiết bị hệ thống xử lý nước theo bản vẽ thiết kế.","Vận hành thử nghiệm, hiệu chỉnh thông số hệ thống (pH, EC, lọc, RO, MBR...).","Bảo trì định kỳ thiết bị tại công trình và trạm cho thuê theo lịch.","Xử lý sự cố kỹ thuật, bảo đảm chất lượng nước đầu ra đạt chuẩn.","Ghi nhật ký kỹ thuật, cập nhật tài liệu và bản vẽ hoàn công.","Hỗ trợ khảo sát hiện trường, tư vấn kỹ thuật cho báo giá."],
+  quyen_han:["Đề xuất vật tư, thiết bị thay thế phục vụ bảo trì/sửa chữa.","Ghi nhận khối lượng, nhật ký công trường (chờ duyệt).","Tạm dừng vận hành khi phát hiện nguy cơ mất an toàn và báo cáo ngay."],
+  yeu_cau:{hoc_van:"Cao đẳng/Đại học (Môi trường, Điện, Cơ khí, Tự động hóa).",kinh_nghiem:"≥ 1 năm lắp đặt/vận hành hệ thống xử lý nước.",ky_nang:["Đọc bản vẽ P&ID","Điện công nghiệp cơ bản","Vận hành RO/MBR/EC","An toàn lao động & PCCC"]},
+  kpis:[{id:31,ten:"Hoàn thành lệnh bảo trì đúng hạn",don_vi:"%",trong_so:30,muc_tieu:95,chieu:"CAO",chu_ky:"THANG"},{id:32,ten:"Thời gian xử lý sự cố trung bình",don_vi:"giờ",trong_so:25,muc_tieu:8,chieu:"THAP",chu_ky:"THANG"},{id:33,ten:"Chất lượng nước sau xử lý đạt chuẩn",don_vi:"%",trong_so:30,muc_tieu:100,chieu:"CAO",chu_ky:"THANG"},{id:34,ten:"Sự cố an toàn lao động",don_vi:"vụ",trong_so:15,muc_tieu:0,chieu:"THAP",chu_ky:"QUY"}]},
  KTT:{vai_tro:"KTT",ten_vai_tro:"Kế toán trưởng",chuc_danh:"Kế toán trưởng",cap_bac:"Quản lý",bao_cao_cho:"CEO",
   muc_dich:"Tổ chức công tác kế toán – tài chính, bảo đảm tuân thủ pháp luật, kiểm soát chi phí và cung cấp thông tin quản trị.",
   trach_nhiem:["Tổ chức hạch toán, lập BCTC và quyết toán thuế đúng hạn.","Kiểm soát dòng tiền, công nợ và ngân sách.","Duyệt & hạch toán bảng lương.","Tham mưu Giám đốc về tài chính, thuế, rủi ro."],
