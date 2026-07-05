@@ -6465,8 +6465,7 @@ async function daThietKe(h){
       <div class="f"><label>Trạng thái</label><select id="tk_tt" ${ro}><option value="DU_THAO" ${tk.trang_thai!=='DA_DUYET'?'selected':''}>Dự thảo</option><option value="DA_DUYET" ${tk.trang_thai==='DA_DUYET'?'selected':''}>Đã duyệt</option></select></div></div>
     <div style="font-weight:600;font-size:13px;margin:8px 0 4px">Thông số thiết kế</div>
     ${canOp?`<div class="f"><label>Nhập mỗi dòng: tên | giá trị | đơn vị</label><textarea id="tk_ts" rows="4" placeholder="COD đầu vào | 1017 | mg/L">${tsText}</textarea></div>`:tsTable}
-    ${canOp?`<div style="text-align:right;margin-top:8px"><button class="btn-sm" onclick="daLuuThietKe()">Lưu thiết kế</button></div>`:''}</div></div>
-    ${canOp&&ts.length?`<div class="panel"><div class="panel-h"><h3>Bảng thông số hiện tại</h3></div><div class="panel-b">${tsTable}</div></div>`:''}`;
+    ${canOp?`<div style="text-align:right;margin-top:8px"><button class="btn-sm" onclick="daLuuThietKe()">Lưu thiết kế</button></div>`:''}</div></div>`;
 }
 async function daLuuThietKe(){
   const raw=gv('tk_ts')||''; const thong_so=raw.split('\n').map(l=>l.trim()).filter(Boolean).map(l=>{const p=l.split('|').map(x=>x.trim());return {ten:p[0]||'',gia_tri:p[1]||'',don_vi:p[2]||''};});
