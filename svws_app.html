@@ -5043,7 +5043,8 @@ async function nsJD(host){
     <td>${ROLE_NAME[j.bao_cao_cho]||j.bao_cao_cho||'—'}</td>
     <td class="num">${j.so_kpi}</td>
     <td style="white-space:nowrap"><button class="btn-sm ghost" onclick="nsOpenJD('${j.vai_tro}')">Xem mô tả</button>
-      <button class="btn-sm ghost" onclick="tdMoTin('${j.vai_tro}')">📢 Tin tuyển dụng</button></td></tr>`).join('');
+      <button class="btn-sm ghost" onclick="tdMoTin('${j.vai_tro}')">📢 Tin tuyển dụng</button>
+      <button class="btn-sm ghost" onclick="hdldMo('${j.vai_tro}')">📄 HĐLĐ 1 năm</button></td></tr>`).join('');
   host.innerHTML=`<div class="panel"><div class="panel-h"><h3>Bảng mô tả công việc theo vị trí</h3></div>
     <div class="panel-b"><table><thead><tr><th>Mã VT</th><th>Chức danh</th><th>Cấp bậc</th><th>Báo cáo cho</th><th class="num">Số KPI</th><th></th></tr></thead>
       <tbody>${rows}</tbody></table></div></div>`;
@@ -5169,6 +5170,151 @@ function _tdCopyFallback(txt){
   ta.select();try{document.execCommand('copy');toast("Đã sao chép tin tuyển dụng","ok");}catch(e){toast("Không sao chép được — trình duyệt chặn","err");}
   ta.remove();
 }
+
+/* ===== Hợp đồng lao động xác định thời hạn 12 tháng (theo Điều 20, 21 BLLĐ 2019) ===== */
+function _cong12Thang(iso){const p=(iso||'').split('-').map(Number);if(p.length!==3)return'';
+  const d=new Date(p[0]+1,p[1]-1,p[2]-1);const z=n=>String(n).padStart(2,'0');
+  return d.getFullYear()+'-'+z(d.getMonth()+1)+'-'+z(d.getDate());}
+function _ngayVN(iso){return iso?iso.split('-').reverse().join('/'):'…/…/…';}
+async function hdldMo(vt){
+  let j;
+  if(S.mode==="live"){ try{j=await api(`/nhan-su/mo-ta-cv/${vt}`);}catch(e){return toast(e.detail||e.message,"err");} }
+  else j=DEMO_JD[vt];
+  if(!j)return toast("Vị trí chưa có mô tả công việc","err");
+  let nvs=[];
+  if(S.mode==="live"){try{nvs=await api("/nhan-su/ho-so");}catch{}}
+  else{if(!DEMO.ns_hoso)DEMO.ns_hoso=_nsDemoHoSo();nvs=DEMO.ns_hoso;}
+  S._hdldJ=j; S._hdldNVs=nvs;
+  const nay=new Date().toISOString().slice(0,10);
+  _ktModal("📄 Hợp đồng lao động 12 tháng — "+j.chuc_danh,`
+    <div class="note" style="margin-bottom:10px">Hợp đồng xác định thời hạn <b>12 tháng</b> theo Điều 20, Điều 21 Bộ luật Lao động 45/2019/QH14; công việc và địa điểm lấy từ bản mô tả công việc của vị trí (đính kèm làm Phụ lục 01).</div>
+    <label>Chọn nhân viên có sẵn trong Hồ sơ lương (tự điền tên + lương)</label>
+    <select id="hl_nv" data-nocbx onchange="hdldChonNV(this.value)"><option value="">— Nhập tay —</option>
+      ${nvs.map(n=>`<option value="${n.id}">${n.ho_ten}${n.chuc_danh?' — '+n.chuc_danh:''}</option>`).join('')}</select>
+    <div class="formrow">
+      <div class="f" style="flex:2"><label>Họ tên người lao động <span style="color:var(--red)">*</span></label><input id="hl_ht"></div>
+      <div class="f"><label>Ngày sinh</label><input id="hl_ns" type="date"></div>
+      <div class="f"><label>Giới tính</label><select id="hl_gt" data-nocbx><option>Nam</option><option>Nữ</option></select></div></div>
+    <div class="formrow">
+      <div class="f"><label>Số CCCD</label><input id="hl_cccd"></div>
+      <div class="f"><label>Ngày cấp</label><input id="hl_cccd_ngay" type="date"></div>
+      <div class="f" style="flex:2"><label>Nơi cấp</label><input id="hl_cccd_noi" value="Cục Cảnh sát QLHC về TTXH"></div></div>
+    <label>Nơi cư trú</label><input id="hl_dc" placeholder="Địa chỉ thường trú của người lao động">
+    <div class="formrow">
+      <div class="f"><label>Số hợp đồng</label><input id="hl_so" value="…/${new Date().getFullYear()}/HĐLĐ-SV"></div>
+      <div class="f"><label>Ngày ký</label><input id="hl_ky" type="date" value="${nay}"></div>
+      <div class="f"><label>Làm việc từ ngày</label><input id="hl_bd" type="date" value="${nay}" onchange="document.getElementById('hl_kt').value=_cong12Thang(this.value)"></div>
+      <div class="f"><label>Đến hết ngày (tự tính 12 tháng)</label><input id="hl_kt" type="date" value="${_cong12Thang(nay)}"></div></div>
+    <div class="formrow">
+      <div class="f"><label>Lương cơ bản (VND/tháng)</label><input id="hl_luong" type="number" min="0" oninput="const e=document.getElementById('hl_luong_chu');if(e)e.textContent=docSoVN(this.value)"></div>
+      <div class="f" style="flex:2;align-self:end;color:var(--muted);font-size:12.5px;padding-bottom:10px">Bằng chữ: <b id="hl_luong_chu">—</b></div></div>
+    <label>Phụ cấp (nếu có)</label><input id="hl_pc" placeholder="VD: Ăn trưa 730.000 đ/tháng; đi lại 500.000 đ/tháng; điện thoại 300.000 đ/tháng">
+    <label>Địa điểm làm việc</label><input id="hl_noi" value="${TD_CTY.dia_chi} và các công trình/trạm xử lý theo phân công">
+    <button class="btn-sm" style="margin-top:14px" onclick="hdldXuat()">🖨 Xuất hợp đồng (PDF)</button>`);
+}
+function hdldChonNV(id){
+  const n=(S._hdldNVs||[]).find(x=>x.id===Number(id)); if(!n)return;
+  const set=(i,v)=>{const e=document.getElementById(i);if(e&&v!=null)e.value=v;};
+  set('hl_ht',n.ho_ten); set('hl_luong',n.luong_co_ban||0);
+  const e=document.getElementById('hl_luong_chu'); if(e)e.textContent=docSoVN(n.luong_co_ban||0);
+  const pc=[(n.phu_cap_an?'Ăn trưa '+Number(n.phu_cap_an).toLocaleString('vi-VN')+' đ/tháng':''),
+    (n.phu_cap_di_lai?'Đi lại '+Number(n.phu_cap_di_lai).toLocaleString('vi-VN')+' đ/tháng':''),
+    (n.phu_cap_dien_thoai?'Điện thoại '+Number(n.phu_cap_dien_thoai).toLocaleString('vi-VN')+' đ/tháng':''),
+    (n.phu_cap_trach_nhiem?'Trách nhiệm '+Number(n.phu_cap_trach_nhiem).toLocaleString('vi-VN')+' đ/tháng':'')].filter(Boolean).join('; ');
+  set('hl_pc',pc);
+}
+function hdldXuat(){
+  const j=S._hdldJ;
+  const ht=gv('hl_ht'); if(!ht)return toast("Nhập họ tên người lao động","err");
+  const luong=Number(gv('hl_luong'))||0;
+  const d={ht,ns:gv('hl_ns'),gt:gv('hl_gt')||'Nam',cccd:gv('hl_cccd'),cccd_ngay:gv('hl_cccd_ngay'),
+    cccd_noi:gv('hl_cccd_noi'),dc:gv('hl_dc'),so:gv('hl_so'),ky:gv('hl_ky'),bd:gv('hl_bd'),kt:gv('hl_kt'),
+    luong,pc:gv('hl_pc'),noi:gv('hl_noi')};
+  const kyD=(d.ky||'').split('-');
+  const nv5=(j.trach_nhiem||[]).slice(0,5);
+  const html=`<!DOCTYPE html><html><head><meta charset="utf-8"><title>HDLD - ${ht}</title><style>
+    @page{size:A4;margin:16mm}
+    body{font-family:"Times New Roman",serif;color:#111;font-size:13.5px;line-height:1.55;margin:0}
+    .qh{text-align:center;font-weight:700}
+    .qh .u{text-decoration:underline}
+    h1{text-align:center;font-size:19px;margin:14px 0 2px;letter-spacing:.5px}
+    .so{text-align:center;margin:0 0 10px;font-style:italic}
+    h2{font-size:13.5px;margin:12px 0 4px}
+    p{margin:4px 0;text-align:justify}
+    table.bt{border-collapse:collapse;margin:2px 0}
+    table.bt td{padding:1px 8px 1px 0;vertical-align:top}
+    ul{margin:4px 0;padding-left:20px}li{margin-bottom:3px}
+    .sig{display:flex;justify-content:space-between;margin-top:30px;text-align:center}
+    .sig div{width:45%}
+  </style></head><body>
+  <div class="qh">CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM<br><span class="u">Độc lập — Tự do — Hạnh phúc</span></div>
+  <h1>HỢP ĐỒNG LAO ĐỘNG</h1>
+  <p class="so">(Xác định thời hạn 12 tháng — Số: <b>${d.so||'…'}</b>)</p>
+  <p style="font-style:italic">— Căn cứ Bộ luật Lao động số 45/2019/QH14 ngày 20/11/2019;<br>
+  — Căn cứ Luật Bảo hiểm xã hội, Luật Bảo hiểm y tế, Luật Việc làm và các văn bản hướng dẫn thi hành;<br>
+  — Căn cứ nhu cầu và sự thỏa thuận của hai bên.</p>
+  <p>Hôm nay, ngày ${kyD[2]||'…'} tháng ${kyD[1]||'…'} năm ${kyD[0]||'…'}, tại ${TD_CTY.ten}, chúng tôi gồm:</p>
+  <h2>BÊN A — NGƯỜI SỬ DỤNG LAO ĐỘNG:</h2>
+  <table class="bt">
+    <tr><td>Tên đơn vị</td><td>: ${TD_CTY.ten}</td></tr>
+    <tr><td>Địa chỉ</td><td>: ${TD_CTY.dia_chi}</td></tr>
+    <tr><td>Điện thoại</td><td>: ${TD_CTY.dien_thoai}</td></tr>
+    <tr><td>Đại diện</td><td>: Ông NGUYỄN LÊ HIẾU — Chức vụ: Giám đốc</td></tr></table>
+  <h2>BÊN B — NGƯỜI LAO ĐỘNG:</h2>
+  <table class="bt">
+    <tr><td>Họ và tên</td><td>: <b>${ht.toUpperCase()}</b> — Giới tính: ${d.gt}</td></tr>
+    <tr><td>Ngày sinh</td><td>: ${_ngayVN(d.ns)}</td></tr>
+    <tr><td>CCCD số</td><td>: ${d.cccd||'…'} — cấp ngày ${_ngayVN(d.cccd_ngay)} tại ${d.cccd_noi||'…'}</td></tr>
+    <tr><td>Nơi cư trú</td><td>: ${d.dc||'…'}</td></tr></table>
+  <p>Hai bên thỏa thuận ký kết hợp đồng lao động (HĐLĐ) với các điều khoản sau:</p>
+  <h2>ĐIỀU 1: CÔNG VIỆC, ĐỊA ĐIỂM LÀM VIỆC VÀ THỜI HẠN HỢP ĐỒNG</h2>
+  <p>1.1 Loại hợp đồng: <b>xác định thời hạn 12 tháng</b>, từ ngày <b>${_ngayVN(d.bd)}</b> đến hết ngày <b>${_ngayVN(d.kt)}</b> (điểm b khoản 1 Điều 20 BLLĐ 2019).</p>
+  <p>1.2 Chức danh chuyên môn: <b>${j.chuc_danh}</b>${j.cap_bac?` — Cấp bậc: ${j.cap_bac}`:''}.</p>
+  <p>1.3 Nhiệm vụ chính (chi tiết theo Bản mô tả công việc — Phụ lục 01 đính kèm, là bộ phận không tách rời của HĐLĐ):</p>
+  <ul>${nv5.map(x=>`<li>${x}</li>`).join('')}</ul>
+  <p>1.4 Địa điểm làm việc: ${d.noi||TD_CTY.dia_chi}.</p>
+  <h2>ĐIỀU 2: THỜI GIỜ LÀM VIỆC, THỜI GIỜ NGHỈ NGƠI</h2>
+  <p>2.1 Thời giờ làm việc: 8 giờ/ngày, 48 giờ/tuần (thứ Hai đến thứ Bảy); nghỉ hằng tuần: Chủ nhật.</p>
+  <p>2.2 Nghỉ lễ, tết theo Điều 112 BLLĐ; nghỉ phép năm 12 ngày làm việc theo Điều 113 BLLĐ (tăng theo thâm niên theo Điều 114).</p>
+  <p>2.3 Làm thêm giờ (nếu có) theo thỏa thuận và không vượt giới hạn tại Điều 107 BLLĐ; tiền lương làm thêm theo Điều 98 BLLĐ.</p>
+  <h2>ĐIỀU 3: TIỀN LƯƠNG, PHỤ CẤP VÀ HÌNH THỨC TRẢ LƯƠNG</h2>
+  <p>3.1 Mức lương chính: <b>${luong?luong.toLocaleString('vi-VN'):'…'} đồng/tháng</b>${luong?` (Bằng chữ: ${docSoVN(luong)}/tháng)`:''}.</p>
+  <p>3.2 Phụ cấp, khoản bổ sung: ${d.pc||'theo quy chế lương - thưởng của công ty'}.</p>
+  <p>3.3 Hình thức trả lương: chuyển khoản; kỳ hạn trả: chậm nhất ngày 05 của tháng kế tiếp.</p>
+  <p>3.4 Chế độ nâng lương, thưởng: theo quy chế lương - thưởng và kết quả đánh giá KPI của công ty.</p>
+  <h2>ĐIỀU 4: BẢO HIỂM XÃ HỘI, BẢO HIỂM Y TẾ, BẢO HIỂM THẤT NGHIỆP</h2>
+  <p>Hai bên đóng BHXH, BHYT, BHTN theo Luật BHXH, Luật BHYT, Luật Việc làm và các quy định hiện hành; Bên B được hưởng đầy đủ chế độ ốm đau, thai sản, tai nạn lao động - bệnh nghề nghiệp theo quy định.</p>
+  <h2>ĐIỀU 5: AN TOÀN, VỆ SINH LAO ĐỘNG VÀ ĐÀO TẠO</h2>
+  <p>5.1 Bên B được trang bị phương tiện bảo hộ, huấn luyện ATVSLĐ và khám sức khỏe định kỳ theo Luật ATVSLĐ 84/2015/QH13; có quyền từ chối làm việc khi có nguy cơ rõ ràng đe dọa tính mạng, sức khỏe.</p>
+  <p>5.2 Bên B được đào tạo, bồi dưỡng nâng cao trình độ kỹ năng nghề phù hợp công việc.</p>
+  <h2>ĐIỀU 6: QUYỀN VÀ NGHĨA VỤ CỦA NGƯỜI LAO ĐỘNG</h2>
+  <ul>
+    <li>Hoàn thành công việc theo HĐLĐ và Bản mô tả công việc; chấp hành nội quy lao động, quy trình an toàn, sự điều hành hợp pháp của Bên A.</li>
+    <li>Bảo mật bí mật kinh doanh, bí mật công nghệ, dữ liệu khách hàng của Bên A theo khoản 2 Điều 21 BLLĐ; trách nhiệm này tiếp tục sau khi chấm dứt HĐLĐ.</li>
+    <li>Bồi thường thiệt hại do làm hư hỏng, làm mất dụng cụ, thiết bị, tài sản theo Điều 129 BLLĐ.</li>
+    <li>Được hưởng đầy đủ tiền lương, chế độ phúc lợi; được khiếu nại, yêu cầu đối thoại theo quy định pháp luật.</li></ul>
+  <h2>ĐIỀU 7: QUYỀN VÀ NGHĨA VỤ CỦA NGƯỜI SỬ DỤNG LAO ĐỘNG</h2>
+  <ul>
+    <li>Trả lương đầy đủ, đúng hạn; bảo đảm việc làm, điều kiện làm việc an toàn theo HĐLĐ.</li>
+    <li>Đóng và giải quyết chế độ BHXH, BHYT, BHTN; thực hiện nghĩa vụ thuế TNCN khấu trừ theo quy định.</li>
+    <li>Điều hành Bên B hoàn thành công việc theo hợp đồng; khen thưởng và xử lý kỷ luật đúng trình tự Điều 122 BLLĐ.</li>
+    <li>Tôn trọng danh dự, nhân phẩm của người lao động.</li></ul>
+  <h2>ĐIỀU 8: CHẤM DỨT HỢP ĐỒNG LAO ĐỘNG</h2>
+  <p>8.1 HĐLĐ chấm dứt theo các trường hợp tại Điều 34 BLLĐ 2019.</p>
+  <p>8.2 Đơn phương chấm dứt: Bên B báo trước ít nhất <b>30 ngày</b> (điểm b khoản 1 Điều 35); Bên A thực hiện theo Điều 36 và báo trước theo quy định.</p>
+  <p>8.3 Khi chấm dứt, hai bên hoàn tất bàn giao công việc, tài sản, khoản nợ và các nghĩa vụ còn lại trong 14 ngày làm việc (Điều 48 BLLĐ).</p>
+  <h2>ĐIỀU 9: ĐIỀU KHOẢN THI HÀNH</h2>
+  <p>9.1 Những nội dung không nêu trong HĐLĐ này thực hiện theo nội quy lao động, quy chế của công ty và pháp luật lao động hiện hành.</p>
+  <p>9.2 Bản mô tả công việc vị trí <b>${j.chuc_danh}</b> là Phụ lục 01 đính kèm hợp đồng.</p>
+  <p>9.3 HĐLĐ lập thành 02 bản có giá trị pháp lý như nhau, mỗi bên giữ 01 bản; có hiệu lực từ ngày ${_ngayVN(d.bd)}.</p>
+  <div class="sig">
+    <div><b>NGƯỜI LAO ĐỘNG</b><br><i>(Ký, ghi rõ họ tên)</i><br><br><br><br>${ht}</div>
+    <div><b>ĐẠI DIỆN NGƯỜI SỬ DỤNG LAO ĐỘNG</b><br><i>(Ký, ghi rõ họ tên, đóng dấu)</i><br><br><br><br>NGUYỄN LÊ HIẾU</div>
+  </div>
+  <script>window.onload=function(){window.print();}<\/script></body></html>`;
+  const w=window.open('','_blank'); if(!w)return toast("Trình duyệt chặn cửa sổ mới — cho phép popup để xuất PDF","err");
+  w.document.write(html); w.document.close();
+}
 async function nsJDDetail(host,vt){
   let j;
   if(S.mode==="live"){ try{j=await api(`/nhan-su/mo-ta-cv/${vt}`);}catch(e){host.innerHTML=`<div class="perm-denied">${e.detail||e.message}</div>`;return;} }
@@ -5186,6 +5332,7 @@ async function nsJDDetail(host,vt){
       <h3>${j.chuc_danh}</h3><div class="spacer"></div>
       <span class="badge ${CAP_BADGE[j.cap_bac]||'b-info'}">${j.cap_bac||''}</span>
       <button class="btn-sm ghost" style="margin-left:8px" onclick="tdMoTin('${vt}')">📢 Tin tuyển dụng</button>
+      <button class="btn-sm ghost" style="margin-left:8px" onclick="hdldMo('${vt}')">📄 Hợp đồng lao động</button>
       ${canEdit?`<button class="btn-sm ghost" style="margin-left:8px" onclick="nsEditJD('${vt}')">✎ Chỉnh sửa</button>`:''}</div>
       <div class="panel-b">
         <div style="display:flex;gap:24px;flex-wrap:wrap;font-size:13px;color:var(--muted);margin-bottom:14px">
