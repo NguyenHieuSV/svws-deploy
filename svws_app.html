@@ -5042,13 +5042,133 @@ async function nsJD(host){
     <td><span class="badge ${CAP_BADGE[j.cap_bac]||'b-info'}">${j.cap_bac||'—'}</span></td>
     <td>${ROLE_NAME[j.bao_cao_cho]||j.bao_cao_cho||'—'}</td>
     <td class="num">${j.so_kpi}</td>
-    <td><button class="btn-sm ghost" onclick="nsOpenJD('${j.vai_tro}')">Xem mô tả</button></td></tr>`).join('');
+    <td style="white-space:nowrap"><button class="btn-sm ghost" onclick="nsOpenJD('${j.vai_tro}')">Xem mô tả</button>
+      <button class="btn-sm ghost" onclick="tdMoTin('${j.vai_tro}')">📢 Tin tuyển dụng</button></td></tr>`).join('');
   host.innerHTML=`<div class="panel"><div class="panel-h"><h3>Bảng mô tả công việc theo vị trí</h3></div>
     <div class="panel-b"><table><thead><tr><th>Mã VT</th><th>Chức danh</th><th>Cấp bậc</th><th>Báo cáo cho</th><th class="num">Số KPI</th><th></th></tr></thead>
       <tbody>${rows}</tbody></table></div></div>`;
 }
 function nsOpenJD(vt){S.nsJDSel=vt;nsRender();}
 function nsBackJD(){S.nsJDSel=null;nsRender();}
+
+/* ===== Tin tuyển dụng từ JD ===== */
+const TD_CTY={ten:"CÔNG TY TNHH GIẢI PHÁP KỸ THUẬT SÓNG VIỆT",slogan:"We Have Solutions",
+  gioi_thieu:"Song Việt là công ty giải pháp kỹ thuật chuyên sâu về xử lý nước cấp, nước thải và khí thải công nghiệp: tư vấn - thiết kế - thi công - vận hành và cho thuê hệ thống xử lý nước trọn gói cho các nhà máy, khu công nghiệp.",
+  dia_chi:"448 Võ Văn Tần, Phường 5, Quận 3, TP. Hồ Chí Minh",
+  dien_thoai:"(084) 937 120 039",email:"info@watersolutions.company",website:"watersolutions.company"};
+async function tdMoTin(vt){
+  let j;
+  if(S.mode==="live"){ try{j=await api(`/nhan-su/mo-ta-cv/${vt}`);}catch(e){return toast(e.detail||e.message,"err");} }
+  else j=DEMO_JD[vt];
+  if(!j)return toast("Vị trí chưa có mô tả công việc","err");
+  S._tdJ=j;
+  const han=new Date(Date.now()+30*864e5).toISOString().slice(0,10);
+  _ktModal("📢 Tin tuyển dụng — "+j.chuc_danh,`
+    <div class="note" style="margin-bottom:10px">Tin được dựng tự động từ bản mô tả công việc. Điều chỉnh các thông tin dưới đây rồi <b>Xuất bản in</b> (lưu PDF) hoặc <b>Sao chép</b> để đăng lên website/trang tuyển dụng.</div>
+    <div class="formrow">
+      <div class="f"><label>Số lượng tuyển</label><input id="td_sl" value="01"></div>
+      <div class="f"><label>Mức lương hiển thị</label><input id="td_luong" value="Thỏa thuận theo năng lực"></div>
+      <div class="f"><label>Loại hình</label><input id="td_lh" value="Toàn thời gian"></div></div>
+    <div class="formrow">
+      <div class="f" style="flex:2"><label>Nơi làm việc</label><input id="td_noi" value="${TD_CTY.dia_chi}"></div>
+      <div class="f"><label>Hạn nộp hồ sơ</label><input id="td_han" type="date" value="${han}"></div></div>
+    <div class="formrow">
+      <div class="f"><label>Email nhận hồ sơ</label><input id="td_email" value="${TD_CTY.email}"></div>
+      <div class="f"><label>Điện thoại liên hệ</label><input id="td_dt" value="${TD_CTY.dien_thoai}"></div></div>
+    <div style="margin-top:12px">
+      <button class="btn-sm" onclick="tdXuat()">🖨 Xuất bản in (PDF)</button>
+      <button class="btn-sm ghost" style="margin-left:8px" onclick="tdCopy()">📋 Sao chép nội dung</button></div>`);
+}
+function _tdOpt(){return {sl:gv('td_sl')||'01',luong:gv('td_luong')||'Thỏa thuận',lh:gv('td_lh')||'Toàn thời gian',
+  noi:gv('td_noi')||TD_CTY.dia_chi,han:gv('td_han')||'',email:gv('td_email')||TD_CTY.email,dt:gv('td_dt')||TD_CTY.dien_thoai};}
+function _tdQuyenLoi(j){
+  const yc=j.yeu_cau||{};
+  const ql=[...(yc.dieu_kien||[])];
+  ql.push("Được đào tạo chuyên môn về công nghệ xử lý nước và sử dụng hệ thống quản trị hiện đại.");
+  ql.push("Môi trường làm việc chuyên nghiệp, đánh giá KPI minh bạch, cơ hội thăng tiến rõ ràng.");
+  return ql;
+}
+function tdXuat(){
+  const j=S._tdJ,o=_tdOpt(),yc=j.yeu_cau||{};
+  const hanVN=o.han?o.han.split('-').reverse().join('/'):'';
+  const logo=document.querySelector('img.logo')?.src||'';
+  const li=arr=>(arr||[]).map(x=>`<li>${x}</li>`).join('');
+  const html=`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Tuyen dung - ${j.chuc_danh}</title><style>
+    @page{size:A4;margin:14mm}
+    body{font-family:"Segoe UI",Arial,sans-serif;color:#16324a;font-size:13px;line-height:1.55;margin:0}
+    .hd{display:flex;align-items:center;gap:14px;border-bottom:3px solid #0E7C86;padding-bottom:10px}
+    .hd img{height:56px}.hd b{font-size:15px}
+    .hd .sl{color:#B23A48;font-weight:700;font-size:12px;letter-spacing:1px}
+    h1{color:#0E7C86;text-align:center;font-size:22px;margin:16px 0 2px;text-transform:uppercase}
+    .vt{text-align:center;font-size:17px;font-weight:800;margin:0 0 14px}
+    .box{background:#f2f7f9;border-radius:10px;padding:10px 16px;margin:10px 0;display:grid;grid-template-columns:1fr 1fr;gap:4px 24px;font-size:12.5px}
+    h2{font-size:14px;color:#0E7C86;text-transform:uppercase;border-bottom:1px solid #d7e3ea;padding-bottom:3px;margin:16px 0 6px}
+    ul{margin:6px 0;padding-left:20px}li{margin-bottom:4px}
+    .ut{background:#0E7C86;color:#fff;border-radius:10px;padding:12px 18px;margin-top:18px}
+    .ut a{color:#fff}
+    .foot{margin-top:16px;text-align:center;color:#5B7186;font-size:11px}
+  </style></head><body>
+  <div class="hd">${logo?`<img src="${logo}">`:''}
+    <div><b>${TD_CTY.ten}</b><div class="sl">${TD_CTY.slogan.toUpperCase()}</div>
+    <div style="font-size:11.5px;color:#5B7186">${TD_CTY.dia_chi} · ${TD_CTY.website}</div></div></div>
+  <h1>Tin tuyển dụng</h1>
+  <div class="vt">${j.chuc_danh.toUpperCase()}</div>
+  <div class="box">
+    <div><b>Cấp bậc:</b> ${j.cap_bac||'—'}</div><div><b>Số lượng:</b> ${o.sl}</div>
+    <div><b>Loại hình:</b> ${o.lh}</div><div><b>Mức lương:</b> ${o.luong}</div>
+    <div style="grid-column:1/3"><b>Nơi làm việc:</b> ${o.noi}</div>
+    ${hanVN?`<div style="grid-column:1/3"><b>Hạn nộp hồ sơ:</b> ${hanVN}</div>`:''}
+  </div>
+  <h2>Giới thiệu công ty</h2><p>${TD_CTY.gioi_thieu}</p>
+  <h2>Mô tả công việc</h2>${j.muc_dich?`<p>${j.muc_dich}</p>`:''}<ul>${li(j.trach_nhiem)}</ul>
+  <h2>Yêu cầu ứng viên</h2><ul>
+    ${yc.hoc_van?`<li><b>Học vấn:</b> ${yc.hoc_van}</li>`:''}
+    ${yc.kinh_nghiem?`<li><b>Kinh nghiệm:</b> ${yc.kinh_nghiem}</li>`:''}
+    ${(yc.ky_nang&&yc.ky_nang.length)?`<li><b>Kỹ năng:</b> ${yc.ky_nang.join('; ')}</li>`:''}
+    ${yc.chung_chi?`<li><b>Chứng chỉ:</b> ${yc.chung_chi}</li>`:''}</ul>
+  <h2>Quyền lợi</h2><ul>${li(_tdQuyenLoi(j))}</ul>
+  <div class="ut"><b>CÁCH THỨC ỨNG TUYỂN</b><br>
+    Gửi CV về email: <b>${o.email}</b> — Tiêu đề: <b>[Ứng tuyển] ${j.chuc_danh} - Họ tên</b><br>
+    Điện thoại liên hệ: <b>${o.dt}</b> · Địa chỉ: ${TD_CTY.dia_chi}</div>
+  <div class="foot">${TD_CTY.ten} · ${TD_CTY.website} · Chúng tôi chào đón bạn gia nhập đội ngũ!</div>
+  <script>window.onload=function(){window.print();}<\/script></body></html>`;
+  const w=window.open('','_blank'); if(!w)return toast("Trình duyệt chặn cửa sổ mới — cho phép popup để xuất bản in","err");
+  w.document.write(html); w.document.close();
+}
+function tdCopy(){
+  const j=S._tdJ,o=_tdOpt(),yc=j.yeu_cau||{};
+  const hanVN=o.han?o.han.split('-').reverse().join('/'):'';
+  const L=[];
+  L.push(`📢 TIN TUYỂN DỤNG: ${j.chuc_danh.toUpperCase()}`);
+  L.push(`${TD_CTY.ten} — "${TD_CTY.slogan}"`,'');
+  L.push(`• Cấp bậc: ${j.cap_bac||'—'} | Số lượng: ${o.sl} | Loại hình: ${o.lh}`);
+  L.push(`• Mức lương: ${o.luong}`);
+  L.push(`• Nơi làm việc: ${o.noi}`);
+  if(hanVN)L.push(`• Hạn nộp hồ sơ: ${hanVN}`);
+  L.push('','🏢 GIỚI THIỆU CÔNG TY',TD_CTY.gioi_thieu);
+  L.push('','📋 MÔ TẢ CÔNG VIỆC'); if(j.muc_dich)L.push(j.muc_dich);
+  (j.trach_nhiem||[]).forEach(x=>L.push('- '+x));
+  L.push('','✅ YÊU CẦU ỨNG VIÊN');
+  if(yc.hoc_van)L.push('- Học vấn: '+yc.hoc_van);
+  if(yc.kinh_nghiem)L.push('- Kinh nghiệm: '+yc.kinh_nghiem);
+  if(yc.ky_nang&&yc.ky_nang.length)L.push('- Kỹ năng: '+yc.ky_nang.join('; '));
+  if(yc.chung_chi)L.push('- Chứng chỉ: '+yc.chung_chi);
+  L.push('','🎁 QUYỀN LỢI');
+  _tdQuyenLoi(j).forEach(x=>L.push('- '+x));
+  L.push('','📩 CÁCH THỨC ỨNG TUYỂN');
+  L.push(`Gửi CV về: ${o.email} — Tiêu đề: [Ứng tuyển] ${j.chuc_danh} - Họ tên`);
+  L.push(`Điện thoại: ${o.dt} · ${TD_CTY.dia_chi} · ${TD_CTY.website}`);
+  const txt=L.join('\n');
+  if(navigator.clipboard&&navigator.clipboard.writeText){
+    navigator.clipboard.writeText(txt).then(()=>toast("Đã sao chép tin tuyển dụng — dán vào website/trang tuyển dụng","ok"))
+      .catch(()=>{_tdCopyFallback(txt);});
+  }else _tdCopyFallback(txt);
+}
+function _tdCopyFallback(txt){
+  const ta=document.createElement('textarea');ta.value=txt;document.body.appendChild(ta);
+  ta.select();try{document.execCommand('copy');toast("Đã sao chép tin tuyển dụng","ok");}catch(e){toast("Không sao chép được — trình duyệt chặn","err");}
+  ta.remove();
+}
 async function nsJDDetail(host,vt){
   let j;
   if(S.mode==="live"){ try{j=await api(`/nhan-su/mo-ta-cv/${vt}`);}catch(e){host.innerHTML=`<div class="perm-denied">${e.detail||e.message}</div>`;return;} }
@@ -5065,6 +5185,7 @@ async function nsJDDetail(host,vt){
     <div class="panel" style="margin-top:14px"><div class="panel-h">
       <h3>${j.chuc_danh}</h3><div class="spacer"></div>
       <span class="badge ${CAP_BADGE[j.cap_bac]||'b-info'}">${j.cap_bac||''}</span>
+      <button class="btn-sm ghost" style="margin-left:8px" onclick="tdMoTin('${vt}')">📢 Tin tuyển dụng</button>
       ${canEdit?`<button class="btn-sm ghost" style="margin-left:8px" onclick="nsEditJD('${vt}')">✎ Chỉnh sửa</button>`:''}</div>
       <div class="panel-b">
         <div style="display:flex;gap:24px;flex-wrap:wrap;font-size:13px;color:var(--muted);margin-bottom:14px">
