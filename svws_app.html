@@ -6444,34 +6444,13 @@ async function daXoaChiTieu(id){
 }
 function _daDemoChiTieu(){return {tieu_chuan_dau_ra:"QCVN 40:2025/BTNMT — Nước thải công nghiệp (cột B)",danh_sach:[{id:1,thu_tu:1,ten:"COD",don_vi:"mg/L",gia_tri_vao:1017,gioi_han_ra:150,ghi_chu:"cột B",can_xu_ly:85.3},{id:2,thu_tu:2,ten:"Độ màu",don_vi:"Pt-Co",gia_tri_vao:1200,gioi_han_ra:150,ghi_chu:"cột B",can_xu_ly:87.5},{id:3,thu_tu:3,ten:"pH",don_vi:"-",gia_tri_vao:null,gioi_han_ra:null,ghi_chu:"6-9",can_xu_ly:null}]};}
 
-/* --- Tab Thiết kế --- */
+/* --- Tab Thiết kế: chỉ nhúng công cụ thiết kế Song Việt --- */
 async function daThietKe(h){
-  const tk=(S.daCt&&S.daCt.thiet_ke)||{}; const canOp=can("du_an","THAO_TAC"); const ro=canOp?'':'disabled';
-  const ts=Array.isArray(tk.thong_so)?tk.thong_so:[];
-  const tsText=ts.map(x=>`${x.ten||''} | ${x.gia_tri||''} | ${x.don_vi||''}`).join('\n');
-  const tsTable=ts.length?`<table><thead><tr><th>Thông số</th><th>Giá trị</th><th>Đơn vị</th></tr></thead><tbody>${ts.map(x=>`<tr><td>${x.ten||''}</td><td class="num">${x.gia_tri||''}</td><td>${x.don_vi||''}</td></tr>`).join('')}</tbody></table>`:'<div class="empty" style="padding:8px">Chưa có thông số.</div>';
-  h.innerHTML=`<div class="panel"><div class="panel-h"><h3>🛠 Công cụ thiết kế Song Việt</h3><div class="spacer"></div>
+  h.innerHTML=`<div class="panel"><div class="panel-h"><h3>🛠 Công cụ thiết kế Song Việt${(S.daCt&&S.daCt.ma)?' — '+S.daCt.ma:''}</h3><div class="spacer"></div>
       <button class="btn-sm ghost" onclick="window.open('https://songviet-design.pages.dev/','_blank')">↗ Mở toàn màn hình</button></div>
-    <div class="note">Công cụ tính toán &amp; thiết kế hệ thống xử lý nước (BOM, chi phí, P&amp;ID) — thiết kế xong, chép <b>công nghệ / thông số</b> xuống phần bên dưới và bấm Lưu thiết kế để gắn vào dự án <b>${(S.daCt&&S.daCt.ma)||''}</b>.</div>
     <div class="panel-b" style="padding:10px">
-      <iframe src="https://songviet-design.pages.dev/" style="width:100%;height:78vh;border:1px solid var(--line);border-radius:10px;background:#fff" loading="lazy" title="Song Viet Design"></iframe>
-    </div></div>
-  <div class="panel"><div class="panel-h"><h3>Thiết kế</h3>${tk.trang_thai?`<div class="spacer"></div><span class="badge ${tk.trang_thai==='DA_DUYET'?'b-ok':'b-cho'}">${tk.trang_thai==='DA_DUYET'?'Đã duyệt':'Dự thảo'}</span>`:''}</div><div class="panel-b">
-    <div class="f"><label>Công nghệ áp dụng</label><textarea id="tk_cn" rows="2" ${ro}>${tk.cong_nghe||''}</textarea></div>
-    <div class="formrow"><div class="f"><label>Công suất thiết kế</label><input id="tk_cs" value="${tk.cong_suat_tk||''}" ${ro}></div>
-      <div class="f"><label>Tiêu chuẩn</label><input id="tk_tc" value="${tk.tieu_chuan||''}" ${ro}></div>
-      <div class="f"><label>Người thiết kế</label><input id="tk_ntk" value="${tk.nguoi_thiet_ke||''}" ${ro}></div>
-      <div class="f"><label>Phiên bản</label><input id="tk_pb" value="${tk.phien_ban||'v1.0'}" ${ro}></div>
-      <div class="f"><label>Trạng thái</label><select id="tk_tt" ${ro}><option value="DU_THAO" ${tk.trang_thai!=='DA_DUYET'?'selected':''}>Dự thảo</option><option value="DA_DUYET" ${tk.trang_thai==='DA_DUYET'?'selected':''}>Đã duyệt</option></select></div></div>
-    <div style="font-weight:600;font-size:13px;margin:8px 0 4px">Thông số thiết kế</div>
-    ${canOp?`<div class="f"><label>Nhập mỗi dòng: tên | giá trị | đơn vị</label><textarea id="tk_ts" rows="4" placeholder="COD đầu vào | 1017 | mg/L">${tsText}</textarea></div>`:tsTable}
-    ${canOp?`<div style="text-align:right;margin-top:8px"><button class="btn-sm" onclick="daLuuThietKe()">Lưu thiết kế</button></div>`:''}</div></div>`;
-}
-async function daLuuThietKe(){
-  const raw=gv('tk_ts')||''; const thong_so=raw.split('\n').map(l=>l.trim()).filter(Boolean).map(l=>{const p=l.split('|').map(x=>x.trim());return {ten:p[0]||'',gia_tri:p[1]||'',don_vi:p[2]||''};});
-  const body={cong_nghe:gv('tk_cn')||null,cong_suat_tk:gv('tk_cs')||null,tieu_chuan:gv('tk_tc')||null,nguoi_thiet_ke:gv('tk_ntk')||null,phien_ban:gv('tk_pb')||null,trang_thai:gv('tk_tt'),thong_so};
-  if(S.mode!=="live"){toast("Đã lưu (demo)","ok");return;}
-  try{await api(`/du-an/${S.daId}/thiet-ke`,{method:'PUT',body:JSON.stringify(body)});toast("Đã lưu thiết kế","ok");S.daCt=await api(`/du-an/${S.daId}/chi-tiet`);daRenderTab();}catch(e){toast(e.detail||e.message,"err");}
+      <iframe src="https://songviet-design.pages.dev/" style="width:100%;height:82vh;border:1px solid var(--line);border-radius:10px;background:#fff" loading="lazy" title="Song Viet Design"></iframe>
+    </div></div>`;
 }
 
 /* --- Tab Tiến độ --- */
