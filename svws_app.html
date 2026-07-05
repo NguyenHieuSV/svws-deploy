@@ -2692,8 +2692,10 @@ async function bhEmail(host){
       <div class="formrow" style="padding-top:0"><div class="f" style="flex:1"><label>Tiêu đề email</label><input id="cd_td" placeholder="Giải pháp xử lý nước cho {ten_kh}"></div></div>
       <div class="formrow" style="padding-top:0"><div class="f" style="flex:1"><label>Nội dung (dùng {ten_kh} để chèn tên KH)</label>
         <textarea id="cd_nd" rows="4" style="width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:9px;font-family:inherit;font-size:14px" placeholder="Kính gửi {ten_kh}, SVWS xin giới thiệu..."></textarea></div></div>
+      <div class="formrow" style="padding-top:0"><div class="f" style="flex:1"><label>📎 Đính kèm tệp gửi kèm email (brochure, catalogue... — chọn được nhiều tệp)</label>
+        <input type="file" id="cd_files" multiple></div></div>
       <div class="formrow" style="padding-top:0"><button class="btn-sm" onclick="taoCD()">Tạo (chờ duyệt)</button>
-        <span class="note" style="padding:0">Tạo xong, đính kèm tệp ở thẻ chiến dịch bên dưới rồi trình duyệt.</span></div></div>`
+        <span class="note" style="padding:0">Tệp đã chọn sẽ tự đính kèm khi tạo; vẫn thêm/bớt được ở thẻ chiến dịch bên dưới.</span></div></div>`
     : `<div class="perm-denied">Vai trò ${S.role} chỉ được xem chiến dịch.</div>`;
 
   const cards = cds.map(c=>{
@@ -2771,11 +2773,25 @@ async function taoCD(){
   const ten=gv('cd_ten'),tieu_de=gv('cd_td'),noi_dung=gv('cd_nd'),abc=gv('cd_abc')||null;
   if(!ten||!tieu_de||!noi_dung){toast("Nhập đủ tên, tiêu đề và nội dung","err");return;}
   const ids=cdSelKH.map(x=>x.id), tens=cdSelKH.map(x=>x.ten);
+  const files=[...((document.getElementById('cd_files')||{}).files||[])];
   const payload={ten,tieu_de,noi_dung,bo_loc_abc: ids.length?null:abc, khach_hang_ids: ids.length?ids:null};
-  if(S.mode==="live"){ try{await api("/ban-hang/chien-dich",{method:'POST',body:JSON.stringify(payload)});
-    cdSelKH=[]; toast("Đã tạo chiến dịch (chờ duyệt)","ok");viewBanHang($("#main"));}catch(e){toast(e.detail||e.message,"err");} return; }
-  DEMO.chien_dich.unshift({id:Date.now(),ten,tieu_de,noi_dung,bo_loc_abc:payload.bo_loc_abc,khach_ids:ids,khach_ten:tens,trang_thai:"CHO_DUYET",tep:[]});
-  cdSelKH=[]; toast("Đã tạo (demo) — chờ duyệt","ok"); viewBanHang($("#main"));
+  if(S.mode==="live"){
+    try{
+      const r=await api("/ban-hang/chien-dich",{method:'POST',body:JSON.stringify(payload)});
+      let loiTep=0;
+      for(const f of files){
+        const fd=new FormData(); fd.append('file',f);
+        try{await apiUpload(`/ban-hang/chien-dich/${r.id}/tep`,fd);}catch(e){loiTep++;}
+      }
+      cdSelKH=[];
+      toast("Đã tạo chiến dịch (chờ duyệt)"+(files.length?` — đính kèm ${files.length-loiTep}/${files.length} tệp`:""), loiTep?"err":"ok");
+      viewBanHang($("#main"));
+    }catch(e){toast(e.detail||e.message,"err");}
+    return;
+  }
+  DEMO.chien_dich.unshift({id:Date.now(),ten,tieu_de,noi_dung,bo_loc_abc:payload.bo_loc_abc,khach_ids:ids,khach_ten:tens,trang_thai:"CHO_DUYET",
+    tep:files.map((f,i)=>({id:Date.now()+i+1,ten_file:f.name,kich_thuoc:f.size}))});
+  cdSelKH=[]; toast("Đã tạo (demo) — chờ duyệt"+(files.length?` — kèm ${files.length} tệp`:""),"ok"); viewBanHang($("#main"));
 }
 async function duyetCD(id){
   if(!can("ban_hang","DUYET")){toast("Bạn không có quyền duyệt nội dung (cần TP_KD/CEO)","err");return;}
