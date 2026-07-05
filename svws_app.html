@@ -6453,49 +6453,13 @@ async function daThietKe(h){
     </div></div>`;
 }
 
-/* --- Tab Tiến độ --- */
+/* --- Tab Tiến độ: nhúng ProjectFlow AI --- */
 async function daTienDo(h){
-  const canOp=can("du_an","THAO_TAC");
-  let d; try{ d = S.mode==="live" ? await api(`/du-an/${S.daId}/moc`) : _daDemoMoc(); }catch(e){h.innerHTML=`<div class="empty" style="color:#dc2626;padding:16px">${e.detail||e.message}</div>`;return;}
-  let html=`<div class="panel"><div class="panel-b" style="padding:14px 18px"><div style="max-width:480px">${_bar(d.tien_do)}<div style="font-size:13px;margin-top:4px">Tiến độ tổng (theo trọng số mốc): <b>${_num(d.tien_do,1)}%</b></div></div></div></div>`;
-  if(canOp){
-    html+=`<div class="panel"><div class="panel-h"><h3>Thêm mốc / hạng mục</h3></div><div class="panel-b">
-      <div class="formrow"><div class="f"><label>Thứ tự</label><input id="mc_tt" type="number" style="max-width:80px"></div>
-        <div class="f" style="flex:2"><label>Tên mốc</label><input id="mc_ten" placeholder="Thi công lắp đặt"></div>
-        <div class="f"><label>Giai đoạn</label><select id="mc_gd">${Object.entries(DA_GD).map(([k,l])=>`<option value="${k}">${l}</option>`).join('')}</select></div>
-        <div class="f"><label>Trọng số</label><input id="mc_ts" type="number" value="1" style="max-width:90px"></div>
-        <div class="f"><label>BĐ kế hoạch</label><input id="mc_bd" type="date"></div>
-        <div class="f"><label>KT kế hoạch</label><input id="mc_kt" type="date"></div>
-        <button class="btn-sm" style="align-self:end" onclick="daThemMoc()">Thêm</button></div></div></div>`;
-  }
-  const rows=(d.moc||[]).map(m=>{const tre=m.ngay_kt_kh&&!['HOAN_THANH'].includes(m.trang_thai)&&m.ngay_kt_kh<new Date().toISOString().slice(0,10);
-    return `<tr><td>${m.thu_tu||''}</td><td><b>${m.ten}</b>${m.phu_trach?`<div style="font-size:11px;color:var(--muted)">${m.phu_trach}</div>`:''}</td>
-    <td>${DA_GD[m.giai_doan]||m.giai_doan||'—'}</td><td class="num">${_num(m.trong_so,1)}</td>
-    <td style="min-width:140px">${_bar(m.phan_tram)}<div style="font-size:11px;color:var(--muted);margin-top:2px">${_num(m.phan_tram,0)}%</div></td>
-    <td>${m.ngay_kt_kh||'—'}${tre?'<div style="font-size:11px;color:#dc2626">trễ hạn</div>':''}</td>
-    <td><span class="badge ${m.trang_thai==='HOAN_THANH'?'b-ok':(m.trang_thai==='CHAM_TRE'||tre?'b-tc':'b-cho')}">${DA_TTMOC[m.trang_thai]||m.trang_thai}</span></td>
-    <td>${canOp?`<input type="number" id="mp_${m.id}" value="${m.phan_tram}" style="width:60px;padding:3px 5px" title="% hoàn thành"> <button class="btn-sm ghost" onclick="daSuaMoc(${m.id})">Lưu</button> <button class="btn-sm ghost" onclick="daXoaMoc(${m.id})">✕</button>`:''}</td></tr>`;}).join('');
-  html+=`<div class="panel"><div class="panel-h"><h3>Mốc tiến độ</h3></div><div class="panel-b"><table>
-    <thead><tr><th>#</th><th>Mốc</th><th>Giai đoạn</th><th class="num">Trọng số</th><th>% hoàn thành</th><th>KT kế hoạch</th><th>Trạng thái</th><th></th></tr></thead>
-    <tbody>${rows||'<tr><td colspan="8" class="empty">Chưa có mốc tiến độ.</td></tr>'}</tbody></table>
-    <div class="note" style="margin-top:8px;color:var(--muted)">Tiến độ tổng = Σ(trọng số × %)/Σ trọng số — tính trực tiếp từ % của các mốc anh nhập, không suy đoán.</div></div></div>`;
-  h.innerHTML=html;
-}
-async function daThemMoc(){
-  const body={thu_tu:Number(gv('mc_tt')||0),ten:gv('mc_ten'),giai_doan:gv('mc_gd'),trong_so:Number(gv('mc_ts')||1),ngay_bd_kh:gv('mc_bd')||null,ngay_kt_kh:gv('mc_kt')||null};
-  if(!body.ten){toast("Nhập tên mốc","err");return;}
-  if(S.mode!=="live"){toast("Đã thêm (demo)","ok");return;}
-  try{await api(`/du-an/${S.daId}/moc`,{method:'POST',body:JSON.stringify(body)});toast("Đã thêm mốc","ok");daRenderTab();}catch(e){toast(e.detail||e.message,"err");}
-}
-async function daSuaMoc(id){
-  const pt=Number(gv('mp_'+id)||0);
-  if(S.mode!=="live"){toast("Đã lưu (demo)","ok");return;}
-  try{const r=await api(`/du-an/moc/${id}`,{method:'PUT',body:JSON.stringify({phan_tram:pt})});toast(`Đã cập nhật · tiến độ tổng ${_num(r.tien_do,1)}%`,"ok");daRenderTab();}catch(e){toast(e.detail||e.message,"err");}
-}
-async function daXoaMoc(id){
-  if(!confirm("Xóa mốc này?"))return;
-  if(S.mode!=="live"){toast("Đã xóa (demo)","ok");return;}
-  try{await api(`/du-an/moc/${id}`,{method:'DELETE'});toast("Đã xóa","ok");daRenderTab();}catch(e){toast(e.detail||e.message,"err");}
+  h.innerHTML=`<div class="panel"><div class="panel-h"><h3>📈 Quản lý tiến độ — ProjectFlow AI${(S.daCt&&S.daCt.ma)?' — '+S.daCt.ma:''}</h3><div class="spacer"></div>
+      <button class="btn-sm ghost" onclick="window.open('https://projectflow-ai-63kw.onrender.com/ui/','_blank')">↗ Mở toàn màn hình</button></div>
+    <div class="panel-b" style="padding:10px">
+      <iframe src="https://projectflow-ai-63kw.onrender.com/ui/" style="width:100%;height:82vh;border:1px solid var(--line);border-radius:10px;background:#fff" loading="lazy" title="ProjectFlow AI"></iframe>
+    </div></div>`;
 }
 
 /* --- Tab An toàn --- */
