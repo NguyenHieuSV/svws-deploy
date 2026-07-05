@@ -8,6 +8,7 @@ module đích của vai trò (không nới quyền).
 """
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from ..database import get_db
@@ -196,6 +197,7 @@ def tao_nguoi_dung(
 
 
 class SuaNguoiDung(BaseModel):
+    email: str | None = None
     vai_tro: str | None = None
     trang_thai: str | None = None
 
@@ -210,7 +212,16 @@ def sua_nguoi_dung(
     u = db.get(NguoiDung, nguoi_dung_id)
     if not u:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy người dùng.")
-    cu = {"vai_tro": u.vai_tro.ma, "trang_thai": u.trang_thai}
+    cu = {"email": u.email, "vai_tro": u.vai_tro.ma, "trang_thai": u.trang_thai}
+    if p.email is not None:
+        email = p.email.strip().lower()
+        if "@" not in email or len(email) < 5:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Email không hợp lệ.")
+        trung = db.query(NguoiDung).filter(NguoiDung.email == email,
+                                           NguoiDung.id != u.id).first()
+        if trung:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Email '{email}' đã tồn tại.")
+        u.email = email
     if p.vai_tro is not None:
         if u.id == nd.id:
             raise HTTPException(status.HTTP_400_BAD_REQUEST,
@@ -227,10 +238,47 @@ def sua_nguoi_dung(
                                 "Không thể tự khóa tài khoản của chính mình.")
         u.trang_thai = p.trang_thai
     ghi_audit(db, nd.id, "SUA", "nguoi_dung", u.id, cu=cu,
-              moi={"vai_tro": p.vai_tro, "trang_thai": p.trang_thai})
+              moi={"email": p.email, "vai_tro": p.vai_tro, "trang_thai": p.trang_thai})
     db.commit()
     db.refresh(u)
     return _nd_ra(u)
+
+
+@router.delete("/nguoi-dung/{nguoi_dung_id}")
+def xoa_nguoi_dung(
+    nguoi_dung_id: int,
+    nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN")),
+    db: Session = Depends(get_db),
+):
+    """Xóa vĩnh viễn tài khoản. Nếu tài khoản đã có dữ liệu liên quan
+    (audit, phiếu, hồ sơ...) thì không xóa được — hãy dùng Khóa."""
+    u = db.get(NguoiDung, nguoi_dung_id)
+    if not u:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy người dùng.")
+    if u.id == nd.id:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Không thể tự xóa tài khoản của chính mình.")
+    email_cu, vai_tro_cu = u.email, u.vai_tro.ma
+    try:
+        db.delete(u)
+        db.flush()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"Tài khoản '{email_cu}' đã có dữ liệu liên quan trong hệ thống "
+            "(chứng từ, nhật ký...) nên không thể xóa. Hãy dùng 'Khóa' thay thế.")
+    ghi_audit(db, nd.id, "XOA", "nguoi_dung", nguoi_dung_id,
+              cu={"email": email_cu, "vai_tro": vai_tro_cu})
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"Tài khoản '{email_cu}' đã có dữ liệu liên quan trong hệ thống "
+            "(chứng từ, nhật ký...) nên không thể xóa. Hãy dùng 'Khóa' thay thế.")
+    return {"ok": True, "email": email_cu}
 
 
 class DatLaiMatKhau(BaseModel):

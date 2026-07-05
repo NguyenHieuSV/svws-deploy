@@ -5331,9 +5331,10 @@ async function viewCauHinh(m){
       <td>${u.ten_vai_tro} <span class="muted">(${u.vai_tro})</span></td>
       <td>${u.trang_thai==="HOAT_DONG"?'<span class="badge b-ok">Hoạt động</span>':'<span class="badge b-tc">🔒 Khóa</span>'}</td>
       <td style="white-space:nowrap">
-        <button class="btn-sm ghost" onclick="chMoDoiVT(${u.id})">Vai trò</button>
+        <button class="btn-sm ghost" onclick="chMoSua(${u.id})">✏️ Sửa</button>
         <button class="btn-sm ghost" onclick="chMoDatMK(${u.id})">Đặt lại MK</button>
         <button class="btn-sm ghost" onclick="chKhoa(${u.id})">${u.trang_thai==="HOAT_DONG"?'Khóa':'Mở khóa'}</button>
+        <button class="btn-sm ghost" style="color:var(--red)" onclick="chXoa(${u.id})">🗑 Xóa</button>
       </td></tr>`).join('')}
   </tbody></table></div></div>
   ${S.mode==="demo"?`<div class="panel"><div class="panel-b" style="color:var(--muted);font-size:12.5px">
@@ -5361,20 +5362,36 @@ async function chTao(){
   document.getElementById('ktModal')?.remove();
   toast("Đã tạo tài khoản "+email+(S.mode==="demo"?" (demo — không lưu)":""));go('cau_hinh');
 }
-function chMoDoiVT(id){
+function chMoSua(id){
   const u=S._chUsers.find(x=>x.id===id);if(!u)return;
-  _ktModal("Đổi vai trò — "+u.email,`
-    <label>Vai trò mới</label><select id="ch_vt2">${_chRoleOpts(u.vai_tro)}</select>
-    <button class="btn-sm" style="margin-top:14px" onclick="chDoiVT(${id})">Lưu</button>`);
+  _ktModal("Sửa người dùng — "+u.email,`
+    <label>Email</label><input id="ch_email2" type="email" value="${u.email}">
+    <label>Vai trò</label><select id="ch_vt2">${_chRoleOpts(u.vai_tro)}</select>
+    <button class="btn-sm" style="margin-top:14px" onclick="chSua(${id})">Lưu thay đổi</button>`);
 }
-async function chDoiVT(id){
-  const vt=$("#ch_vt2").value,u=S._chUsers.find(x=>x.id===id);
+async function chSua(id){
+  const email=$("#ch_email2").value.trim().toLowerCase(),vt=$("#ch_vt2").value,u=S._chUsers.find(x=>x.id===id);
+  if(!email.includes('@'))return toast("Email không hợp lệ","err");
   if(S.mode==="live"){
-    try{await api("/cau-hinh/nguoi-dung/"+id,{method:'PATCH',body:JSON.stringify({vai_tro:vt})});}
+    try{await api("/cau-hinh/nguoi-dung/"+id,{method:'PATCH',body:JSON.stringify({email,vai_tro:vt})});}
     catch(e){return toast(e.message,"err");}
-  }else{u.vai_tro=vt;u.ten_vai_tro=ROLE_NAME[vt]||vt;}
+  }else{
+    if(DEMO_USERS.some(x=>x.email===email&&x.id!==id))return toast("Email đã tồn tại","err");
+    u.email=email;u.vai_tro=vt;u.ten_vai_tro=ROLE_NAME[vt]||vt;
+  }
   document.getElementById('ktModal')?.remove();
-  toast("Đã đổi vai trò"+(S.mode==="demo"?" (demo)":""));go('cau_hinh');
+  toast("Đã lưu thay đổi"+(S.mode==="demo"?" (demo)":""));go('cau_hinh');
+}
+async function chXoa(id){
+  const u=S._chUsers.find(x=>x.id===id);if(!u)return;
+  if(!confirm("Xóa vĩnh viễn tài khoản "+u.email+"?\n\nNếu tài khoản đã có dữ liệu (chứng từ, nhật ký...) hệ thống sẽ từ chối xóa — khi đó hãy dùng Khóa."))return;
+  if(S.mode==="live"){
+    try{await api("/cau-hinh/nguoi-dung/"+id,{method:'DELETE'});}
+    catch(e){return toast(e.message,"err");}
+  }else{
+    const i=DEMO_USERS.findIndex(x=>x.id===id);if(i>=0)DEMO_USERS.splice(i,1);
+  }
+  toast("Đã xóa "+u.email+(S.mode==="demo"?" (demo)":""));go('cau_hinh');
 }
 function chMoDatMK(id){
   const u=S._chUsers.find(x=>x.id===id);if(!u)return;
