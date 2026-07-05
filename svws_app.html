@@ -1828,6 +1828,7 @@ async function bhBaoGia(host){
   if(S.bgnEdit) return bgnEditor(host);
   let drafts=DEMO.bgf||[];
   if(S.mode==="live"){ try{drafts=await api("/ban-hang/bao-gia-form");}catch(e){} }
+  drafts=drafts.filter(g=>!(g.noi_dung&&g.noi_dung.loai==='HOP_DONG'));
   S._bgfList=drafts;
   const canOpBGF=can("ban_hang","THAO_TAC");
   const dRows=drafts.map(g=>{const d=g.noi_dung||{};const t=_bgfTinh(d);
@@ -1854,7 +1855,8 @@ async function bhBaoGia(host){
     const btn=(st==="CHO_DUYET")
       ? (canApprove?`<button class="btn-sm" onclick="duyetBG(${b.id},${b.tong_tien})">Duyệt</button>`
                    :`<button class="btn-sm" disabled title="Không có quyền duyệt">Duyệt</button>`)
-      : '—';
+      : (st==="DA_DUYET"&&can("ban_hang","THAO_TAC")
+          ?`<button class="btn-sm ghost" onclick="taoDonTuBG(${b.id})">→ Tạo đơn hàng</button>`:'—');
     return `<tr><td><b>${b.so}</b></td><td>${b.khach}</td><td class="num">${vnd(b.tong_tien)}</td><td>${badge}</td><td>${btn}</td></tr>`;
   }).join('');
   const gateNote = HANMUC.bao_gia[S.role]!==undefined
@@ -2166,12 +2168,21 @@ async function duyetBG(id,amount){
 
 /* --- Tab Đơn hàng & tệp PO/Hợp đồng --- */
 async function bhDonHang(host){
+  if(S.hdEdit) return hdEditor(host);
+  let hds=DEMO.bgf||[];
+  if(S.mode==="live"){ try{hds=await api("/ban-hang/bao-gia-form");}catch(e){} }
+  hds=hds.filter(g=>g.noi_dung&&g.noi_dung.loai==='HOP_DONG');
+  S._hdList=hds;
   let orders=DEMO.don_hang;
   if(S.mode==="live"){ try{ const r=await api("/ban-hang/don-hang");
+    let khs=[]; try{khs=await api("/ban-hang/khach-hang");}catch{}
+    S._dhKhs=khs;
     orders=await Promise.all(r.map(async o=>{ let tep=[],pnl=null;
       try{tep=await api(`/ban-hang/don-hang/${o.id}/tep`);}catch{}
       try{pnl=await api(`/ban-hang/don-hang/${o.id}/lai-lo`);}catch{}
-      return {id:o.id,so:o.so,khach:"KH #"+o.khach_hang_id,tong_tien:Number(o.tong_tien),trang_thai:o.trang_thai,tep,pnl};}));
+      const kh=khs.find(k=>k.id===o.khach_hang_id);
+      return {id:o.id,so:o.so,khach:kh?kh.ten:("KH #"+o.khach_hang_id),khach_hang_id:o.khach_hang_id,
+        tong_tien:Number(o.tong_tien),trang_thai:o.trang_thai,tep,pnl};}));
     }catch(e){toast(e.detail||e.message,"err");} }
   else { orders=(DEMO.don_hang||[]).map(o=>{
       const posAll=(DEMO.don_mua||[]).filter(p=>p.don_hang_id===o.id && p.trang_thai!=="TU_CHOI");
@@ -2182,6 +2193,7 @@ async function bhDonHang(host){
         lai_lo_dukien:dt-camket,ty_suat_thuc:rate(thuc),ty_suat_dukien:rate(camket),so_po:posAll.length}};
     }); }
   const canUp=can("ban_hang","THAO_TAC");
+  S._dhList=orders;
   const cards=orders.map(o=>{
     const ma=o.so||('DH-'+o.id);
     const tepRows = (o.tep&&o.tep.length)
@@ -2203,13 +2215,41 @@ async function bhDonHang(host){
       : `<div class="perm-denied">Vai trò ${S.role} chỉ được xem — không tải tệp lên.</div>`;
     return `<div class="panel">
       <div class="panel-h"><h3>${ma} · ${o.khach}</h3><div class="spacer"></div>
+        ${canUp?`<button class="btn-sm ghost" onclick="hdMoi(${o.id})">📄 Tạo Hợp đồng</button>`:''}
         <span class="num" style="font-weight:700">${vnd(o.tong_tien)}</span>
         <span class="badge ${o.trang_thai==='DA_XUAT'?'b-ok':'b-info'}" style="margin-left:10px">${o.trang_thai}</span></div>
       ${pnlBar}
       <div class="panel-b"><table><thead><tr><th>Loại</th><th>Mã Bán hàng</th><th>Tên tệp</th><th class="num">Cỡ</th><th>Tải về</th></tr></thead>
         <tbody>${tepRows}</tbody></table></div>${upBox}</div>`;
   }).join('');
-  host.innerHTML = `<div class="note" style="padding:0 0 12px">Mỗi đơn hiển thị <b>Mã Bán hàng</b> làm khóa liên kết sang Mua hàng, kèm <b>giá vốn</b> (tổng PO mua liên kết) và <b>lãi/lỗ</b>. Đính kèm PO khách & hợp đồng ngay trên đơn.</div>${cards||'<div class="panel"><div class="empty">Chưa có đơn hàng.</div></div>'}`;
+  const hdRows=hds.map(g=>{const d=g.noi_dung||{};const t=_bgfTinh(d);
+    return `<tr><td><b>${g.so||d.so||'—'}</b></td><td>${(d.benA&&d.benA.ten)||'—'}</td>
+    <td>${d.don_hang_so||'—'}</td><td class="num">${vnd(t.tong)}</td>
+    <td>${g.trang_thai==='DA_XUAT'?'<span class="badge b-ok">Đã xuất PDF</span>':'<span class="badge b-cho">Nháp</span>'}</td>
+    <td style="white-space:nowrap">
+      ${canUp?`<button class="btn-sm ghost" onclick="hdSua(${g.id})">✏️ Sửa</button>`:''}
+      <button class="btn-sm ghost" onclick="hdPdfTu(${g.id})">🖨 PDF</button>
+      ${canUp?`<button class="btn-sm ghost" style="color:var(--red)" onclick="hdXoa(${g.id})">🗑</button>`:''}</td></tr>`;}).join('');
+  const hdPanel=`<div class="panel"><div class="panel-h"><h3>Hợp đồng đã soạn</h3></div>
+    <div class="note">Bấm <b>📄 Tạo Hợp đồng</b> trên từng đơn hàng bên dưới để soạn hợp đồng theo mẫu, lưu tạm và xuất PDF. Bản hợp đồng đã ký (scan) thì đính kèm vào đơn hàng bằng khung <b>Tải lên</b> với loại "Hợp đồng".</div>
+    <div class="panel-b"><table><thead><tr><th>Số HĐ</th><th>Bên A (khách)</th><th>Đơn hàng</th><th class="num">Giá trị</th><th>Trạng thái</th><th></th></tr></thead>
+    <tbody>${hdRows||'<tr><td colspan="6" class="empty">Chưa có hợp đồng nào.</td></tr>'}</tbody></table></div></div>`;
+  host.innerHTML = `<div class="note" style="padding:0 0 12px">Mỗi đơn hiển thị <b>Mã Bán hàng</b> làm khóa liên kết sang Mua hàng, kèm <b>giá vốn</b> (tổng PO mua liên kết) và <b>lãi/lỗ</b>. Đính kèm PO khách & hợp đồng ngay trên đơn.</div>${hdPanel}${cards||'<div class="panel"><div class="empty">Chưa có đơn hàng nào.<br><span style="font-size:12.5px;color:var(--muted)">Đơn hàng được tạo từ <b>báo giá nội bộ đã duyệt</b>: sang tab Báo giá → bấm "→ Tạo đơn hàng" trên báo giá Đã duyệt. Sau đó quay lại đây để đính kèm PO/Hợp đồng.</span></div></div>'}`;
+}
+
+/* --- Tạo đơn hàng từ báo giá nội bộ đã duyệt --- */
+async function taoDonTuBG(id){
+  if(S.mode==="live"){
+    try{const r=await api(`/ban-hang/bao-gia/${id}/tao-don`,{method:'POST'});
+      toast("Đã tạo đơn hàng "+(r.so||'')+" từ báo giá","ok");}
+    catch(e){return toast(e.detail||e.message,"err");}
+  }else{
+    const b=DEMO.bao_gia.find(x=>x.id===id); if(!b)return;
+    const did=Math.max(0,...DEMO.don_hang.map(o=>o.id))+1;
+    DEMO.don_hang.unshift({id:did,so:"DH-"+String(did).padStart(4,'0'),khach:b.khach,tong_tien:b.tong_tien,trang_thai:"MOI",tep:[]});
+    toast("Đã tạo đơn hàng (demo)","ok");
+  }
+  S.bhTab='don_hang'; viewBanHang($("#main"));
 }
 async function uploadTep(dhId){
   const inp=document.getElementById('file_'+dhId), f=inp&&inp.files[0];
@@ -2229,6 +2269,226 @@ async function taiTep(id,name){
     const blob=await r.blob(), url=URL.createObjectURL(blob), a=document.createElement('a');
     a.href=url; a.download=name; a.click(); URL.revokeObjectURL(url);
   }catch(e){toast(e.message,"err");}
+}
+
+/* ===== Hợp đồng: soạn theo mẫu, lưu tạm, xuất PDF ===== */
+function _docSo3VN(n,full){
+  const CS=["không","một","hai","ba","bốn","năm","sáu","bảy","tám","chín"];
+  let s="",tr=Math.floor(n/100),ch=Math.floor((n%100)/10),dv=n%10;
+  if(full||tr>0){s+=CS[tr]+" trăm";if(ch===0&&dv>0)s+=" lẻ";}
+  if(ch>1){s+=" "+CS[ch]+" mươi";if(dv===1)s+=" mốt";else if(dv===4)s+=" tư";else if(dv===5)s+=" lăm";else if(dv>0)s+=" "+CS[dv];}
+  else if(ch===1){s+=" mười";if(dv===5)s+=" lăm";else if(dv>0)s+=" "+CS[dv];}
+  else if(dv>0&&!full&&tr===0)s+=CS[dv];
+  else if(dv>0)s+=" "+CS[dv];
+  return s.trim();
+}
+function docSoVN(n){
+  n=Math.round(Number(n)||0); if(n<=0)return "Không đồng";
+  const DV=["","nghìn","triệu","tỷ","nghìn tỷ","triệu tỷ"];
+  const groups=[]; let x=n; while(x>0){groups.push(x%1000);x=Math.floor(x/1000);}
+  const parts=[];
+  for(let g=groups.length-1;g>=0;g--){
+    if(groups[g]>0)parts.push(_docSo3VN(groups[g],g<groups.length-1)+(DV[g]?" "+DV[g]:""));
+  }
+  const s=parts.join(" ").replace(/\s+/g," ").trim();
+  return s.charAt(0).toUpperCase()+s.slice(1)+" đồng";
+}
+function hdMoi(oid){
+  const o=(S._dhList||[]).find(x=>x.id===oid); if(!o)return;
+  const kh=S.mode==="live"
+    ? (S._dhKhs||[]).find(k=>k.id===o.khach_hang_id)
+    : (DEMO.khach||[]).find(k=>k.ten===o.khach);
+  const nay=new Date();
+  S.hdEdit={id:null,d:{
+    loai:'HOP_DONG',
+    so:"HĐ-"+(o.so||o.id)+"/"+nay.getFullYear(),
+    ngay:nay.toISOString().slice(0,10),
+    don_hang_so:o.so||('DH-'+o.id),
+    khach_hang_id:o.khach_hang_id||(kh?kh.id:null),
+    benA:{ten:(kh?kh.ten:o.khach)||"",dia_chi:"",mst:(kh&&kh.ma_so_thue)||"",
+      dai_dien:(kh&&kh.nguoi_lien_he)||"",chuc_vu:"",dien_thoai:(kh&&kh.dien_thoai)||""},
+    benB:{ten:"Công ty TNHH Giải pháp Kỹ thuật Song Việt",dia_chi:"448 Võ Văn Tần, P. Bàn Cờ, TP.HCM",
+      mst:"",dai_dien:"",chuc_vu:"Giám đốc",dien_thoai:""},
+    items:[{ten:"Cung cấp thiết bị/vật tư theo đơn hàng "+(o.so||o.id),mo_ta:"",so_luong:1,don_vi:"Gói",don_gia:o.tong_tien||0,vat_pct:8}],
+    thanh_toan:"Đặt cọc 40% khi ký hợp đồng, thanh toán 60% còn lại khi có thông báo giao hàng.",
+    giao_hang:"8-10 tuần kể từ ngày ký hợp đồng và nhận đặt cọc.",
+    dia_diem:"Theo thỏa thuận.",
+    bao_hanh:"12 tháng kể từ ngày bàn giao.",
+    so_ban:"02"
+  }};
+  viewBanHang($("#main"));
+}
+function hdEditor(host){
+  const d=S.hdEdit.d, t=_bgfTinh(d);
+  const esc=v=>(v===null||v===undefined?'':String(v)).replace(/"/g,'&quot;');
+  const ben=(khoa,b,tieude)=>`<div style="flex:1;min-width:280px;border:1px solid var(--line);border-radius:10px;padding:10px 14px">
+    <div style="font-weight:700;margin-bottom:4px">${tieude}</div>
+    <label>Tên đơn vị</label><input value="${esc(b.ten)}" oninput="hdSetBen('${khoa}','ten',this.value)">
+    <label>Địa chỉ</label><input value="${esc(b.dia_chi)}" oninput="hdSetBen('${khoa}','dia_chi',this.value)">
+    <div style="display:flex;gap:10px"><div style="flex:1"><label>Mã số thuế</label><input value="${esc(b.mst)}" oninput="hdSetBen('${khoa}','mst',this.value)"></div>
+      <div style="flex:1"><label>Điện thoại</label><input value="${esc(b.dien_thoai)}" oninput="hdSetBen('${khoa}','dien_thoai',this.value)"></div></div>
+    <div style="display:flex;gap:10px"><div style="flex:1"><label>Người đại diện</label><input value="${esc(b.dai_dien)}" oninput="hdSetBen('${khoa}','dai_dien',this.value)"></div>
+      <div style="flex:1"><label>Chức vụ</label><input value="${esc(b.chuc_vu)}" oninput="hdSetBen('${khoa}','chuc_vu',this.value)"></div></div>
+  </div>`;
+  const itemRows=(d.items||[]).map((it,i)=>`<tr>
+    <td style="color:var(--muted)">${i+1}</td>
+    <td><input value="${esc(it.ten)}" oninput="hdSet(${i},'ten',this.value)" style="min-width:220px" placeholder="Tên hàng hóa / nội dung công việc"></td>
+    <td><input type="number" min="0" step="any" value="${esc(it.so_luong)}" oninput="hdSet(${i},'so_luong',this.value)" style="width:70px"></td>
+    <td><input value="${esc(it.don_vi)}" oninput="hdSet(${i},'don_vi',this.value)" style="width:70px"></td>
+    <td><input type="number" min="0" step="any" value="${esc(it.don_gia)}" oninput="hdSet(${i},'don_gia',this.value)" style="width:130px"></td>
+    <td><input type="number" min="0" max="100" step="any" value="${esc(it.vat_pct??8)}" oninput="hdSet(${i},'vat_pct',this.value)" style="width:60px"></td>
+    <td class="num" id="hd_tt_${i}">${vnd((Number(it.so_luong)||0)*(Number(it.don_gia)||0))}</td>
+    <td><button class="btn-sm ghost" style="color:var(--red)" onclick="hdXoaDong(${i})">✕</button></td></tr>`).join('');
+  host.innerHTML=`
+  <div style="margin-bottom:12px"><button class="btn-sm ghost" onclick="hdDong()">← Quay lại danh sách</button></div>
+  <div class="panel"><div class="panel-h"><h3>${S.hdEdit.id?'Sửa hợp đồng':'Soạn hợp đồng mới'} — đơn hàng ${d.don_hang_so||''}</h3><div class="spacer"></div>
+    <button class="btn-sm ghost" onclick="hdLuu()">💾 Lưu tạm</button>
+    <button class="btn-sm" onclick="hdPdf()">🖨 Xuất PDF</button></div>
+  <div class="panel-b" style="padding:14px 18px">
+    <div style="display:flex;gap:12px;flex-wrap:wrap">
+      <div style="flex:1;min-width:180px"><label>Số hợp đồng</label><input value="${esc(d.so)}" oninput="hdSetD('so',this.value)"></div>
+      <div style="min-width:150px"><label>Ngày ký</label><input type="date" value="${esc(d.ngay)}" oninput="hdSetD('ngay',this.value)"></div>
+      <div style="min-width:110px"><label>Số bản</label><input value="${esc(d.so_ban)}" oninput="hdSetD('so_ban',this.value)"></div>
+    </div>
+    <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:12px">
+      ${ben('benA',d.benA,'BÊN A — BÊN MUA (khách hàng)')}
+      ${ben('benB',d.benB,'BÊN B — BÊN BÁN (Song Việt)')}
+    </div>
+    <div style="margin:16px 0 6px;font-weight:700;font-size:13px">ĐIỀU 1 — NỘI DUNG HỢP ĐỒNG (hàng hóa / dịch vụ)</div>
+    <div style="overflow-x:auto"><table><thead><tr><th>#</th><th>Nội dung</th><th>SL</th><th>Đơn vị</th><th>Đơn giá (VND)</th><th>VAT %</th><th class="num">Thành tiền (chưa VAT)</th><th></th></tr></thead>
+    <tbody>${itemRows}</tbody></table></div>
+    <button class="btn-sm ghost" style="margin-top:8px" onclick="hdThemDong()">+ Thêm dòng</button>
+    <div style="display:flex;justify-content:flex-end;margin-top:14px">
+      <table style="width:auto;min-width:320px">
+        <tr><td>Tạm tính (chưa VAT):</td><td class="num" id="hd_sub"><b>${vnd(t.sub)}</b></td></tr>
+        <tr><td>Tổng VAT (theo từng dòng):</td><td class="num" id="hd_vat">${vnd(t.vat)}</td></tr>
+        <tr><td><b>GIÁ TRỊ HỢP ĐỒNG (gồm VAT):</b></td><td class="num" id="hd_tot" style="font-size:16px"><b>${vnd(t.tong)}</b></td></tr>
+      </table></div>
+    <div style="margin:16px 0 6px;font-weight:700;font-size:13px">CÁC ĐIỀU KHOẢN</div>
+    <label>Điều 2 — Thanh toán</label><input value="${esc(d.thanh_toan)}" oninput="hdSetD('thanh_toan',this.value)">
+    <div style="display:flex;gap:12px;flex-wrap:wrap">
+      <div style="flex:1;min-width:220px"><label>Điều 3 — Thời gian giao hàng</label><input value="${esc(d.giao_hang)}" oninput="hdSetD('giao_hang',this.value)"></div>
+      <div style="flex:1;min-width:180px"><label>Địa điểm giao hàng</label><input value="${esc(d.dia_diem)}" oninput="hdSetD('dia_diem',this.value)"></div>
+    </div>
+    <label>Điều 4 — Bảo hành</label><input value="${esc(d.bao_hanh)}" oninput="hdSetD('bao_hanh',this.value)">
+  </div></div>`;
+}
+function hdSet(i,f,v){const it=S.hdEdit.d.items[i];if(!it)return;it[f]=v;
+  const el=document.getElementById('hd_tt_'+i);
+  if(el)el.textContent=vnd((Number(it.so_luong)||0)*(Number(it.don_gia)||0));
+  const t=_bgfTinh(S.hdEdit.d);
+  const s=document.getElementById('hd_sub'),vv=document.getElementById('hd_vat'),g=document.getElementById('hd_tot');
+  if(s)s.innerHTML='<b>'+vnd(t.sub)+'</b>'; if(vv)vv.textContent=vnd(t.vat); if(g)g.innerHTML='<b>'+vnd(t.tong)+'</b>';}
+function hdSetD(f,v){S.hdEdit.d[f]=v;}
+function hdSetBen(khoa,f,v){S.hdEdit.d[khoa][f]=v;}
+function hdThemDong(){const its=S.hdEdit.d.items;
+  its.push({ten:"",so_luong:1,don_vi:"Cái",don_gia:0,vat_pct:its.length?its[its.length-1].vat_pct:8});viewBanHang($("#main"));}
+function hdXoaDong(i){S.hdEdit.d.items.splice(i,1);if(!S.hdEdit.d.items.length)hdThemDong();else viewBanHang($("#main"));}
+function hdDong(){S.hdEdit=null;viewBanHang($("#main"));}
+async function hdLuu(trangThai){
+  const d=S.hdEdit.d;
+  if(!d.so||!d.so.trim())return toast("Nhập số hợp đồng","err"),null;
+  const payload={so:d.so,khach_hang_id:d.khach_hang_id||null,noi_dung:d,trang_thai:trangThai||"NHAP"};
+  if(S.mode==="live"){
+    try{
+      const r=S.hdEdit.id
+        ? await api("/ban-hang/bao-gia-form/"+S.hdEdit.id,{method:'PATCH',body:JSON.stringify(payload)})
+        : await api("/ban-hang/bao-gia-form",{method:'POST',body:JSON.stringify(payload)});
+      S.hdEdit.id=r.id;
+    }catch(e){toast(e.detail||e.message,"err");return null;}
+  }else{
+    DEMO.bgf=DEMO.bgf||[];
+    if(S.hdEdit.id){const g=DEMO.bgf.find(x=>x.id===S.hdEdit.id);
+      if(g){g.so=d.so;g.noi_dung=JSON.parse(JSON.stringify(d));if(trangThai)g.trang_thai=trangThai;}}
+    else{const id=Math.max(0,...DEMO.bgf.map(x=>x.id),0)+1;S.hdEdit.id=id;
+      DEMO.bgf.unshift({id,so:d.so,khach_hang_id:d.khach_hang_id,noi_dung:JSON.parse(JSON.stringify(d)),trang_thai:trangThai||"NHAP"});}
+  }
+  if(!trangThai)toast("Đã lưu tạm hợp đồng "+d.so+(S.mode==="demo"?" (demo)":""),"ok");
+  return true;
+}
+async function hdPdf(){
+  const ok=await hdLuu("DA_XUAT"); if(!ok)return;
+  _hdPrint(S.hdEdit.d);
+  toast("Đã mở bản in — chọn 'Save as PDF' trong hộp thoại in","ok");
+}
+function hdSua(id){const g=(S._hdList||[]).find(x=>x.id===id)||(DEMO.bgf||[]).find(x=>x.id===id);
+  if(!g)return;S.hdEdit={id:g.id,d:JSON.parse(JSON.stringify(g.noi_dung||{}))};
+  viewBanHang($("#main"));}
+function hdPdfTu(id){const g=(S._hdList||[]).find(x=>x.id===id)||(DEMO.bgf||[]).find(x=>x.id===id);
+  if(!g)return;_hdPrint(g.noi_dung||{});}
+async function hdXoa(id){
+  const g=(S._hdList||[]).find(x=>x.id===id)||(DEMO.bgf||[]).find(x=>x.id===id);
+  if(!g)return;
+  if(!confirm("Xóa hợp đồng "+(g.so||'')+"?"))return;
+  if(S.mode==="live"){try{await api("/ban-hang/bao-gia-form/"+id,{method:'DELETE'});}catch(e){return toast(e.detail||e.message,"err");}}
+  else{const i=(DEMO.bgf||[]).findIndex(x=>x.id===id);if(i>=0)DEMO.bgf.splice(i,1);}
+  toast("Đã xóa hợp đồng","ok");viewBanHang($("#main"));
+}
+function _hdPrint(d){
+  const t=_bgfTinh(d);
+  const money=n=>Math.round(n).toLocaleString('vi-VN');
+  const items=(d.items||[]).filter(it=>it.ten).map((it,i)=>`<tr>
+    <td style="text-align:center">${i+1}</td><td>${it.ten||''}</td>
+    <td style="text-align:center">${it.so_luong||''}</td><td style="text-align:center">${it.don_vi||''}</td>
+    <td style="text-align:right">${money(Number(it.don_gia)||0)}</td>
+    <td style="text-align:center">${it.vat_pct||0}%</td>
+    <td style="text-align:right">${money((Number(it.so_luong)||0)*(Number(it.don_gia)||0))}</td></tr>`).join('');
+  const ngayD=d.ngay?d.ngay.split('-'):['','',''];
+  const benRow=(b)=>`
+    <p style="margin:2px 0"><b>${(b.ten||'').toUpperCase()}</b></p>
+    ${b.dia_chi?`<p style="margin:2px 0">Địa chỉ: ${b.dia_chi}</p>`:''}
+    ${b.mst?`<p style="margin:2px 0">Mã số thuế: ${b.mst}</p>`:''}
+    ${b.dien_thoai?`<p style="margin:2px 0">Điện thoại: ${b.dien_thoai}</p>`:''}
+    ${b.dai_dien?`<p style="margin:2px 0">Đại diện: <b>${b.dai_dien}</b>${b.chuc_vu?' — Chức vụ: '+b.chuc_vu:''}</p>`:''}`;
+  const html=`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${d.so||'Hop dong'}</title><style>
+    @page{size:A4;margin:16mm}
+    body{font-family:"Times New Roman",serif;color:#111;font-size:13.5px;line-height:1.55;margin:0}
+    .qh{text-align:center;font-weight:700}
+    .qh .u{text-decoration:underline;font-weight:700}
+    h1{text-align:center;font-size:20px;margin:16px 0 2px;letter-spacing:1px}
+    .so{text-align:center;margin:0 0 12px}
+    h2{font-size:14px;margin:14px 0 4px}
+    table.it{width:100%;border-collapse:collapse;margin:6px 0}
+    table.it th,table.it td{border:1px solid #444;padding:5px 7px;font-size:12.5px}
+    table.it th{background:#f0f0f0;text-align:center}
+    .tot td{padding:2px 8px}
+    .sig{display:flex;justify-content:space-between;margin-top:30px;text-align:center}
+    .sig div{width:45%}
+  </style></head><body>
+  <div class="qh">CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM<br><span class="u">Độc lập — Tự do — Hạnh phúc</span></div>
+  <h1>HỢP ĐỒNG KINH TẾ</h1>
+  <p class="so">Số: <b>${d.so||''}</b></p>
+  <p style="font-style:italic">— Căn cứ Bộ luật Dân sự số 91/2015/QH13;<br>
+  — Căn cứ Luật Thương mại số 36/2005/QH11;<br>
+  — Căn cứ nhu cầu và khả năng của hai bên.</p>
+  <p>Hôm nay, ngày ${ngayD[2]||'…'} tháng ${ngayD[1]||'…'} năm ${ngayD[0]||'…'}, chúng tôi gồm:</p>
+  <h2>BÊN A (BÊN MUA):</h2>${benRow(d.benA||{})}
+  <h2>BÊN B (BÊN BÁN):</h2>${benRow(d.benB||{})}
+  <p>Hai bên thống nhất ký kết hợp đồng với các điều khoản sau:</p>
+  <h2>ĐIỀU 1: NỘI DUNG HỢP ĐỒNG</h2>
+  <p>Bên B đồng ý bán, Bên A đồng ý mua hàng hóa/dịch vụ với nội dung:</p>
+  <table class="it"><thead><tr><th style="width:28px">STT</th><th>Nội dung</th><th style="width:44px">SL</th>
+    <th style="width:52px">Đơn vị</th><th style="width:92px">Đơn giá (VND)</th><th style="width:44px">VAT</th>
+    <th style="width:100px">Thành tiền (VND)</th></tr></thead><tbody>${items}</tbody></table>
+  <table class="tot" style="margin-left:auto">
+    <tr><td>Cộng (chưa VAT):</td><td style="text-align:right"><b>${money(t.sub)} đ</b></td></tr>
+    <tr><td>Thuế VAT:</td><td style="text-align:right"><b>${money(t.vat)} đ</b></td></tr>
+    <tr><td><b>TỔNG GIÁ TRỊ HỢP ĐỒNG:</b></td><td style="text-align:right"><b>${money(t.tong)} đ</b></td></tr></table>
+  <p style="font-style:italic">(Bằng chữ: ${docSoVN(t.tong)})</p>
+  <h2>ĐIỀU 2: PHƯƠNG THỨC THANH TOÁN</h2><p>${d.thanh_toan||''}</p>
+  <h2>ĐIỀU 3: GIAO HÀNG</h2><p>Thời gian giao hàng: ${d.giao_hang||''}<br>Địa điểm giao hàng: ${d.dia_diem||''}</p>
+  <h2>ĐIỀU 4: BẢO HÀNH</h2><p>${d.bao_hanh||''}</p>
+  <h2>ĐIỀU 5: ĐIỀU KHOẢN CHUNG</h2>
+  <p>Hai bên cam kết thực hiện đúng các điều khoản của hợp đồng. Mọi thay đổi phải được hai bên thống nhất bằng văn bản.
+  Trường hợp phát sinh tranh chấp, hai bên ưu tiên thương lượng; nếu không giải quyết được sẽ đưa ra Tòa án có thẩm quyền.</p>
+  <p>Hợp đồng được lập thành ${d.so_ban||'02'} bản có giá trị pháp lý như nhau, mỗi bên giữ ${(Number(d.so_ban)||2)/2>=1?String(Math.floor((Number(d.so_ban)||2)/2)).padStart(2,'0'):'01'} bản, có hiệu lực kể từ ngày ký.</p>
+  <div class="sig">
+    <div><b>ĐẠI DIỆN BÊN A</b><br><i>(Ký, ghi rõ họ tên, đóng dấu)</i><br><br><br><br>${(d.benA&&d.benA.dai_dien)||''}</div>
+    <div><b>ĐẠI DIỆN BÊN B</b><br><i>(Ký, ghi rõ họ tên, đóng dấu)</i><br><br><br><br>${(d.benB&&d.benB.dai_dien)||''}</div>
+  </div>
+  <script>window.onload=function(){window.print();}<\/script></body></html>`;
+  const w=window.open('','_blank'); if(!w)return toast("Trình duyệt chặn cửa sổ mới — cho phép popup để xuất PDF","err");
+  w.document.write(html); w.document.close();
 }
 
 /* --- Tab Email chào hàng (soạn → duyệt → gửi) --- */
