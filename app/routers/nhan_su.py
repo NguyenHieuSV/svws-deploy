@@ -34,6 +34,43 @@ def ds_nhan_vien(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM")
     return db.query(NhanVien).order_by(NhanVien.id).all()
 
 
+from pydantic import BaseModel as _NVBase
+
+
+class NhanVienMoiVao(_NVBase):
+    ho_ten: str
+    ma: str | None = None
+    chuc_danh: str | None = None
+    luong_co_ban: float = 0
+    luong_dong_bh: float = 0
+    so_phu_thuoc: int = 0
+    email: str | None = None
+    so_tai_khoan: str | None = None
+    ngan_hang: str | None = None
+    tk_chi_phi: str = "642"
+
+
+@router.post("/nhan-vien", status_code=201)
+def tao_nhan_vien(data: NhanVienMoiVao, db: Session = Depends(get_db),
+                  nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    """Thêm nhân viên mới vào hồ sơ lương (kỳ lương tạo sau sẽ tự gồm người này)."""
+    if not data.ho_ten.strip():
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Họ tên là bắt buộc")
+    if data.ma:
+        trung = db.query(NhanVien).filter_by(ma=data.ma).first()
+        if trung:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Mã NV '{data.ma}' đã tồn tại")
+    nv = NhanVien(ma=data.ma, ho_ten=data.ho_ten.strip(), chuc_danh=data.chuc_danh,
+                  luong_co_ban=data.luong_co_ban, luong_dong_bh=data.luong_dong_bh,
+                  so_phu_thuoc=data.so_phu_thuoc, email=data.email,
+                  so_tai_khoan=data.so_tai_khoan, ngan_hang=data.ngan_hang,
+                  tk_chi_phi=data.tk_chi_phi or "642", trang_thai="DANG_LAM")
+    db.add(nv); db.flush()
+    ghi_audit(db, nd.id, "TAO", "nhan_vien", nv.id, moi={"ho_ten": nv.ho_ten, "chuc_danh": nv.chuc_danh})
+    db.commit(); db.refresh(nv)
+    return {"id": nv.id, "ma": nv.ma, "ho_ten": nv.ho_ten, "chuc_danh": nv.chuc_danh}
+
+
 # ----- Chấm công -----
 @router.post("/cham-cong", status_code=201)
 def cham_cong(data: ChamCongVao, db: Session = Depends(get_db),

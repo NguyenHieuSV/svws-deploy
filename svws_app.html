@@ -5291,7 +5291,8 @@ async function nsApThuongKPI(){
 /* --- Tab Hồ sơ lương --- */
 async function nsHoSo(host){
   const canOp=can("nhan_su","THAO_TAC");
-  const ds = S.mode==="live" ? await api("/nhan-su/ho-so") : _nsDemoHoSo();
+  if(S.mode!=="live"&&!DEMO.ns_hoso)DEMO.ns_hoso=_nsDemoHoSo();
+  const ds = S.mode==="live" ? await api("/nhan-su/ho-so") : DEMO.ns_hoso;
   const rows=ds.map(x=>`<tr><td><b>${x.ma||x.id}</b></td><td>${x.ho_ten}</td><td>${x.chuc_danh||''}</td>
     <td class="num">${vnd(x.luong_co_ban)}</td><td class="num">${vnd(x.luong_dong_bh||x.luong_co_ban)}</td>
     <td class="num">${vnd((x.phu_cap_an||0)+(x.phu_cap_di_lai||0)+(x.phu_cap_dien_thoai||0)+(x.phu_cap_trach_nhiem||0))}</td>
@@ -5300,9 +5301,53 @@ async function nsHoSo(host){
   host.innerHTML=`<div class="note" style="padding:0 0 10px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
     <span style="flex:1">Khai báo lương cơ bản, lương đóng BH, phụ cấp, số người phụ thuộc (giảm trừ thuế), tài khoản & <b>email</b> nhận phiếu lương cho từng nhân viên.</span>
     ${can("nhan_su","DUYET")?'<button class="btn-sm ghost" onclick="nsThamSo()">⚖️ Tham số lương theo luật</button>':''}</div>
-    <div class="panel"><div class="panel-h"><h3>Hồ sơ lương nhân viên</h3></div><div class="panel-b"><table>
+    <div class="panel"><div class="panel-h"><h3>Hồ sơ lương nhân viên</h3><div class="spacer"></div>
+      ${canOp?'<button class="btn-sm" onclick="nsMoThemNV()">+ Thêm nhân viên</button>':''}</div><div class="panel-b"><table>
     <thead><tr><th>Mã</th><th>Họ tên</th><th>Chức danh</th><th class="num">Lương CB</th><th class="num">Lương đóng BH</th><th class="num">Phụ cấp</th><th class="num">Phụ thuộc</th><th>Email</th><th></th></tr></thead>
-    <tbody>${rows||'<tr><td colspan="9" class="empty">Chưa có nhân viên.</td></tr>'}</tbody></table></div></div>`;
+    <tbody>${rows||'<tr><td colspan="9" class="empty">Chưa có nhân viên — bấm "+ Thêm nhân viên".</td></tr>'}</tbody></table></div></div>`;
+}
+function nsMoThemNV(){
+  const chucDanhs=[...new Set(Object.values(ROLE_NAME))];
+  _ktModal("Thêm nhân viên mới",`
+    <datalist id="ns_cd_list">${chucDanhs.map(c=>`<option value="${c}">`).join('')}</datalist>
+    <div class="formrow">
+      <div class="f" style="flex:2"><label>Họ tên <span style="color:var(--red)">*</span></label><input id="nv_ht" placeholder="VD: Nguyễn Văn A"></div>
+      <div class="f"><label>Mã NV</label><input id="nv_ma" placeholder="VD: NV003"></div></div>
+    <label>Chức danh (gõ hoặc chọn — VD: NV Kỹ thuật)</label>
+    <input id="nv_cd" list="ns_cd_list" placeholder="VD: NV Kỹ thuật">
+    <div class="formrow">
+      <div class="f"><label>Lương cơ bản</label><input id="nv_lcb" type="number" min="0" value="0"></div>
+      <div class="f"><label>Lương đóng BH (0 = theo lương CB)</label><input id="nv_ldbh" type="number" min="0" value="0"></div>
+      <div class="f"><label>Số người phụ thuộc</label><input id="nv_pt" type="number" min="0" value="0"></div></div>
+    <div class="formrow">
+      <div class="f"><label>Email nhận phiếu lương</label><input id="nv_email" type="email"></div>
+      <div class="f"><label>Số tài khoản</label><input id="nv_stk"></div>
+      <div class="f"><label>Ngân hàng</label><input id="nv_nh"></div></div>
+    <div class="login-foot">Phụ cấp (ăn, đi lại, điện thoại, trách nhiệm) khai sau bằng nút <b>Sửa</b> trên dòng nhân viên. Nhân viên mới sẽ tự có mặt trong <b>kỳ lương tạo sau này</b>.</div>
+    <button class="btn-sm" style="margin-top:12px" onclick="nsTaoNV()">Thêm nhân viên</button>`);
+}
+async function nsTaoNV(){
+  const ht=gv('nv_ht'),ma=gv('nv_ma'),cd=gv('nv_cd'),email=gv('nv_email');
+  if(!ht)return toast("Họ tên là bắt buộc","err");
+  if(email&&!email.includes('@'))return toast("Email không hợp lệ","err");
+  const body={ho_ten:ht,ma:ma||null,chuc_danh:cd||null,
+    luong_co_ban:Number(gv('nv_lcb'))||0,luong_dong_bh:Number(gv('nv_ldbh'))||0,
+    so_phu_thuoc:Number(gv('nv_pt'))||0,email:email||null,
+    so_tai_khoan:gv('nv_stk')||null,ngan_hang:gv('nv_nh')||null};
+  if(S.mode==="live"){
+    try{await api("/nhan-su/nhan-vien",{method:'POST',body:JSON.stringify(body)});}
+    catch(e){return toast(e.detail||e.message,"err");}
+  }else{
+    if(!DEMO.ns_hoso)DEMO.ns_hoso=_nsDemoHoSo();
+    const id=Math.max(0,...DEMO.ns_hoso.map(x=>x.id))+1;
+    DEMO.ns_hoso.push({id,ma:ma||("NV"+String(id).padStart(3,'0')),ho_ten:ht,chuc_danh:cd||'',
+      luong_co_ban:body.luong_co_ban,luong_dong_bh:body.luong_dong_bh,so_phu_thuoc:body.so_phu_thuoc,
+      phu_cap_an:0,phu_cap_di_lai:0,phu_cap_dien_thoai:0,phu_cap_trach_nhiem:0,
+      email:email||'',so_tai_khoan:gv('nv_stk')||'',ngan_hang:gv('nv_nh')||'',tk_chi_phi:'642'});
+  }
+  document.getElementById('ktModal')?.remove();
+  toast("Đã thêm nhân viên "+ht+(S.mode==="demo"?" (demo)":"")+" — sẽ có trong kỳ lương tạo mới","ok");
+  nsRender();
 }
 function nsSuaHoSo(x){
   const f=(id,lb,v,t='number')=>`<div class="f"><label>${lb}</label><input id="${id}" type="${t}" value="${v??''}"></div>`;
