@@ -2222,9 +2222,12 @@ async function bhDonHang(host){
       <div class="panel-b"><table><thead><tr><th>Loại</th><th>Mã Bán hàng</th><th>Tên tệp</th><th class="num">Cỡ</th><th>Tải về</th></tr></thead>
         <tbody>${tepRows}</tbody></table></div>${upBox}</div>`;
   }).join('');
-  const hdRows=hds.map(g=>{const d=g.noi_dung||{};const t=_bgfTinh(d);
+  const hdRows=hds.map(g=>{const d=g.noi_dung||{};
+    const giaTri=d.mau==='DV2N'
+      ? (Number(d.d2_don_gia)?vnd(d.d2_don_gia).replace(' ₫',' ')+(d.d2_don_gia_dv||'VND'):'—')
+      : vnd(_bgfTinh(d).tong);
     return `<tr><td><b>${g.so||d.so||'—'}</b></td><td>${(d.benA&&d.benA.ten)||'—'}</td>
-    <td>${d.don_hang_so||'—'}</td><td class="num">${vnd(t.tong)}</td>
+    <td>${d.don_hang_so||'—'}</td><td class="num">${giaTri}</td>
     <td>${g.trang_thai==='DA_XUAT'?'<span class="badge b-ok">Đã xuất PDF</span>':'<span class="badge b-cho">Nháp</span>'}</td>
     <td style="white-space:nowrap">
       ${canUp?`<button class="btn-sm ghost" onclick="hdSua(${g.id})">✏️ Sửa</button>`:''}
@@ -2293,97 +2296,172 @@ function docSoVN(n){
   const s=parts.join(" ").replace(/\s+/g," ").trim();
   return s.charAt(0).toUpperCase()+s.slice(1)+" đồng";
 }
+/* Mẫu Hợp đồng dịch vụ song ngữ (theo SongViet_Contract_Form) */
+const HD_BENB_MD={ten:"CÔNG TY TNHH GIẢI PHÁP KỸ THUẬT SÓNG VIỆT",ten_en:"SONG VIET ENGINEERING SOLUTIONS CO., LTD",
+  dai_dien:"Ông NGUYỄN LÊ HIẾU",chuc_vu:"Giám đốc",
+  dia_chi:"448 Võ Văn Tần, Phường 5, Quận 3, Tp. Hồ Chí Minh",dien_thoai:"(08) 37273369",
+  mst:"0303620066",tai_khoan:"002001700001 — Ngân hàng TMCP Đông Á - PGD Lê Văn Sỹ, Quận 3, Tp.HCM"};
+function HD_DK_MD(){return [
+ {ten:"ĐIỀU 5: TRÁCH NHIỆM CỦA BÊN A / RESPONSIBILITIES OF PARTY A",
+  vn:"Bên A phải thanh toán đúng hạn cho bên B theo thỏa thuận tại điều 3, nếu thanh toán trễ không theo hợp đồng thì sẽ bị phạt 0.03% trên giá trị phần nghĩa vụ hợp đồng bị vi phạm trên ngày, nhưng không vượt quá 8% tổng giá trị hợp đồng.\nTạo mọi điều kiện thuận lợi để giúp bên B bàn giao và nghiệm thu hệ thống đúng tiến độ.\nPhối hợp thực hiện các tư vấn kỹ thuật của bên B nhằm đảm bảo và kiểm soát hệ thống vận hành tốt hơn.\nCung cấp điện, nước đến điểm hệ thống được lắp đặt.\nChuẩn bị và bàn giao mặt bằng cho hệ thống.",
+  en:"Party A shall pay Party B on time as agreed in Article 3. Late payment shall incur a penalty of 0.03% of the value of the breached contractual obligation per day, but not exceeding 8% of the total contract value.\nFacilitate Party B's handover and acceptance of the system on schedule.\nCooperate with Party B's technical consultations to ensure and better control the operation of the system.\nSupply electricity and water to the point where the system is installed.\nPrepare and hand over the site for the system."},
+ {ten:"ĐIỀU 6: TRÁCH NHIỆM CỦA BÊN B / RESPONSIBILITIES OF PARTY B",
+  vn:"Bên B có trách nhiệm lắp đặt hệ thống tại địa điểm của bên A theo đúng tiêu chuẩn, số lượng, chất lượng yêu cầu và đúng thời gian thỏa thuận.\nTuân thủ các nội quy làm việc tại bên A, bảo đảm an toàn lao động, PCCC và bảo vệ môi trường, tài sản của bên A và bên thứ 3 (nếu có) trong suốt quá trình thi công.\nKhông được chuyển nhượng quyền và nghĩa vụ của mình theo Hợp Đồng này cho bất kỳ bên thứ ba nào mà không có sự đồng ý trước của Bên A.\nBên B chịu trách nhiệm về an toàn lao động, tính mạng, tài sản thiết bị của mình trong quá trình thi công lắp đặt, và bồi thường thiệt hại cho bên A hoặc bên thứ 3 (nếu có) nếu gây ra sự cố.",
+  en:"Install the system at Party A's premises in accordance with the correct standards, quantity, quality requirements and agreed schedule.\nComply with Party A's EHS policies; ensure occupational safety, fire prevention and protection of the environment and property of Party A and third parties (if any) throughout construction.\nNot assign its rights and obligations under this Service Contract to any third party without the prior consent of Party A.\nBe responsible for occupational safety, human life, property and equipment during installation, and compensate Party A and third parties (if any) for losses caused by Party B."},
+ {ten:"ĐIỀU 7: HIỆU LỰC CỦA HỢP ĐỒNG / EFFECT OF THE SERVICE CONTRACT",
+  vn:"Hợp Đồng dịch vụ này có hiệu lực … năm, từ ngày …/…/… đến hết ngày …/…/….\nTrường hợp được chấm dứt sớm theo các điều khoản của Hợp Đồng này, Bên A sẽ phải thanh toán chi phí bồi hoàn đầu tư còn lại cho bên B theo phụ lục số 01 đính kèm.",
+  en:"This service contract is effective for … year(s), from …/…/… to the end of …/…/….\nIn the event of early termination under the terms of this service contract, Party A shall pay Party B the remaining investment compensation cost, in accordance with appendix No. 01."},
+ {ten:"ĐIỀU 8: BỒI THƯỜNG / INDEMNIFICATION",
+  vn:"Các Bên cam kết tuân thủ nghiêm ngặt các điều khoản và điều kiện đã thoả thuận trong Hợp Đồng dịch vụ này. Bất kỳ sự vi phạm nào đều phải chịu các nghĩa vụ pháp lý. Trong trường hợp vi phạm Hợp Đồng dịch vụ gây ra bởi một trong các Bên trong thời hạn của Hợp Đồng mà gây thiệt hại cho Bên còn lại, Bên vi phạm phải bồi thường đầy đủ cho Bên còn lại.",
+  en:"The Parties undertake to strictly comply with the terms and conditions agreed in this Service Contract. Any breach shall be subject to legal liability. In the event that a breach caused by one Party during the term causes damage to the other Party, the breaching Party shall fully indemnify the other Party."},
+ {ten:"ĐIỀU 9: CHẤM DỨT HỢP ĐỒNG / TERMINATION",
+  vn:"9.1 Ngoại trừ các trường hợp được chấm dứt trước thời hạn theo quy định dưới đây, Hợp Đồng dịch vụ này sẽ có hiệu lực kể từ ngày ký cho đến khi hết Thời Hạn. Không Bên nào được chấm dứt Hợp Đồng trừ trường hợp được quy định trong Hợp Đồng này.\n9.2 Hợp Đồng này sẽ được chấm dứt khi: hết Thời Hạn mà các Bên không đạt được thoả thuận gia hạn; hoặc các Bên cùng thỏa thuận chấm dứt.\n9.3 Hợp Đồng có thể được chấm dứt bởi một Bên bằng thông báo bằng văn bản gửi Bên Vi Phạm trước 30 ngày làm việc khi có vi phạm nghiêm trọng mà không được khắc phục. Vi phạm nghiêm trọng: đối với Bên A là chậm thanh toán quá 105 ngày làm việc; đối với Bên B là vi phạm yêu cầu chất lượng nước sau xử lý tại Điều 2.\n9.4 Bên Vi Phạm phải bồi thường toàn bộ thiệt hại thực tế, hoàn tất trong vòng 30 ngày làm việc kể từ ngày chấm dứt.\n9.5 Đơn phương chấm dứt trái Hợp Đồng phải bồi thường toàn bộ thiệt hại thực tế trực tiếp phát sinh.",
+  en:"9.1 Except for early termination cases below, this Service Contract is effective from signing until the end of the Term.\n9.2 This Contract terminates upon: expiry of the Term without extension agreement; or mutual agreement of the Parties.\n9.3 Either Party may terminate by 30 working days' written notice upon an unremedied material breach. Material breach: for Party A, payment delay exceeding 105 working days; for Party B, breach of treated-water quality requirements in Article 2.\n9.4 The Breaching Party shall compensate all actual damages within 30 working days from termination.\n9.5 Unilateral termination in breach of the Contract entails full compensation for direct actual damages."},
+ {ten:"ĐIỀU 10: BẤT KHẢ KHÁNG / FORCE MAJEURE",
+  vn:"Trong trường hợp xảy ra Sự kiện bất khả kháng, các nghĩa vụ không thể thực hiện được sẽ được tạm ngưng trong thời gian diễn ra sự kiện. Bên chịu ảnh hưởng phải thông báo bằng văn bản cho Bên kia trong vòng 07 ngày, nêu rõ bản chất sự kiện và các nỗ lực khắc phục.\n“Sự kiện bất khả kháng” là sự kiện vượt trên sự kiểm soát hợp lý của các Bên: động đất, bão lụt, thời tiết khắc nghiệt, chiến tranh, đình công, dịch bệnh, cách ly, hành động của chính phủ…\nNếu sự kiện kéo dài từ 01 tháng trở lên, bên bị ảnh hưởng có thể thông báo bằng văn bản chấm dứt Hợp Đồng.",
+  en:"Upon a Force Majeure Event, obligations that cannot be performed shall be suspended for its duration. The affected Party shall notify the other in writing within 07 days, detailing the event and remediation efforts.\nA \"Force Majeure Event\" means any event beyond the Parties' reasonable control: earthquake, storm, flood, extreme weather, war, strike, epidemic, quarantine, government act...\nIf the event lasts 01 month or more, the affected Party may notify termination in writing."},
+ {ten:"ĐIỀU 11: BẢO ĐẢM CHỐNG THAM NHŨNG VÀ TIÊU CHUẨN NHÂN QUYỀN / ANTI BRIBERY CORRUPTION & HUMAN RIGHTS STANDARDS",
+  vn:"11.1 Hai Bên cam kết thực hiện nghĩa vụ phù hợp với pháp luật phòng, chống tham nhũng của Việt Nam; không tặng, cho hoặc chi trả (trực tiếp hoặc qua bên thứ ba) các khoản thanh toán hoặc lợi ích tài chính trái pháp luật; công bố các khoản thanh toán cho đại lý, môi giới, trung gian liên quan đến Hợp Đồng.\n11.2 Bên B có trách nhiệm (và bảo đảm đại diện, đại lý, nhà thầu phụ, nhà cung cấp, người lao động của mình) tuân thủ pháp luật về lao động trẻ em và nhân quyền theo Hiến pháp, Bộ luật Dân sự và Bộ luật Lao động Việt Nam.",
+  en:"11.1 Both Parties commit to comply with Vietnam's anti-corruption laws; not to give or pay (directly or via third parties) unlawful payments or financial benefits; and to disclose payments to agents, brokers or intermediaries in connection with this Contract.\n11.2 Party B is responsible (and shall ensure its representatives, agents, subcontractors, suppliers and workers) comply with all applicable child labor and human rights laws under the Constitution, Civil Code and Labor Code of Vietnam."},
+ {ten:"ĐIỀU 12: NGÔN NGỮ SỬ DỤNG TRONG HỢP ĐỒNG / LANGUAGE OF THE CONTRACT",
+  vn:"Ngôn ngữ sử dụng là Tiếng Việt và Tiếng Anh. Các báo cáo, công văn, tài liệu trao đổi do bên B lập trong quá trình thực hiện hợp đồng đều phải được thể hiện bằng Tiếng Việt.",
+  en:"The languages used are Vietnamese and English. All reports, official letters and exchanged documents prepared by Party B during the performance of the Contract shall be presented in Vietnamese."},
+ {ten:"ĐIỀU 13: QUY ĐỊNH NHÀ CUNG CẤP / COMPLIANCE WITH SUPPLIER CODE",
+  vn:"13.1 Bên B cam kết tuân thủ Quy định đối với nhà cung cấp của khách hàng (phiên bản cập nhật mới nhất), gồm 5 mục không thể thương lượng: 1. Lao động trẻ em; 2. Lao động cưỡng bức; 3. Lạm dụng thể chất hoặc tinh thần; 4. Mức lương tối thiểu; 5. Hối lộ hoặc hoạt động tội phạm.\n13.2 Về mức lương tối thiểu: bảo đảm người lao động được trả bằng hoặc cao hơn mức tối thiểu theo pháp luật.\n13.3 Về giờ làm việc và giấy phép kinh doanh: tuân thủ quy định pháp luật hiện hành.\n13.4 Nhà cung cấp tự đánh giá sự tuân thủ và khắc phục các điểm chưa tuân thủ trong thời gian nhanh nhất.",
+  en:"13.1 Party B commits to comply with the customer's Supplier Code (latest version), including 5 non-negotiable items: 1. Child labor; 2. Forced labor; 3. Mental & physical abuse; 4. Minimum wages; 5. Bribery & corruption.\n13.2 Minimum wages: ensure Workers are paid at or above the legal minimum.\n13.3 Working hours and business licenses: comply with applicable regulations.\n13.4 Suppliers shall self-assess compliance and promptly take corrective actions."},
+ {ten:"ĐIỀU 14: ĐIỀU KHOẢN CHUNG / GENERAL REGULATIONS",
+  vn:"Hợp Đồng này được điều chỉnh và giải thích theo pháp luật Việt Nam.\nHai Bên cam kết thực hiện đúng các điều khoản đã ký. Nếu có trở ngại trong quá trình thực hiện, các Bên phải bàn bạc thống nhất bằng văn bản chính thức.\nMọi sửa đổi bổ sung phải được hai bên thỏa thuận bằng các phụ lục Hợp Đồng đính kèm.\nBên nào tự ý hủy bỏ Hợp Đồng mà không thống nhất với bên kia thì phải bồi thường thiệt hại và hoàn toàn chịu trách nhiệm trước pháp luật.\nHợp đồng được lập thành 2 (hai) bản gốc có giá trị pháp lý như nhau, mỗi Bên giữ 1 (một) bản gốc để thực hiện.",
+  en:"This Service Contract shall be governed by and construed in accordance with the laws of Vietnam.\nThe Parties undertake to duly perform the signed terms. Any obstacle during performance shall be resolved by mutual written agreement.\nAny amendment or supplement must be agreed by the Parties by way of attached contract annexes.\nA Party unilaterally cancelling the Contract without the other's agreement shall compensate for damages and be fully liable before the law.\nThis Contract is made in two (02) originals of equal legal validity, each Party keeping one (01) original."}
+];}
 function hdMoi(oid){
   const o=(S._dhList||[]).find(x=>x.id===oid); if(!o)return;
   const kh=S.mode==="live"
     ? (S._dhKhs||[]).find(k=>k.id===o.khach_hang_id)
     : (DEMO.khach||[]).find(k=>k.ten===o.khach);
   const nay=new Date();
+  const mmyyyy=String(nay.getMonth()+1).padStart(2,'0')+nay.getFullYear();
   S.hdEdit={id:null,d:{
-    loai:'HOP_DONG',
-    so:"HĐ-"+(o.so||o.id)+"/"+nay.getFullYear(),
+    loai:'HOP_DONG', mau:'DV2N',
+    so:`SV-${(kh&&kh.ma)?kh.ma.replace(/^KH-?/,''):'KH'}-01-${mmyyyy}`,
     ngay:nay.toISOString().slice(0,10),
+    tieu_de_vn:"HỢP ĐỒNG DỊCH VỤ", tieu_de_en:"SERVICE CONTRACT",
     don_hang_so:o.so||('DH-'+o.id),
     khach_hang_id:o.khach_hang_id||(kh?kh.id:null),
-    benA:{ten:(kh?kh.ten:o.khach)||"",dia_chi:"",mst:(kh&&kh.ma_so_thue)||"",
-      dai_dien:(kh&&kh.nguoi_lien_he)||"",chuc_vu:"",dien_thoai:(kh&&kh.dien_thoai)||""},
-    benB:{ten:"Công ty TNHH Giải pháp Kỹ thuật Song Việt",dia_chi:"448 Võ Văn Tần, P. Bàn Cờ, TP.HCM",
-      mst:"",dai_dien:"",chuc_vu:"Giám đốc",dien_thoai:""},
-    items:[{ten:"Cung cấp thiết bị/vật tư theo đơn hàng "+(o.so||o.id),mo_ta:"",so_luong:1,don_vi:"Gói",don_gia:o.tong_tien||0,vat_pct:8}],
-    thanh_toan:"Đặt cọc 40% khi ký hợp đồng, thanh toán 60% còn lại khi có thông báo giao hàng.",
-    giao_hang:"8-10 tuần kể từ ngày ký hợp đồng và nhận đặt cọc.",
-    dia_diem:"Theo thỏa thuận.",
-    bao_hanh:"12 tháng kể từ ngày bàn giao.",
-    so_ban:"02"
+    benA:{ten:(kh?kh.ten:o.khach)||"",ten_en:"",dai_dien:(kh&&kh.nguoi_lien_he)||"",chuc_vu:"",
+      dia_chi:"",dien_thoai:(kh&&kh.dien_thoai)||"",mst:(kh&&kh.ma_so_thue)||"",tai_khoan:""},
+    benB:Object.assign({},HD_BENB_MD),
+    d1_vn:"Hợp Đồng dịch vụ này quy định các điều khoản thỏa thuận cơ bản về: hệ thống mà bên B sẽ cung cấp/đầu tư, tiêu chí nghiệm thu, đơn giá dịch vụ, phương thức thanh toán, trách nhiệm và nghĩa vụ của các bên, chấm dứt hợp đồng và các điều khoản khác. Quy cách hệ thống cụ thể như sau:",
+    d1_en:"This Service Contract sets out the fundamental terms agreed regarding: the system that Party B shall supply/invest in, the acceptance criteria, the service unit price, the payment method, the responsibilities and obligations of the Parties, termination, and other provisions. The detailed specifications are as follows:",
+    tb:[{nhom:true,ten:"Hạng mục thiết bị chính / Main equipment"},
+        {ten:"",thong_so:"",so_luong:"",ncc:""}],
+    d2_don_gia:0, d2_don_gia_dv:"VND/m³",
+    d2_ghi_chu_vn:"Đơn giá sẽ được cân nhắc điều chỉnh 6 tháng 1 lần dựa trên tỷ lệ tăng hoặc giảm giá hóa chất. Đơn giá trên đã bao gồm tất cả các phí lắp đặt, vận hành, bảo trì do bên B chịu trách nhiệm. Đơn giá chưa bao gồm thuế VAT.",
+    d2_ghi_chu_en:"The unit price shall be reviewed for adjustment once every six (6) months based on the rate of increase or decrease in chemical prices. The unit price is inclusive of all installation, operation and maintenance costs for which Party B is responsible, and exclusive of VAT.",
+    d2_nghiem_thu_vn:"Nước sau xử lý đạt chuẩn theo QCVN thỏa thuận. Hai bên tiến hành chốt sổ khối lượng vào ngày 25 hàng tháng; bên B xuất hóa đơn VAT cho bên A theo số lượng tương ứng trước ngày 30 của tháng đó.",
+    d2_nghiem_thu_en:"Treated water meets the agreed QCVN standards. The Parties shall reconcile the treated volume on the 25th of each month; Party B shall issue a VAT invoice to Party A for the corresponding volume before the 30th of that month.",
+    d3_hinh_thuc_vn:"Bằng chuyển khoản, theo tiền Đồng Việt Nam.",
+    d3_hinh_thuc_en:"By bank transfer, in Vietnamese Dong (VND).",
+    d3_tam_ung:0,
+    d3_dieu_khoan_vn:"Bên A thanh toán toàn bộ giá trị dịch vụ hàng tháng (bao gồm thuế VAT) trong vòng 30 ngày kể từ ngày hóa đơn.",
+    d3_dieu_khoan_en:"Party A shall pay the full monthly service value (including VAT) within thirty (30) days from the invoice date.",
+    d4_vn:"Bên B có trách nhiệm lắp đặt hệ thống tại địa chỉ của bên A. Thời gian lắp đặt: trong vòng … tuần sau khi hai bên ký hợp đồng và bên B nhận được khoản tạm ứng như nêu tại Điều 3.",
+    d4_en:"Party B shall install the system at Party A's address. Installation time: within … weeks after both Parties sign this Contract and Party B receives the advance stated in Article 3.",
+    dieu_khoan:HD_DK_MD()
   }};
   viewBanHang($("#main"));
 }
 function hdEditor(host){
-  const d=S.hdEdit.d, t=_bgfTinh(d);
+  const d=S.hdEdit.d;
   const esc=v=>(v===null||v===undefined?'':String(v)).replace(/"/g,'&quot;');
-  const ben=(khoa,b,tieude)=>`<div style="flex:1;min-width:280px;border:1px solid var(--line);border-radius:10px;padding:10px 14px">
+  const escT=v=>(v===null||v===undefined?'':String(v)).replace(/</g,'&lt;');
+  const ben=(khoa,b,tieude)=>`<div style="flex:1;min-width:300px;border:1px solid var(--line);border-radius:10px;padding:10px 14px">
     <div style="font-weight:700;margin-bottom:4px">${tieude}</div>
-    <label>Tên đơn vị</label><input value="${esc(b.ten)}" oninput="hdSetBen('${khoa}','ten',this.value)">
-    <label>Địa chỉ</label><input value="${esc(b.dia_chi)}" oninput="hdSetBen('${khoa}','dia_chi',this.value)">
-    <div style="display:flex;gap:10px"><div style="flex:1"><label>Mã số thuế</label><input value="${esc(b.mst)}" oninput="hdSetBen('${khoa}','mst',this.value)"></div>
-      <div style="flex:1"><label>Điện thoại</label><input value="${esc(b.dien_thoai)}" oninput="hdSetBen('${khoa}','dien_thoai',this.value)"></div></div>
-    <div style="display:flex;gap:10px"><div style="flex:1"><label>Người đại diện</label><input value="${esc(b.dai_dien)}" oninput="hdSetBen('${khoa}','dai_dien',this.value)"></div>
+    <label>Tên đơn vị (VN)</label><input value="${esc(b.ten)}" oninput="hdSetBen('${khoa}','ten',this.value)">
+    <label>Tên đơn vị (EN)</label><input value="${esc(b.ten_en)}" oninput="hdSetBen('${khoa}','ten_en',this.value)">
+    <div style="display:flex;gap:10px"><div style="flex:1"><label>Đại diện bởi</label><input value="${esc(b.dai_dien)}" oninput="hdSetBen('${khoa}','dai_dien',this.value)"></div>
       <div style="flex:1"><label>Chức vụ</label><input value="${esc(b.chuc_vu)}" oninput="hdSetBen('${khoa}','chuc_vu',this.value)"></div></div>
+    <label>Địa chỉ</label><input value="${esc(b.dia_chi)}" oninput="hdSetBen('${khoa}','dia_chi',this.value)">
+    <div style="display:flex;gap:10px"><div style="flex:1"><label>Điện thoại</label><input value="${esc(b.dien_thoai)}" oninput="hdSetBen('${khoa}','dien_thoai',this.value)"></div>
+      <div style="flex:1"><label>MST</label><input value="${esc(b.mst)}" oninput="hdSetBen('${khoa}','mst',this.value)"></div></div>
+    <label>Tài khoản số / tại ngân hàng</label><input value="${esc(b.tai_khoan)}" oninput="hdSetBen('${khoa}','tai_khoan',this.value)">
   </div>`;
-  const itemRows=(d.items||[]).map((it,i)=>`<tr>
-    <td style="color:var(--muted)">${i+1}</td>
-    <td><input value="${esc(it.ten)}" oninput="hdSet(${i},'ten',this.value)" style="min-width:220px" placeholder="Tên hàng hóa / nội dung công việc"></td>
-    <td><input type="number" min="0" step="any" value="${esc(it.so_luong)}" oninput="hdSet(${i},'so_luong',this.value)" style="width:70px"></td>
-    <td><input value="${esc(it.don_vi)}" oninput="hdSet(${i},'don_vi',this.value)" style="width:70px"></td>
-    <td><input type="number" min="0" step="any" value="${esc(it.don_gia)}" oninput="hdSet(${i},'don_gia',this.value)" style="width:130px"></td>
-    <td><input type="number" min="0" max="100" step="any" value="${esc(it.vat_pct??8)}" oninput="hdSet(${i},'vat_pct',this.value)" style="width:60px"></td>
-    <td class="num" id="hd_tt_${i}">${vnd((Number(it.so_luong)||0)*(Number(it.don_gia)||0))}</td>
-    <td><button class="btn-sm ghost" style="color:var(--red)" onclick="hdXoaDong(${i})">✕</button></td></tr>`).join('');
+  let sttTB=0;
+  const tbRows=(d.tb||[]).map((r,i)=>r.nhom
+    ? `<tr style="background:var(--surface)"><td></td>
+        <td colspan="4"><input value="${esc(r.ten)}" oninput="hdTb(${i},'ten',this.value)" style="font-weight:700" placeholder="Tên nhóm thiết bị (VD: Điều chỉnh pH)"></td>
+        <td><button class="btn-sm ghost" style="color:var(--red)" onclick="hdTbXoa(${i})">✕</button></td></tr>`
+    : `<tr><td style="color:var(--muted)">${++sttTB}</td>
+        <td><input value="${esc(r.ten)}" oninput="hdTb(${i},'ten',this.value)" style="min-width:170px" placeholder="Tên thiết bị / Equipment"></td>
+        <td><input value="${esc(r.thong_so)}" oninput="hdTb(${i},'thong_so',this.value)" style="min-width:200px" placeholder="Thông số kỹ thuật / Specs"></td>
+        <td><input value="${esc(r.so_luong)}" oninput="hdTb(${i},'so_luong',this.value)" style="width:90px" placeholder="VD: 2 bồn"></td>
+        <td><input value="${esc(r.ncc)}" oninput="hdTb(${i},'ncc',this.value)" style="width:90px" placeholder="VN/EU..."></td>
+        <td><button class="btn-sm ghost" style="color:var(--red)" onclick="hdTbXoa(${i})">✕</button></td></tr>`).join('');
+  const ta=(label,key,rows)=>`<label>${label}</label><textarea rows="${rows||3}" style="width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:9px;font-family:inherit;font-size:13.5px" oninput="hdSetD('${key}',this.value)">${escT(d[key])}</textarea>`;
+  const dkBoxes=(d.dieu_khoan||[]).map((dk,i)=>`<details style="border:1px solid var(--line);border-radius:9px;margin:8px 0">
+    <summary style="cursor:pointer;padding:9px 13px;font-weight:600;font-size:13px">${escT(dk.ten)}</summary>
+    <div style="padding:4px 13px 12px">
+      <label>Tiếng Việt</label><textarea rows="5" style="width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:9px;font-family:inherit;font-size:13px" oninput="hdDk(${i},'vn',this.value)">${escT(dk.vn)}</textarea>
+      <label>English</label><textarea rows="5" style="width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:9px;font-family:inherit;font-size:13px" oninput="hdDk(${i},'en',this.value)">${escT(dk.en)}</textarea>
+      <div class="login-foot">Xóa hết nội dung cả 2 ô nếu muốn bỏ điều khoản này khỏi bản in.</div>
+    </div></details>`).join('');
   host.innerHTML=`
   <div style="margin-bottom:12px"><button class="btn-sm ghost" onclick="hdDong()">← Quay lại danh sách</button></div>
-  <div class="panel"><div class="panel-h"><h3>${S.hdEdit.id?'Sửa hợp đồng':'Soạn hợp đồng mới'} — đơn hàng ${d.don_hang_so||''}</h3><div class="spacer"></div>
+  <div class="panel"><div class="panel-h"><h3>${S.hdEdit.id?'Sửa hợp đồng':'Soạn hợp đồng'} song ngữ — đơn hàng ${d.don_hang_so||''}</h3><div class="spacer"></div>
     <button class="btn-sm ghost" onclick="hdLuu()">💾 Lưu tạm</button>
     <button class="btn-sm" onclick="hdPdf()">🖨 Xuất PDF</button></div>
   <div class="panel-b" style="padding:14px 18px">
     <div style="display:flex;gap:12px;flex-wrap:wrap">
-      <div style="flex:1;min-width:180px"><label>Số hợp đồng</label><input value="${esc(d.so)}" oninput="hdSetD('so',this.value)"></div>
+      <div style="flex:1;min-width:170px"><label>Tiêu đề (VN)</label><input value="${esc(d.tieu_de_vn)}" oninput="hdSetD('tieu_de_vn',this.value)"></div>
+      <div style="flex:1;min-width:170px"><label>Tiêu đề (EN)</label><input value="${esc(d.tieu_de_en)}" oninput="hdSetD('tieu_de_en',this.value)"></div>
+      <div style="min-width:180px"><label>Số hợp đồng</label><input value="${esc(d.so)}" oninput="hdSetD('so',this.value)" placeholder="VD: SV-COATS-01-072026"></div>
       <div style="min-width:150px"><label>Ngày ký</label><input type="date" value="${esc(d.ngay)}" oninput="hdSetD('ngay',this.value)"></div>
-      <div style="min-width:110px"><label>Số bản</label><input value="${esc(d.so_ban)}" oninput="hdSetD('so_ban',this.value)"></div>
     </div>
     <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:12px">
-      ${ben('benA',d.benA,'BÊN A — BÊN MUA (khách hàng)')}
-      ${ben('benB',d.benB,'BÊN B — BÊN BÁN (Song Việt)')}
+      ${ben('benA',d.benA,'BÊN A (Bên Mua) / PARTY A (the Buyer)')}
+      ${ben('benB',d.benB,'BÊN B (Bên Bán) / PARTY B (the Seller)')}
     </div>
-    <div style="margin:16px 0 6px;font-weight:700;font-size:13px">ĐIỀU 1 — NỘI DUNG HỢP ĐỒNG (hàng hóa / dịch vụ)</div>
-    <div style="overflow-x:auto"><table><thead><tr><th>#</th><th>Nội dung</th><th>SL</th><th>Đơn vị</th><th>Đơn giá (VND)</th><th>VAT %</th><th class="num">Thành tiền (chưa VAT)</th><th></th></tr></thead>
-    <tbody>${itemRows}</tbody></table></div>
-    <button class="btn-sm ghost" style="margin-top:8px" onclick="hdThemDong()">+ Thêm dòng</button>
-    <div style="display:flex;justify-content:flex-end;margin-top:14px">
-      <table style="width:auto;min-width:320px">
-        <tr><td>Tạm tính (chưa VAT):</td><td class="num" id="hd_sub"><b>${vnd(t.sub)}</b></td></tr>
-        <tr><td>Tổng VAT (theo từng dòng):</td><td class="num" id="hd_vat">${vnd(t.vat)}</td></tr>
-        <tr><td><b>GIÁ TRỊ HỢP ĐỒNG (gồm VAT):</b></td><td class="num" id="hd_tot" style="font-size:16px"><b>${vnd(t.tong)}</b></td></tr>
-      </table></div>
-    <div style="margin:16px 0 6px;font-weight:700;font-size:13px">CÁC ĐIỀU KHOẢN</div>
-    <label>Điều 2 — Thanh toán</label><input value="${esc(d.thanh_toan)}" oninput="hdSetD('thanh_toan',this.value)">
-    <div style="display:flex;gap:12px;flex-wrap:wrap">
-      <div style="flex:1;min-width:220px"><label>Điều 3 — Thời gian giao hàng</label><input value="${esc(d.giao_hang)}" oninput="hdSetD('giao_hang',this.value)"></div>
-      <div style="flex:1;min-width:180px"><label>Địa điểm giao hàng</label><input value="${esc(d.dia_diem)}" oninput="hdSetD('dia_diem',this.value)"></div>
+    <div style="margin:16px 0 6px;font-weight:700;font-size:13px">ĐIỀU 1 — NỘI DUNG HỢP ĐỒNG / SCOPE</div>
+    ${ta('Mô tả phạm vi (Tiếng Việt)','d1_vn')}
+    ${ta('Scope description (English)','d1_en')}
+    <div style="margin:10px 0 4px;font-weight:600;font-size:12.5px">Bảng thiết bị / Equipment list</div>
+    <div style="overflow-x:auto"><table><thead><tr><th>No.</th><th>Tên thiết bị / Equipment</th><th>Thông số kỹ thuật / Specs</th><th>Số lượng / Qty</th><th>NCC / Origin</th><th></th></tr></thead>
+    <tbody>${tbRows}</tbody></table></div>
+    <button class="btn-sm ghost" style="margin-top:8px" onclick="hdTbThem(false)">+ Thiết bị</button>
+    <button class="btn-sm ghost" style="margin-top:8px" onclick="hdTbThem(true)">+ Dòng nhóm</button>
+    <div style="margin:16px 0 6px;font-weight:700;font-size:13px">ĐIỀU 2 — ĐƠN GIÁ VÀ TIÊU CHÍ NGHIỆM THU / UNIT PRICE & ACCEPTANCE</div>
+    <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end">
+      <div style="min-width:170px"><label>Đơn giá dịch vụ</label><input type="number" min="0" step="any" value="${esc(d.d2_don_gia)}" oninput="hdSetD('d2_don_gia',this.value);const e=document.getElementById('hd_dg_chu');if(e)e.textContent=docSoVN(this.value)"></div>
+      <div style="min-width:120px"><label>Đơn vị tính</label><input value="${esc(d.d2_don_gia_dv)}" oninput="hdSetD('d2_don_gia_dv',this.value)"></div>
+      <div style="flex:1;color:var(--muted);font-size:12.5px;padding-bottom:10px">Bằng chữ: <b id="hd_dg_chu">${docSoVN(d.d2_don_gia)}</b></div>
     </div>
-    <label>Điều 4 — Bảo hành</label><input value="${esc(d.bao_hanh)}" oninput="hdSetD('bao_hanh',this.value)">
+    ${ta('Ghi chú đơn giá (VN)','d2_ghi_chu_vn',2)}
+    ${ta('Unit price notes (EN)','d2_ghi_chu_en',2)}
+    ${ta('Tiêu chí nghiệm thu, xuất hóa đơn (VN)','d2_nghiem_thu_vn',2)}
+    ${ta('Acceptance & invoicing criteria (EN)','d2_nghiem_thu_en',2)}
+    <div style="margin:16px 0 6px;font-weight:700;font-size:13px">ĐIỀU 3 — PHƯƠNG THỨC VÀ ĐIỀU KIỆN THANH TOÁN / PAYMENT</div>
+    <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end">
+      <div style="flex:1;min-width:200px"><label>Hình thức thanh toán (VN)</label><input value="${esc(d.d3_hinh_thuc_vn)}" oninput="hdSetD('d3_hinh_thuc_vn',this.value)"></div>
+      <div style="flex:1;min-width:200px"><label>Payment method (EN)</label><input value="${esc(d.d3_hinh_thuc_en)}" oninput="hdSetD('d3_hinh_thuc_en',this.value)"></div>
+    </div>
+    <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end">
+      <div style="min-width:190px"><label>Tạm ứng / đặt cọc (VND, 0 = không)</label><input type="number" min="0" step="any" value="${esc(d.d3_tam_ung)}" oninput="hdSetD('d3_tam_ung',this.value);const e=document.getElementById('hd_tu_chu');if(e)e.textContent=docSoVN(this.value)"></div>
+      <div style="flex:1;color:var(--muted);font-size:12.5px;padding-bottom:10px">Bằng chữ: <b id="hd_tu_chu">${docSoVN(d.d3_tam_ung)}</b></div>
+    </div>
+    ${ta('Điều khoản thanh toán (VN)','d3_dieu_khoan_vn',2)}
+    ${ta('Payment terms (EN)','d3_dieu_khoan_en',2)}
+    <div style="margin:16px 0 6px;font-weight:700;font-size:13px">ĐIỀU 4 — THỜI GIAN & ĐỊA ĐIỂM CUNG CẤP LẮP ĐẶT / TIME & PLACE</div>
+    ${ta('Tiếng Việt','d4_vn',2)}
+    ${ta('English','d4_en',2)}
+    <div style="margin:16px 0 6px;font-weight:700;font-size:13px">ĐIỀU 5 → 14 — CÁC ĐIỀU KHOẢN (bấm để mở và chỉnh sửa)</div>
+    ${dkBoxes}
   </div></div>`;
 }
-function hdSet(i,f,v){const it=S.hdEdit.d.items[i];if(!it)return;it[f]=v;
-  const el=document.getElementById('hd_tt_'+i);
-  if(el)el.textContent=vnd((Number(it.so_luong)||0)*(Number(it.don_gia)||0));
-  const t=_bgfTinh(S.hdEdit.d);
-  const s=document.getElementById('hd_sub'),vv=document.getElementById('hd_vat'),g=document.getElementById('hd_tot');
-  if(s)s.innerHTML='<b>'+vnd(t.sub)+'</b>'; if(vv)vv.textContent=vnd(t.vat); if(g)g.innerHTML='<b>'+vnd(t.tong)+'</b>';}
 function hdSetD(f,v){S.hdEdit.d[f]=v;}
 function hdSetBen(khoa,f,v){S.hdEdit.d[khoa][f]=v;}
-function hdThemDong(){const its=S.hdEdit.d.items;
-  its.push({ten:"",so_luong:1,don_vi:"Cái",don_gia:0,vat_pct:its.length?its[its.length-1].vat_pct:8});viewBanHang($("#main"));}
-function hdXoaDong(i){S.hdEdit.d.items.splice(i,1);if(!S.hdEdit.d.items.length)hdThemDong();else viewBanHang($("#main"));}
+function hdTb(i,f,v){const r=S.hdEdit.d.tb[i];if(r)r[f]=v;}
+function hdDk(i,f,v){const r=S.hdEdit.d.dieu_khoan[i];if(r)r[f]=v;}
+function hdTbThem(nhom){S.hdEdit.d.tb.push(nhom?{nhom:true,ten:""}:{ten:"",thong_so:"",so_luong:"",ncc:""});viewBanHang($("#main"));}
+function hdTbXoa(i){S.hdEdit.d.tb.splice(i,1);viewBanHang($("#main"));}
 function hdDong(){S.hdEdit=null;viewBanHang($("#main"));}
 async function hdLuu(trangThai){
   const d=S.hdEdit.d;
@@ -2412,7 +2490,26 @@ async function hdPdf(){
   toast("Đã mở bản in — chọn 'Save as PDF' trong hộp thoại in","ok");
 }
 function hdSua(id){const g=(S._hdList||[]).find(x=>x.id===id)||(DEMO.bgf||[]).find(x=>x.id===id);
-  if(!g)return;S.hdEdit={id:g.id,d:JSON.parse(JSON.stringify(g.noi_dung||{}))};
+  if(!g)return;
+  let d=JSON.parse(JSON.stringify(g.noi_dung||{}));
+  if(d.mau!=='DV2N'){ // nháp mẫu cũ -> chuyển sang mẫu song ngữ, giữ tối đa dữ liệu
+    const cu=d;
+    d={loai:'HOP_DONG',mau:'DV2N',so:cu.so||'',ngay:cu.ngay||new Date().toISOString().slice(0,10),
+      tieu_de_vn:"HỢP ĐỒNG DỊCH VỤ",tieu_de_en:"SERVICE CONTRACT",
+      don_hang_so:cu.don_hang_so||'',khach_hang_id:cu.khach_hang_id||null,
+      benA:Object.assign({ten:"",ten_en:"",dai_dien:"",chuc_vu:"",dia_chi:"",dien_thoai:"",mst:"",tai_khoan:""},cu.benA||{}),
+      benB:Object.assign({},HD_BENB_MD,cu.benB&&cu.benB.ten&&cu.benB.ten!=="Công ty TNHH Giải pháp Kỹ thuật Song Việt"?cu.benB:{}),
+      d1_vn:"",d1_en:"",
+      tb:(cu.items||[]).map(it=>({ten:it.ten||'',thong_so:it.mo_ta||'',so_luong:String(it.so_luong||'')+(it.don_vi?' '+it.don_vi:''),ncc:''})),
+      d2_don_gia:0,d2_don_gia_dv:"VND/m³",d2_ghi_chu_vn:"",d2_ghi_chu_en:"",
+      d2_nghiem_thu_vn:"",d2_nghiem_thu_en:"",
+      d3_hinh_thuc_vn:"Bằng chuyển khoản, theo tiền Đồng Việt Nam.",d3_hinh_thuc_en:"By bank transfer, in Vietnamese Dong (VND).",
+      d3_tam_ung:0,d3_dieu_khoan_vn:cu.thanh_toan||"",d3_dieu_khoan_en:"",
+      d4_vn:[cu.giao_hang,cu.dia_diem].filter(Boolean).join(' — '),d4_en:"",
+      dieu_khoan:HD_DK_MD()};
+    if(!d.tb.length)d.tb=[{nhom:true,ten:"Hạng mục thiết bị chính / Main equipment"},{ten:"",thong_so:"",so_luong:"",ncc:""}];
+  }
+  S.hdEdit={id:g.id,d};
   viewBanHang($("#main"));}
 function hdPdfTu(id){const g=(S._hdList||[]).find(x=>x.id===id)||(DEMO.bgf||[]).find(x=>x.id===id);
   if(!g)return;_hdPrint(g.noi_dung||{});}
@@ -2425,66 +2522,87 @@ async function hdXoa(id){
   toast("Đã xóa hợp đồng","ok");viewBanHang($("#main"));
 }
 function _hdPrint(d){
-  const t=_bgfTinh(d);
-  const money=n=>Math.round(n).toLocaleString('vi-VN');
-  const items=(d.items||[]).filter(it=>it.ten).map((it,i)=>`<tr>
-    <td style="text-align:center">${i+1}</td><td>${it.ten||''}</td>
-    <td style="text-align:center">${it.so_luong||''}</td><td style="text-align:center">${it.don_vi||''}</td>
-    <td style="text-align:right">${money(Number(it.don_gia)||0)}</td>
-    <td style="text-align:center">${it.vat_pct||0}%</td>
-    <td style="text-align:right">${money((Number(it.so_luong)||0)*(Number(it.don_gia)||0))}</td></tr>`).join('');
+  const money=n=>Math.round(Number(n)||0).toLocaleString('en-US');
+  const br=s=>(s||'').replace(/</g,'&lt;').split('\n').map(x=>x.trim()).filter(Boolean);
+  const vnEn=(vn,en)=>br(vn).map(x=>`<p class="vn">${x}</p>`).join('')+br(en).map(x=>`<p class="en">${x}</p>`).join('');
   const ngayD=d.ngay?d.ngay.split('-'):['','',''];
-  const benRow=(b)=>`
-    <p style="margin:2px 0"><b>${(b.ten||'').toUpperCase()}</b></p>
-    ${b.dia_chi?`<p style="margin:2px 0">Địa chỉ: ${b.dia_chi}</p>`:''}
-    ${b.mst?`<p style="margin:2px 0">Mã số thuế: ${b.mst}</p>`:''}
-    ${b.dien_thoai?`<p style="margin:2px 0">Điện thoại: ${b.dien_thoai}</p>`:''}
-    ${b.dai_dien?`<p style="margin:2px 0">Đại diện: <b>${b.dai_dien}</b>${b.chuc_vu?' — Chức vụ: '+b.chuc_vu:''}</p>`:''}`;
+  const ngayVN=`ngày ${ngayD[2]||'…'} tháng ${ngayD[1]||'…'} năm ${ngayD[0]||'…'}`;
+  const benBlock=(nhan,nhanEn,b)=>`
+    <p class="vn" style="margin-top:10px"><b>${nhan} : ${(b.ten||'').toUpperCase()}</b></p>
+    ${b.ten_en?`<p class="en"><b>${nhanEn}: ${(b.ten_en||'').toUpperCase()}</b></p>`:`<p class="en"><b>${nhanEn}:</b></p>`}
+    <table class="bt">
+      <tr><td>Đại diện bởi</td><td>: ${b.dai_dien||''}</td><td>Chức vụ</td><td>: ${b.chuc_vu||''}</td></tr>
+      <tr><td>Địa chỉ</td><td colspan="3">: ${b.dia_chi||''}</td></tr>
+      <tr><td>Điện thoại</td><td>: ${b.dien_thoai||''}</td><td>MST</td><td>: ${b.mst||''}</td></tr>
+      <tr><td>Tài khoản số</td><td colspan="3">: ${b.tai_khoan||''}</td></tr>
+    </table>`;
+  let stt=0;
+  const tbRows=(d.tb||[]).filter(r=>r.nhom?(r.ten||'').trim():((r.ten||'')+(r.thong_so||'')).trim()).map(r=>r.nhom
+    ? `<tr class="grp"><td colspan="5">${r.ten}</td></tr>`
+    : `<tr><td style="text-align:center">${++stt}</td><td>${r.ten||''}</td><td>${r.thong_so||''}</td>
+       <td style="text-align:center">${r.so_luong||''}</td><td style="text-align:center">${r.ncc||''}</td></tr>`).join('');
+  const dks=(d.dieu_khoan||[]).filter(dk=>((dk.vn||'')+(dk.en||'')).trim()).map(dk=>`
+    <h2>${dk.ten}</h2>${vnEn(dk.vn,dk.en)}`).join('');
+  const donGia=Number(d.d2_don_gia)||0, tamUng=Number(d.d3_tam_ung)||0;
   const html=`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${d.so||'Hop dong'}</title><style>
     @page{size:A4;margin:16mm}
-    body{font-family:"Times New Roman",serif;color:#111;font-size:13.5px;line-height:1.55;margin:0}
-    .qh{text-align:center;font-weight:700}
-    .qh .u{text-decoration:underline;font-weight:700}
-    h1{text-align:center;font-size:20px;margin:16px 0 2px;letter-spacing:1px}
-    .so{text-align:center;margin:0 0 12px}
-    h2{font-size:14px;margin:14px 0 4px}
-    table.it{width:100%;border-collapse:collapse;margin:6px 0}
-    table.it th,table.it td{border:1px solid #444;padding:5px 7px;font-size:12.5px}
-    table.it th{background:#f0f0f0;text-align:center}
-    .tot td{padding:2px 8px}
-    .sig{display:flex;justify-content:space-between;margin-top:30px;text-align:center}
-    .sig div{width:45%}
+    body{font-family:"Times New Roman",serif;color:#111;font-size:13px;line-height:1.5;margin:0}
+    h1{text-align:center;font-size:19px;margin:2px 0;letter-spacing:.5px}
+    h1.en{font-size:16px;font-style:italic;color:#333}
+    .so{text-align:center;margin:2px 0 12px}
+    h2{font-size:13.5px;margin:14px 0 4px;text-transform:uppercase}
+    p{margin:4px 0;text-align:justify}
+    p.en,li.en{font-style:italic;color:#333}
+    ul{margin:4px 0;padding-left:20px}
+    table.bt{border-collapse:collapse;margin:2px 0 4px}
+    table.bt td{padding:1px 8px 1px 0;vertical-align:top}
+    table.bt td:first-child,table.bt td:nth-child(3){white-space:nowrap;min-width:95px}
+    table.it{width:100%;border-collapse:collapse;margin:8px 0}
+    table.it th,table.it td{border:1px solid #444;padding:4px 6px;font-size:11.5px;vertical-align:top}
+    table.it th{background:#eef2f5;text-align:center}
+    tr.grp td{background:#f5f7f9;font-weight:700}
+    .sig{display:flex;justify-content:space-between;margin-top:34px;text-align:center}
+    .sig div{width:45%;font-weight:700}
   </style></head><body>
-  <div class="qh">CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM<br><span class="u">Độc lập — Tự do — Hạnh phúc</span></div>
-  <h1>HỢP ĐỒNG KINH TẾ</h1>
-  <p class="so">Số: <b>${d.so||''}</b></p>
-  <p style="font-style:italic">— Căn cứ Bộ luật Dân sự số 91/2015/QH13;<br>
-  — Căn cứ Luật Thương mại số 36/2005/QH11;<br>
-  — Căn cứ nhu cầu và khả năng của hai bên.</p>
-  <p>Hôm nay, ngày ${ngayD[2]||'…'} tháng ${ngayD[1]||'…'} năm ${ngayD[0]||'…'}, chúng tôi gồm:</p>
-  <h2>BÊN A (BÊN MUA):</h2>${benRow(d.benA||{})}
-  <h2>BÊN B (BÊN BÁN):</h2>${benRow(d.benB||{})}
-  <p>Hai bên thống nhất ký kết hợp đồng với các điều khoản sau:</p>
-  <h2>ĐIỀU 1: NỘI DUNG HỢP ĐỒNG</h2>
-  <p>Bên B đồng ý bán, Bên A đồng ý mua hàng hóa/dịch vụ với nội dung:</p>
-  <table class="it"><thead><tr><th style="width:28px">STT</th><th>Nội dung</th><th style="width:44px">SL</th>
-    <th style="width:52px">Đơn vị</th><th style="width:92px">Đơn giá (VND)</th><th style="width:44px">VAT</th>
-    <th style="width:100px">Thành tiền (VND)</th></tr></thead><tbody>${items}</tbody></table>
-  <table class="tot" style="margin-left:auto">
-    <tr><td>Cộng (chưa VAT):</td><td style="text-align:right"><b>${money(t.sub)} đ</b></td></tr>
-    <tr><td>Thuế VAT:</td><td style="text-align:right"><b>${money(t.vat)} đ</b></td></tr>
-    <tr><td><b>TỔNG GIÁ TRỊ HỢP ĐỒNG:</b></td><td style="text-align:right"><b>${money(t.tong)} đ</b></td></tr></table>
-  <p style="font-style:italic">(Bằng chữ: ${docSoVN(t.tong)})</p>
-  <h2>ĐIỀU 2: PHƯƠNG THỨC THANH TOÁN</h2><p>${d.thanh_toan||''}</p>
-  <h2>ĐIỀU 3: GIAO HÀNG</h2><p>Thời gian giao hàng: ${d.giao_hang||''}<br>Địa điểm giao hàng: ${d.dia_diem||''}</p>
-  <h2>ĐIỀU 4: BẢO HÀNH</h2><p>${d.bao_hanh||''}</p>
-  <h2>ĐIỀU 5: ĐIỀU KHOẢN CHUNG</h2>
-  <p>Hai bên cam kết thực hiện đúng các điều khoản của hợp đồng. Mọi thay đổi phải được hai bên thống nhất bằng văn bản.
-  Trường hợp phát sinh tranh chấp, hai bên ưu tiên thương lượng; nếu không giải quyết được sẽ đưa ra Tòa án có thẩm quyền.</p>
-  <p>Hợp đồng được lập thành ${d.so_ban||'02'} bản có giá trị pháp lý như nhau, mỗi bên giữ ${(Number(d.so_ban)||2)/2>=1?String(Math.floor((Number(d.so_ban)||2)/2)).padStart(2,'0'):'01'} bản, có hiệu lực kể từ ngày ký.</p>
+  <h1>${d.tieu_de_vn||'HỢP ĐỒNG DỊCH VỤ'}</h1>
+  <h1 class="en">${d.tieu_de_en||'SERVICE CONTRACT'}</h1>
+  <p class="so">(Số / No.: <b>${d.so||''}</b>)</p>
+  <ul>
+    <li>Căn cứ Bộ luật dân sự số 91/2015/QH13 của nước CHXHCN Việt Nam ban hành ngày 24/11/2015, hiệu lực từ ngày 01/01/2017.</li>
+    <li class="en">Pursuant to the Civil Code No. 91/2015/QH13 of the Socialist Republic of Vietnam, promulgated on November 24, 2015, effective from January 1, 2017.</li>
+    <li>Căn cứ Luật Thương mại của nước CHXHCN Việt Nam được Quốc hội thông qua ngày 14/6/2005.</li>
+    <li class="en">Pursuant to the Commercial Law of the Socialist Republic of Vietnam passed by the National Assembly on June 14, 2005.</li>
+    <li>Dựa vào khả năng và nhu cầu của cả hai bên.</li>
+    <li class="en">Based on the capabilities and needs of both parties.</li>
+  </ul>
+  <p class="vn">Hôm nay, ${ngayVN}, chúng tôi gồm có:</p>
+  <p class="en">Today, ${d.ngay||''}, we are:</p>
+  ${benBlock('BÊN A (Bên Mua)','PARTY A (the Buyer)',d.benA||{})}
+  ${benBlock('BÊN B (Bên Bán)','PARTY B (the Seller)',d.benB||{})}
+  <p class="vn">Các Bên đồng ý ký kết Hợp Đồng này với các điều kiện và điều khoản sau:</p>
+  <p class="en">The Parties agree to sign this contract with the following terms and conditions:</p>
+  <h2>ĐIỀU 1: NỘI DUNG HỢP ĐỒNG / SCOPE OF THE CONTRACT</h2>
+  ${vnEn(d.d1_vn,d.d1_en)}
+  ${tbRows?`<table class="it"><thead><tr><th style="width:30px">No.</th><th style="width:24%">Tên thiết bị/<br>Equipment</th><th>Thông số kỹ thuật/<br>Technical specifications</th><th style="width:74px">Số lượng/<br>Qty</th><th style="width:74px">NCC/<br>Origin</th></tr></thead><tbody>${tbRows}</tbody></table>`:''}
+  <h2>ĐIỀU 2: ĐƠN GIÁ VÀ TIÊU CHÍ NGHIỆM THU / UNIT PRICE AND ACCEPTANCE CRITERIA</h2>
+  <p class="vn"><b>2.1 Đơn giá / Unit price</b></p>
+  ${donGia?`<p class="vn">Đơn giá dịch vụ: <b>${money(donGia)} ${d.d2_don_gia_dv||'VND'}</b> (Bằng chữ: ${docSoVN(donGia)}${(d.d2_don_gia_dv||'').includes('/')?' trên '+(d.d2_don_gia_dv||'').split('/')[1]:''}).</p>
+  <p class="en">Service unit price: <b>${(d.d2_don_gia_dv||'VND').split('/')[0]} ${money(donGia)}${(d.d2_don_gia_dv||'').includes('/')?'/'+(d.d2_don_gia_dv||'').split('/')[1]:''}</b>.</p>`:''}
+  ${vnEn(d.d2_ghi_chu_vn,d.d2_ghi_chu_en)}
+  <p class="vn"><b>2.2 Tiêu chí nghiệm thu, xuất hóa đơn / Acceptance and invoicing criteria</b></p>
+  ${vnEn(d.d2_nghiem_thu_vn,d.d2_nghiem_thu_en)}
+  <h2>ĐIỀU 3: PHƯƠNG THỨC VÀ ĐIỀU KIỆN THANH TOÁN / PAYMENT METHOD AND CONDITIONS</h2>
+  <p class="vn">Hình thức thanh toán: ${d.d3_hinh_thuc_vn||''}</p>
+  <p class="en">Payment method: ${d.d3_hinh_thuc_en||''}</p>
+  ${tamUng?`<p class="vn">Điều kiện tạm ứng: Bên A tạm ứng cho bên B số tiền đặt cọc: <b>${money(tamUng)} VNĐ</b> (Bằng chữ: ${docSoVN(tamUng)}) ngay sau khi ký hợp đồng.</p>
+  <p class="en">Advance: Party A shall advance to Party B a deposit of <b>VND ${money(tamUng)}</b> immediately upon signing this Contract.</p>`:''}
+  ${vnEn(d.d3_dieu_khoan_vn,d.d3_dieu_khoan_en)}
+  <h2>ĐIỀU 4: THỜI GIAN & ĐỊA ĐIỂM CUNG CẤP LẮP ĐẶT / TIME AND PLACE OF SUPPLY AND INSTALLATION</h2>
+  ${vnEn(d.d4_vn,d.d4_en)}
+  ${dks}
   <div class="sig">
-    <div><b>ĐẠI DIỆN BÊN A</b><br><i>(Ký, ghi rõ họ tên, đóng dấu)</i><br><br><br><br>${(d.benA&&d.benA.dai_dien)||''}</div>
-    <div><b>ĐẠI DIỆN BÊN B</b><br><i>(Ký, ghi rõ họ tên, đóng dấu)</i><br><br><br><br>${(d.benB&&d.benB.dai_dien)||''}</div>
+    <div>FOR PARTY A<br><br><br><br><br>${(d.benA&&d.benA.dai_dien)||''}</div>
+    <div>FOR PARTY B<br><br><br><br><br>${(d.benB&&d.benB.dai_dien)||''}</div>
   </div>
   <script>window.onload=function(){window.print();}<\/script></body></html>`;
   const w=window.open('','_blank'); if(!w)return toast("Trình duyệt chặn cửa sổ mới — cho phép popup để xuất PDF","err");
