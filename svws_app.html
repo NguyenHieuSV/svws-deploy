@@ -4212,7 +4212,7 @@ async function viewKeToan(m){
   m.innerHTML+=`<div class="tabs">${tabs.map(([k,l])=>`<button class="${S.ktTab===k?'active':''}" onclick="ktSwitch('${k}')">${l}</button>`).join('')}</div><div id="ktBody"></div>`;
   ktRender();
 }
-function ktSwitch(t){S.ktTab=t;ktRender();}
+function ktSwitch(t){S.ktTab=t;_tabActive(t);ktRender();}
 async function ktRender(){const h=$("#ktBody"); if(!h)return; h.innerHTML='<div class="empty" style="padding:24px">Đang tải…</div>';
   try{ if(S.ktTab==="tq")await ktTongQuan(h); else if(S.ktTab==="quy")await ktQuy(h); else if(S.ktTab==="thongke")await ktThongKe(h); else if(S.ktTab==="hoadon")await ktHoaDon(h); else if(S.ktTab==="phieu")await ktPhieu(h); else if(S.ktTab==="lailo")await ktLaiLo(h); else if(S.ktTab==="tratruoc")await ktTraTruoc(h); else if(S.ktTab==="quytl")await qtTrichLap(h); else await ktCanDoi(h);}catch(e){h.innerHTML=`<div class="empty" style="padding:24px;color:#dc2626">${e.detail||e.message}</div>`;}
 }
@@ -4952,7 +4952,10 @@ async function viewNhanSu(m){
     +`<div class="tabs">${tabs.map(([k,l])=>`<button class="${S.nsTab===k?'active':''}" onclick="nsTab('${k}')">${l}</button>`).join('')}</div><div id="nsBody"></div>`;
   nsRender();
 }
-function nsTab(k){S.nsTab=k;nsRender();}
+/* Cập nhật gạch xanh tab đang chọn (dùng cho các module chỉ vẽ lại phần thân) */
+function _tabActive(k){document.querySelectorAll('#main .tabs button').forEach(b=>{
+  b.classList.toggle('active',(b.getAttribute('onclick')||'').includes("'"+k+"'"));});}
+function nsTab(k){S.nsTab=k;_tabActive(k);nsRender();}
 async function nsRender(){
   const h=document.getElementById('nsBody'); if(!h)return; h.innerHTML='<div class="empty" style="padding:20px">Đang tải…</div>';
   try{ if(S.nsTab==="hoso")await nsHoSo(h); else if(S.nsTab==="motacv")await nsMotaCV(h); else await nsBangLuong(h); }
@@ -5932,7 +5935,7 @@ async function daDetail(m){
   m.innerHTML+=`<div class="tabs">${tabs.map(([k,l])=>`<button class="${S.daTab===k?'active':''}" onclick="daSwitch('${k}')">${l}</button>`).join('')}</div><div id="daBody"></div>`;
   daRenderTab();
 }
-function daSwitch(t){S.daTab=t;daRenderTab();}
+function daSwitch(t){S.daTab=t;_tabActive(t);daRenderTab();}
 async function daRenderTab(){const h=$("#daBody");if(!h)return;h.innerHTML='<div class="empty" style="padding:24px">Đang tải…</div>';
   try{const f={thongtin:daThongTin,thietke:daThietKe,tiendo:daTienDo,antoan:daAnToan,trienkhai:daTrienKhai,tailieu:daTaiLieu,kpi:daKpi,baocao:daBaoCao}[S.daTab]||daThongTin;await f(h);}
   catch(e){h.innerHTML=`<div class="empty" style="color:#dc2626;padding:24px">${e.detail||e.message}</div>`;}
