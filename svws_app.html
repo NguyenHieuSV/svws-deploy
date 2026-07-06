@@ -2090,15 +2090,16 @@ function _bgfPrint(d){
     <td style="text-align:right">${money((Number(it.so_luong)||0)*(Number(it.don_gia)||0))}</td></tr>`;}).join('');
   const ngayVN=d.ngay?d.ngay.split('-').reverse().join('/'):'';
   const html=`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${d.so||'Quotation'}</title><style>
-    @page{size:A4;margin:14mm}
-    body{font-family:"Segoe UI",Arial,sans-serif;color:#16324a;font-size:12.5px;line-height:1.5;margin:0}
+    @page{size:A4;margin:12mm}
+    body{font-family:"Segoe UI",Arial,sans-serif;color:#16324a;font-size:12.5px;line-height:1.5;margin:0;padding:8mm 9mm}
     .hd{display:flex;align-items:center;gap:14px;border-bottom:3px solid #0E7C86;padding-bottom:10px}
     .hd img{height:58px}
     .hd .cty b{font-size:15px}
     h1{color:#0E7C86;font-size:26px;letter-spacing:2px;margin:14px 0 4px;text-align:center}
-    .meta{width:100%;border-collapse:collapse;margin:8px 0}
-    .meta td{padding:3px 8px;font-size:12px}
-    .meta .k{font-weight:700;color:#0E7C86;white-space:nowrap}
+    .meta{border-collapse:collapse;margin:8px 0}
+    .meta td{padding:3px 0;font-size:12px;vertical-align:top}
+    .meta .k{font-weight:700;color:#0E7C86;white-space:nowrap;padding-right:10px}
+    .meta td.v{padding-right:44px}
     .ttl{font-weight:800;font-size:14px;margin:10px 0 2px;text-transform:uppercase}
     table.it{width:100%;border-collapse:collapse;margin-top:6px}
     table.it th{background:#0E7C86;color:#fff;padding:6px 7px;font-size:11px;text-align:left}
@@ -2116,7 +2117,7 @@ function _bgfPrint(d){
     <div class="cty"><b>Song Viet Technical Solutions Co., Ltd</b><br>Address: 448 Vo Van Tan St., Ban Co Ward, HCMC</div></div>
   <h1>QUOTATION</h1>
   <p>Song Viet Technical Solutions appreciates your interest. We are pleased to send you our quotation as requested:</p>
-  <table class="meta"><tr><td class="k">QUOTE NO.</td><td>${d.so||''}</td><td class="k">QUOTE DATE</td><td>${ngayVN}</td></tr>
+  <table class="meta"><tr><td class="k">QUOTE NO.</td><td class="v">${d.so||''}</td><td class="k">QUOTE DATE</td><td>${ngayVN}</td></tr>
     <tr><td class="k">VALID UNTIL</td><td colspan="3">${d.hieu_luc||''}</td></tr></table>
   <div class="ttl">${d.tieu_de||''}</div>
   <table class="meta"><tr><td class="k">CUSTOMER:</td><td>${(d.khach_ten||'').toUpperCase()}</td></tr>
