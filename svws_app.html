@@ -2807,7 +2807,8 @@ async function bhEmail(host){
         <div class="f" style="flex:2"><label>Đính kèm tệp gửi kèm email (brochure, catalogue...)</label><input type="file" id="cdfile_${c.id}"></div>
         <button class="btn-sm" onclick="uploadTepCD(${c.id})">Đính kèm</button></div>` : '';
     return `<div class="panel">
-      <div class="panel-h"><h3>${c.ten}</h3><div class="spacer"></div>${badge}</div>
+      <div class="panel-h"><h3>${c.ten}</h3><div class="spacer"></div>
+        ${canApprove?`<button class="btn-sm ghost" style="color:var(--red)" onclick="cdXoa(${c.id},'${String(c.ten||'').replace(/'/g,'')}')">🗑 Xóa</button>`:''}${badge}</div>
       <div class="note" style="padding-bottom:6px">Tiêu đề: ${c.tieu_de}<br>Gửi tới: ${cdTarget(c)} · Gửi từ: <b>${FROM}</b></div>
       <div class="panel-b"><table><thead><tr><th>Tệp đính kèm</th><th class="num">Cỡ</th><th>Tải về</th></tr></thead>
         <tbody>${tepRows}</tbody></table></div>${upBox}
@@ -2903,6 +2904,17 @@ async function guiCD(id){
   let ok=0,bo=0; tg.forEach(k=>k.email?ok++:bo++);
   c.trang_thai="DA_GUI"; c.ket_qua={GUI_OK:ok,BO_QUA:bo};
   toast(`Đã gửi (demo): ${ok} email · bỏ qua ${bo} KH thiếu email`,"ok"); viewBanHang($("#main"));
+}
+async function cdXoa(id,ten){
+  if(!confirm("Xóa chiến dịch \""+ten+"\"?\n\nTệp đính kèm và kết quả gửi của chiến dịch sẽ bị xóa theo. Nhật ký liên lạc với từng khách hàng vẫn được giữ nguyên. Không thể hoàn tác."))return;
+  if(S.mode==="live"){
+    try{await api("/ban-hang/chien-dich/"+id,{method:'DELETE'});}
+    catch(e){return toast(e.detail||e.message,"err");}
+  }else{
+    const i=(DEMO.chien_dich||[]).findIndex(x=>x.id===id); if(i>=0)DEMO.chien_dich.splice(i,1);
+  }
+  toast("Đã xóa chiến dịch "+ten+(S.mode==="demo"?" (demo)":""),"ok");
+  viewBanHang($("#main"));
 }
 async function xemKetQuaCD(id){
   if(S.mode==="live"){ try{const r=await api(`/ban-hang/chien-dich/${id}/ket-qua`);

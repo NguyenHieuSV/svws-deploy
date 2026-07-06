@@ -180,6 +180,35 @@ def ket_qua_gui(cd_id: int, db: Session = Depends(get_db), _=Depends(yeu_cau(MOD
                           "trang_thai": r.trang_thai, "ghi_chu": r.ghi_chu} for r in rows]}
 
 
+# ----- DUYET: xóa chiến dịch chào hàng -----
+@router.delete("/chien-dich/{cd_id}")
+def xoa_chien_dich(cd_id: int, db: Session = Depends(get_db),
+                   nd: NguoiDung = Depends(yeu_cau(MODULE, "DUYET"))):
+    """Xóa chiến dịch cùng tệp đính kèm và nhật ký gửi email của nó. Lịch sử
+    liên lạc với từng khách (lien_lac) và audit vẫn được giữ nguyên."""
+    from sqlalchemy.exc import IntegrityError
+    cd = db.get(ChienDichEmail, cd_id)
+    if cd is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy chiến dịch")
+    ten_cu, tt_cu = cd.ten, cd.trang_thai
+    so_log = db.query(EmailLog).filter_by(chien_dich_id=cd_id).delete()
+    teps = db.query(TepDinhKem).filter_by(doi_tuong="CHIEN_DICH", doi_tuong_id=cd_id).all()
+    for t in teps:
+        xoa(t.duong_dan)
+        db.delete(t)
+    try:
+        db.delete(cd)
+        db.flush()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            f"Chiến dịch '{ten_cu}' còn dữ liệu liên kết ở phân hệ khác nên không thể xóa.")
+    ghi_audit(db, nd.id, "XOA", "chien_dich_email", cd_id,
+              cu={"ten": ten_cu, "trang_thai": tt_cu, "so_email_log": so_log, "so_tep": len(teps)})
+    db.commit()
+    return {"ok": True, "ten": ten_cu}
+
+
 # ============ (3) LIÊN LẠC KHÁCH HÀNG — gửi email 1:1 QUA HỆ THỐNG ============
 # Thay cho mail cá nhân: nhân viên gửi từ địa chỉ công ty, mọi thư đều được ghi nhật ký.
 @router.post("/khach-hang/{kh_id}/gui-email")
