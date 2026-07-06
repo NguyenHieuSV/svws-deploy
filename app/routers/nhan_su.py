@@ -359,6 +359,14 @@ def cap_nhat_ho_so(nv_id: int, data: HoSoLuongVao, db: Session = Depends(get_db)
         setattr(nv, k, getattr(data, k))
     if data.chuc_danh is not None:
         nv.chuc_danh = data.chuc_danh
+    if data.ho_ten is not None and data.ho_ten.strip():
+        nv.ho_ten = data.ho_ten.strip()
+    if data.ma is not None and data.ma.strip():
+        trung = db.query(NhanVien).filter(NhanVien.ma == data.ma.strip(),
+                                          NhanVien.id != nv.id).first()
+        if trung:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Mã NV '{data.ma}' đã tồn tại")
+        nv.ma = data.ma.strip()
     ghi_audit(db, nd.id, "CAP_NHAT", "nhan_vien", nv.id, moi={"luong_co_ban": _f(nv.luong_co_ban)})
     db.commit()
     return {"id": nv.id, "trang_thai": "DA_LUU"}

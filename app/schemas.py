@@ -468,6 +468,8 @@ class TinhLuongVao(BaseModel):
 
 
 class HoSoLuongVao(BaseModel):
+    ho_ten: str | None = None
+    ma: str | None = None
     luong_co_ban: Decimal = Decimal(0)
     luong_dong_bh: Decimal = Decimal(0)
     so_phu_thuoc: int = 0

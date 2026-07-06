@@ -5795,19 +5795,34 @@ async function nsTaoNV(){
   nsRender();
 }
 function nsSuaHoSo(x){
-  const f=(id,lb,v,t='number')=>`<div class="f"><label>${lb}</label><input id="${id}" type="${t}" value="${v??''}"></div>`;
+  const f=(id,lb,v,t='number')=>`<div class="f"><label>${lb}</label><input id="${id}" type="${t}" value="${(v??'').toString().replace(/"/g,'&quot;')}"></div>`;
+  const chucDanhs=[...new Set(Object.values(ROLE_NAME))];
   _ktModal("Hồ sơ lương — "+x.ho_ten,`
+    <datalist id="h_cd_list">${chucDanhs.map(c=>`<option value="${c}">`).join('')}</datalist>
+    <div class="formrow">${f('h_ht','Họ tên',x.ho_ten,'text')}${f('h_ma','Mã NV',x.ma,'text')}
+      <div class="f"><label>Chức danh</label><input id="h_cd" list="h_cd_list" value="${(x.chuc_danh||'').replace(/"/g,'&quot;')}" placeholder="VD: NV Kỹ thuật"></div></div>
     <div class="formrow">${f('h_lcb','Lương cơ bản',x.luong_co_ban)}${f('h_ldbh','Lương đóng BH (0=theo lương CB)',x.luong_dong_bh)}${f('h_pt','Số người phụ thuộc',x.so_phu_thuoc||0)}</div>
     <div class="formrow">${f('h_pan','Phụ cấp ăn',x.phu_cap_an||0)}${f('h_pdl','Phụ cấp đi lại',x.phu_cap_di_lai||0)}${f('h_pdt','Phụ cấp điện thoại',x.phu_cap_dien_thoai||0)}${f('h_ptn','Phụ cấp trách nhiệm',x.phu_cap_trach_nhiem||0)}</div>
     <div class="formrow">${f('h_email','Email nhận phiếu lương',x.email||'','email')}${f('h_stk','Số tài khoản',x.so_tai_khoan||'','text')}${f('h_nh','Ngân hàng',x.ngan_hang||'','text')}<div class="f"><label>TK chi phí</label><select id="h_tk"><option ${x.tk_chi_phi==='642'?'selected':''}>642</option><option ${x.tk_chi_phi==='622'?'selected':''}>622</option><option ${x.tk_chi_phi==='627'?'selected':''}>627</option></select></div></div>
     <div style="text-align:right;margin-top:8px"><button class="btn-sm" onclick="nsLuuHoSo(${x.id})">Lưu hồ sơ</button></div>`);
 }
 async function nsLuuHoSo(id){
-  const body={luong_co_ban:Number(gv('h_lcb')||0),luong_dong_bh:Number(gv('h_ldbh')||0),so_phu_thuoc:Number(gv('h_pt')||0),
+  const ht=gv('h_ht');
+  if(!ht)return toast("Họ tên không được để trống","err");
+  const body={ho_ten:ht,ma:gv('h_ma')||null,chuc_danh:gv('h_cd')||null,
+    luong_co_ban:Number(gv('h_lcb')||0),luong_dong_bh:Number(gv('h_ldbh')||0),so_phu_thuoc:Number(gv('h_pt')||0),
     phu_cap_an:Number(gv('h_pan')||0),phu_cap_di_lai:Number(gv('h_pdl')||0),phu_cap_dien_thoai:Number(gv('h_pdt')||0),phu_cap_trach_nhiem:Number(gv('h_ptn')||0),
     email:gv('h_email')||null,so_tai_khoan:gv('h_stk')||null,ngan_hang:gv('h_nh')||null,tk_chi_phi:gv('h_tk')||'642'};
   if(S.mode==="live"){ try{await api(`/nhan-su/nhan-vien/${id}/ho-so`,{method:'PUT',body:JSON.stringify(body)});toast("Đã lưu hồ sơ","ok");}catch(e){toast(e.detail||e.message,"err");return;} }
-  else toast("Đã lưu (demo)","ok");
+  else{
+    const nv=(DEMO.ns_hoso||[]).find(x=>x.id===id);
+    if(nv)Object.assign(nv,{ho_ten:ht,ma:gv('h_ma')||nv.ma,chuc_danh:gv('h_cd')||nv.chuc_danh,
+      luong_co_ban:body.luong_co_ban,luong_dong_bh:body.luong_dong_bh,so_phu_thuoc:body.so_phu_thuoc,
+      phu_cap_an:body.phu_cap_an,phu_cap_di_lai:body.phu_cap_di_lai,phu_cap_dien_thoai:body.phu_cap_dien_thoai,
+      phu_cap_trach_nhiem:body.phu_cap_trach_nhiem,email:body.email||'',so_tai_khoan:body.so_tai_khoan||'',
+      ngan_hang:body.ngan_hang||'',tk_chi_phi:body.tk_chi_phi});
+    toast("Đã lưu (demo)","ok");
+  }
   const md=document.getElementById('ktModal'); if(md)md.remove(); nsRender();
 }
 
