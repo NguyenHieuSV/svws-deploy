@@ -5742,7 +5742,7 @@ async function nsHoSo(host){
     <td class="num">${vnd(x.luong_co_ban)}</td><td class="num">${vnd(x.luong_dong_bh||x.luong_co_ban)}</td>
     <td class="num">${vnd((x.phu_cap_an||0)+(x.phu_cap_di_lai||0)+(x.phu_cap_dien_thoai||0)+(x.phu_cap_trach_nhiem||0))}</td>
     <td class="num">${x.so_phu_thuoc||0}</td><td>${x.email||'<span style="color:#dc2626">— thiếu —</span>'}</td>
-    ${canOp?`<td><button class="btn-sm ghost" onclick='nsSuaHoSo(${JSON.stringify(x).replace(/'/g,"&#39;")})'>Sửa</button></td>`:'<td></td>'}</tr>`).join('');
+    ${canOp?`<td style="white-space:nowrap"><button class="btn-sm ghost" onclick='nsSuaHoSo(${JSON.stringify(x).replace(/'/g,"&#39;")})'>Sửa</button>${(S.role==='CEO'||S.role==='ADMIN')?`<button class="btn-sm ghost" onclick="nsTaoTK(${x.id})">🔑 Tạo tài khoản</button>`:''}</td>`:'<td></td>'}</tr>`).join('');
   host.innerHTML=`<div class="note" style="padding:0 0 10px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
     <span style="flex:1">Khai báo lương cơ bản, lương đóng BH, phụ cấp, số người phụ thuộc (giảm trừ thuế), tài khoản & <b>email</b> nhận phiếu lương cho từng nhân viên.</span>
     ${can("nhan_su","DUYET")?'<button class="btn-sm ghost" onclick="nsThamSo()">⚖️ Tham số lương theo luật</button>':''}</div>
@@ -5824,6 +5824,41 @@ async function nsLuuHoSo(id){
     toast("Đã lưu (demo)","ok");
   }
   const md=document.getElementById('ktModal'); if(md)md.remove(); nsRender();
+}
+
+/* --- Tạo tài khoản đăng nhập cho nhân viên (CEO/Admin) --- */
+async function nsTaoTK(nvId){
+  const ds=S.mode==="live"?await api("/nhan-su/ho-so").catch(()=>[]):(DEMO.ns_hoso||[]);
+  const nv=ds.find(x=>x.id===nvId); if(!nv)return toast("Không tìm thấy nhân viên","err");
+  let roles;
+  if(S.mode==="live"){ try{roles=await api("/cau-hinh/vai-tro");}catch(e){return toast("Chỉ CEO/Admin tạo được tài khoản: "+(e.detail||e.message),"err");} }
+  else roles=Object.entries(ROLE_NAME).map(([ma,ten])=>({ma,ten}));
+  // đoán vai trò từ chức danh
+  const doan=(Object.entries(ROLE_NAME).find(([,ten])=>ten===(nv.chuc_danh||''))||[])[0]||'NV_KD';
+  S._nsTkNv=nv;
+  _ktModal("🔑 Tạo tài khoản đăng nhập — "+nv.ho_ten,`
+    <div class="note" style="margin-bottom:10px">Tài khoản dùng để đăng nhập hệ thống SVWS; quyền theo vai trò được chọn. Có thể quản lý lại ở phân hệ <b>Cấu hình</b>.</div>
+    <label>Email đăng nhập</label><input id="tk_email" type="email" value="${(nv.email||'').replace(/"/g,'&quot;')}" placeholder="ten@svws.vn">
+    <label>Mật khẩu ban đầu (tối thiểu 6 ký tự)</label><input id="tk_mk" type="text" placeholder="Người dùng nên đổi sau khi nhận">
+    <label>Vai trò (đoán từ chức danh — sửa được)</label>
+    <select id="tk_vt" data-nocbx>${roles.map(r=>`<option value="${r.ma}" ${r.ma===doan?'selected':''}>${r.ten} (${r.ma})</option>`).join('')}</select>
+    <button class="btn-sm" style="margin-top:14px" onclick="nsTaoTKLuu()">Tạo tài khoản</button>`);
+}
+async function nsTaoTKLuu(){
+  const email=(gv('tk_email')||'').toLowerCase(), mk=gv('tk_mk'), vt=gv('tk_vt');
+  if(!email.includes('@'))return toast("Email không hợp lệ","err");
+  if((mk||'').length<6)return toast("Mật khẩu tối thiểu 6 ký tự","err");
+  if(S.mode==="live"){
+    try{await api("/cau-hinh/nguoi-dung",{method:'POST',body:JSON.stringify({email,mat_khau:mk,vai_tro:vt})});}
+    catch(e){return toast(e.detail||e.message,"err");}
+  }else{
+    if(typeof DEMO_USERS!=='undefined'){
+      if(DEMO_USERS.some(u=>u.email===email))return toast("Email đã tồn tại","err");
+      DEMO_USERS.push({id:Math.max(...DEMO_USERS.map(u=>u.id))+1,email,vai_tro:vt,ten_vai_tro:ROLE_NAME[vt]||vt,trang_thai:"HOAT_DONG"});
+    }
+  }
+  document.getElementById('ktModal')?.remove();
+  toast("Đã tạo tài khoản "+email+" ("+(ROLE_NAME[vt]||vt)+")"+(S.mode==="demo"?" (demo)":""),"ok");
 }
 
 async function nsThamSo(){
