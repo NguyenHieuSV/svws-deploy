@@ -2278,6 +2278,7 @@ async function bhDonHang(host){
     return `<div class="panel">
       <div class="panel-h"><h3>${ma} · ${o.khach}</h3><div class="spacer"></div>
         ${canUp?`<button class="btn-sm ghost" onclick="hdMoi(${o.id})">📄 Tạo Hợp đồng</button>`:''}
+        ${can("ban_hang","DUYET")?`<button class="btn-sm ghost" style="color:var(--red)" onclick="dhXoa(${o.id},'${ma.replace(/'/g,'')}')">🗑 Xóa đơn</button>`:''}
         <span class="num" style="font-weight:700">${vnd(o.tong_tien)}</span>
         <span class="badge ${o.trang_thai==='DA_XUAT'?'b-ok':'b-info'}" style="margin-left:10px">${o.trang_thai}</span></div>
       ${pnlBar}
@@ -2301,6 +2302,19 @@ async function bhDonHang(host){
     <div class="panel-b"><table><thead><tr><th>Số HĐ</th><th>Bên A (khách)</th><th>Đơn hàng</th><th class="num">Giá trị</th><th>Trạng thái</th><th></th></tr></thead>
     <tbody>${hdRows||'<tr><td colspan="6" class="empty">Chưa có hợp đồng nào.</td></tr>'}</tbody></table></div></div>`;
   host.innerHTML = `<div class="note" style="padding:0 0 12px">Mỗi đơn hiển thị <b>Mã Bán hàng</b> làm khóa liên kết sang Mua hàng, kèm <b>giá vốn</b> (tổng PO mua liên kết) và <b>lãi/lỗ</b>. Đính kèm PO khách & hợp đồng ngay trên đơn.</div>${hdPanel}${cards||'<div class="panel"><div class="empty">Chưa có đơn hàng nào.<br><span style="font-size:12.5px;color:var(--muted)">Đơn hàng được tạo từ <b>báo giá nội bộ đã duyệt</b>: sang tab Báo giá → bấm "→ Tạo đơn hàng" trên báo giá Đã duyệt. Sau đó quay lại đây để đính kèm PO/Hợp đồng.</span></div></div>'}`;
+}
+
+/* --- Xóa đơn hàng --- */
+async function dhXoa(id,ma){
+  if(!confirm("Xóa đơn hàng "+ma+"?\n\nDòng hàng và tệp đính kèm (PO/Hợp đồng) của đơn sẽ bị xóa theo. Đơn đã xuất kho, có hóa đơn hoặc phiếu thu/chi sẽ bị hệ thống từ chối để giữ vết kế toán. Không thể hoàn tác."))return;
+  if(S.mode==="live"){
+    try{await api("/ban-hang/don-hang/"+id,{method:'DELETE'});}
+    catch(e){return toast(e.detail||e.message,"err");}
+  }else{
+    const i=(DEMO.don_hang||[]).findIndex(x=>x.id===id); if(i>=0)DEMO.don_hang.splice(i,1);
+  }
+  toast("Đã xóa đơn hàng "+ma+(S.mode==="demo"?" (demo)":""),"ok");
+  viewBanHang($("#main"));
 }
 
 /* --- Tạo đơn hàng từ báo giá nội bộ đã duyệt --- */

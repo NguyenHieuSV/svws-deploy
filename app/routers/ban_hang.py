@@ -136,6 +136,51 @@ def dich_hop_dong(p: DichVao, nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"
     return {"texts": kq}
 
 
+# ----- DUYET: xóa đơn hàng (chỉ đơn chưa phát sinh kho/kế toán) -----
+@router.delete("/don-hang/{dh_id}")
+def xoa_don_hang(dh_id: int, db: Session = Depends(get_db),
+                 nd: NguoiDung = Depends(yeu_cau(MODULE, "DUYET"))):
+    """Xóa đơn hàng cùng dòng hàng và tệp đính kèm. Chặn khi đơn đã xuất kho,
+    có hóa đơn, phiếu thu/chi hoặc bút toán liên quan (giữ vết kế toán)."""
+    from sqlalchemy import text as _sql
+    from sqlalchemy.exc import IntegrityError
+    from ..models import TepDinhKem
+    from ..luu_tru import xoa as _xoa_tep
+    dh = db.get(DonHang, dh_id)
+    if dh is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đơn hàng")
+    refs = [("phiếu kho (đã xuất hàng)", "phieu_kho"), ("hóa đơn", "hoa_don"),
+            ("phiếu thu/chi", "phieu_thu_chi"), ("bút toán", "but_toan")]
+    ban = []
+    for ten_ref, bang in refs:
+        try:
+            n = db.execute(_sql(f"SELECT COUNT(*) FROM {bang} WHERE don_hang_id = :i"),
+                           {"i": dh_id}).scalar() or 0
+        except Exception:
+            n = 0
+        if n:
+            ban.append(f"{n} {ten_ref}")
+    if ban:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"Đơn hàng '{dh.so or dh_id}' đang gắn với {', '.join(ban)} — không thể xóa để giữ vết kế toán.")
+    so_cu = dh.so
+    teps = db.query(TepDinhKem).filter_by(doi_tuong="DON_HANG", doi_tuong_id=dh_id).all()
+    for t in teps:
+        _xoa_tep(t.duong_dan)
+        db.delete(t)
+    try:
+        db.delete(dh)
+        db.flush()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            f"Đơn hàng '{so_cu}' còn dữ liệu liên kết ở phân hệ khác nên không thể xóa.")
+    ghi_audit(db, nd.id, "XOA", "don_hang", dh_id, cu={"so": so_cu, "so_tep": len(teps)})
+    db.commit()
+    return {"ok": True, "so": so_cu}
+
+
 # ----- Báo giá soạn theo mẫu (lưu tạm & xuất PDF) -----
 @router.get("/bao-gia-form", response_model=list[BaoGiaFormRa])
 def ds_bao_gia_form(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
