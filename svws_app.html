@@ -7003,7 +7003,7 @@ async function chSua(id){
 }
 async function chXoa(id){
   const u=S._chUsers.find(x=>x.id===id);if(!u)return;
-  if(!confirm("Xóa vĩnh viễn tài khoản "+u.email+"?\n\nNếu tài khoản đã có dữ liệu (chứng từ, nhật ký...) hệ thống sẽ từ chối xóa — khi đó hãy dùng Khóa."))return;
+  if(!confirm("Xóa vĩnh viễn tài khoản "+u.email+"?\n\nNhật ký thao tác và hồ sơ nhân viên liên quan vẫn được GIỮ LẠI (chỉ gỡ liên kết với tài khoản). Không thể hoàn tác."))return;
   if(S.mode==="live"){
     try{await api("/cau-hinh/nguoi-dung/"+id,{method:'DELETE'});}
     catch(e){return toast(e.message,"err");}
