@@ -6421,16 +6421,18 @@ async function viewDuAn(m){
         <div class="f" style="flex:2"><label>Tên dự án</label><input id="da_ten" placeholder="Trạm XLNT 1.200 m³/ngày"></div>
         <button class="btn-sm" style="align-self:end" onclick="daTao()">Tạo dự án</button></div></div></div>`;
   }
+  const canDel=can("du_an","DUYET");
   const rows=(ds||[]).map(d=>`<tr style="cursor:pointer" onclick="daOpen(${d.id})">
     <td><b>${d.ma||('#'+d.id)}</b></td><td>${d.ten}${d.chu_dau_tu?`<div style="font-size:11px;color:var(--muted)">${d.chu_dau_tu}</div>`:''}</td>
     <td>${d.loai_du_an?`<span class="badge b-info">${DA_LOAI[d.loai_du_an]||d.loai_du_an}</span>`:'—'}</td>
     <td>${d.cong_suat||'—'}</td>
     <td style="min-width:120px">${_bar(d.tien_do)}<div style="font-size:11px;color:var(--muted);margin-top:2px">${_num(d.tien_do||0,1)}%</div></td>
     <td><span class="badge ${d.trang_thai==='HOAN_THANH'?'b-ok':(d.trang_thai==='TAM_DUNG'?'b-tc':'b-cho')}">${DA_TT[d.trang_thai]||d.trang_thai}</span></td>
-    <td class="num">${d.gia_tri_hop_dong?vnd(d.gia_tri_hop_dong):'—'}</td></tr>`).join('');
+    <td class="num">${d.gia_tri_hop_dong?vnd(d.gia_tri_hop_dong):'—'}</td>
+    <td>${canDel?`<button class="btn-sm ghost" style="color:var(--red)" onclick="event.stopPropagation();daXoaDuAn(${d.id},'${((d.ma||d.ten||'')+'').replace(/'/g,'')}')">🗑</button>`:''}</td></tr>`).join('');
   html+=`<div class="panel"><div class="panel-h"><h3>Danh sách dự án</h3></div><div class="panel-b"><table>
-    <thead><tr><th>Mã</th><th>Tên / Chủ đầu tư</th><th>Loại</th><th>Công suất</th><th>Tiến độ</th><th>Trạng thái</th><th class="num">Giá trị HĐ</th></tr></thead>
-    <tbody>${rows||'<tr><td colspan="7" class="empty">Chưa có dự án. Tạo dự án mới để bắt đầu.</td></tr>'}</tbody></table></div></div>`;
+    <thead><tr><th>Mã</th><th>Tên / Chủ đầu tư</th><th>Loại</th><th>Công suất</th><th>Tiến độ</th><th>Trạng thái</th><th class="num">Giá trị HĐ</th><th></th></tr></thead>
+    <tbody>${rows||'<tr><td colspan="8" class="empty">Chưa có dự án. Tạo dự án mới để bắt đầu.</td></tr>'}</tbody></table></div></div>`;
   m.innerHTML+=html;
 }
 /* Số báo giá bắt đầu bằng DA/DV -> dùng làm mã dự án */
@@ -6461,6 +6463,12 @@ async function daTao(){
 }
 function daOpen(id){S.daId=id;S.daTab="thongtin";viewDuAn($("#main"));}
 function daBack(){S.daId=null;S.daTab=null;viewDuAn($("#main"));}
+async function daXoaDuAn(id,ma){
+  if(!confirm("Xóa dự án "+ma+"?\n\nToàn bộ dữ liệu con (mốc, an toàn, tài liệu, KPI, nhật ký, chi phí...) sẽ bị xóa theo. Dự án đã có nghiệm thu hoặc hóa đơn sẽ bị hệ thống từ chối để giữ vết kế toán. Không thể hoàn tác."))return;
+  if(S.mode!=="live"){toast("Đã xóa (demo)","ok");return;}
+  try{await api("/du-an/"+id,{method:'DELETE'});toast("Đã xóa dự án "+ma,"ok");viewDuAn($("#main"));}
+  catch(e){toast(e.detail||e.message,"err");}
+}
 
 async function daDetail(m){
   let ct; try{ ct = S.mode==="live" ? await api(`/du-an/${S.daId}/chi-tiet`) : _daDemoCt(); }catch(e){m.innerHTML=head("Dự án","")+`<div class="empty" style="color:#dc2626;padding:24px">${e.detail||e.message}</div><button class="btn-sm ghost" onclick="daBack()">← Danh sách</button>`;return;}

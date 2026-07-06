@@ -38,6 +38,36 @@ def ds_du_an(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
     return db.query(DuAn).order_by(DuAn.id).all()
 
 
+# ----- DUYET: xóa dự án (chặn khi đã có nghiệm thu/hóa đơn để giữ vết) -----
+@router.delete("/{da_id}")
+def xoa_du_an(da_id: int, db: Session = Depends(get_db),
+              nd: NguoiDung = Depends(yeu_cau(MODULE, "DUYET"))):
+    """Xóa dự án cùng dữ liệu con (mốc, an toàn, tài liệu, KPI, nhật ký... tự xóa theo).
+    Không xóa được dự án đã có biên bản nghiệm thu hoặc hóa đơn liên quan."""
+    from sqlalchemy.exc import IntegrityError
+    from sqlalchemy import text as _sql
+    da = db.get(DuAn, da_id)
+    if da is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy dự án")
+    so_nt = db.query(func.count(NghiemThu.id)).filter(NghiemThu.du_an_id == da_id).scalar() or 0
+    so_hd = db.execute(_sql("SELECT COUNT(*) FROM hoa_don WHERE du_an_id = :i"), {"i": da_id}).scalar() or 0
+    if so_nt or so_hd:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            f"Dự án '{da.ma or da.ten}' đã có {so_nt} biên bản nghiệm thu và {so_hd} hóa đơn "
+                            "liên quan — không thể xóa để giữ vết kế toán. Hãy chuyển trạng thái Tạm dừng/Hoàn thành.")
+    ma_cu, ten_cu = da.ma, da.ten
+    try:
+        db.delete(da)
+        db.flush()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            f"Dự án '{ten_cu}' còn dữ liệu liên kết ở phân hệ khác nên không thể xóa.")
+    ghi_audit(db, nd.id, "XOA", "du_an", da_id, cu={"ma": ma_cu, "ten": ten_cu})
+    db.commit()
+    return {"ok": True, "ma": ma_cu}
+
+
 # ----- THAO_TAC: tạo dự án -----
 @router.post("", response_model=DuAnRa, status_code=201)
 def tao_du_an(data: DuAnVao, db: Session = Depends(get_db),
