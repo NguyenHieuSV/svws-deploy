@@ -74,12 +74,31 @@ def sua_kh(kh_id: int, data: KhachHangSua, db: Session = Depends(get_db),
 @router.delete("/khach-hang/{kh_id}")
 def xoa_kh(kh_id: int, db: Session = Depends(get_db),
            nd: NguoiDung = Depends(yeu_cau(MODULE, "DUYET"))):
-    """Xóa khách hàng CHƯA có giao dịch. Đã có báo giá/đơn hàng/công nợ
-    thì CSDL chặn (giữ vết kế toán) — trả lỗi hướng dẫn rõ."""
+    """Xóa khách hàng CHƯA có chứng từ thật. Báo giá nháp / nhật ký email /
+    CRM tự gỡ theo; báo giá chính thức, đơn hàng, công nợ, dự án... thì chặn
+    và trả lỗi liệt kê rõ đang vướng gì."""
+    from sqlalchemy import text as _sql
     kh = db.get(KhachHang, kh_id)
     if kh is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy khách hàng")
     ten_cu, ma_cu = kh.ten, kh.ma
+    refs = [("báo giá", "bao_gia"), ("đơn hàng", "don_hang"), ("công nợ", "cong_no"),
+            ("dự án", "du_an"), ("hợp đồng thuê", "hop_dong_thue"),
+            ("phiếu thu/chi", "phieu_thu_chi"), ("tài sản cho thuê", "tai_san_cho_thue")]
+    ban = []
+    for ten_ref, bang in refs:
+        try:
+            n = db.execute(_sql(f"SELECT COUNT(*) FROM {bang} WHERE khach_hang_id = :i"),
+                           {"i": kh_id}).scalar() or 0
+        except Exception:
+            n = 0
+        if n:
+            ban.append(f"{n} {ten_ref}")
+    if ban:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"Khách '{ten_cu}' đang gắn với {', '.join(ban)} — không thể xóa để giữ vết kế toán. "
+            "Chỉ xóa được khách chưa phát sinh chứng từ.")
     try:
         db.delete(kh)
         db.flush()
@@ -90,8 +109,7 @@ def xoa_kh(kh_id: int, db: Session = Depends(get_db),
         db.rollback()
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
-            f"Khách '{ten_cu}' đã có giao dịch (báo giá / đơn hàng / công nợ / "
-            "nhật ký liên lạc) nên không thể xóa — dữ liệu kế toán phải giữ vết.")
+            f"Khách '{ten_cu}' còn dữ liệu liên kết ở phân hệ khác nên không thể xóa.")
     return {"ok": True, "ten": ten_cu}
 
 
