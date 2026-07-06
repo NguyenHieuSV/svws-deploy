@@ -172,56 +172,76 @@ def _bgf_tinh(d: dict):
 @router.post("/bao-gia-form/{bgf_id}/gui-email")
 def gui_bao_gia_email(bgf_id: int, data: GuiBaoGiaVao, db: Session = Depends(get_db),
                       nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
-    """Gửi báo giá cho khách qua email công ty (settings.email_from = sv-sales@...)."""
+    """Gửi báo giá cho khách: tự sinh PDF báo giá đính kèm, thư văn phong chuyên nghiệp.
+    Gửi từ settings.email_from (sv-sales@watersolutions.company)."""
+    import os as _os, re as _re, tempfile as _tmp
     from ..email_gateway import lay_email_provider
     from ..config import settings as _st
+    from ..bao_gia_pdf import tao_bao_gia_pdf, tinh_bao_gia
     bgf = db.get(BaoGiaForm, bgf_id)
     if bgf is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy báo giá")
     if "@" not in (data.den or ""):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Email người nhận không hợp lệ")
     d = bgf.noi_dung or {}
-    sub, vat, tong = _bgf_tinh(d)
+    so = d.get("so") or bgf.so or f"BG-{bgf.id}"
+    sub, vat, tong = tinh_bao_gia(d)
     mn = lambda n: f"{round(n):,}".replace(",", ".")
-    L = []
-    if data.loi_nhan:
-        L += [data.loi_nhan, ""]
-    L += [f"BÁO GIÁ SỐ: {d.get('so') or bgf.so or ''} — Ngày: {d.get('ngay') or ''}",
-          f"Hiệu lực: {d.get('hieu_luc') or ''}", ""]
+
+    # 1) Sinh PDF báo giá đính kèm
+    ten_file = "Bao_gia_" + _re.sub(r"[^A-Za-z0-9._-]", "-", so) + ".pdf"
+    pdf_path = _os.path.join(_tmp.gettempdir(), f"bgf_{bgf.id}_{ten_file}")
+    dinh_kem = []
+    try:
+        tao_bao_gia_pdf(pdf_path, d,
+                        font_path=_st.pdf_font_path, font_bold_path=_st.pdf_font_bold_path)
+        dinh_kem = [{"duong_dan": pdf_path, "ten_file": ten_file}]
+    except Exception:
+        dinh_kem = []   # không chặn việc gửi thư nếu sinh PDF lỗi
+
+    # 2) Nội dung thư — văn phong thương mại chuyên nghiệp
+    khach = d.get("khach_ten") or "Quý công ty"
+    mo_dau = (data.loi_nhan or "").strip() or (
+        f"Công ty TNHH Giải pháp Kỹ thuật Sóng Việt trân trọng cảm ơn sự quan tâm của {khach}. "
+        f"Chúng tôi hân hạnh gửi đến Quý công ty báo giá cho hạng mục nêu dưới đây.")
+    L = [f"Kính gửi {khach},", "", mo_dau, "", "THÔNG TIN BÁO GIÁ:",
+         f"   •  Số báo giá: {so} — ngày {d.get('ngay') or ''}"]
     if d.get("tieu_de"):
-        L += [str(d.get("tieu_de")), ""]
-    L.append("CHI TIẾT SẢN PHẨM/DỊCH VỤ:")
-    for i, it in enumerate(d.get("items") or [], 1):
-        if not (it.get("ten") or it.get("mo_ta")):
-            continue
-        tt = float(it.get("so_luong") or 0) * float(it.get("don_gia") or 0)
-        L.append(f"{i}. {it.get('ten') or ''}"
-                 + (f" ({it.get('mo_ta')})" if it.get("mo_ta") else "")
-                 + f" — {it.get('so_luong')} {it.get('don_vi') or ''}"
-                 + f" x {mn(float(it.get('don_gia') or 0))} = {mn(tt)} VND")
-    L += ["", f"Tạm tính (chưa VAT): {mn(sub)} VND",
-          f"Tổng VAT: {mn(vat)} VND",
-          f"TỔNG CỘNG (gồm VAT): {mn(tong)} VND", ""]
-    if d.get("tt"):
-        L.append(f"Điều khoản thanh toán: {d.get('tt')}")
-    if d.get("giao"):
-        L.append(f"Thời gian giao hàng: {d.get('giao')}")
-    if d.get("dia_diem"):
-        L.append(f"Địa điểm giao hàng: {d.get('dia_diem')}")
-    L += ["", "Trân trọng,", "------------------------------",
+        L.append(f"   •  Hạng mục: {d.get('tieu_de')}")
+    L.append(f"   •  Tổng giá trị (đã gồm VAT): {mn(tong)} VND")
+    if d.get("hieu_luc"):
+        L.append(f"   •  Hiệu lực báo giá: {d.get('hieu_luc')}")
+    if dinh_kem:
+        L.append(f"   •  Chi tiết đầy đủ: vui lòng xem tệp PDF đính kèm ({ten_file}).")
+    L += ["",
+          "Kính mong Quý công ty xem xét. Nếu cần trao đổi thêm về thông số kỹ thuật, "
+          "tiến độ cung cấp hoặc điều khoản thương mại, xin vui lòng liên hệ chúng tôi "
+          "theo thông tin bên dưới — chúng tôi luôn sẵn sàng hỗ trợ.",
+          "",
+          "Trân trọng,",
+          "",
+          (d.get("nguoi_bg") or "Bộ phận Kinh doanh"),
           "CÔNG TY TNHH GIẢI PHÁP KỸ THUẬT SÓNG VIỆT — \"We Have Solutions\"",
-          f"Email: {_st.email_from} · ĐT: {_st.cong_ty_tel}",
-          f"Địa chỉ: {_st.cong_ty_dia_chi}"]
-    tieu_de = data.tieu_de or f"[SVWS] Báo giá {d.get('so') or bgf.so or ''}"
-    kq = lay_email_provider().gui(data.den.strip(), tieu_de, "\n".join(L))
+          f"Email: {_st.email_from} · Điện thoại: {_st.cong_ty_tel}",
+          f"Địa chỉ: {_st.cong_ty_dia_chi} · Website: {_st.cong_ty_website}"]
+    tieu_de = data.tieu_de or f"[Sóng Việt] Báo giá {so}" + (f" — {khach}" if d.get("khach_ten") else "")
+
+    try:
+        kq = lay_email_provider().gui(data.den.strip(), tieu_de, "\n".join(L), dinh_kem=dinh_kem)
+    finally:
+        try:
+            if dinh_kem:
+                _os.remove(pdf_path)
+        except OSError:
+            pass
     if kq.get("trang_thai") == "LOI":
         raise HTTPException(status.HTTP_502_BAD_GATEWAY,
                             "Gửi email thất bại: " + (kq.get("ghi_chu") or "lỗi SMTP"))
     bgf.trang_thai = "DA_GUI"
     ghi_audit(db, nd.id, "GUI", "bao_gia_form", bgf.id,
-              moi={"den": data.den, "gui_tu": kq.get("gui_tu")})
+              moi={"den": data.den, "gui_tu": kq.get("gui_tu"), "pdf": bool(dinh_kem)})
     db.commit()
-    return {"gui_tu": kq.get("gui_tu"), "den": data.den,
+    return {"gui_tu": kq.get("gui_tu"), "den": data.den, "pdf_dinh_kem": bool(dinh_kem),
             "trang_thai": kq.get("trang_thai"), "ghi_chu": kq.get("ghi_chu")}
 
 

@@ -2038,14 +2038,14 @@ async function bgfGuiMail(id){
   try{const khs=await _crmKhList();const kh=khs.find(k=>k.id===d.khach_hang_id);emailKH=(kh&&kh.email)||'';}catch(_){}
   S._bgfMailId=id;
   _ktModal("✉️ Gửi báo giá "+(g.so||d.so||'')+" cho khách",`
-    <div class="note" style="margin-bottom:10px">Email gửi từ địa chỉ công ty: <b>sv-sales@watersolutions.company</b>. Nội dung thư gồm đầy đủ chi tiết báo giá (dòng hàng, VAT, tổng, điều khoản).</div>
+    <div class="note" style="margin-bottom:10px">Email gửi từ: <b>sv-sales@watersolutions.company</b>. Báo giá được <b>tự động chuyển thành tệp PDF đính kèm</b>; nội dung thư là công văn tóm tắt chuyên nghiệp (số báo giá, hạng mục, tổng giá trị, hiệu lực).</div>
     <label>Email người nhận <span style="color:var(--red)">*</span></label>
     <input id="bgm_den" type="email" value="${emailKH.replace(/"/g,'&quot;')}" placeholder="khach@congty.vn">
     <label>Tiêu đề</label>
-    <input id="bgm_td" value="${('[SVWS] Báo giá '+(g.so||d.so||'')+(d.khach_ten?' — '+d.khach_ten:'')).replace(/"/g,'&quot;')}">
-    <label>Lời nhắn đầu thư</label>
-    <textarea id="bgm_ln" rows="3" style="width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:9px;font-family:inherit;font-size:13.5px">Kính gửi ${d.khach_ten||'Quý công ty'},\n\nSong Việt xin gửi đến Quý công ty báo giá theo yêu cầu. Rất mong nhận được phản hồi của Quý công ty.</textarea>
-    <button class="btn-sm" style="margin-top:14px" onclick="bgfGuiMailXacNhan()">Gửi email</button>`);
+    <input id="bgm_td" value="${('[Sóng Việt] Báo giá '+(g.so||d.so||'')+(d.khach_ten?' — '+d.khach_ten:'')).replace(/"/g,'&quot;')}">
+    <label>Đoạn mở đầu thư (để trống sẽ dùng mẫu chuyên nghiệp có sẵn)</label>
+    <textarea id="bgm_ln" rows="3" style="width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:9px;font-family:inherit;font-size:13.5px" placeholder="Công ty TNHH Giải pháp Kỹ thuật Sóng Việt trân trọng cảm ơn sự quan tâm của ${d.khach_ten||'Quý công ty'}. Chúng tôi hân hạnh gửi đến Quý công ty báo giá cho hạng mục nêu dưới đây."></textarea>
+    <button class="btn-sm" style="margin-top:14px" onclick="bgfGuiMailXacNhan()">Gửi email kèm PDF</button>`);
 }
 async function bgfGuiMailXacNhan(){
   const den=(gv('bgm_den')||'').trim();
@@ -2058,7 +2058,7 @@ async function bgfGuiMailXacNhan(){
       document.getElementById('ktModal')?.remove();
       if((r.ghi_chu||'').includes('demo'))
         toast("Máy chủ chưa cấu hình SMTP — email chỉ MÔ PHỎNG, chưa gửi thật. Vào Render → Environment thêm EMAIL_PROVIDER=SMTP + SMTP_HOST/USER/PASS.","err");
-      else toast("Đã gửi báo giá từ "+r.gui_tu+" → "+r.den,"ok");
+      else toast("Đã gửi báo giá"+(r.pdf_dinh_kem?" (kèm PDF)":"")+" từ "+r.gui_tu+" → "+r.den,"ok");
       viewBanHang($("#main"));
     }catch(e){toast(e.detail||e.message,"err");}
   }else{
