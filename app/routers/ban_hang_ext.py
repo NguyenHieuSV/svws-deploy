@@ -458,6 +458,35 @@ def cap_nhat_cong_viec(cv_id: int, data: TrangThaiCVVao, db: Session = Depends(g
     return {"id": cv.id, "trang_thai": cv.trang_thai}
 
 
+# ----- DUYET: xóa công việc SLA -----
+@router.delete("/cong-viec/{cv_id}")
+def xoa_cong_viec(cv_id: int, db: Session = Depends(get_db),
+                  nd: NguoiDung = Depends(yeu_cau(MODULE, "DUYET"))):
+    cv = db.get(CongViec, cv_id)
+    if cv is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy công việc")
+    ghi_audit(db, nd.id, "XOA", "cong_viec", cv_id,
+              cu={"tieu_de": cv.tieu_de, "trang_thai": cv.trang_thai})
+    db.delete(cv)
+    db.commit()
+    return {"ok": True}
+
+
+# ----- DUYET: xóa cơ hội -----
+@router.delete("/co-hoi/{ch_id}")
+def xoa_co_hoi(ch_id: int, db: Session = Depends(get_db),
+               nd: NguoiDung = Depends(yeu_cau(MODULE, "DUYET"))):
+    ch = db.get(CoHoi, ch_id)
+    if ch is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy cơ hội")
+    ghi_audit(db, nd.id, "XOA", "co_hoi", ch_id,
+              cu={"tieu_de": ch.tieu_de, "giai_doan": ch.giai_doan,
+                  "khach_hang_id": ch.khach_hang_id})
+    db.delete(ch)
+    db.commit()
+    return {"ok": True}
+
+
 @router.get("/phan-hoi")
 def ds_phan_hoi(chua_xu_ly: bool | None = None, db: Session = Depends(get_db),
                 _=Depends(yeu_cau(MODULE, "XEM"))):

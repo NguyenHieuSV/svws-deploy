@@ -323,6 +323,81 @@ def huy_phieu(pid: int, db: Session = Depends(get_db),
     return _phieu_dict(db, p)
 
 
+# ---------- DUYET: xóa phiếu thu/chi (chỉ phiếu CHƯA DUYỆT) ----------
+@router.delete("/phieu/{pid}")
+def xoa_phieu(pid: int, db: Session = Depends(get_db),
+              nd: NguoiDung = Depends(yeu_cau(MODULE, "DUYET"))):
+    p = db.get(PhieuThuChi, pid)
+    if p is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy phiếu")
+    if p.trang_thai == "DA_DUYET":
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            f"Phiếu '{p.so or pid}' ĐÃ DUYỆT (đã chuyển tiền quỹ, sinh bút toán) — không thể xóa để giữ vết kế toán.")
+    so_cu = p.so
+    ghi_audit(db, nd.id, "XOA", "phieu_thu_chi", pid,
+              cu={"so": so_cu, "loai": p.loai, "so_tien": _f(p.so_tien), "trang_thai": p.trang_thai})
+    db.delete(p)
+    db.commit()
+    return {"ok": True, "so": so_cu}
+
+
+# ---------- DUYET: xóa quỹ (chỉ quỹ chưa có phiếu/bút toán) ----------
+@router.delete("/quy/{quy_id}")
+def xoa_quy(quy_id: int, db: Session = Depends(get_db),
+            nd: NguoiDung = Depends(yeu_cau(MODULE, "DUYET"))):
+    q = db.get(TaiKhoanQuy, quy_id)
+    if q is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy quỹ")
+    so_phieu = db.query(func.count(PhieuThuChi.id)).filter_by(quy_id=quy_id).scalar() or 0
+    so_bt = db.query(func.count(ButToan.id)).filter_by(quy_id=quy_id).scalar() or 0
+    if so_phieu or so_bt:
+        chi_tiet = ", ".join(x for x in
+                             ([f"{so_phieu} phiếu thu/chi"] if so_phieu else []) +
+                             ([f"{so_bt} bút toán"] if so_bt else []))
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            f"Quỹ '{q.ten}' đang gắn với {chi_tiet} — không thể xóa để giữ vết kế toán.")
+    ten_cu = q.ten
+    ghi_audit(db, nd.id, "XOA", "tai_khoan_quy", quy_id,
+              cu={"ma": q.ma, "ten": ten_cu, "so_du": _f(q.so_du)})
+    db.delete(q)
+    db.commit()
+    return {"ok": True, "ten": ten_cu}
+
+
+# ---------- DUYET: xóa hóa đơn (chưa phát hành HĐĐT, chưa thu/trả tiền) ----------
+@router.delete("/hoa-don/{hd_id}")
+def xoa_hoa_don(hd_id: int, db: Session = Depends(get_db),
+                nd: NguoiDung = Depends(yeu_cau(MODULE, "DUYET"))):
+    """Hủy hóa đơn ghi nhận nhầm: xóa kèm công nợ và bút toán do chính hóa đơn
+    sinh ra. Chặn khi đã phát hành HĐĐT hoặc công nợ đã thu/trả một phần."""
+    hd = db.get(HoaDon, hd_id)
+    if hd is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy hóa đơn")
+    if hd.hddt_trang_thai == "DA_PHAT_HANH":
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            f"Hóa đơn '{hd.so}' đã phát hành HĐĐT — không thể xóa. Cần lập hóa đơn điều chỉnh/thay thế theo quy định.")
+    cns = db.query(CongNo).filter_by(hoa_don_id=hd_id).all()
+    if any(_f(cn.da_thanh_toan) > 0 for cn in cns):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            f"Công nợ của hóa đơn '{hd.so}' đã thu/trả một phần — không thể xóa để giữ vết kế toán.")
+    cn_ids = [cn.id for cn in cns]
+    if cn_ids:
+        so_p = db.query(func.count(PhieuThuChi.id)).filter(PhieuThuChi.cong_no_id.in_(cn_ids)).scalar() or 0
+        if so_p:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                f"Hóa đơn '{hd.so}' có {so_p} phiếu thu/chi gắn công nợ — không thể xóa để giữ vết kế toán.")
+    so_cu = hd.so
+    so_bt = db.query(ButToan).filter_by(hoa_don_id=hd_id).delete()
+    for cn in cns:
+        db.delete(cn)
+    ghi_audit(db, nd.id, "XOA", "hoa_don", hd_id,
+              cu={"so": so_cu, "loai": hd.loai, "tong_tien": _f(hd.tong_tien),
+                  "so_cong_no": len(cns), "so_but_toan": so_bt})
+    db.delete(hd)
+    db.commit()
+    return {"ok": True, "so": so_cu}
+
+
 # ---------- TỔNG QUAN ----------
 @router.get("/tong-quan")
 def tong_quan(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):

@@ -374,6 +374,129 @@ def tao_po_tu_de_xuat(ycm_id: int, data: TaoPoTuDeXuatVao, db: Session = Depends
 
 
 # ----- XEM: danh sách đơn mua -----
+# ----- DUYET: xóa nhà cung cấp (chặn khi có chứng từ mua hàng/kế toán) -----
+@router.delete("/nha-cung-cap/{ncc_id}")
+def xoa_ncc(ncc_id: int, db: Session = Depends(get_db),
+            nd: NguoiDung = Depends(yeu_cau(MODULE, "DUYET"))):
+    """Xóa NCC cùng sản phẩm, báo giá NCC và lịch sử đánh giá. Chặn khi NCC đã có
+    đơn mua, hóa đơn, công nợ hoặc phiếu thu/chi (giữ vết kế toán)."""
+    from sqlalchemy import text as _sql
+    from sqlalchemy.exc import IntegrityError
+    nc = db.get(NhaCungCap, ncc_id)
+    if nc is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy nhà cung cấp")
+    refs = [("đơn mua (PO)", "don_mua"), ("hóa đơn", "hoa_don"),
+            ("công nợ", "cong_no"), ("phiếu thu/chi", "phieu_thu_chi")]
+    ban = []
+    for ten_ref, bang in refs:
+        try:
+            n = db.execute(_sql(f"SELECT COUNT(*) FROM {bang} WHERE nha_cung_cap_id = :i"),
+                           {"i": ncc_id}).scalar() or 0
+        except Exception:
+            n = 0
+        if n:
+            ban.append(f"{n} {ten_ref}")
+    if ban:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"NCC '{nc.ten}' đang gắn với {', '.join(ban)} — không thể xóa để giữ vết kế toán.")
+    ten_cu = nc.ten
+    db.query(BaoGiaNcc).filter_by(nha_cung_cap_id=ncc_id).delete()
+    db.query(DanhGiaNcc).filter_by(nha_cung_cap_id=ncc_id).delete()
+    for bang, cot in (("yeu_cau_mua", "nha_cung_cap_id"), ("yeu_cau_mua", "ai_ncc_id"),
+                      ("yeu_cau_mua_ct", "nha_cung_cap_id")):
+        try:
+            db.execute(_sql(f"UPDATE {bang} SET {cot} = NULL WHERE {cot} = :i"), {"i": ncc_id})
+        except Exception:
+            pass
+    try:
+        db.delete(nc)
+        db.flush()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            f"NCC '{ten_cu}' còn dữ liệu liên kết ở phân hệ khác nên không thể xóa.")
+    ghi_audit(db, nd.id, "XOA", "nha_cung_cap", ncc_id, cu={"ten": ten_cu})
+    db.commit()
+    return {"ok": True, "ten": ten_cu}
+
+
+# ----- DUYET: xóa đề xuất mua (chặn khi đã tạo PO) -----
+@router.delete("/yeu-cau-mua/{ycm_id}")
+def xoa_de_xuat(ycm_id: int, db: Session = Depends(get_db),
+                nd: NguoiDung = Depends(yeu_cau(MODULE, "DUYET"))):
+    y = db.get(YeuCauMua, ycm_id)
+    if y is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đề xuất")
+    if y.don_mua_id or y.trang_thai == "DA_TAO_PO":
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Đề xuất đã được tạo PO — không thể xóa. Hãy xóa PO liên quan trước.")
+    if y.dinh_kem_file:
+        base = (getattr(settings, "storage_dir", None) or os.environ.get("STORAGE_DIR") or "/tmp")
+        try:
+            os.remove(os.path.join(base, "de_xuat", y.dinh_kem_file))
+        except OSError:
+            pass
+    db.query(YeuCauMuaCt).filter_by(yeu_cau_mua_id=ycm_id).delete()
+    ghi_audit(db, nd.id, "XOA", "yeu_cau_mua", ycm_id,
+              cu={"trang_thai": y.trang_thai, "ly_do": (y.ly_do or "")[:200]})
+    db.delete(y)
+    db.commit()
+    return {"ok": True}
+
+
+# ----- DUYET: xóa báo giá NCC -----
+@router.delete("/bao-gia/{bg_id}")
+def xoa_bao_gia_ncc(bg_id: int, db: Session = Depends(get_db),
+                    nd: NguoiDung = Depends(yeu_cau(MODULE, "DUYET"))):
+    bg = db.get(BaoGiaNcc, bg_id)
+    if bg is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy báo giá NCC")
+    ghi_audit(db, nd.id, "XOA", "bao_gia_ncc", bg_id,
+              cu={"nha_cung_cap_id": bg.nha_cung_cap_id, "hang_hoa_id": bg.hang_hoa_id})
+    db.delete(bg)
+    db.commit()
+    return {"ok": True}
+
+
+# ----- DUYET: xóa đơn mua PO (chỉ PO chưa nhận hàng, chưa có hóa đơn) -----
+@router.delete("/don-mua/{dm_id}")
+def xoa_don_mua(dm_id: int, db: Session = Depends(get_db),
+                nd: NguoiDung = Depends(yeu_cau(MODULE, "DUYET"))):
+    """Xóa PO cùng dòng hàng; đề xuất mua liên quan tự gỡ liên kết. Chặn khi PO
+    đã nhận hàng (phiếu kho) hoặc đã có hóa đơn (giữ vết kế toán)."""
+    from sqlalchemy import text as _sql
+    from sqlalchemy.exc import IntegrityError
+    dm = db.get(DonMua, dm_id)
+    if dm is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đơn mua")
+    ban = []
+    for ten_ref, bang in (("phiếu kho (đã nhận hàng)", "phieu_kho"), ("hóa đơn", "hoa_don")):
+        try:
+            n = db.execute(_sql(f"SELECT COUNT(*) FROM {bang} WHERE don_mua_id = :i"),
+                           {"i": dm_id}).scalar() or 0
+        except Exception:
+            n = 0
+        if n:
+            ban.append(f"{n} {ten_ref}")
+    if ban:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"PO '{dm.so or dm_id}' đang gắn với {', '.join(ban)} — không thể xóa để giữ vết kế toán.")
+    so_cu = dm.so
+    db.query(DonMuaCt).filter_by(don_mua_id=dm_id).delete()
+    try:
+        db.delete(dm)
+        db.flush()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            f"PO '{so_cu}' còn dữ liệu liên kết ở phân hệ khác nên không thể xóa.")
+    ghi_audit(db, nd.id, "XOA", "don_mua", dm_id, cu={"so": so_cu})
+    db.commit()
+    return {"ok": True, "so": so_cu}
+
+
 @router.get("/don-mua", response_model=list[DonMuaRa])
 def ds_don_mua(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
     return db.query(DonMua).order_by(DonMua.id.desc()).all()

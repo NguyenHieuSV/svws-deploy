@@ -111,6 +111,45 @@ def sua_tai_san(ts_id: int, data: TaiSanSuaCT, db: Session = Depends(get_db),
     return _ts_ra(db, t)
 
 
+# ----- DUYET: xóa tài sản cho thuê -----
+@router.delete("/tai-san/{ts_id}")
+def xoa_tai_san(ts_id: int, db: Session = Depends(get_db),
+                nd: NguoiDung = Depends(yeu_cau(MODULE, "DUYET"))):
+    """Xóa tài sản cùng kế hoạch bảo trì và định mức; chi phí vận hành cũ chỉ bị
+    gỡ liên kết. Chặn khi tài sản đang cho thuê hoặc gắn hợp đồng thuê."""
+    from sqlalchemy import text as _sql
+    from sqlalchemy.exc import IntegrityError
+    t = db.get(TaiSanChoThue, ts_id)
+    if t is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy tài sản")
+    if t.tinh_trang == "DANG_THUE" or t.khach_hang_id:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            f"Tài sản '{t.ten}' đang cho thuê/gắn khách hàng — kết thúc cho thuê trước khi xóa.")
+    try:
+        n = db.execute(_sql("SELECT COUNT(*) FROM hop_dong_thue_ct WHERE tai_san_id = :i"),
+                       {"i": ts_id}).scalar() or 0
+    except Exception:
+        n = 0
+    if n:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            f"Tài sản '{t.ten}' đang gắn {n} dòng hợp đồng thuê — không thể xóa để giữ vết.")
+    ma_cu, ten_cu = t.ma, t.ten
+    db.query(KeHoachBaoTri).filter_by(tai_san_id=ts_id).delete()
+    db.query(DinhMucTieuHao).filter_by(tai_san_id=ts_id).delete()
+    db.query(TieuHaoThucTe).filter_by(tai_san_id=ts_id).delete()
+    db.query(ChiPhiVanHanh).filter_by(tai_san_id=ts_id).update({"tai_san_id": None})
+    try:
+        db.delete(t)
+        db.flush()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            f"Tài sản '{ten_cu}' còn dữ liệu liên kết ở phân hệ khác nên không thể xóa.")
+    ghi_audit(db, nd.id, "XOA", "tai_san_cho_thue", ts_id, cu={"ma": ma_cu, "ten": ten_cu})
+    db.commit()
+    return {"ok": True, "ten": ten_cu}
+
+
 @router.get("/tai-san/{ts_id}")
 def chi_tiet_tai_san(ts_id: int, db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
     t = db.get(TaiSanChoThue, ts_id)
@@ -168,6 +207,21 @@ def them_chi_phi(data: ChiPhiVao, db: Session = Depends(get_db),
     ghi_audit(db, nd.id, "TAO", "chi_phi_van_hanh", c.id, moi={"so_tien": float(data.so_tien)})
     db.commit()
     return {"id": c.id}
+
+
+# ----- DUYET: xóa chi phí vận hành -----
+@router.delete("/chi-phi/{cp_id}")
+def xoa_chi_phi(cp_id: int, db: Session = Depends(get_db),
+                nd: NguoiDung = Depends(yeu_cau(MODULE, "DUYET"))):
+    c = db.get(ChiPhiVanHanh, cp_id)
+    if c is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy chi phí")
+    ghi_audit(db, nd.id, "XOA", "chi_phi_van_hanh", cp_id,
+              cu={"ma_ban_hang": c.ma_ban_hang, "loai": c.loai_chi_phi,
+                  "so_tien": float(c.so_tien or 0), "nguon": c.nguon})
+    db.delete(c)
+    db.commit()
+    return {"ok": True}
 
 
 @router.post("/dong-bo-chi-phi")
@@ -252,6 +306,27 @@ def tao_de_xuat(data: DeXuatMuaCT, db: Session = Depends(get_db),
     return {"id": yc.id, "trang_thai": yc.trang_thai}
 
 
+# ----- DUYET: xóa đề xuất mua cho thuê -----
+@router.delete("/de-xuat-mua/{ycm_id}")
+def xoa_de_xuat_ct(ycm_id: int, db: Session = Depends(get_db),
+                   nd: NguoiDung = Depends(yeu_cau(MODULE, "DUYET"))):
+    yc = db.get(YeuCauMua, ycm_id)
+    if yc is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đề xuất")
+    if yc.don_mua_id or yc.trang_thai == "DA_TAO_PO":
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Đề xuất đã được tạo PO — không thể xóa. Hãy xóa PO liên quan trước.")
+    so_cp = db.query(func.count(ChiPhiVanHanh.id)).filter_by(yeu_cau_mua_id=ycm_id).scalar() or 0
+    if so_cp:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            f"Đề xuất đã đồng bộ thành {so_cp} chi phí vận hành — xóa chi phí đó trước.")
+    ghi_audit(db, nd.id, "XOA", "yeu_cau_mua", ycm_id,
+              cu={"cho_thue_ma": yc.cho_thue_ma, "trang_thai": yc.trang_thai})
+    db.delete(yc)
+    db.commit()
+    return {"ok": True}
+
+
 # ===================== KẾ HOẠCH BẢO TRÌ =====================
 class BaoTriVao(BaseModel):
     tai_san_id: int
@@ -299,6 +374,20 @@ def them_bao_tri(data: BaoTriVao, db: Session = Depends(get_db),
     ghi_audit(db, nd.id, "TAO", "ke_hoach_bao_tri", b.id)
     db.commit()
     return _bt_ra(db, b)
+
+
+# ----- DUYET: xóa kế hoạch bảo trì -----
+@router.delete("/bao-tri/{bt_id}")
+def xoa_bao_tri(bt_id: int, db: Session = Depends(get_db),
+                nd: NguoiDung = Depends(yeu_cau(MODULE, "DUYET"))):
+    b = db.get(KeHoachBaoTri, bt_id)
+    if b is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy kế hoạch bảo trì")
+    ghi_audit(db, nd.id, "XOA", "ke_hoach_bao_tri", bt_id,
+              cu={"tai_san_id": b.tai_san_id, "ten_cong_viec": b.ten_cong_viec})
+    db.delete(b)
+    db.commit()
+    return {"ok": True}
 
 
 @router.post("/bao-tri/{bt_id}/hoan-thanh")

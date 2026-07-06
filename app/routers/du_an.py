@@ -427,6 +427,20 @@ def sua_an_toan(at_id: int, data: AnToanVao, db: Session = Depends(get_db),
     return _at_ra(a)
 
 
+# ----- DUYET: xóa đánh giá an toàn -----
+@router.delete("/an-toan/{at_id}")
+def xoa_an_toan(at_id: int, db: Session = Depends(get_db),
+                nd: NguoiDung = Depends(yeu_cau(MODULE, "DUYET"))):
+    a = db.get(DuAnAnToan, at_id)
+    if a is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đánh giá")
+    ghi_audit(db, nd.id, "XOA", "du_an_an_toan", at_id,
+              cu={"du_an_id": a.du_an_id, "hang_muc": a.hang_muc, "trang_thai": a.trang_thai})
+    db.delete(a)
+    db.commit()
+    return {"ok": True}
+
+
 # ----- Triển khai: nhật ký thi công -----
 @router.get("/{da_id}/nhat-ky")
 def ds_nhat_ky(da_id: int, db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
@@ -445,6 +459,20 @@ def them_nhat_ky(da_id: int, data: NhatKyVao, db: Session = Depends(get_db),
                    van_de=data.van_de, nguoi_ghi=data.nguoi_ghi or _nguoi(db, nd))
     db.add(r); db.commit()
     return {"id": r.id, "ngay": str(r.ngay)}
+
+
+# ----- DUYET: xóa nhật ký thi công -----
+@router.delete("/nhat-ky/{nk_id}")
+def xoa_nhat_ky(nk_id: int, db: Session = Depends(get_db),
+                nd: NguoiDung = Depends(yeu_cau(MODULE, "DUYET"))):
+    r = db.get(DuAnNhatKy, nk_id)
+    if r is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy nhật ký")
+    ghi_audit(db, nd.id, "XOA", "du_an_nhat_ky", nk_id,
+              cu={"du_an_id": r.du_an_id, "ngay": str(r.ngay)})
+    db.delete(r)
+    db.commit()
+    return {"ok": True}
 
 
 # ----- Tài liệu -----

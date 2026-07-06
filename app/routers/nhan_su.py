@@ -71,6 +71,55 @@ def tao_nhan_vien(data: NhanVienMoiVao, db: Session = Depends(get_db),
     return {"id": nv.id, "ma": nv.ma, "ho_ten": nv.ho_ten, "chuc_danh": nv.chuc_danh}
 
 
+# ----- DUYET: xóa nhân viên (chỉ khi chưa có bảng lương/chấm công) -----
+@router.delete("/nhan-vien/{nv_id}")
+def xoa_nhan_vien(nv_id: int, db: Session = Depends(get_db),
+                  nd: NguoiDung = Depends(yeu_cau(MODULE, "DUYET"))):
+    """Xóa nhân viên thêm nhầm. Chặn khi đã có bảng lương, chấm công, nghỉ phép
+    hoặc được tham chiếu trong chứng từ khác (người tạo/duyệt) — khi đó nên
+    chuyển trạng thái NGHỈ VIỆC thay vì xóa."""
+    from sqlalchemy import text as _sql
+    from sqlalchemy.exc import IntegrityError
+    nv = db.get(NhanVien, nv_id)
+    if nv is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy nhân viên")
+    refs = [("bảng lương", "bang_luong"), ("chấm công", "cham_cong"),
+            ("nghỉ phép", "nghi_phep")]
+    ban = []
+    for ten_ref, bang in refs:
+        try:
+            n = db.execute(_sql(f"SELECT COUNT(*) FROM {bang} WHERE nhan_vien_id = :i"),
+                           {"i": nv_id}).scalar() or 0
+        except Exception:
+            n = 0
+        if n:
+            ban.append(f"{n} {ten_ref}")
+    if ban:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"Nhân viên '{nv.ho_ten}' đang gắn với {', '.join(ban)} — không thể xóa. "
+            "Hãy dùng trạng thái NGHỈ VIỆC để giữ hồ sơ.")
+    ten_cu, ma_cu = nv.ho_ten, nv.ma
+    try:
+        db.execute(_sql("UPDATE nguoi_dung SET nhan_vien_id = NULL WHERE nhan_vien_id = :i"),
+                   {"i": nv_id})
+        db.execute(_sql("DELETE FROM kpi_danh_gia WHERE nhan_vien_id = :i"), {"i": nv_id})
+    except Exception:
+        pass
+    try:
+        db.delete(nv)
+        db.flush()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"Nhân viên '{ten_cu}' được tham chiếu trong chứng từ khác (người tạo/duyệt/phụ trách) "
+            "— không thể xóa. Hãy dùng trạng thái NGHỈ VIỆC để giữ hồ sơ.")
+    ghi_audit(db, nd.id, "XOA", "nhan_vien", nv_id, cu={"ma": ma_cu, "ho_ten": ten_cu})
+    db.commit()
+    return {"ok": True, "ho_ten": ten_cu}
+
+
 # ----- Chấm công -----
 @router.post("/cham-cong", status_code=201)
 def cham_cong(data: ChamCongVao, db: Session = Depends(get_db),

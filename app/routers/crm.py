@@ -133,6 +133,21 @@ def hoan_thanh(cs_id: int, data: HoanThanhVao, db: Session = Depends(get_db),
     return cs
 
 
+# ----- DUYET: xóa việc chăm sóc / khiếu nại -----
+@router.delete("/cham-soc/{cs_id}")
+def xoa_cham_soc(cs_id: int, db: Session = Depends(get_db),
+                 nd: NguoiDung = Depends(yeu_cau(MODULE, "DUYET"))):
+    cs = db.get(ChamSocKH, cs_id)
+    if cs is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy việc chăm sóc/khiếu nại")
+    ghi_audit(db, nd.id, "XOA", "cham_soc_kh", cs_id,
+              cu={"loai": cs.loai, "khach_hang_id": cs.khach_hang_id,
+                  "trang_thai": cs.trang_thai, "noi_dung": (cs.noi_dung or "")[:200]})
+    db.delete(cs)
+    db.commit()
+    return {"ok": True}
+
+
 # ----- Nhắc việc chăm sóc đến hạn -----
 @router.get("/cham-soc/den-han", response_model=list[ChamSocRa])
 def den_han(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):

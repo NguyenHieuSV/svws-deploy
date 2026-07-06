@@ -760,7 +760,7 @@ async function crmChamSoc(host){
     denHan=(DEMO.cham_soc||[]).filter(c=>c.trang_thai==="CHO"&&c.ngay_hen&&c.ngay_hen<=today); }
   const rows=denHan.map(c=>`<tr><td>${_crmKhName(c.khach_hang_id)}</td><td>${CS_LOAI[c.loai]||c.loai}</td>
     <td>${c.noi_dung||''}</td><td>${c.ngay_hen||''}</td>
-    <td>${canDo?`<button class="btn-sm" onclick="crmHoanThanh(${c.id})">Hoàn thành + CSAT</button>`:`<span ${_MU}>—</span>`}</td></tr>`).join('')
+    <td style="white-space:nowrap">${canDo?`<button class="btn-sm" onclick="crmHoanThanh(${c.id})">Hoàn thành + CSAT</button>`:`<span ${_MU}>—</span>`}${can("crm","DUYET")?` <button class="btn-sm ghost" style="color:var(--red)" title="Xóa" onclick="crmXoaCS(${c.id},'việc chăm sóc')">🗑</button>`:''}</td></tr>`).join('')
     ||`<tr><td colspan="5" ${_MU}>Không có việc đến hạn</td></tr>`;
   const khOpts=(await _crmKhList()).map(k=>`<option value="${k.id}">${k.ten}</option>`).join('');
   let orders=[]; if(S.mode==="live"){ try{orders=await api("/ban-hang/don-hang");}catch{} } else { orders=DEMO.don_hang||[]; }
@@ -805,9 +805,10 @@ async function crmKhieuNai(host){
     }else{
       sla=`<span class="badge b-ok">Đã xử lý${c.csat?' · CSAT '+c.csat+'★':''}</span>`;
     }
+    if(can("crm","DUYET"))act+=` <button class="btn-sm ghost" style="color:var(--red)" title="Xóa" onclick="crmXoaCS(${c.id},'khiếu nại')">🗑</button>`;
     return `<tr><td>${tenKH(c.khach_hang_id)}</td><td>${c.noi_dung||''}</td>
       <td style="white-space:nowrap;color:var(--muted);font-size:12px">${(c.created_at||'').toString().replace('T',' ').slice(0,16)}</td>
-      <td>${sla}</td><td>${act}</td></tr>`;
+      <td>${sla}</td><td style="white-space:nowrap">${act}</td></tr>`;
   }).join('')||`<tr><td colspan="5" ${_MU}>Chưa có khiếu nại nào — ghi nhận ở khung bên trên.</td></tr>`;
   const dangCho=ds.filter(c=>c.trang_thai==="CHO").length;
   const quaHan=ds.filter(c=>c.trang_thai==="CHO"&&gioTroi(c)>=24).length;
@@ -828,6 +829,17 @@ async function crmKhieuNai(host){
 }
 
 /* --- Hành động CRM --- */
+async function crmXoaCS(id,loai){
+  if(!confirm("Xóa "+loai+" này? Không thể hoàn tác."))return;
+  if(S.mode==="live"){
+    try{await api("/crm/cham-soc/"+id,{method:'DELETE'});}
+    catch(e){return toast(e.detail||e.message,"err");}
+  }else{
+    const i=(DEMO.cham_soc||[]).findIndex(x=>x.id===id); if(i>=0)DEMO.cham_soc.splice(i,1);
+  }
+  toast("Đã xóa "+loai+(S.mode==="demo"?" (demo)":""),"ok");
+  viewCRM($("#main"));
+}
 async function crmPhanLoaiABC(){
   if(S.mode!=="live"){toast("Phân loại ABC chạy ở bản kết nối backend","err");return;}
   try{const r=await api("/crm/phan-loai-abc",{method:'POST'});
@@ -979,7 +991,7 @@ async function ctTaiSan(host){
       <td class="num">${vnd(t.gia_thue_thang||0)}</td>
       <td><span class="badge ${tt[1]}">${tt[0]}</span></td>
       <td>${t.khach_hang||'<span style="color:var(--muted)">—</span>'}</td>
-      <td><button class="btn-sm ghost" onclick="ctOpenTS(${t.id})">Chi tiết</button>${canOp?` <button class="btn-sm ghost" onclick="ctEditTS(${t.id})">Sửa</button>`:''}</td></tr>`;}).join('');
+      <td style="white-space:nowrap"><button class="btn-sm ghost" onclick="ctOpenTS(${t.id})">Chi tiết</button>${canOp?` <button class="btn-sm ghost" onclick="ctEditTS(${t.id})">Sửa</button>`:''}${can("cho_thue","DUYET")?` <button class="btn-sm ghost" style="color:var(--red)" title="Xóa tài sản" onclick="ctXoaTS(${t.id},'${String(t.ten||'').replace(/'/g,'')}')">🗑</button>`:''}</td></tr>`;}).join('');
   host.innerHTML=`<div class="panel">
     <div class="panel-h"><h3>Danh mục tài sản cho thuê</h3><div class="spacer"></div>
       ${canOp?`<button class="btn-sm" onclick="ctFormTS()">+ Thêm tài sản</button>`:''}</div>
@@ -1027,6 +1039,20 @@ async function ctSaveTS(){
     toast("Đã thêm tài sản","ok");
   }
   S.ctEdit=null;S._ctTS=null;viewChoThue($("#main"));
+}
+async function ctXoaTS(id,ten){
+  if(!confirm("Xóa tài sản \""+ten+"\"?\n\nKế hoạch bảo trì và định mức của tài sản sẽ bị xóa theo; chi phí vận hành cũ chỉ bị gỡ liên kết. Tài sản đang cho thuê sẽ bị hệ thống từ chối. Không thể hoàn tác."))return;
+  if(S.mode==="live"){
+    try{await api("/cho-thue/tai-san/"+id,{method:'DELETE'});}
+    catch(e){return toast(e.detail||e.message,"err");}
+  }else{
+    const t=(DEMO.tai_san_ct||[]).find(x=>x.id===id);
+    if(t&&(t.tinh_trang==="DANG_THUE"||t.khach_hang))return toast("Tài sản đang cho thuê — kết thúc cho thuê trước khi xóa.","err");
+    const i=(DEMO.tai_san_ct||[]).findIndex(x=>x.id===id); if(i>=0)DEMO.tai_san_ct.splice(i,1);
+  }
+  S._ctTS=null;
+  toast("Đã xóa tài sản "+ten+(S.mode==="demo"?" (demo)":""),"ok");
+  viewChoThue($("#main"));
 }
 function ctOpenTS(id){S.ctSel=id;viewChoThue($("#main"));}
 function ctBackTS(){S.ctSel=null;viewChoThue($("#main"));}
@@ -1102,16 +1128,18 @@ async function ctChiPhi(host){
   let data={tong:0,danh_sach:[]};
   if(S.mode==="live"){ try{data=await api("/cho-thue/chi-phi"+(S.ctDuAn?`?tai_san_id=${S.ctDuAn}`:""));}catch(e){host.innerHTML=`<div class="perm-denied">${e.detail||e.message}</div>`;return;} }
   else { const _c=(S._ctTS||[]).find(t=>String(t.id)===String(S.ctDuAn)); const pre=_c?(_c.ten_du_an||_c.ma):null; let ds=DEMO.chi_phi_vh||[]; if(pre)ds=ds.filter(c=>String(c.ma_ban_hang||"").indexOf(pre)===0); data={tong:ds.reduce((s,c)=>s+c.so_tien,0),danh_sach:ds}; }
+  const canXoaCP=can("cho_thue","DUYET");
   const rows=data.danh_sach.map(c=>`<tr><td>${c.ngay}</td><td>${c.tai_san||c.ma_ban_hang||'—'}</td>
     <td>${LOAI_CP[c.loai_chi_phi]||c.loai_chi_phi}</td><td class="num">${vnd(c.so_tien)}</td>
-    <td>${c.mo_ta||''}</td><td><span class="badge ${c.nguon==='DE_XUAT_MUA'?'b-info':c.nguon==='BAO_TRI'?'b-cho':'b-ok'}">${c.nguon==='DE_XUAT_MUA'?'Đề xuất mua':c.nguon==='BAO_TRI'?'Bảo trì':'Thủ công'}</span></td></tr>`).join('')
-    ||`<tr><td colspan="6" style="color:var(--muted)">Chưa có chi phí</td></tr>`;
+    <td>${c.mo_ta||''}</td><td><span class="badge ${c.nguon==='DE_XUAT_MUA'?'b-info':c.nguon==='BAO_TRI'?'b-cho':'b-ok'}">${c.nguon==='DE_XUAT_MUA'?'Đề xuất mua':c.nguon==='BAO_TRI'?'Bảo trì':'Thủ công'}</span></td>
+    <td>${canXoaCP?`<button class="btn-sm ghost" style="color:var(--red)" title="Xóa chi phí" onclick="ctXoaChiPhi(${c.id})">🗑</button>`:''}</td></tr>`).join('')
+    ||`<tr><td colspan="7" style="color:var(--muted)">Chưa có chi phí</td></tr>`;
   const tsOpts=(await _ctTaiSan()).map(t=>`<option value="${t.id}" ${String(t.id)===String(S.ctDuAn)?'selected':''}>${t.ten_du_an||t.ma} — ${t.ten}</option>`).join('');
   host.innerHTML=`
     <div class="cards"><div class="stat accent"><div class="k">Tổng chi phí vận hành</div><div class="v small">${vnd(data.tong||0)}</div><div class="d">Thủ công + đề xuất mua + bảo trì</div></div></div>
     <div class="panel"><div class="panel-h"><h3>Chi phí vận hành</h3><div class="spacer"></div>
       ${canOp?`<button class="btn-sm ghost" onclick="ctDongBo()">⟳ Đồng bộ từ đề xuất mua</button>`:''}</div>
-      <div class="panel-b"><table><thead><tr><th>Ngày</th><th>Tài sản</th><th>Loại</th><th class="num">Số tiền</th><th>Mô tả</th><th>Nguồn</th></tr></thead>
+      <div class="panel-b"><table><thead><tr><th>Ngày</th><th>Tài sản</th><th>Loại</th><th class="num">Số tiền</th><th>Mô tả</th><th>Nguồn</th><th></th></tr></thead>
         <tbody>${rows}</tbody></table></div></div>
     ${canOp?`<div class="panel"><div class="panel-h"><h3>Ghi chi phí thủ công</h3></div><div class="panel-b">
       <div class="formrow">
@@ -1134,6 +1162,18 @@ async function ctThemChiPhi(){
   if(S.mode!=="live"){(DEMO.chi_phi_vh=DEMO.chi_phi_vh||[]).unshift({id:Date.now(),tai_san:t.ten,ma_ban_hang:ma,loai_chi_phi:gv("cp_loai"),so_tien:st,ngay,mo_ta:gv("cp_mt"),nguon:"THU_CONG"});toast("Đã ghi chi phí "+ma+" (demo)","ok");viewChoThue($("#main"));return;}
   try{await api("/cho-thue/chi-phi",{method:'POST',body:JSON.stringify({tai_san_id:ts,ma_ban_hang:ma,loai_chi_phi:gv("cp_loai"),so_tien:st,ngay,mo_ta:gv("cp_mt")||null})});toast("Đã ghi chi phí "+ma,"ok");viewChoThue($("#main"));}
   catch(e){toast(e.detail||e.message,"err");}
+}
+
+async function ctXoaChiPhi(id){
+  if(!confirm("Xóa dòng chi phí này? Không thể hoàn tác."))return;
+  if(S.mode==="live"){
+    try{await api("/cho-thue/chi-phi/"+id,{method:'DELETE'});}
+    catch(e){return toast(e.detail||e.message,"err");}
+  }else{
+    const i=(DEMO.chi_phi_vh||[]).findIndex(x=>x.id===id); if(i>=0)DEMO.chi_phi_vh.splice(i,1);
+  }
+  toast("Đã xóa chi phí"+(S.mode==="demo"?" (demo)":""),"ok");
+  viewChoThue($("#main"));
 }
 
 /* --- Vật tư & thiết bị + Hóa chất (đề xuất mua gắn mã cho thuê) --- */
@@ -1177,15 +1217,17 @@ async function ctVatTu(host){
           <tbody>${cr}</tbody></table></div></div>`;
   }
 
+  const canXoaDX=can("cho_thue","DUYET");
   const rows=flt.map(x=>`<tr><td><b>${x.ma_hh||'—'}</b> ${x.hang_hoa||''}</td><td class="num">${x.so_luong}</td>
     <td class="num">${vnd(x.don_gia)}</td><td class="num">${vnd(x.thanh_tien)}</td><td>${x.cho_thue_ma}</td>
     <td><span class="badge ${x.trang_thai==='MOI'?'b-cho':'b-ok'}">${x.trang_thai}</span></td>
-    <td>${x.da_dong_bo?'<span class="badge b-ok">Đã vào chi phí</span>':'<span style="color:var(--amber)">chưa đồng bộ</span>'}</td></tr>`).join('')
-    ||`<tr><td colspan="7" style="color:var(--muted)">Chưa có đề xuất mua ${isHC?'hóa chất':'vật tư/thiết bị'} cho thuê</td></tr>`;
+    <td>${x.da_dong_bo?'<span class="badge b-ok">Đã vào chi phí</span>':'<span style="color:var(--amber)">chưa đồng bộ</span>'}</td>
+    <td>${canXoaDX?`<button class="btn-sm ghost" style="color:var(--red)" title="Xóa đề xuất" onclick="ctXoaDeXuat(${x.id})">🗑</button>`:''}</td></tr>`).join('')
+    ||`<tr><td colspan="8" style="color:var(--muted)">Chưa có đề xuất mua ${isHC?'hóa chất':'vật tư/thiết bị'} cho thuê</td></tr>`;
 
   host.innerHTML=toggle+tonKhoPanel+`
     <div class="panel"><div class="panel-h"><h3>Đề xuất mua ${isHC?'hóa chất':'vật tư / thiết bị'} cho thuê</h3></div>
-      <div class="panel-b"><table><thead><tr><th>Hàng hóa</th><th class="num">SL</th><th class="num">Đơn giá</th><th class="num">Thành tiền</th><th>Mã cho thuê</th><th>Trạng thái</th><th>Chi phí</th></tr></thead>
+      <div class="panel-b"><table><thead><tr><th>Hàng hóa</th><th class="num">SL</th><th class="num">Đơn giá</th><th class="num">Thành tiền</th><th>Mã cho thuê</th><th>Trạng thái</th><th>Chi phí</th><th></th></tr></thead>
         <tbody>${rows}</tbody></table>
         <div style="color:var(--muted);font-size:12px;margin-top:6px">Đề xuất gắn <b>mã bán hàng cho thuê</b>; bấm <b>Đồng bộ</b> ở tab Chi phí vận hành để cộng vào chi phí tài sản tương ứng.</div></div></div>
     ${canOp?`<div class="panel"><div class="panel-h"><h3>Tạo đề xuất mua ${isHC?'hóa chất':'vật tư/thiết bị'} (gắn mã cho thuê)</h3></div><div class="panel-b">
@@ -1215,6 +1257,20 @@ async function ctTaoDeXuat(){
   catch(e){toast(e.detail||e.message,"err");}
 }
 
+async function ctXoaDeXuat(id){
+  if(!confirm("Xóa đề xuất mua này?\n\nĐề xuất đã tạo PO hoặc đã đồng bộ thành chi phí sẽ bị hệ thống từ chối. Không thể hoàn tác."))return;
+  if(S.mode==="live"){
+    try{await api("/cho-thue/de-xuat-mua/"+id,{method:'DELETE'});}
+    catch(e){return toast(e.detail||e.message,"err");}
+  }else{
+    const x=(DEMO.dx_thue||[]).find(d=>d.id===id);
+    if(x&&x.da_dong_bo)return toast("Đề xuất đã đồng bộ thành chi phí — xóa chi phí đó trước.","err");
+    const i=(DEMO.dx_thue||[]).findIndex(d=>d.id===id); if(i>=0)DEMO.dx_thue.splice(i,1);
+  }
+  toast("Đã xóa đề xuất"+(S.mode==="demo"?" (demo)":""),"ok");
+  viewChoThue($("#main"));
+}
+
 /* --- Bảo trì --- */
 async function ctBaoTri(host){
   const canOp=can("cho_thue","THAO_TAC");
@@ -1225,7 +1281,7 @@ async function ctBaoTri(host){
   const rows=list.map(b=>`<tr><td>${b.ma||''} ${b.tai_san||''}</td><td>${b.ten_cong_viec}</td>
     <td>${b.chu_ky_ngay} ngày</td><td>${b.ngay_ke_tiep||'—'}</td><td>${b.lan_cuoi||'—'}</td>
     <td>${b.qua_han?'<span class="badge b-tc">Quá hạn</span>':'<span class="badge b-ok">Đúng kế hoạch</span>'}</td>
-    <td>${canOp?`<button class="btn-sm" onclick="ctHoanThanhBT(${b.id})">Hoàn thành</button>`:'—'}</td></tr>`).join('')
+    <td style="white-space:nowrap">${canOp?`<button class="btn-sm" onclick="ctHoanThanhBT(${b.id})">Hoàn thành</button>`:'—'}${can("cho_thue","DUYET")?` <button class="btn-sm ghost" style="color:var(--red)" title="Xóa kế hoạch" onclick="ctXoaBaoTri(${b.id})">🗑</button>`:''}</td></tr>`).join('')
     ||`<tr><td colspan="7" style="color:var(--muted)">Chưa có kế hoạch bảo trì</td></tr>`;
   const tsOpts=(await _ctTaiSan()).map(t=>`<option value="${t.id}" ${String(t.id)===String(S.ctDuAn)?'selected':''}>${t.ten_du_an||t.ma} — ${t.ten}</option>`).join('');
   host.innerHTML=`
@@ -1257,6 +1313,18 @@ async function ctHoanThanhBT(id){
   catch(e){toast(e.detail||e.message,"err");}
 }
 
+
+async function ctXoaBaoTri(id){
+  if(!confirm("Xóa kế hoạch bảo trì này? Không thể hoàn tác."))return;
+  if(S.mode==="live"){
+    try{await api("/cho-thue/bao-tri/"+id,{method:'DELETE'});}
+    catch(e){return toast(e.detail||e.message,"err");}
+  }else{
+    const i=(DEMO.bao_tri_ct||[]).findIndex(x=>x.id===id); if(i>=0)DEMO.bao_tri_ct.splice(i,1);
+  }
+  toast("Đã xóa kế hoạch bảo trì"+(S.mode==="demo"?" (demo)":""),"ok");
+  viewChoThue($("#main"));
+}
 
 /* --- Định mức & tiêu hao theo hệ thống/tháng --- */
 function _ctDmInit(){
@@ -1643,7 +1711,7 @@ async function khoTonKho(host){
       <td class="num">${h.gia_ban?vnd(h.gia_ban):'—'}</td>
       <td class="num">${gt?vnd(gt):'—'}</td>
       <td>${low?'<span class="badge b-tc">Dưới min</span>':'<span class="badge b-ok">Đủ</span>'}</td>
-      <td>${canDo?`<button class="btn-sm ghost" onclick="khoEdit(${h.id})">Sửa</button>`:''}</td></tr>`;}).join('');
+      <td style="white-space:nowrap">${canDo?`<button class="btn-sm ghost" onclick="khoEdit(${h.id})">Sửa</button>`:''}${can("kho","DUYET")?` <button class="btn-sm ghost" style="color:var(--red)" title="Xóa hàng hóa" onclick="khoXoaHH(${h.id},'${String(h.ten||'').replace(/'/g,'')}')">🗑</button>`:''}</td></tr>`;}).join('');
   host.innerHTML=`<div class="cards">
     <div class="stat accent"><div class="k">Số mặt hàng</div><div class="v">${kpi.so_mat_hang}</div><div class="d">Đang theo dõi tồn</div></div>
     <div class="stat"><div class="k">Dưới mức tồn tối thiểu</div><div class="v small">${kpi.duoi_min}</div><div class="d" style="color:var(--red)">Cần bổ sung</div></div>
@@ -1657,6 +1725,20 @@ async function khoTonKho(host){
       <th class="num">Tồn</th><th class="num">Min</th><th class="num">Max</th><th class="num">Giá</th><th class="num">Giá trị</th><th>Trạng thái</th><th></th></tr></thead>
       <tbody id="khoRows">${rows||`<tr><td colspan="10" style="color:var(--muted)">Chưa có hàng hóa</td></tr>`}</tbody></table></div></div>`;
   if(S.khoEdit) khoFillForm(S.khoEdit);
+}
+async function khoXoaHH(id,ten){
+  if(!confirm("Xóa hàng hóa \""+ten+"\" khỏi danh mục?\n\nHàng còn tồn kho hoặc đã xuất hiện trong báo giá/đơn hàng/phiếu kho sẽ bị hệ thống từ chối để giữ vết chứng từ. Không thể hoàn tác."))return;
+  if(S.mode==="live"){
+    try{await api("/kho/hang-hoa/"+id,{method:'DELETE'});}
+    catch(e){return toast(e.detail||e.message,"err");}
+  }else{
+    const h=(DEMO.hang_hoa||[]).find(x=>x.id===id);
+    if(h&&Number(h.so_luong||0)>0)return toast("'"+ten+"' còn tồn kho "+h.so_luong+" — xuất hết hoặc điều chỉnh tồn về 0 trước khi xóa.","err");
+    const i=(DEMO.hang_hoa||[]).findIndex(x=>x.id===id); if(i>=0)DEMO.hang_hoa.splice(i,1);
+  }
+  S._khoHang=null;
+  toast("Đã xóa hàng hóa "+ten+(S.mode==="demo"?" (demo)":""),"ok");
+  viewKho($("#main"));
 }
 function khoFilter(){const q=(gv("kho_q")||'').toLowerCase();
   document.querySelectorAll('#khoRows tr').forEach(tr=>{tr.style.display=tr.textContent.toLowerCase().includes(q)?'':'none';});}
@@ -3261,12 +3343,13 @@ async function bhCongViec(host){
       act+=`<button class="btn-sm" onclick="capNhatCV(${c.id},'XONG')">Xong</button> `;
     }
     if(c.khach_hang_id)act+=`<button class="btn-sm ghost" onclick="openKH(${c.khach_hang_id})">Hồ sơ</button>`;
+    if(can("ban_hang","DUYET"))act+=` <button class="btn-sm ghost" style="color:var(--red)" title="Xóa việc" onclick="cvXoa(${c.id})">🗑</button>`;
     return `<tr class="${c.qua_han?'qh':''}">
       <td><b>${c.tieu_de}</b>${c.mo_ta?`<div style="color:var(--muted);font-size:12px">${c.mo_ta}</div>`:''}</td>
       <td>${c.khach_ten||(c.khach_hang_id?('KH #'+c.khach_hang_id):'—')}</td>
       <td><span class="badge ${pr}">${c.uu_tien}</span></td>
       <td>${han||'—'} ${c.qua_han?'<span class="badge b-tc">Quá hạn</span>':''}</td>
-      <td>${stt}</td><td>${act||'—'}</td></tr>`;
+      <td>${stt}</td><td style="white-space:nowrap">${act||'—'}</td></tr>`;
   }).join('');
   host.innerHTML=`<div class="note" style="padding:0 0 12px">Việc tự sinh từ thư phản hồi, gán cho người phụ trách kèm hạn xử lý (SLA theo độ khẩn: Cao 4h · Trung 24h · Thấp 48h). Việc quá hạn được tô đỏ để leo thang.</div>
     <div class="panel"><div class="panel-h"><h3>Công việc từ phản hồi & việc tự thêm</h3><div class="spacer"></div>
@@ -3283,6 +3366,18 @@ async function capNhatCV(id,tt){
     toast("Đã cập nhật","ok");viewBanHang($("#main"));}catch(e){toast(e.detail||e.message,"err");} return; }
   const c=(DEMO.cong_viec||[]).find(x=>x.id===id); if(c){c.trang_thai=tt; c.hoan_thanh_luc=(tt==="XONG")?new Date().toISOString().slice(0,16):null;}
   toast("Đã cập nhật (demo)","ok"); viewBanHang($("#main"));
+}
+
+async function cvXoa(id){
+  if(!confirm("Xóa công việc này? Không thể hoàn tác."))return;
+  if(S.mode==="live"){
+    try{await api("/ban-hang/cong-viec/"+id,{method:'DELETE'});}
+    catch(e){return toast(e.detail||e.message,"err");}
+  }else{
+    const i=(DEMO.cong_viec||[]).findIndex(x=>x.id===id); if(i>=0)DEMO.cong_viec.splice(i,1);
+  }
+  toast("Đã xóa công việc"+(S.mode==="demo"?" (demo)":""),"ok");
+  viewBanHang($("#main"));
 }
 
 /* Giờ địa phương dạng "YYYY-MM-DDTHH:mm" (tránh lệch múi giờ khi parse lại) */
@@ -3347,6 +3442,7 @@ async function bhCoHoi(host){
     const sel=`<select id="ch_gd_${c.id}">${GD_LIST.map(g=>`<option value="${g}"${c.giai_doan===g?' selected':''}>${GD_NHAN[g]}</option>`).join('')}</select>`;
     let act=canOp?`${sel} <input id="ch_val_${c.id}" type="number" placeholder="giá trị" value="${c.gia_tri_dk||''}" style="width:120px"> <button class="btn-sm ghost" onclick="chuyenGD(${c.id})">Lưu</button> `:'';
     if(c.khach_hang_id)act+=`<button class="btn-sm ghost" onclick="openKH(${c.khach_hang_id})">Hồ sơ</button>`;
+    if(can("ban_hang","DUYET"))act+=` <button class="btn-sm ghost" style="color:var(--red)" title="Xóa cơ hội" onclick="coHoiXoa(${c.id})">🗑</button>`;
     const link=[c.bao_gia_id?`BG #${c.bao_gia_id}`:'',c.don_hang_id?`Đơn #${c.don_hang_id}`:''].filter(Boolean).join(' · ')||'—';
     return `<tr><td><b>${c.tieu_de||'—'}</b><div style="color:var(--muted);font-size:12px">${c.nguon==='EMAIL'?'từ phản hồi email':c.nguon||''}</div></td>
       <td>${c.khach_ten||(c.khach_hang_id?('KH #'+c.khach_hang_id):'—')}</td>
@@ -3403,6 +3499,17 @@ async function chuyenGD(id){
     toast("Đã chuyển giai đoạn","ok");viewBanHang($("#main"));}catch(e){toast(e.detail||e.message,"err");} return; }
   const c=(DEMO.co_hoi||[]).find(x=>x.id===id); if(c){c.giai_doan=gd; if(val!=null)c.gia_tri_dk=val; if(gd==="THANG"&&!c.don_hang_id)c.don_hang_id="DH-"+id;}
   toast("Đã chuyển giai đoạn (demo)","ok"); viewBanHang($("#main"));
+}
+async function coHoiXoa(id){
+  if(!confirm("Xóa cơ hội này khỏi pipeline? Không thể hoàn tác."))return;
+  if(S.mode==="live"){
+    try{await api("/ban-hang/co-hoi/"+id,{method:'DELETE'});}
+    catch(e){return toast(e.detail||e.message,"err");}
+  }else{
+    const i=(DEMO.co_hoi||[]).findIndex(x=>x.id===id); if(i>=0)DEMO.co_hoi.splice(i,1);
+  }
+  toast("Đã xóa cơ hội"+(S.mode==="demo"?" (demo)":""),"ok");
+  viewBanHang($("#main"));
 }
 
 /* --- Tab Tổng quan (dashboard) --- */
@@ -3569,7 +3676,7 @@ async function nccSuppliers(host){
     <td class="num">${vnd(Number(s.han_muc_cong_no||0))}</td>
     <td>${stars(Number(s.diem_danh_gia||0))} <span style="color:var(--muted)">${Number(s.diem_danh_gia||0).toFixed(1)}</span></td>
     <td>${s.blacklist?'<span class="badge b-tc">Hạn chế</span>':'<span class="badge b-ok">Đang dùng</span>'}</td>
-    <td>${canAdd?`<button class="btn-sm ghost" onclick="nccDanhGia(${s.id})">Đánh giá</button>`:'—'}</td></tr>`).join('');
+    <td style="white-space:nowrap">${canAdd?`<button class="btn-sm ghost" onclick="nccDanhGia(${s.id})">Đánh giá</button>`:'—'}${can("ncc","DUYET")?` <button class="btn-sm ghost" style="color:var(--red)" title="Xóa NCC" onclick="nccXoa(${s.id},'${String(s.ten||'').replace(/'/g,'')}')">🗑</button>`:''}</td></tr>`).join('');
   const form=canAdd?`<div id="nccForm" class="formrow hidden">
     <div class="f"><label>Mã</label><input id="n_ma" placeholder="NCC-04"></div>
     <div class="f" style="flex:2"><label>Tên NCC</label><input id="n_ten" placeholder="Tên công ty"></div>
@@ -3592,6 +3699,20 @@ async function nccAdd(){
     toast("Đã thêm NCC","ok");viewNCC($("#main"));}catch(e){toast(e.detail||e.message,"err");} return; }
   DEMO.ncc.suppliers.push({id:Date.now(),ma:payload.ma||"NEW",ten,email:payload.email,han_muc_cong_no:payload.han_muc_cong_no,diem_danh_gia:0,blacklist:false});
   toast("Đã thêm (demo)","ok"); viewNCC($("#main"));
+}
+async function nccXoa(id,ten){
+  if(!confirm("Xóa nhà cung cấp \""+ten+"\"?\n\nSản phẩm, báo giá NCC và lịch sử đánh giá của NCC sẽ bị xóa theo. NCC đã có đơn mua/hóa đơn/công nợ sẽ bị hệ thống từ chối để giữ vết kế toán. Không thể hoàn tác."))return;
+  if(S.mode==="live"){
+    try{await api("/ncc/nha-cung-cap/"+id,{method:'DELETE'});}
+    catch(e){return toast(e.detail||e.message,"err");}
+  }else{
+    if((DEMO.ncc.don_mua||[]).some(d=>d.nha_cung_cap_id===id)||(DEMO.don_mua||[]).some(d=>d.nha_cung_cap_id===id))
+      return toast("NCC đã có đơn mua — không thể xóa để giữ vết kế toán.","err");
+    const i=DEMO.ncc.suppliers.findIndex(s=>s.id===id); if(i>=0)DEMO.ncc.suppliers.splice(i,1);
+    DEMO.spn=(DEMO.spn||[]).filter(s=>s.nha_cung_cap_id!==id);
+  }
+  toast("Đã xóa NCC "+ten+(S.mode==="demo"?" (demo)":""),"ok");
+  viewNCC($("#main"));
 }
 async function nccDanhGia(id){
   const v=prompt("Chấm điểm NCC (0–5):","4"); if(v===null)return; const diem=Number(v);
@@ -3621,6 +3742,7 @@ async function viewDeXuat(m){
     if(x.trang_thai==="MOI"&&canApprove) act+=`<button class="btn-sm" onclick="nccDxDuyet(${x.id})">Duyệt</button> <button class="btn-sm ghost" onclick="nccDxTuChoi(${x.id})">Từ chối</button>`;
     else if(x.trang_thai==="DA_DUYET") act+=`<span style="color:var(--muted)">→ đã chuyển Nhà cung cấp</span>`;
     else if(x.trang_thai==="DA_TAO_PO") act+=`<span style="color:var(--muted)">PO #${x.don_mua_id||''}</span>`;
+    if(canApprove&&x.trang_thai!=="DA_TAO_PO") act+=` <button class="btn-sm ghost" style="color:var(--red)" title="Xóa đề xuất" onclick="nccDxXoa(${x.id})">🗑</button>`;
     const nItem=(x.so_dong||1);
     const badgeN=nItem>1?` <span class="badge b-info">+${nItem-1} mặt hàng</span>`:'';
     let dk='';
@@ -3695,6 +3817,19 @@ async function nccDxCreate(){
   const demoItems=items.map(it=>{const o=(DEMO.hang_hoa||[]).find(h=>h.id===it.hang_hoa_id);return {hang_hoa_id:it.hang_hoa_id,ten_hh:o?o.ten:('HH#'+it.hang_hoa_id),so_luong:it.so_luong,don_gia:it.don_gia,nha_cung_cap_id:it.nha_cung_cap_id,ghi_chu:it.ghi_chu};});
   DEMO.de_xuat.unshift({id:Date.now(),hang_hoa_id:p.hang_hoa_id,ten_hh:hhObj?hhObj.ten:('HH#'+p.hang_hoa_id),so_luong:p.so_luong,don_gia:p.don_gia,nha_cung_cap_id:ncc,don_hang_id:dh,ngay_can:can_,ly_do:ly,trang_thai:"MOI",don_mua_id:null,dinh_kem_url:url,dinh_kem_file:file?('x_'+file.name):null,so_dong:items.length,items:demoItems});
   toast(`Đã gửi đề xuất (demo, ${items.length} mặt hàng)`,"ok"); viewDeXuat($("#main"));
+}
+async function nccDxXoa(id){
+  if(!confirm("Xóa đề xuất mua này?\n\nĐề xuất đã tạo PO sẽ bị hệ thống từ chối. Không thể hoàn tác."))return;
+  if(S.mode==="live"){
+    try{await api("/ncc/yeu-cau-mua/"+id,{method:'DELETE'});}
+    catch(e){return toast(e.detail||e.message,"err");}
+  }else{
+    const x=(DEMO.de_xuat||[]).find(p=>p.id===id);
+    if(x&&(x.trang_thai==="DA_TAO_PO"||x.don_mua_id))return toast("Đề xuất đã được tạo PO — không thể xóa.","err");
+    const i=(DEMO.de_xuat||[]).findIndex(p=>p.id===id); if(i>=0)DEMO.de_xuat.splice(i,1);
+  }
+  toast("Đã xóa đề xuất"+(S.mode==="demo"?" (demo)":""),"ok");
+  viewDeXuat($("#main"));
 }
 async function nccDxDuyet(id){
   if(S.mode==="live"){ try{await api(`/ncc/yeu-cau-mua/${id}/duyet`,{method:'POST'});
@@ -3922,10 +4057,12 @@ async function nccBaoGia(host){
   const tt=q=>{ if(!q.hieu_luc_den)return {lbl:"Không hạn",cls:"b-info",d:99999}; const d=Math.floor((new Date(q.hieu_luc_den)-today)/864e5); return d<0?{lbl:"Hết hạn",cls:"b-tc",d}:d<=7?{lbl:`Sắp hết hạn (${d} ngày)`,cls:"b-cho",d}:{lbl:"Còn hiệu lực",cls:"b-ok",d}; };
   const en=quotes.map(q=>({...q,_tt:tt(q)})); const sapHet=en.filter(q=>q._tt.d>=0&&q._tt.d<=7).length; const hetHan=en.filter(q=>q._tt.d<0).length;
   const canAdd=can("ncc","THAO_TAC");
+  const canXoaBG=can("ncc","DUYET");
   const rows=en.sort((a,b)=>a._tt.d-b._tt.d).map(q=>`<tr class="${q._tt.d<0?'qh':''}"><td>${hhName(q.hang_hoa_id)}</td><td>${supName(q.nha_cung_cap_id)}</td>
     <td class="num">${vnd(q.don_gia)}</td><td class="num">${Number(q.so_luong_toi_thieu||0)}</td>
     <td>${q.hieu_luc_den||'—'}</td><td><span class="badge b-info">${q.nguon||'THU_CONG'}</span></td>
-    <td><span class="badge ${q._tt.cls}">${q._tt.lbl}</span></td></tr>`).join('');
+    <td><span class="badge ${q._tt.cls}">${q._tt.lbl}</span></td>
+    <td>${canXoaBG?`<button class="btn-sm ghost" style="color:var(--red)" title="Xóa báo giá" onclick="nccBgXoa(${q.id})">🗑</button>`:''}</td></tr>`).join('');
   const form=canAdd?`<div id="bgForm2" class="formrow hidden">
     <div class="f" style="flex:2"><label>Hàng hóa</label><select id="bg2_hh">${hhs.map(h=>`<option value="${h.id}">${h.ten}</option>`).join('')}</select></div>
     <div class="f" style="flex:2"><label>NCC</label><select id="bg2_ncc">${sups.map(s=>`<option value="${s.id}">${s.ten}</option>`).join('')}</select></div>
@@ -3945,8 +4082,8 @@ async function nccBaoGia(host){
     <div class="panel"><div class="panel-h"><h3>Báo giá theo mặt hàng / NCC</h3><div class="spacer"></div>
       ${canAdd?`<button class="btn-sm" onclick="$('#bgForm2').classList.toggle('hidden')">+ Báo giá</button>`:''}</div>
       ${form}
-      <div class="panel-b"><table><thead><tr><th>Hàng hóa</th><th>NCC</th><th class="num">Đơn giá</th><th class="num">SL tối thiểu</th><th>Hiệu lực đến</th><th>Nguồn</th><th>Trạng thái</th></tr></thead>
-      <tbody>${rows||'<tr><td colspan="7" class="empty" style="padding:20px">Chưa có báo giá.</td></tr>'}</tbody></table></div></div>
+      <div class="panel-b"><table><thead><tr><th>Hàng hóa</th><th>NCC</th><th class="num">Đơn giá</th><th class="num">SL tối thiểu</th><th>Hiệu lực đến</th><th>Nguồn</th><th>Trạng thái</th><th></th></tr></thead>
+      <tbody>${rows||'<tr><td colspan="8" class="empty" style="padding:20px">Chưa có báo giá.</td></tr>'}</tbody></table></div></div>
     <div class="panel"><div class="panel-h"><h3>Nhật ký RFQ — gửi từ inf@watersolutions.company</h3></div>
       <div class="panel-b"><table><thead><tr><th>Hàng hóa</th><th class="num">SL</th><th>Ngày gửi</th><th>Hạn báo giá</th><th>Đầu mối</th><th>Đã gửi</th><th>Email</th></tr></thead>
       <tbody>${rfqRows||'<tr><td colspan="7" class="empty" style="padding:18px">Chưa gửi RFQ nào. Gửi từ panel “chờ tạo PO” (nút ✉️ RFQ).</td></tr>'}</tbody></table></div></div>`;
@@ -3969,6 +4106,31 @@ async function nccRfqXem(id){
   if(S.mode==="live"){ try{const r=await api(`/ncc/rfq/${id}`);_emailModal(r.tieu_de||"Email hỏi giá",r.noi_dung);}catch(e){toast(e.detail||e.message,"err");} return; }
   const r=(DEMO.rfq||[]).find(x=>x.id===id); if(!r){toast("Không tìm thấy RFQ","err");return;}
   _emailModal(r.tieu_de||"Email hỏi giá",r.noi_dung);
+}
+async function nccBgXoa(id){
+  if(!confirm("Xóa báo giá NCC này? Không thể hoàn tác."))return;
+  if(S.mode==="live"){
+    try{await api("/ncc/bao-gia/"+id,{method:'DELETE'});}
+    catch(e){return toast(e.detail||e.message,"err");}
+  }else{
+    const i=(DEMO.bao_gia_ncc||[]).findIndex(b=>b.id===id); if(i>=0)DEMO.bao_gia_ncc.splice(i,1);
+  }
+  toast("Đã xóa báo giá NCC"+(S.mode==="demo"?" (demo)":""),"ok");
+  viewNCC($("#main"));
+}
+async function poXoa(id,so){
+  if(!confirm("Xóa đơn mua "+so+"?\n\nDòng hàng của PO sẽ bị xóa theo; đề xuất mua liên quan tự gỡ liên kết. PO đã nhận hàng hoặc có hóa đơn sẽ bị hệ thống từ chối để giữ vết kế toán. Không thể hoàn tác."))return;
+  if(S.mode==="live"){
+    try{await api("/ncc/don-mua/"+id,{method:'DELETE'});}
+    catch(e){return toast(e.detail||e.message,"err");}
+  }else{
+    const p=(DEMO.don_mua||[]).find(x=>x.id===id);
+    if(p&&p.trang_thai_nhan&&p.trang_thai_nhan!=="CHUA")return toast("PO "+so+" đã nhận hàng — không thể xóa để giữ vết kế toán.","err");
+    let i=(DEMO.don_mua||[]).findIndex(x=>x.id===id); if(i>=0)DEMO.don_mua.splice(i,1);
+    i=(DEMO.ncc.don_mua||[]).findIndex(x=>x.id===id); if(i>=0)DEMO.ncc.don_mua.splice(i,1);
+  }
+  toast("Đã xóa PO "+so+(S.mode==="demo"?" (demo)":""),"ok");
+  viewNCC($("#main"));
 }
 async function nccBgCreate(){
   const hh=Number(gv('bg2_hh')),ncc=Number(gv('bg2_ncc')),gia=Number(gv('bg2_gia')||0),mn=Number(gv('bg2_min')||0),hl=gv('bg2_hl')||null;
@@ -4073,9 +4235,10 @@ async function nccPO(host){
     if(p.trang_thai==="CHO_DUYET") act+=canApprove?`<button class="btn-sm" onclick="duyetPO(${p.id},${Number(p.tong_tien)})">Duyệt</button> `:`<button class="btn-sm" disabled title="Không có quyền duyệt">Duyệt</button> `;
     if(p.trang_thai==="DA_DUYET" && p.trang_thai_nhan!=="DU" && can("kho","THAO_TAC")) act+=`<button class="btn-sm ghost" onclick="nccRecvOpen(${p.id})">Nhận hàng</button>`;
     if(can("ncc","THAO_TAC")) act+=` <button class="btn-sm ghost" onclick="nccPoSend(${p.id})">Gửi PO</button>`;
+    if(can("ncc","DUYET")) act+=` <button class="btn-sm ghost" style="color:var(--red)" title="Xóa PO" onclick="poXoa(${p.id},'${String(p.so||('PO-'+p.id)).replace(/'/g,'')}')">🗑</button>`;
     return `<tr><td><b>${p.so||('PO-'+p.id)}</b></td><td>${supName(p.nha_cung_cap_id)}</td>
       <td>${ordNo(p.don_hang_id)}</td><td class="num">${vnd(Number(p.tong_tien))}</td>
-      <td>${stt(p.trang_thai)}</td><td>${nhanBadge(p.trang_thai_nhan)}</td><td>${act||'—'}</td></tr>`;
+      <td>${stt(p.trang_thai)}</td><td>${nhanBadge(p.trang_thai_nhan)}</td><td style="white-space:nowrap">${act||'—'}</td></tr>`;
   }).join('');
   const createForm = can("ncc","THAO_TAC") ? `<div class="panel"><div class="panel-h"><h3>Tạo đơn mua (PO)</h3><div class="spacer"></div>
       <button class="btn-sm" onclick="$('#poForm').classList.toggle('hidden')">+ Tạo PO</button></div>
@@ -4416,7 +4579,7 @@ async function ktQuy(host){
   const quy=S.mode==="live"?await api("/ke-toan/quy"):DEMO.ke_toan.quy;
   const rows=quy.map(q=>`<tr><td>${q.ma}</td><td>${q.ten}</td><td>${q.loai==="TIEN_MAT"?"Tiền mặt":"Ngân hàng"}${q.so_tk?(' · '+q.so_tk):''}</td>
     <td class="num">${q.tk_ke_toan}</td><td class="num"><b>${vnd(q.so_du)}</b></td>
-    <td><button class="btn-sm ghost" onclick="ktSoQuy(${q.id})">Sổ quỹ</button></td></tr>`).join('');
+    <td style="white-space:nowrap"><button class="btn-sm ghost" onclick="ktSoQuy(${q.id})">Sổ quỹ</button>${can("ke_toan","DUYET")?` <button class="btn-sm ghost" style="color:var(--red)" title="Xóa quỹ" onclick="ktXoaQuy(${q.id},'${String(q.ten||'').replace(/'/g,'')}')">🗑</button>`:''}</td></tr>`).join('');
   const form=canOp?`<div class="panel"><div class="panel-h"><h3>Tạo quỹ / tài khoản</h3><div class="spacer"></div><button class="btn-sm" onclick="$('#qForm').classList.toggle('hidden')">+ Quỹ</button></div>
     <div id="qForm" class="hidden" style="padding:0 18px 14px"><div class="formrow">
       <div class="f"><label>Tên quỹ</label><input id="q_ten" placeholder="VD: Quỹ tiền mặt CN2"></div>
@@ -4433,6 +4596,18 @@ async function ktTaoQuy(){
   const body={ten,loai:gv('q_loai'),so_tk:gv('q_stk')||null,tk_ke_toan:gv('q_loai')==="NGAN_HANG"?"112":"111",so_du_dau:Number(gv('q_sdd')||0)};
   if(S.mode==="live"){ try{await api("/ke-toan/quy",{method:'POST',body:JSON.stringify(body)});toast("Đã tạo quỹ","ok");ktRender();}catch(e){toast(e.detail||e.message,"err");} return; }
   const id=Date.now(); DEMO.ke_toan.quy.push({id,ma:"Q"+id,...body,so_du:body.so_du_dau}); toast("Đã tạo quỹ (demo)","ok"); ktRender();
+}
+async function ktXoaQuy(id,ten){
+  if(!confirm("Xóa quỹ \""+ten+"\"?\n\nQuỹ đã có phiếu thu/chi hoặc bút toán sẽ bị hệ thống từ chối để giữ vết kế toán. Không thể hoàn tác."))return;
+  if(S.mode==="live"){
+    try{await api("/ke-toan/quy/"+id,{method:'DELETE'});}
+    catch(e){return toast(e.detail||e.message,"err");}
+  }else{
+    if((DEMO.ke_toan.phieu||[]).some(p=>p.quy_id===id))return toast("Quỹ \""+ten+"\" đã có phiếu thu/chi — không thể xóa để giữ vết kế toán.","err");
+    const i=DEMO.ke_toan.quy.findIndex(q=>q.id===id); if(i>=0)DEMO.ke_toan.quy.splice(i,1);
+  }
+  toast("Đã xóa quỹ "+ten+(S.mode==="demo"?" (demo)":""),"ok");
+  ktRender();
 }
 async function ktSoQuy(id){
   let d;
@@ -4531,10 +4706,11 @@ async function ktHoaDon(host){
     let act='';
     if(canOp&&!h.da_hach_toan)act+=`<button class="btn-sm" onclick="ktHachToanHD(${h.id})">Hạch toán</button> `;
     if(canOp&&ban&&h.hddt_trang_thai!=="DA_PHAT_HANH")act+=`<button class="btn-sm ghost" onclick="ktPhatHanhHddt(${h.id})">Phát hành HĐĐT</button>`;
+    if(can("ke_toan","DUYET")&&h.hddt_trang_thai!=="DA_PHAT_HANH")act+=` <button class="btn-sm ghost" style="color:var(--red)" title="Xóa hóa đơn" onclick="ktXoaHoaDon(${h.id},'${String(h.so||'').replace(/'/g,'')}')">🗑</button>`;
     return `<tr><td><b>${h.so}</b></td><td><span class="badge ${ban?'b-ok':'b-tc'}">${ban?'BÁN':'MUA'}</span></td>
       <td>${h.ten_doi_tac||'—'}</td><td>${h.ma_ban?`<span class="badge b-info">${h.ma_ban}</span>`:'—'}</td>
       <td class="num">${vnd(h.tien_truoc_thue)}</td><td class="num">${vnd(h.tien_thue)}</td><td class="num"><b>${vnd(h.tong_tien)}</b></td>
-      <td class="num">${cn?vnd(conlai):'—'}</td><td>${stHt}${stHddt}</td><td>${act||'—'}</td></tr>`;}).join('');
+      <td class="num">${cn?vnd(conlai):'—'}</td><td>${stHt}${stHddt}</td><td style="white-space:nowrap">${act||'—'}</td></tr>`;}).join('');
   host.innerHTML=form+`<div class="note" style="padding:0 0 10px">Ghi nhận hóa đơn <b>bán</b> → sinh <b>phải thu</b> + hạch toán <b>doanh thu</b> (Nợ 131/Có 511, 3331). Hóa đơn <b>mua</b> → sinh <b>phải trả</b> + <b>chi phí/giá vốn</b> + thuế GTGT vào (Nợ 632/642·1331/Có 331). Công nợ sinh ra dùng để lập phiếu thu/chi ở tab bên cạnh.</div>
     <div class="panel"><div class="panel-h"><h3>Hóa đơn mua &amp; bán</h3></div>
     <div class="panel-b"><table><thead><tr><th>Số HĐ</th><th>Loại</th><th>Đối tác</th><th>Mã bán</th><th class="num">Trước thuế</th><th class="num">Thuế</th><th class="num">Tổng</th><th class="num">Còn nợ</th><th>Trạng thái</th><th>Hành động</th></tr></thead>
@@ -4553,6 +4729,19 @@ async function ktTaoHoaDon(){
   const dh=(DEMO.don_hang||[]).find(o=>o.id===body.don_hang_id);
   DEMO.ke_toan.hoa_don.unshift({id,so:(loai==="BAN"?"HDB":"HDM")+"-"+id,loai,ten_doi_tac:ten,ma_ban:dh?dh.so:null,tien_truoc_thue:truoc,tien_thue:thue,tong_tien:tong,da_hach_toan:body.hach_toan_luon,hddt_trang_thai:loai==="BAN"?"CHUA_PHAT_HANH":null,cong_no:body.tao_cong_no?{loai:loai==="BAN"?"PHAI_THU":"PHAI_TRA",con_lai:tong}:null});
   toast("Đã ghi nhận hóa đơn (demo)","ok"); ktRender();
+}
+async function ktXoaHoaDon(id,so){
+  if(!confirm("Xóa hóa đơn "+so+"?\n\nCông nợ và bút toán do hóa đơn sinh ra sẽ bị xóa theo (hủy chứng từ ghi nhầm). Hóa đơn đã phát hành HĐĐT hoặc công nợ đã thu/trả một phần sẽ bị hệ thống từ chối. Không thể hoàn tác."))return;
+  if(S.mode==="live"){
+    try{await api("/ke-toan/hoa-don/"+id,{method:'DELETE'});}
+    catch(e){return toast(e.detail||e.message,"err");}
+  }else{
+    const h=(DEMO.ke_toan.hoa_don||[]).find(x=>x.id===id);
+    if(h&&h.hddt_trang_thai==="DA_PHAT_HANH")return toast("Hóa đơn "+so+" đã phát hành HĐĐT — không thể xóa.","err");
+    const i=(DEMO.ke_toan.hoa_don||[]).findIndex(x=>x.id===id); if(i>=0)DEMO.ke_toan.hoa_don.splice(i,1);
+  }
+  toast("Đã xóa hóa đơn "+so+(S.mode==="demo"?" (demo)":""),"ok");
+  ktRender();
 }
 async function ktHachToanHD(id){
   if(S.mode==="live"){ try{await api(`/ke-toan/hoa-don/${id}/hach-toan`,{method:'POST'});toast("Đã hạch toán","ok");ktRender();}catch(e){toast(e.detail||e.message,"err");} return; }
@@ -4596,6 +4785,7 @@ async function ktPhieu(host){
     if(p.trang_thai==="NHAP"&&canOp)act+=`<button class="btn-sm" onclick="ktTrinh(${p.id})">Trình</button> <button class="btn-sm ghost" onclick="ktHuy(${p.id})">Hủy</button>`;
     else if(p.trang_thai==="CHO_DUYET"&&canDuyet)act+=`<button class="btn-sm" onclick="ktDuyet(${p.id})">Duyệt</button> <button class="btn-sm ghost" onclick="ktTuChoi(${p.id})">Từ chối</button>`;
     else if(p.trang_thai==="CHO_DUYET"&&canOp)act+=`<button class="btn-sm ghost" onclick="ktHuy(${p.id})">Hủy</button>`;
+    if(canDuyet&&p.trang_thai!=="DA_DUYET")act+=` <button class="btn-sm ghost" style="color:var(--red)" title="Xóa phiếu" onclick="ktXoaPhieu(${p.id},'${String(p.so||('#'+p.id)).replace(/'/g,'')}')">🗑</button>`;
     return `<tr><td><b>${p.so||('#'+p.id)}</b></td><td><span class="badge ${p.loai==="THU"?'b-ok':'b-tc'}">${p.loai}</span></td>
       <td>${p.ten_quy||''}</td><td>${p.ten_doi_tac||p.dien_giai||'—'}${p.la_tam_ung?` <span class="badge b-cho">Tạm ứng${p.con_lai_tam_ung>0?' · còn '+vnd(p.con_lai_tam_ung):' · đã cấn trừ'}</span>`:''}</td>
       <td>${p.ma_ban?`<span class="badge b-info">${p.ma_ban}</span>`:'—'}</td>
@@ -4641,6 +4831,19 @@ async function ktTaoPhieu(){
   const id=Date.now(); const q=DEMO.ke_toan.quy.find(x=>x.id===quy_id); const dh=(DEMO.don_hang||[]).find(o=>o.id===body.don_hang_id);
   DEMO.ke_toan.phieu.unshift({id,so:(loai==="THU"?"PT":"PC")+"-"+id,loai,quy_id,ten_quy:q?q.ten:'',so_tien,dien_giai:body.dien_giai,don_hang_id:body.don_hang_id,ma_ban:dh?dh.so:null,cong_no_id:body.cong_no_id,tk_doi_ung:body.tk_doi_ung,la_tam_ung:tu,con_lai_tam_ung:tu?so_tien:0,trang_thai:body.trinh_luon?"CHO_DUYET":"NHAP"});
   toast(tu?"Đã lập tạm ứng (demo)":"Đã lập phiếu (demo)","ok"); ktRender();
+}
+async function ktXoaPhieu(id,so){
+  if(!confirm("Xóa phiếu "+so+"?\n\nChỉ xóa được phiếu CHƯA DUYỆT (nháp/chờ duyệt/từ chối/hủy). Phiếu đã duyệt đã chuyển tiền quỹ nên không thể xóa. Không thể hoàn tác."))return;
+  if(S.mode==="live"){
+    try{await api("/ke-toan/phieu/"+id,{method:'DELETE'});}
+    catch(e){return toast(e.detail||e.message,"err");}
+  }else{
+    const p=(DEMO.ke_toan.phieu||[]).find(x=>x.id===id);
+    if(p&&p.trang_thai==="DA_DUYET")return toast("Phiếu "+so+" đã duyệt — không thể xóa để giữ vết kế toán.","err");
+    const i=(DEMO.ke_toan.phieu||[]).findIndex(x=>x.id===id); if(i>=0)DEMO.ke_toan.phieu.splice(i,1);
+  }
+  toast("Đã xóa phiếu "+so+(S.mode==="demo"?" (demo)":""),"ok");
+  ktRender();
 }
 async function _ktAction(id,path,okmsg){
   if(S.mode==="live"){ try{await api(`/ke-toan/phieu/${id}/${path}`,{method:'POST'});toast(okmsg,"ok");ktRender();}catch(e){toast(e.detail||e.message,"err");} return; }
@@ -5825,7 +6028,7 @@ async function nsHoSo(host){
     <td class="num">${vnd(x.luong_co_ban)}</td><td class="num">${vnd(x.luong_dong_bh||x.luong_co_ban)}</td>
     <td class="num">${vnd((x.phu_cap_an||0)+(x.phu_cap_di_lai||0)+(x.phu_cap_dien_thoai||0)+(x.phu_cap_trach_nhiem||0))}</td>
     <td class="num">${x.so_phu_thuoc||0}</td><td>${x.email||'<span style="color:#dc2626">— thiếu —</span>'}</td>
-    ${canOp?`<td style="white-space:nowrap"><button class="btn-sm ghost" onclick='nsSuaHoSo(${JSON.stringify(x).replace(/'/g,"&#39;")})'>Sửa</button>${(S.role==='CEO'||S.role==='ADMIN')?`<button class="btn-sm ghost" onclick="nsTaoTK(${x.id})">🔑 Tạo tài khoản</button>`:''}</td>`:'<td></td>'}</tr>`).join('');
+    ${canOp?`<td style="white-space:nowrap"><button class="btn-sm ghost" onclick='nsSuaHoSo(${JSON.stringify(x).replace(/'/g,"&#39;")})'>Sửa</button>${(S.role==='CEO'||S.role==='ADMIN')?`<button class="btn-sm ghost" onclick="nsTaoTK(${x.id})">🔑 Tạo tài khoản</button>`:''}${can("nhan_su","DUYET")?` <button class="btn-sm ghost" style="color:var(--red)" title="Xóa nhân viên" onclick="nsXoaNV(${x.id},'${String(x.ho_ten||'').replace(/'/g,'')}')">🗑</button>`:''}</td>`:'<td></td>'}</tr>`).join('');
   host.innerHTML=`<div class="note" style="padding:0 0 10px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
     <span style="flex:1">Khai báo lương cơ bản, lương đóng BH, phụ cấp, số người phụ thuộc (giảm trừ thuế), tài khoản & <b>email</b> nhận phiếu lương cho từng nhân viên.</span>
     ${can("nhan_su","DUYET")?'<button class="btn-sm ghost" onclick="nsThamSo()">⚖️ Tham số lương theo luật</button>':''}</div>
@@ -5875,6 +6078,17 @@ async function nsTaoNV(){
   }
   document.getElementById('ktModal')?.remove();
   toast("Đã thêm nhân viên "+ht+(S.mode==="demo"?" (demo)":"")+" — sẽ có trong kỳ lương tạo mới","ok");
+  nsRender();
+}
+async function nsXoaNV(id,ten){
+  if(!confirm("Xóa nhân viên \""+ten+"\"?\n\nChỉ xóa được nhân viên thêm nhầm CHƯA có bảng lương/chấm công. Nhân viên đã có dữ liệu lương nên chuyển trạng thái NGHỈ VIỆC thay vì xóa. Không thể hoàn tác."))return;
+  if(S.mode==="live"){
+    try{await api("/nhan-su/nhan-vien/"+id,{method:'DELETE'});}
+    catch(e){return toast(e.detail||e.message,"err");}
+  }else{
+    const i=(DEMO.ns_hoso||[]).findIndex(x=>x.id===id); if(i>=0)DEMO.ns_hoso.splice(i,1);
+  }
+  toast("Đã xóa nhân viên "+ten+(S.mode==="demo"?" (demo)":""),"ok");
   nsRender();
 }
 function nsSuaHoSo(x){
@@ -6118,7 +6332,7 @@ async function tcVay(host){
       <td class="num"><b>${vnd(v.con_lai_goc)}</b></td>
       <td>${sap?`${sap.ngay_den_han}<div style="font-size:11px;color:${sap.qua_han?'#dc2626':'var(--muted)'}">${sap.qua_han?'QUÁ HẠN · ':''}${vnd(sap.tong)}</div>`:'—'}</td>
       <td>${v.trang_thai==='DA_TAT_TOAN'?'<span class="badge b-ok">Tất toán</span>':(v.so_ky_qua_han?`<span class="badge b-tc">${v.so_ky_qua_han} kỳ quá hạn</span>`:'<span class="badge b-info">Đang vay</span>')}</td>
-      <td><button class="btn-sm ghost" onclick="tcVayChiTiet(${v.id})">Lịch & trả nợ</button></td></tr>`;}).join('');
+      <td style="white-space:nowrap"><button class="btn-sm ghost" onclick="tcVayChiTiet(${v.id})">Lịch & trả nợ</button>${can("tai_chinh","DUYET")?` <button class="btn-sm ghost" style="color:var(--red)" title="Xóa khế ước" onclick="tcXoaVay(${v.id},'${String(v.so||('#'+v.id)).replace(/'/g,'')}')">🗑</button>`:''}</td></tr>`;}).join('');
   html+=`<div class="panel"><div class="panel-h"><h3>Khế ước vay</h3></div><div class="panel-b"><table>
     <thead><tr><th>Số/Phương thức</th><th>Bên cho vay</th><th>Loại</th><th class="num">Gốc vay</th><th class="num">Lãi/năm</th><th class="num">Dư nợ</th><th>Kỳ tới</th><th>Trạng thái</th><th></th></tr></thead>
     <tbody>${rows||'<tr><td colspan="9" class="empty">Chưa có khoản vay nào.</td></tr>'}</tbody></table></div></div>`;
@@ -6130,6 +6344,14 @@ async function tcTaoVay(){
   if(!body.ben_cho_vay||body.so_tien_goc<=0||!body.ngay_nhan){toast("Nhập bên cho vay, số tiền và ngày nhận","err");return;}
   if(S.mode!=="live"){toast("Đã tạo khế ước (demo)","ok");return;}
   try{await api("/vay",{method:'POST',body:JSON.stringify(body)});toast("Đã tạo khế ước vay + hạch toán nhận tiền","ok");tcRender();}catch(e){toast(e.detail||e.message,"err");}
+}
+async function tcXoaVay(id,so){
+  if(!confirm("Xóa khế ước vay "+so+"?\n\nLịch trả nợ và bút toán nhận tiền vay sẽ bị xóa/hoàn tác (hủy khế ước tạo nhầm). Khế ước đã trả bất kỳ kỳ nào sẽ bị hệ thống từ chối. Không thể hoàn tác."))return;
+  if(S.mode!=="live"){toast("Xóa khế ước chạy ở bản kết nối backend","err");return;}
+  try{await api("/vay/"+id,{method:'DELETE'});}
+  catch(e){return toast(e.detail||e.message,"err");}
+  toast("Đã xóa khế ước "+so,"ok");
+  tcRender();
 }
 async function tcVayChiTiet(id){
   let v; try{ v = S.mode==="live" ? await api(`/vay/${id}`) : _tcDemoVay().find(x=>x.id===id); }catch(e){toast(e.detail||e.message,"err");return;}
@@ -6824,7 +7046,7 @@ async function daAnToan(h){
     <td>${a.moi_nguy||'—'}</td><td><span class="badge ${a.muc_rui_ro==='CAO'?'b-tc':(a.muc_rui_ro==='THAP'?'b-ok':'b-cho')}">${DA_RR[a.muc_rui_ro]||a.muc_rui_ro}</span></td>
     <td>${a.bien_phap||'—'}</td><td>${a.han||'—'}</td>
     <td><span class="badge ${a.trang_thai==='DA_KIEM_SOAT'?'b-ok':'b-cho'}">${a.trang_thai==='DA_KIEM_SOAT'?'Đã kiểm soát':(a.trang_thai==='DANG_XU_LY'?'Đang xử lý':'Mở')}</span></td>
-    <td>${canOp?`<select onchange="daSuaAnToan(${a.id},this.value)" style="padding:3px 5px"><option ${a.trang_thai==='MO'?'selected':''} value="MO">Mở</option><option ${a.trang_thai==='DANG_XU_LY'?'selected':''} value="DANG_XU_LY">Đang xử lý</option><option ${a.trang_thai==='DA_KIEM_SOAT'?'selected':''} value="DA_KIEM_SOAT">Đã kiểm soát</option></select>`:''}</td></tr>`).join('');
+    <td style="white-space:nowrap">${canOp?`<select onchange="daSuaAnToan(${a.id},this.value)" style="padding:3px 5px" data-nocbx><option ${a.trang_thai==='MO'?'selected':''} value="MO">Mở</option><option ${a.trang_thai==='DANG_XU_LY'?'selected':''} value="DANG_XU_LY">Đang xử lý</option><option ${a.trang_thai==='DA_KIEM_SOAT'?'selected':''} value="DA_KIEM_SOAT">Đã kiểm soát</option></select>`:''}${can("du_an","DUYET")?` <button class="btn-sm ghost" style="color:var(--red)" title="Xóa đánh giá" onclick="daXoaAnToan(${a.id})">🗑</button>`:''}</td></tr>`).join('');
   html+=`<div class="panel"><div class="panel-h"><h3>Bảng đánh giá rủi ro an toàn (HIRA)</h3></div><div class="panel-b"><table>
     <thead><tr><th>Hạng mục</th><th>Mối nguy</th><th>Mức RR</th><th>Biện pháp</th><th>Hạn</th><th>Trạng thái</th><th></th></tr></thead>
     <tbody>${rows||'<tr><td colspan="7" class="empty">Chưa có đánh giá an toàn.</td></tr>'}</tbody></table>
@@ -6842,6 +7064,15 @@ async function daSuaAnToan(id,tt){
   try{await api(`/du-an/an-toan/${id}`,{method:'PUT',body:JSON.stringify({hang_muc:S.daCt.ten,trang_thai:tt})});toast("Đã cập nhật trạng thái","ok");daRenderTab();}catch(e){toast(e.detail||e.message,"err");}
 }
 
+async function daXoaAnToan(id){
+  if(!confirm("Xóa đánh giá an toàn này? Không thể hoàn tác."))return;
+  if(S.mode!=="live"){toast("Xóa chạy ở bản kết nối backend","err");return;}
+  try{await api("/du-an/an-toan/"+id,{method:'DELETE'});}
+  catch(e){return toast(e.detail||e.message,"err");}
+  toast("Đã xóa đánh giá an toàn","ok");
+  daRenderTab();
+}
+
 /* --- Tab Triển khai (nhật ký) --- */
 async function daTrienKhai(h){
   const canOp=can("du_an","THAO_TAC");
@@ -6857,12 +7088,22 @@ async function daTrienKhai(h){
       <div class="formrow"><div class="f" style="flex:1"><label>Vấn đề / vướng mắc</label><input id="nk_vd"></div>
         <button class="btn-sm" style="align-self:end" onclick="daThemNhatKy()">Lưu nhật ký</button></div></div></div>`;
   }
+  const canXoaNK=can("du_an","DUYET");
   const rows=(ds||[]).map(r=>`<tr><td>${r.ngay}</td><td>${r.noi_dung||'—'}${r.van_de?`<div style="font-size:11px;color:#dc2626">⚠️ ${r.van_de}</div>`:''}</td>
-    <td>${r.nhan_luc||'—'}</td><td>${r.thiet_bi||'—'}</td><td>${r.thoi_tiet||'—'}</td><td style="font-size:12px;color:var(--muted)">${r.nguoi_ghi||''}</td></tr>`).join('');
+    <td>${r.nhan_luc||'—'}</td><td>${r.thiet_bi||'—'}</td><td>${r.thoi_tiet||'—'}</td><td style="font-size:12px;color:var(--muted)">${r.nguoi_ghi||''}</td>
+    <td>${canXoaNK?`<button class="btn-sm ghost" style="color:var(--red)" title="Xóa nhật ký" onclick="daXoaNhatKy(${r.id})">🗑</button>`:''}</td></tr>`).join('');
   html+=`<div class="panel"><div class="panel-h"><h3>Nhật ký thi công</h3></div><div class="panel-b"><table>
-    <thead><tr><th>Ngày</th><th>Nội dung</th><th>Nhân lực</th><th>Thiết bị</th><th>Thời tiết</th><th>Người ghi</th></tr></thead>
-    <tbody>${rows||'<tr><td colspan="6" class="empty">Chưa có nhật ký.</td></tr>'}</tbody></table></div></div>`;
+    <thead><tr><th>Ngày</th><th>Nội dung</th><th>Nhân lực</th><th>Thiết bị</th><th>Thời tiết</th><th>Người ghi</th><th></th></tr></thead>
+    <tbody>${rows||'<tr><td colspan="7" class="empty">Chưa có nhật ký.</td></tr>'}</tbody></table></div></div>`;
   h.innerHTML=html;
+}
+async function daXoaNhatKy(id){
+  if(!confirm("Xóa nhật ký thi công này? Không thể hoàn tác."))return;
+  if(S.mode!=="live"){toast("Xóa chạy ở bản kết nối backend","err");return;}
+  try{await api("/du-an/nhat-ky/"+id,{method:'DELETE'});}
+  catch(e){return toast(e.detail||e.message,"err");}
+  toast("Đã xóa nhật ký","ok");
+  daRenderTab();
 }
 async function daThemNhatKy(){
   const body={ngay:gv('nk_ngay')||null,noi_dung:gv('nk_nd')||null,nhan_luc:gv('nk_nl')||null,thiet_bi:gv('nk_tb')||null,thoi_tiet:gv('nk_tt')||null,van_de:gv('nk_vd')||null};

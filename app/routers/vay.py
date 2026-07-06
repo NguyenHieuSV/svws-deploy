@@ -89,6 +89,33 @@ def ds_khoan_vay(trang_thai: str | None = None, db: Session = Depends(get_db),
     return [_vay_dict(db, v) for v in q.order_by(KhoanVay.id.desc()).all()]
 
 
+# ----- DUYET: xóa khế ước vay (chỉ khi CHƯA trả kỳ nào) -----
+@router.delete("/{vay_id}")
+def xoa_khoan_vay(vay_id: int, db: Session = Depends(get_db),
+                  nd: NguoiDung = Depends(yeu_cau(MODULE, "DUYET"))):
+    """Hủy khế ước tạo nhầm: xóa lịch trả nợ, hoàn tác bút toán nhận tiền và số dư
+    quỹ. Chặn khi đã trả bất kỳ kỳ nào (đã phát sinh chi tiền thật)."""
+    v = db.get(KhoanVay, vay_id)
+    if v is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy khế ước vay")
+    da_tra = db.query(func.count(LichTraNo.id)).filter(
+        LichTraNo.khoan_vay_id == vay_id, LichTraNo.da_tra.is_(True)).scalar() or 0
+    if da_tra:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            f"Khế ước '{v.so or vay_id}' đã trả {da_tra} kỳ — không thể xóa để giữ vết kế toán.")
+    so_cu, goc = v.so, Decimal(v.so_tien_goc or 0)
+    db.query(LichTraNo).filter_by(khoan_vay_id=vay_id).delete()
+    so_bt = db.query(ButToan).filter_by(nguon="VAY", nguon_id=vay_id).delete()
+    quy = _quy_theo_tk(db, v.tk_tien)
+    if quy and so_bt:
+        quy.so_du = Decimal(quy.so_du) - goc
+    ghi_audit(db, nd.id, "XOA", "khoan_vay", vay_id,
+              cu={"so": so_cu, "ben": v.ben_cho_vay, "goc": _f(goc), "so_but_toan": so_bt})
+    db.delete(v)
+    db.commit()
+    return {"ok": True, "so": so_cu}
+
+
 @router.get("/tong-quan")
 def tong_quan_vay(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
     today = date.today()

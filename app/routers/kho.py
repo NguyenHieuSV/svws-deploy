@@ -86,6 +86,54 @@ def sua_hang_hoa(
     return _ra(hh)
 
 
+# ----- DUYET: xóa hàng hóa (chỉ khi chưa phát sinh chứng từ, tồn = 0) -----
+@router.delete("/hang-hoa/{hh_id}")
+def xoa_hang_hoa(hh_id: int, db: Session = Depends(get_db),
+                 nd: NguoiDung = Depends(yeu_cau(MODULE, "DUYET"))):
+    """Xóa hàng hóa khỏi danh mục. Chặn khi còn tồn kho hoặc đã xuất hiện trong
+    báo giá, đơn hàng, đơn mua, phiếu kho, đề xuất mua, báo giá NCC, định mức,
+    tài sản cho thuê (giữ vết chứng từ)."""
+    from sqlalchemy import text as _sql
+    from sqlalchemy.exc import IntegrityError
+    hh = db.get(HangHoa, hh_id)
+    if hh is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy hàng hóa")
+    ton = db.query(TonKho).filter_by(hang_hoa_id=hh_id).first()
+    if ton and (ton.so_luong or 0) > 0:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            f"'{hh.ten}' còn tồn kho {ton.so_luong} — xuất hết hoặc điều chỉnh tồn về 0 trước khi xóa.")
+    refs = [("dòng báo giá", "bao_gia_ct"), ("dòng đơn hàng", "don_hang_ct"),
+            ("dòng đơn mua", "don_mua_ct"), ("dòng phiếu kho", "phieu_kho_ct"),
+            ("dòng đề xuất mua", "yeu_cau_mua_ct"), ("báo giá NCC", "bao_gia_ncc"),
+            ("định mức tiêu hao", "dinh_muc_tieu_hao"), ("tài sản cho thuê", "tai_san_cho_thue")]
+    ban = []
+    for ten_ref, bang in refs:
+        try:
+            n = db.execute(_sql(f"SELECT COUNT(*) FROM {bang} WHERE hang_hoa_id = :i"),
+                           {"i": hh_id}).scalar() or 0
+        except Exception:
+            n = 0
+        if n:
+            ban.append(f"{n} {ten_ref}")
+    if ban:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"'{hh.ten}' đang gắn với {', '.join(ban)} — không thể xóa để giữ vết chứng từ.")
+    ten_cu, ma_cu = hh.ten, hh.ma
+    if ton:
+        db.delete(ton)
+    try:
+        db.delete(hh)
+        db.flush()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            f"'{ten_cu}' còn dữ liệu liên kết ở phân hệ khác nên không thể xóa.")
+    ghi_audit(db, nd.id, "XOA", "hang_hoa", hh_id, cu={"ma": ma_cu, "ten": ten_cu})
+    db.commit()
+    return {"ok": True, "ten": ten_cu}
+
+
 # ----- XEM: phiếu kho -----
 @router.get("/phieu", response_model=list[PhieuKhoRa])
 def ds_phieu(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
