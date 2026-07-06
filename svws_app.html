@@ -1878,7 +1878,8 @@ async function bhBaoGia(host){
                    :`<button class="btn-sm" disabled title="Không có quyền duyệt">Duyệt</button>`)
       : (st==="DA_DUYET"&&can("ban_hang","THAO_TAC")
           ?`<button class="btn-sm ghost" onclick="taoDonTuBG(${b.id})">→ Tạo đơn hàng</button>`:'—');
-    return `<tr><td><b>${b.so}</b></td><td>${b.khach}</td><td class="num">${vnd(b.tong_tien)}</td><td>${badge}</td><td>${btn}</td></tr>`;
+    const btnXoa=can("ban_hang","DUYET")?` <button class="btn-sm ghost" style="color:var(--red)" title="Xóa báo giá" onclick="bgnXoa(${b.id},'${String(b.so||'').replace(/'/g,'')}')">🗑</button>`:'';
+    return `<tr><td><b>${b.so}</b></td><td>${b.khach}</td><td class="num">${vnd(b.tong_tien)}</td><td>${badge}</td><td>${btn}${btnXoa}</td></tr>`;
   }).join('');
   const gateNote = HANMUC.bao_gia[S.role]!==undefined
     ? `Hạn mức duyệt của bạn: ${HANMUC.bao_gia[S.role]===null?'không giới hạn':vnd(HANMUC.bao_gia[S.role])}.`
@@ -2304,6 +2305,20 @@ async function bhDonHang(host){
   host.innerHTML = `<div class="note" style="padding:0 0 12px">Mỗi đơn hiển thị <b>Mã Bán hàng</b> làm khóa liên kết sang Mua hàng, kèm <b>giá vốn</b> (tổng PO mua liên kết) và <b>lãi/lỗ</b>. Đính kèm PO khách & hợp đồng ngay trên đơn.</div>${hdPanel}${cards||'<div class="panel"><div class="empty">Chưa có đơn hàng nào.<br><span style="font-size:12.5px;color:var(--muted)">Đơn hàng được tạo từ <b>báo giá nội bộ đã duyệt</b>: sang tab Báo giá → bấm "→ Tạo đơn hàng" trên báo giá Đã duyệt. Sau đó quay lại đây để đính kèm PO/Hợp đồng.</span></div></div>'}`;
 }
 
+/* --- Xóa báo giá nội bộ --- */
+async function bgnXoa(id,so){
+  if(!confirm("Xóa báo giá "+so+"?\n\nDòng hàng của báo giá sẽ bị xóa theo; cơ hội CRM liên quan chỉ bị gỡ liên kết. Báo giá đã sinh đơn hàng sẽ bị hệ thống từ chối để giữ vết bán hàng. Không thể hoàn tác."))return;
+  if(S.mode==="live"){
+    try{await api("/ban-hang/bao-gia/"+id,{method:'DELETE'});}
+    catch(e){return toast(e.detail||e.message,"err");}
+  }else{
+    if((DEMO.don_hang||[]).some(d=>d.bao_gia_id===id))return toast("Báo giá "+so+" đã sinh đơn hàng — không thể xóa để giữ vết bán hàng.","err");
+    const i=(DEMO.bao_gia||[]).findIndex(x=>x.id===id); if(i>=0)DEMO.bao_gia.splice(i,1);
+  }
+  toast("Đã xóa báo giá "+so+(S.mode==="demo"?" (demo)":""),"ok");
+  viewBanHang($("#main"));
+}
+
 /* --- Xóa đơn hàng --- */
 async function dhXoa(id,ma){
   if(!confirm("Xóa đơn hàng "+ma+"?\n\nDòng hàng và tệp đính kèm (PO/Hợp đồng) của đơn sẽ bị xóa theo. Đơn đã xuất kho, có hóa đơn hoặc phiếu thu/chi sẽ bị hệ thống từ chối để giữ vết kế toán. Không thể hoàn tác."))return;
@@ -2326,7 +2341,7 @@ async function taoDonTuBG(id){
   }else{
     const b=DEMO.bao_gia.find(x=>x.id===id); if(!b)return;
     const did=Math.max(0,...DEMO.don_hang.map(o=>o.id))+1;
-    DEMO.don_hang.unshift({id:did,so:"DH-"+String(did).padStart(4,'0'),khach:b.khach,tong_tien:b.tong_tien,trang_thai:"MOI",tep:[]});
+    DEMO.don_hang.unshift({id:did,so:"DH-"+String(did).padStart(4,'0'),khach:b.khach,tong_tien:b.tong_tien,trang_thai:"MOI",bao_gia_id:id,tep:[]});
     toast("Đã tạo đơn hàng (demo)","ok");
   }
   S.bhTab='don_hang'; viewBanHang($("#main"));

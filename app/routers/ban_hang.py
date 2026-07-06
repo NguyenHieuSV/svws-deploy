@@ -385,6 +385,36 @@ def tao_don_tu_bao_gia(bg_id: int, db: Session = Depends(get_db),
     return dh
 
 
+# ----- DUYET: xóa báo giá nội bộ (chặn khi đã sinh đơn hàng) -----
+@router.delete("/bao-gia/{bg_id}")
+def xoa_bao_gia(bg_id: int, db: Session = Depends(get_db),
+                nd: NguoiDung = Depends(yeu_cau(MODULE, "DUYET"))):
+    """Xóa báo giá nội bộ cùng dòng hàng. Chặn khi đã có đơn hàng tạo từ báo giá
+    này (giữ vết bán hàng); cơ hội CRM liên quan chỉ bị gỡ liên kết."""
+    from sqlalchemy.exc import IntegrityError
+    bg = db.get(BaoGia, bg_id)
+    if bg is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy báo giá")
+    so_don = db.query(DonHang).filter_by(bao_gia_id=bg_id).count()
+    if so_don:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"Báo giá '{bg.so or bg_id}' đã sinh {so_don} đơn hàng — không thể xóa để giữ vết bán hàng. "
+            "Nếu cần, hãy xóa đơn hàng liên quan trước.")
+    so_cu, tt_cu = bg.so, bg.trang_thai
+    db.query(BaoGiaCt).filter_by(bao_gia_id=bg_id).delete()
+    try:
+        db.delete(bg)
+        db.flush()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            f"Báo giá '{so_cu}' còn dữ liệu liên kết ở phân hệ khác nên không thể xóa.")
+    ghi_audit(db, nd.id, "XOA", "bao_gia", bg_id, cu={"so": so_cu, "trang_thai": tt_cu})
+    db.commit()
+    return {"ok": True, "so": so_cu}
+
+
 @router.get("/don-hang", response_model=list[DonHangRa])
 def ds_don_hang(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
     return db.query(DonHang).order_by(DonHang.id.desc()).all()
