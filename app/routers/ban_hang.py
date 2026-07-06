@@ -152,6 +152,79 @@ def sua_bao_gia_form(bgf_id: int, data: BaoGiaFormVao, db: Session = Depends(get
     return bgf
 
 
+class GuiBaoGiaVao(_BM):
+    den: str
+    tieu_de: str | None = None
+    loi_nhan: str | None = None
+
+
+def _bgf_tinh(d: dict):
+    sub = 0.0; vat = 0.0
+    for it in (d.get("items") or []):
+        tt = float(it.get("so_luong") or 0) * float(it.get("don_gia") or 0)
+        sub += tt
+        p = it.get("vat_pct")
+        p = float(d.get("vat_pct") or 0) if p in (None, "") else float(p)
+        vat += tt * p / 100
+    return sub, vat, sub + vat
+
+
+@router.post("/bao-gia-form/{bgf_id}/gui-email")
+def gui_bao_gia_email(bgf_id: int, data: GuiBaoGiaVao, db: Session = Depends(get_db),
+                      nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    """Gửi báo giá cho khách qua email công ty (settings.email_from = sv-sales@...)."""
+    from ..email_gateway import lay_email_provider
+    from ..config import settings as _st
+    bgf = db.get(BaoGiaForm, bgf_id)
+    if bgf is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy báo giá")
+    if "@" not in (data.den or ""):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Email người nhận không hợp lệ")
+    d = bgf.noi_dung or {}
+    sub, vat, tong = _bgf_tinh(d)
+    mn = lambda n: f"{round(n):,}".replace(",", ".")
+    L = []
+    if data.loi_nhan:
+        L += [data.loi_nhan, ""]
+    L += [f"BÁO GIÁ SỐ: {d.get('so') or bgf.so or ''} — Ngày: {d.get('ngay') or ''}",
+          f"Hiệu lực: {d.get('hieu_luc') or ''}", ""]
+    if d.get("tieu_de"):
+        L += [str(d.get("tieu_de")), ""]
+    L.append("CHI TIẾT SẢN PHẨM/DỊCH VỤ:")
+    for i, it in enumerate(d.get("items") or [], 1):
+        if not (it.get("ten") or it.get("mo_ta")):
+            continue
+        tt = float(it.get("so_luong") or 0) * float(it.get("don_gia") or 0)
+        L.append(f"{i}. {it.get('ten') or ''}"
+                 + (f" ({it.get('mo_ta')})" if it.get("mo_ta") else "")
+                 + f" — {it.get('so_luong')} {it.get('don_vi') or ''}"
+                 + f" x {mn(float(it.get('don_gia') or 0))} = {mn(tt)} VND")
+    L += ["", f"Tạm tính (chưa VAT): {mn(sub)} VND",
+          f"Tổng VAT: {mn(vat)} VND",
+          f"TỔNG CỘNG (gồm VAT): {mn(tong)} VND", ""]
+    if d.get("tt"):
+        L.append(f"Điều khoản thanh toán: {d.get('tt')}")
+    if d.get("giao"):
+        L.append(f"Thời gian giao hàng: {d.get('giao')}")
+    if d.get("dia_diem"):
+        L.append(f"Địa điểm giao hàng: {d.get('dia_diem')}")
+    L += ["", "Trân trọng,", "------------------------------",
+          "CÔNG TY TNHH GIẢI PHÁP KỸ THUẬT SÓNG VIỆT — \"We Have Solutions\"",
+          f"Email: {_st.email_from} · ĐT: {_st.cong_ty_tel}",
+          f"Địa chỉ: {_st.cong_ty_dia_chi}"]
+    tieu_de = data.tieu_de or f"[SVWS] Báo giá {d.get('so') or bgf.so or ''}"
+    kq = lay_email_provider().gui(data.den.strip(), tieu_de, "\n".join(L))
+    if kq.get("trang_thai") == "LOI":
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY,
+                            "Gửi email thất bại: " + (kq.get("ghi_chu") or "lỗi SMTP"))
+    bgf.trang_thai = "DA_GUI"
+    ghi_audit(db, nd.id, "GUI", "bao_gia_form", bgf.id,
+              moi={"den": data.den, "gui_tu": kq.get("gui_tu")})
+    db.commit()
+    return {"gui_tu": kq.get("gui_tu"), "den": data.den,
+            "trang_thai": kq.get("trang_thai"), "ghi_chu": kq.get("ghi_chu")}
+
+
 @router.delete("/bao-gia-form/{bgf_id}")
 def xoa_bao_gia_form(bgf_id: int, db: Session = Depends(get_db),
                      nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
