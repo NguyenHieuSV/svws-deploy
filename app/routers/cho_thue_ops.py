@@ -13,7 +13,7 @@ from sqlalchemy import func
 from ..database import get_db
 from ..config import settings
 from ..luu_tru import luu, xoa, ton_tai, phan_hoi_tai
-from ..rbac import yeu_cau
+from ..rbac import yeu_cau, chi_vai_tro
 from ..deps import nhan_vien_id_cua
 from ..audit import ghi_audit
 from ..models import (NguoiDung, KhachHang, YeuCauMua, HangHoa, HoaDon,
@@ -114,7 +114,7 @@ def sua_tai_san(ts_id: int, data: TaiSanSuaCT, db: Session = Depends(get_db),
 # ----- DUYET: xóa tài sản cho thuê -----
 @router.delete("/tai-san/{ts_id}")
 def xoa_tai_san(ts_id: int, db: Session = Depends(get_db),
-                nd: NguoiDung = Depends(yeu_cau(MODULE, "DUYET"))):
+                nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
     """Xóa tài sản cùng kế hoạch bảo trì và định mức; chi phí vận hành cũ chỉ bị
     gỡ liên kết. Chặn khi tài sản đang cho thuê hoặc gắn hợp đồng thuê."""
     from sqlalchemy import text as _sql
@@ -212,7 +212,7 @@ def them_chi_phi(data: ChiPhiVao, db: Session = Depends(get_db),
 # ----- DUYET: xóa chi phí vận hành -----
 @router.delete("/chi-phi/{cp_id}")
 def xoa_chi_phi(cp_id: int, db: Session = Depends(get_db),
-                nd: NguoiDung = Depends(yeu_cau(MODULE, "DUYET"))):
+                nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
     c = db.get(ChiPhiVanHanh, cp_id)
     if c is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy chi phí")
@@ -309,7 +309,7 @@ def tao_de_xuat(data: DeXuatMuaCT, db: Session = Depends(get_db),
 # ----- DUYET: xóa đề xuất mua cho thuê -----
 @router.delete("/de-xuat-mua/{ycm_id}")
 def xoa_de_xuat_ct(ycm_id: int, db: Session = Depends(get_db),
-                   nd: NguoiDung = Depends(yeu_cau(MODULE, "DUYET"))):
+                   nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
     yc = db.get(YeuCauMua, ycm_id)
     if yc is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đề xuất")
@@ -379,7 +379,7 @@ def them_bao_tri(data: BaoTriVao, db: Session = Depends(get_db),
 # ----- DUYET: xóa kế hoạch bảo trì -----
 @router.delete("/bao-tri/{bt_id}")
 def xoa_bao_tri(bt_id: int, db: Session = Depends(get_db),
-                nd: NguoiDung = Depends(yeu_cau(MODULE, "DUYET"))):
+                nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
     b = db.get(KeHoachBaoTri, bt_id)
     if b is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy kế hoạch bảo trì")
@@ -488,7 +488,7 @@ def luu_dinh_muc(data: DinhMucVao, db: Session = Depends(get_db),
 
 @router.delete("/dinh-muc/{dm_id}")
 def xoa_dinh_muc(dm_id: int, db: Session = Depends(get_db),
-                 nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+                 nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
     d = db.get(DinhMucTieuHao, dm_id)
     if d is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy định mức")
@@ -748,7 +748,7 @@ def tai_tai_lieu_ct(tep_id: int, db: Session = Depends(get_db), _=Depends(yeu_ca
 
 @router.delete("/tai-lieu/{tep_id}")
 def xoa_tai_lieu_ct(tep_id: int, db: Session = Depends(get_db),
-                    nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+                    nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
     t = db.get(TepDinhKem, tep_id)
     if t is None or t.doi_tuong != "CHO_THUE_DA":
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy tài liệu")

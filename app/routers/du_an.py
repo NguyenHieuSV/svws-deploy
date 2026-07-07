@@ -17,7 +17,7 @@ from sqlalchemy import func
 from ..database import get_db
 from ..config import settings
 from ..luu_tru import luu, xoa, ton_tai, phan_hoi_tai
-from ..rbac import yeu_cau, kiem_han_muc
+from ..rbac import yeu_cau, kiem_han_muc, chi_vai_tro
 from ..audit import ghi_audit
 from ..deps import nhan_vien_id_cua
 from ..models import (NguoiDung, NhanVien, DuAn, DuToanCt, DuAnChiPhi, NghiemThu,
@@ -41,7 +41,7 @@ def ds_du_an(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
 # ----- DUYET: xóa dự án (chặn khi đã có nghiệm thu/hóa đơn để giữ vết) -----
 @router.delete("/{da_id}")
 def xoa_du_an(da_id: int, db: Session = Depends(get_db),
-              nd: NguoiDung = Depends(yeu_cau(MODULE, "DUYET"))):
+              nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
     """Xóa dự án cùng dữ liệu con (mốc, an toàn, tài liệu, KPI, nhật ký... tự xóa theo).
     Không xóa được dự án đã có biên bản nghiệm thu hoặc hóa đơn liên quan."""
     from sqlalchemy.exc import IntegrityError
@@ -369,7 +369,7 @@ def sua_moc(moc_id: int, data: MocSuaVao, db: Session = Depends(get_db),
 
 @router.delete("/moc/{moc_id}")
 def xoa_moc(moc_id: int, db: Session = Depends(get_db),
-            nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+            nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
     m = db.get(DuAnMoc, moc_id)
     if m is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy mốc")
@@ -430,7 +430,7 @@ def sua_an_toan(at_id: int, data: AnToanVao, db: Session = Depends(get_db),
 # ----- DUYET: xóa đánh giá an toàn -----
 @router.delete("/an-toan/{at_id}")
 def xoa_an_toan(at_id: int, db: Session = Depends(get_db),
-                nd: NguoiDung = Depends(yeu_cau(MODULE, "DUYET"))):
+                nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
     a = db.get(DuAnAnToan, at_id)
     if a is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đánh giá")
@@ -464,7 +464,7 @@ def them_nhat_ky(da_id: int, data: NhatKyVao, db: Session = Depends(get_db),
 # ----- DUYET: xóa nhật ký thi công -----
 @router.delete("/nhat-ky/{nk_id}")
 def xoa_nhat_ky(nk_id: int, db: Session = Depends(get_db),
-                nd: NguoiDung = Depends(yeu_cau(MODULE, "DUYET"))):
+                nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
     r = db.get(DuAnNhatKy, nk_id)
     if r is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy nhật ký")
@@ -537,7 +537,7 @@ def sua_tai_lieu(tl_id: int, data: TaiLieuMetaVao, db: Session = Depends(get_db)
 
 @router.delete("/tai-lieu/{tl_id}")
 def xoa_tai_lieu(tl_id: int, db: Session = Depends(get_db),
-                 nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+                 nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
     t = db.get(DuAnTaiLieu, tl_id)
     if t is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy tài liệu")
@@ -612,7 +612,7 @@ def sua_kpi(kpi_id: int, data: KpiVao, db: Session = Depends(get_db),
 
 @router.delete("/kpi/{kpi_id}")
 def xoa_kpi(kpi_id: int, db: Session = Depends(get_db),
-            nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+            nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
     k = db.get(DuAnKpi, kpi_id)
     if k is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy KPI")
@@ -709,7 +709,7 @@ def sua_chi_tieu(ct_id: int, data: ChiTieuVao, db: Session = Depends(get_db),
 
 @router.delete("/chi-tieu/{ct_id}")
 def xoa_chi_tieu(ct_id: int, db: Session = Depends(get_db),
-                 nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+                 nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
     c = db.get(DuAnChiTieu, ct_id)
     if c is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy chỉ tiêu")

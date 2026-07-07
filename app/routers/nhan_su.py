@@ -74,7 +74,7 @@ def tao_nhan_vien(data: NhanVienMoiVao, db: Session = Depends(get_db),
 # ----- DUYET: xóa nhân viên (chỉ khi chưa có bảng lương/chấm công) -----
 @router.delete("/nhan-vien/{nv_id}")
 def xoa_nhan_vien(nv_id: int, db: Session = Depends(get_db),
-                  nd: NguoiDung = Depends(yeu_cau(MODULE, "DUYET"))):
+                  nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
     """Xóa nhân viên thêm nhầm. Chặn khi đã có bảng lương, chấm công, nghỉ phép
     hoặc được tham chiếu trong chứng từ khác (người tạo/duyệt) — khi đó nên
     chuyển trạng thái NGHỈ VIỆC thay vì xóa."""

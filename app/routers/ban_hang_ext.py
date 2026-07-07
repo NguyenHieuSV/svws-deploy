@@ -13,7 +13,7 @@ from sqlalchemy import func
 from ..database import get_db
 from ..config import settings
 from ..luu_tru import luu, xoa, ton_tai, phan_hoi_tai
-from ..rbac import yeu_cau
+from ..rbac import yeu_cau, chi_vai_tro
 from ..deps import nhan_vien_id_cua
 from ..audit import ghi_audit
 from ..email_gateway import lay_email_provider
@@ -183,7 +183,7 @@ def ket_qua_gui(cd_id: int, db: Session = Depends(get_db), _=Depends(yeu_cau(MOD
 # ----- DUYET: xóa chiến dịch chào hàng -----
 @router.delete("/chien-dich/{cd_id}")
 def xoa_chien_dich(cd_id: int, db: Session = Depends(get_db),
-                   nd: NguoiDung = Depends(yeu_cau(MODULE, "DUYET"))):
+                   nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
     """Xóa chiến dịch cùng tệp đính kèm và nhật ký gửi email của nó. Lịch sử
     liên lạc với từng khách (lien_lac) và audit vẫn được giữ nguyên."""
     from sqlalchemy.exc import IntegrityError
@@ -461,7 +461,7 @@ def cap_nhat_cong_viec(cv_id: int, data: TrangThaiCVVao, db: Session = Depends(g
 # ----- DUYET: xóa công việc SLA -----
 @router.delete("/cong-viec/{cv_id}")
 def xoa_cong_viec(cv_id: int, db: Session = Depends(get_db),
-                  nd: NguoiDung = Depends(yeu_cau(MODULE, "DUYET"))):
+                  nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
     cv = db.get(CongViec, cv_id)
     if cv is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy công việc")
@@ -475,7 +475,7 @@ def xoa_cong_viec(cv_id: int, db: Session = Depends(get_db),
 # ----- DUYET: xóa cơ hội -----
 @router.delete("/co-hoi/{ch_id}")
 def xoa_co_hoi(ch_id: int, db: Session = Depends(get_db),
-               nd: NguoiDung = Depends(yeu_cau(MODULE, "DUYET"))):
+               nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
     ch = db.get(CoHoi, ch_id)
     if ch is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy cơ hội")

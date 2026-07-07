@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from ..database import get_db
-from ..rbac import yeu_cau
+from ..rbac import yeu_cau, chi_vai_tro
 from ..deps import nhan_vien_id_cua
 from ..audit import ghi_audit
 from ..models import (NguoiDung, KhachHang, BaoGia, DonHang, CongNo, ChamSocKH)
@@ -136,7 +136,7 @@ def hoan_thanh(cs_id: int, data: HoanThanhVao, db: Session = Depends(get_db),
 # ----- DUYET: xóa việc chăm sóc / khiếu nại -----
 @router.delete("/cham-soc/{cs_id}")
 def xoa_cham_soc(cs_id: int, db: Session = Depends(get_db),
-                 nd: NguoiDung = Depends(yeu_cau(MODULE, "DUYET"))):
+                 nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
     cs = db.get(ChamSocKH, cs_id)
     if cs is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy việc chăm sóc/khiếu nại")

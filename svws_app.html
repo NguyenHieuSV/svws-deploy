@@ -468,6 +468,8 @@ async function apiUpload(path,formData){
 }
 function can(mod,lvl){return RANK[S.perm[pmod(mod)]||"KHONG"]>=RANK[lvl];}
 function pmod(m){return (MODULES[m]&&MODULES[m].permKey)||m;}
+/* Nút Xóa toàn app: chỉ CEO/ADMIN thấy và dùng được */
+function laQTV(){return S.role==="CEO"||S.role==="ADMIN";}
 
 /* ============ Đăng nhập ============ */
 async function doLogin(){
@@ -760,7 +762,7 @@ async function crmChamSoc(host){
     denHan=(DEMO.cham_soc||[]).filter(c=>c.trang_thai==="CHO"&&c.ngay_hen&&c.ngay_hen<=today); }
   const rows=denHan.map(c=>`<tr><td>${_crmKhName(c.khach_hang_id)}</td><td>${CS_LOAI[c.loai]||c.loai}</td>
     <td>${c.noi_dung||''}</td><td>${c.ngay_hen||''}</td>
-    <td style="white-space:nowrap">${canDo?`<button class="btn-sm" onclick="crmHoanThanh(${c.id})">Hoàn thành + CSAT</button>`:`<span ${_MU}>—</span>`}${can("crm","DUYET")?` <button class="btn-sm ghost" style="color:var(--red)" title="Xóa" onclick="crmXoaCS(${c.id},'việc chăm sóc')">🗑</button>`:''}</td></tr>`).join('')
+    <td style="white-space:nowrap">${canDo?`<button class="btn-sm" onclick="crmHoanThanh(${c.id})">Hoàn thành + CSAT</button>`:`<span ${_MU}>—</span>`}${laQTV()?` <button class="btn-sm ghost" style="color:var(--red)" title="Xóa" onclick="crmXoaCS(${c.id},'việc chăm sóc')">🗑</button>`:''}</td></tr>`).join('')
     ||`<tr><td colspan="5" ${_MU}>Không có việc đến hạn</td></tr>`;
   const khOpts=(await _crmKhList()).map(k=>`<option value="${k.id}">${k.ten}</option>`).join('');
   let orders=[]; if(S.mode==="live"){ try{orders=await api("/ban-hang/don-hang");}catch{} } else { orders=DEMO.don_hang||[]; }
@@ -805,7 +807,7 @@ async function crmKhieuNai(host){
     }else{
       sla=`<span class="badge b-ok">Đã xử lý${c.csat?' · CSAT '+c.csat+'★':''}</span>`;
     }
-    if(can("crm","DUYET"))act+=` <button class="btn-sm ghost" style="color:var(--red)" title="Xóa" onclick="crmXoaCS(${c.id},'khiếu nại')">🗑</button>`;
+    if(laQTV())act+=` <button class="btn-sm ghost" style="color:var(--red)" title="Xóa" onclick="crmXoaCS(${c.id},'khiếu nại')">🗑</button>`;
     return `<tr><td>${tenKH(c.khach_hang_id)}</td><td>${c.noi_dung||''}</td>
       <td style="white-space:nowrap;color:var(--muted);font-size:12px">${(c.created_at||'').toString().replace('T',' ').slice(0,16)}</td>
       <td>${sla}</td><td style="white-space:nowrap">${act}</td></tr>`;
@@ -991,7 +993,7 @@ async function ctTaiSan(host){
       <td class="num">${vnd(t.gia_thue_thang||0)}</td>
       <td><span class="badge ${tt[1]}">${tt[0]}</span></td>
       <td>${t.khach_hang||'<span style="color:var(--muted)">—</span>'}</td>
-      <td style="white-space:nowrap"><button class="btn-sm ghost" onclick="ctOpenTS(${t.id})">Chi tiết</button>${canOp?` <button class="btn-sm ghost" onclick="ctEditTS(${t.id})">Sửa</button>`:''}${can("cho_thue","DUYET")?` <button class="btn-sm ghost" style="color:var(--red)" title="Xóa tài sản" onclick="ctXoaTS(${t.id},'${String(t.ten||'').replace(/'/g,'')}')">🗑</button>`:''}</td></tr>`;}).join('');
+      <td style="white-space:nowrap"><button class="btn-sm ghost" onclick="ctOpenTS(${t.id})">Chi tiết</button>${canOp?` <button class="btn-sm ghost" onclick="ctEditTS(${t.id})">Sửa</button>`:''}${laQTV()?` <button class="btn-sm ghost" style="color:var(--red)" title="Xóa tài sản" onclick="ctXoaTS(${t.id},'${String(t.ten||'').replace(/'/g,'')}')">🗑</button>`:''}</td></tr>`;}).join('');
   host.innerHTML=`<div class="panel">
     <div class="panel-h"><h3>Danh mục tài sản cho thuê</h3><div class="spacer"></div>
       ${canOp?`<button class="btn-sm" onclick="ctFormTS()">+ Thêm tài sản</button>`:''}</div>
@@ -1128,7 +1130,7 @@ async function ctChiPhi(host){
   let data={tong:0,danh_sach:[]};
   if(S.mode==="live"){ try{data=await api("/cho-thue/chi-phi"+(S.ctDuAn?`?tai_san_id=${S.ctDuAn}`:""));}catch(e){host.innerHTML=`<div class="perm-denied">${e.detail||e.message}</div>`;return;} }
   else { const _c=(S._ctTS||[]).find(t=>String(t.id)===String(S.ctDuAn)); const pre=_c?(_c.ten_du_an||_c.ma):null; let ds=DEMO.chi_phi_vh||[]; if(pre)ds=ds.filter(c=>String(c.ma_ban_hang||"").indexOf(pre)===0); data={tong:ds.reduce((s,c)=>s+c.so_tien,0),danh_sach:ds}; }
-  const canXoaCP=can("cho_thue","DUYET");
+  const canXoaCP=laQTV();
   const rows=data.danh_sach.map(c=>`<tr><td>${c.ngay}</td><td>${c.tai_san||c.ma_ban_hang||'—'}</td>
     <td>${LOAI_CP[c.loai_chi_phi]||c.loai_chi_phi}</td><td class="num">${vnd(c.so_tien)}</td>
     <td>${c.mo_ta||''}</td><td><span class="badge ${c.nguon==='DE_XUAT_MUA'?'b-info':c.nguon==='BAO_TRI'?'b-cho':'b-ok'}">${c.nguon==='DE_XUAT_MUA'?'Đề xuất mua':c.nguon==='BAO_TRI'?'Bảo trì':'Thủ công'}</span></td>
@@ -1217,7 +1219,7 @@ async function ctVatTu(host){
           <tbody>${cr}</tbody></table></div></div>`;
   }
 
-  const canXoaDX=can("cho_thue","DUYET");
+  const canXoaDX=laQTV();
   const rows=flt.map(x=>`<tr><td><b>${x.ma_hh||'—'}</b> ${x.hang_hoa||''}</td><td class="num">${x.so_luong}</td>
     <td class="num">${vnd(x.don_gia)}</td><td class="num">${vnd(x.thanh_tien)}</td><td>${x.cho_thue_ma}</td>
     <td><span class="badge ${x.trang_thai==='MOI'?'b-cho':'b-ok'}">${x.trang_thai}</span></td>
@@ -1281,7 +1283,7 @@ async function ctBaoTri(host){
   const rows=list.map(b=>`<tr><td>${b.ma||''} ${b.tai_san||''}</td><td>${b.ten_cong_viec}</td>
     <td>${b.chu_ky_ngay} ngày</td><td>${b.ngay_ke_tiep||'—'}</td><td>${b.lan_cuoi||'—'}</td>
     <td>${b.qua_han?'<span class="badge b-tc">Quá hạn</span>':'<span class="badge b-ok">Đúng kế hoạch</span>'}</td>
-    <td style="white-space:nowrap">${canOp?`<button class="btn-sm" onclick="ctHoanThanhBT(${b.id})">Hoàn thành</button>`:'—'}${can("cho_thue","DUYET")?` <button class="btn-sm ghost" style="color:var(--red)" title="Xóa kế hoạch" onclick="ctXoaBaoTri(${b.id})">🗑</button>`:''}</td></tr>`).join('')
+    <td style="white-space:nowrap">${canOp?`<button class="btn-sm" onclick="ctHoanThanhBT(${b.id})">Hoàn thành</button>`:'—'}${laQTV()?` <button class="btn-sm ghost" style="color:var(--red)" title="Xóa kế hoạch" onclick="ctXoaBaoTri(${b.id})">🗑</button>`:''}</td></tr>`).join('')
     ||`<tr><td colspan="7" style="color:var(--muted)">Chưa có kế hoạch bảo trì</td></tr>`;
   const tsOpts=(await _ctTaiSan()).map(t=>`<option value="${t.id}" ${String(t.id)===String(S.ctDuAn)?'selected':''}>${t.ten_du_an||t.ma} — ${t.ten}</option>`).join('');
   host.innerHTML=`
@@ -1381,7 +1383,7 @@ async function ctDinhMuc(host){
     ||`<tr><td colspan="8" style="color:var(--muted)">Chưa có định mức/tiêu hao cho hệ thống này. Thiết lập định mức bên dưới.</td></tr>`;
   const dmRows=dms.map(d=>`<tr><td>${d.ma_hh?'<b>'+d.ma_hh+'</b> ':''}${d.ten}</td><td>${d.don_vi||''}</td>
     <td class="num">${d.dinh_muc_thang}</td><td class="num">${vnd(d.chi_phi_dinh_muc)}</td>
-    <td>${canOp?`<button class="btn-sm ghost" onclick="ctDmXoa('${d.id}')">Xóa</button>`:''}</td></tr>`).join('')
+    <td>${laQTV()?`<button class="btn-sm ghost" style="color:var(--red)" onclick="ctDmXoa('${d.id}')">🗑 Xóa</button>`:''}</td></tr>`).join('')
     ||`<tr><td colspan="5" style="color:var(--muted)">Chưa thiết lập định mức cho hệ thống này</td></tr>`;
   const chenh=bc.tong.chenh_chi_phi||0;
   host.innerHTML=_ctDmToggle()+`
@@ -1523,7 +1525,7 @@ async function ctDocument(host,pid){
 
   const grp={};docs.forEach(d=>{(grp[d.loai]=grp[d.loai]||[]).push(d);});
   const docRows=docs.map(d=>{const m=NHOM_TL[d.loai]||[d.loai,'b-info'];return `<tr><td>${d.ten}</td><td><span class="badge ${m[1]}">${m[0]}</span></td><td>${d.ngay||''}</td><td class="num">${_fmtKB(d.kich_thuoc)}</td>
-    <td><button class="btn-sm ghost" onclick="ctTaiLieuTai(${d.id},'${(d.ten||'tai-lieu').replace(/'/g,'')}')">Tải</button>${canOp?` <button class="btn-sm ghost" onclick="ctTaiLieuXoa(${d.id})">Xóa</button>`:''}</td></tr>`;}).join('')
+    <td><button class="btn-sm ghost" onclick="ctTaiLieuTai(${d.id},'${(d.ten||'tai-lieu').replace(/'/g,'')}')">Tải</button>${laQTV()?` <button class="btn-sm ghost" style="color:var(--red)" onclick="ctTaiLieuXoa(${d.id})">🗑 Xóa</button>`:''}</td></tr>`;}).join('')
     ||`<tr><td colspan="5" style="color:var(--muted)">Chưa có tài liệu lưu trữ</td></tr>`;
 
   host.innerHTML=`
@@ -1711,7 +1713,7 @@ async function khoTonKho(host){
       <td class="num">${h.gia_ban?vnd(h.gia_ban):'—'}</td>
       <td class="num">${gt?vnd(gt):'—'}</td>
       <td>${low?'<span class="badge b-tc">Dưới min</span>':'<span class="badge b-ok">Đủ</span>'}</td>
-      <td style="white-space:nowrap">${canDo?`<button class="btn-sm ghost" onclick="khoEdit(${h.id})">Sửa</button>`:''}${can("kho","DUYET")?` <button class="btn-sm ghost" style="color:var(--red)" title="Xóa hàng hóa" onclick="khoXoaHH(${h.id},'${String(h.ten||'').replace(/'/g,'')}')">🗑</button>`:''}</td></tr>`;}).join('');
+      <td style="white-space:nowrap">${canDo?`<button class="btn-sm ghost" onclick="khoEdit(${h.id})">Sửa</button>`:''}${laQTV()?` <button class="btn-sm ghost" style="color:var(--red)" title="Xóa hàng hóa" onclick="khoXoaHH(${h.id},'${String(h.ten||'').replace(/'/g,'')}')">🗑</button>`:''}</td></tr>`;}).join('');
   host.innerHTML=`<div class="cards">
     <div class="stat accent"><div class="k">Số mặt hàng</div><div class="v">${kpi.so_mat_hang}</div><div class="d">Đang theo dõi tồn</div></div>
     <div class="stat"><div class="k">Dưới mức tồn tối thiểu</div><div class="v small">${kpi.duoi_min}</div><div class="d" style="color:var(--red)">Cần bổ sung</div></div>
@@ -1942,7 +1944,7 @@ async function bhBaoGia(host){
       ${canOpBGF?`<button class="btn-sm ghost" onclick="bgfSua(${g.id})">✏️ Sửa</button>`:''}
       <button class="btn-sm ghost" onclick="bgfPdfTu(${g.id})">🖨 PDF</button>
       ${canOpBGF?`<button class="btn-sm ghost" onclick="bgfGuiMail(${g.id})">✉️ Gửi email</button>`:''}
-      ${canOpBGF?`<button class="btn-sm ghost" style="color:var(--red)" onclick="bgfXoa(${g.id})">🗑</button>`:''}</td></tr>`;}).join('');
+      ${laQTV()?`<button class="btn-sm ghost" style="color:var(--red)" onclick="bgfXoa(${g.id})">🗑</button>`:''}</td></tr>`;}).join('');
   const draftPanel=`<div class="panel"><div class="panel-h"><h3>Báo giá gửi khách hàng</h3><div class="spacer"></div>
       ${canOpBGF?'<button class="btn-sm" onclick="bgfMoi()">+ Tạo báo giá</button>':''}</div>
     <div class="note">Soạn báo giá theo mẫu công ty → <b>Lưu tạm</b> để chỉnh sửa nhiều lần → <b>Xuất PDF</b> gửi khách.</div>
@@ -1960,7 +1962,7 @@ async function bhBaoGia(host){
                    :`<button class="btn-sm" disabled title="Không có quyền duyệt">Duyệt</button>`)
       : (st==="DA_DUYET"&&can("ban_hang","THAO_TAC")
           ?`<button class="btn-sm ghost" onclick="taoDonTuBG(${b.id})">→ Tạo đơn hàng</button>`:'—');
-    const btnXoa=can("ban_hang","DUYET")?` <button class="btn-sm ghost" style="color:var(--red)" title="Xóa báo giá" onclick="bgnXoa(${b.id},'${String(b.so||'').replace(/'/g,'')}')">🗑</button>`:'';
+    const btnXoa=laQTV()?` <button class="btn-sm ghost" style="color:var(--red)" title="Xóa báo giá" onclick="bgnXoa(${b.id},'${String(b.so||'').replace(/'/g,'')}')">🗑</button>`:'';
     return `<tr><td><b>${b.so}</b></td><td>${b.khach}</td><td class="num">${vnd(b.tong_tien)}</td><td>${badge}</td><td>${btn}${btnXoa}</td></tr>`;
   }).join('');
   const gateNote = HANMUC.bao_gia[S.role]!==undefined
@@ -2361,7 +2363,7 @@ async function bhDonHang(host){
     return `<div class="panel">
       <div class="panel-h"><h3>${ma} · ${o.khach}</h3><div class="spacer"></div>
         ${canUp?`<button class="btn-sm ghost" onclick="hdMoi(${o.id})">📄 Tạo Hợp đồng</button>`:''}
-        ${can("ban_hang","DUYET")?`<button class="btn-sm ghost" style="color:var(--red)" onclick="dhXoa(${o.id},'${ma.replace(/'/g,'')}')">🗑 Xóa đơn</button>`:''}
+        ${laQTV()?`<button class="btn-sm ghost" style="color:var(--red)" onclick="dhXoa(${o.id},'${ma.replace(/'/g,'')}')">🗑 Xóa đơn</button>`:''}
         <span class="num" style="font-weight:700">${vnd(o.tong_tien)}</span>
         <span class="badge ${o.trang_thai==='DA_XUAT'?'b-ok':'b-info'}" style="margin-left:10px">${o.trang_thai}</span></div>
       ${pnlBar}
@@ -2378,7 +2380,7 @@ async function bhDonHang(host){
     <td style="white-space:nowrap">
       ${canUp?`<button class="btn-sm ghost" onclick="hdSua(${g.id})">✏️ Sửa</button>`:''}
       <button class="btn-sm ghost" onclick="hdPdfTu(${g.id})">🖨 PDF</button>
-      ${canUp?`<button class="btn-sm ghost" style="color:var(--red)" onclick="hdXoa(${g.id})">🗑</button>`:''}</td></tr>`;}).join('');
+      ${laQTV()?`<button class="btn-sm ghost" style="color:var(--red)" onclick="hdXoa(${g.id})">🗑</button>`:''}</td></tr>`;}).join('');
   const hdPanel=`<div class="panel"><div class="panel-h"><h3>Hợp đồng đã soạn</h3><div class="spacer"></div>
     ${canUp?'<button class="btn-sm" onclick="hdMoiTrong()">+ Tạo hợp đồng</button>':''}</div>
     <div class="note">Bấm <b>+ Tạo hợp đồng</b> (chọn khách) hoặc <b>📄 Tạo Hợp đồng</b> trên từng đơn hàng bên dưới (tự điền theo đơn). Lưu tạm để sửa nhiều lần, Xuất PDF khi hoàn tất. Bản hợp đồng đã ký (scan) thì đính kèm vào đơn hàng bằng khung <b>Tải lên</b> với loại "Hợp đồng".</div>
@@ -2890,7 +2892,7 @@ async function bhEmail(host){
         <button class="btn-sm" onclick="uploadTepCD(${c.id})">Đính kèm</button></div>` : '';
     return `<div class="panel">
       <div class="panel-h"><h3>${c.ten}</h3><div class="spacer"></div>
-        ${canApprove?`<button class="btn-sm ghost" style="color:var(--red)" onclick="cdXoa(${c.id},'${String(c.ten||'').replace(/'/g,'')}')">🗑 Xóa</button>`:''}${badge}</div>
+        ${laQTV()?`<button class="btn-sm ghost" style="color:var(--red)" onclick="cdXoa(${c.id},'${String(c.ten||'').replace(/'/g,'')}')">🗑 Xóa</button>`:''}${badge}</div>
       <div class="note" style="padding-bottom:6px">Tiêu đề: ${c.tieu_de}<br>Gửi tới: ${cdTarget(c)} · Gửi từ: <b>${FROM}</b></div>
       <div class="panel-b"><table><thead><tr><th>Tệp đính kèm</th><th class="num">Cỡ</th><th>Tải về</th></tr></thead>
         <tbody>${tepRows}</tbody></table></div>${upBox}
@@ -3020,7 +3022,7 @@ async function bhKhachHang(host){
     <td>${k.phan_loai_abc?`<span class="badge b-info">Hạng ${k.phan_loai_abc}</span>`:'—'}</td>
     <td style="white-space:nowrap"><button class="btn-sm ghost" onclick="openKH(${k.id})">Hồ sơ & liên lạc</button>
       ${canOp?`<button class="btn-sm ghost" onclick="khMoSua(${k.id})">✏️ Sửa</button>`:''}
-      ${can("ban_hang","DUYET")?`<button class="btn-sm ghost" style="color:var(--red)" onclick="khXoa(${k.id})">🗑 Xóa</button>`:''}</td></tr>`).join('');
+      ${laQTV()?`<button class="btn-sm ghost" style="color:var(--red)" onclick="khXoa(${k.id})">🗑 Xóa</button>`:''}</td></tr>`).join('');
   host.innerHTML=`<div class="note" style="padding:0 0 12px">Mọi khách hàng, trao đổi và tệp đều nằm trong hệ thống. Email gửi từ địa chỉ công ty <b>sv-sales@watersolutions.company</b> và được ghi nhật ký — không dùng mail cá nhân.</div>
     <div class="panel"><div class="panel-h"><h3>Danh sách khách hàng</h3><div class="spacer"></div>
     ${can("ban_hang","THAO_TAC")?'<button class="btn-sm" onclick="khMoTao()">+ Thêm khách hàng</button>':''}</div>
@@ -3343,7 +3345,7 @@ async function bhCongViec(host){
       act+=`<button class="btn-sm" onclick="capNhatCV(${c.id},'XONG')">Xong</button> `;
     }
     if(c.khach_hang_id)act+=`<button class="btn-sm ghost" onclick="openKH(${c.khach_hang_id})">Hồ sơ</button>`;
-    if(can("ban_hang","DUYET"))act+=` <button class="btn-sm ghost" style="color:var(--red)" title="Xóa việc" onclick="cvXoa(${c.id})">🗑</button>`;
+    if(laQTV())act+=` <button class="btn-sm ghost" style="color:var(--red)" title="Xóa việc" onclick="cvXoa(${c.id})">🗑</button>`;
     return `<tr class="${c.qua_han?'qh':''}">
       <td><b>${c.tieu_de}</b>${c.mo_ta?`<div style="color:var(--muted);font-size:12px">${c.mo_ta}</div>`:''}</td>
       <td>${c.khach_ten||(c.khach_hang_id?('KH #'+c.khach_hang_id):'—')}</td>
@@ -3442,7 +3444,7 @@ async function bhCoHoi(host){
     const sel=`<select id="ch_gd_${c.id}">${GD_LIST.map(g=>`<option value="${g}"${c.giai_doan===g?' selected':''}>${GD_NHAN[g]}</option>`).join('')}</select>`;
     let act=canOp?`${sel} <input id="ch_val_${c.id}" type="number" placeholder="giá trị" value="${c.gia_tri_dk||''}" style="width:120px"> <button class="btn-sm ghost" onclick="chuyenGD(${c.id})">Lưu</button> `:'';
     if(c.khach_hang_id)act+=`<button class="btn-sm ghost" onclick="openKH(${c.khach_hang_id})">Hồ sơ</button>`;
-    if(can("ban_hang","DUYET"))act+=` <button class="btn-sm ghost" style="color:var(--red)" title="Xóa cơ hội" onclick="coHoiXoa(${c.id})">🗑</button>`;
+    if(laQTV())act+=` <button class="btn-sm ghost" style="color:var(--red)" title="Xóa cơ hội" onclick="coHoiXoa(${c.id})">🗑</button>`;
     const link=[c.bao_gia_id?`BG #${c.bao_gia_id}`:'',c.don_hang_id?`Đơn #${c.don_hang_id}`:''].filter(Boolean).join(' · ')||'—';
     return `<tr><td><b>${c.tieu_de||'—'}</b><div style="color:var(--muted);font-size:12px">${c.nguon==='EMAIL'?'từ phản hồi email':c.nguon||''}</div></td>
       <td>${c.khach_ten||(c.khach_hang_id?('KH #'+c.khach_hang_id):'—')}</td>
@@ -3604,8 +3606,7 @@ async function nccSanPham(host){
     <td>${x.nha_san_xuat||'—'}</td>
     <td>${x.don_vi||'—'}</td>
     <td class="num"><b>${vnd(x.don_gia||0)}</b></td>
-    <td style="white-space:nowrap">${canOp?`<button class="btn-sm ghost" onclick="spnMo(${x.id})">✏️</button>
-      <button class="btn-sm ghost" style="color:var(--red)" onclick="spnXoa(${x.id})">🗑</button>`:'—'}</td></tr>`).join('');
+    <td style="white-space:nowrap">${canOp?`<button class="btn-sm ghost" onclick="spnMo(${x.id})">✏️</button>`:'—'}${laQTV()?` <button class="btn-sm ghost" style="color:var(--red)" onclick="spnXoa(${x.id})">🗑</button>`:''}</td></tr>`).join('');
   host.innerHTML=`
     <div class="note" style="padding:0 0 12px">Danh mục sản phẩm của từng nhà cung cấp — nguồn dữ liệu cho <b>đề xuất mua hàng</b> và <b>dự toán giá vốn khi lập báo giá</b> cho khách. Cập nhật đơn giá mỗi khi có báo giá mới từ NCC.</div>
     <div class="panel"><div class="panel-h"><h3>Sản phẩm nhà cung cấp</h3><div class="spacer"></div>
@@ -3676,7 +3677,7 @@ async function nccSuppliers(host){
     <td class="num">${vnd(Number(s.han_muc_cong_no||0))}</td>
     <td>${stars(Number(s.diem_danh_gia||0))} <span style="color:var(--muted)">${Number(s.diem_danh_gia||0).toFixed(1)}</span></td>
     <td>${s.blacklist?'<span class="badge b-tc">Hạn chế</span>':'<span class="badge b-ok">Đang dùng</span>'}</td>
-    <td style="white-space:nowrap">${canAdd?`<button class="btn-sm ghost" onclick="nccDanhGia(${s.id})">Đánh giá</button>`:'—'}${can("ncc","DUYET")?` <button class="btn-sm ghost" style="color:var(--red)" title="Xóa NCC" onclick="nccXoa(${s.id},'${String(s.ten||'').replace(/'/g,'')}')">🗑</button>`:''}</td></tr>`).join('');
+    <td style="white-space:nowrap">${canAdd?`<button class="btn-sm ghost" onclick="nccDanhGia(${s.id})">Đánh giá</button>`:'—'}${laQTV()?` <button class="btn-sm ghost" style="color:var(--red)" title="Xóa NCC" onclick="nccXoa(${s.id},'${String(s.ten||'').replace(/'/g,'')}')">🗑</button>`:''}</td></tr>`).join('');
   const form=canAdd?`<div id="nccForm" class="formrow hidden">
     <div class="f"><label>Mã</label><input id="n_ma" placeholder="NCC-04"></div>
     <div class="f" style="flex:2"><label>Tên NCC</label><input id="n_ten" placeholder="Tên công ty"></div>
@@ -3742,7 +3743,7 @@ async function viewDeXuat(m){
     if(x.trang_thai==="MOI"&&canApprove) act+=`<button class="btn-sm" onclick="nccDxDuyet(${x.id})">Duyệt</button> <button class="btn-sm ghost" onclick="nccDxTuChoi(${x.id})">Từ chối</button>`;
     else if(x.trang_thai==="DA_DUYET") act+=`<span style="color:var(--muted)">→ đã chuyển Nhà cung cấp</span>`;
     else if(x.trang_thai==="DA_TAO_PO") act+=`<span style="color:var(--muted)">PO #${x.don_mua_id||''}</span>`;
-    if(canApprove&&x.trang_thai!=="DA_TAO_PO") act+=` <button class="btn-sm ghost" style="color:var(--red)" title="Xóa đề xuất" onclick="nccDxXoa(${x.id})">🗑</button>`;
+    if(laQTV()&&x.trang_thai!=="DA_TAO_PO") act+=` <button class="btn-sm ghost" style="color:var(--red)" title="Xóa đề xuất" onclick="nccDxXoa(${x.id})">🗑</button>`;
     const nItem=(x.so_dong||1);
     const badgeN=nItem>1?` <span class="badge b-info">+${nItem-1} mặt hàng</span>`:'';
     let dk='';
@@ -4057,7 +4058,7 @@ async function nccBaoGia(host){
   const tt=q=>{ if(!q.hieu_luc_den)return {lbl:"Không hạn",cls:"b-info",d:99999}; const d=Math.floor((new Date(q.hieu_luc_den)-today)/864e5); return d<0?{lbl:"Hết hạn",cls:"b-tc",d}:d<=7?{lbl:`Sắp hết hạn (${d} ngày)`,cls:"b-cho",d}:{lbl:"Còn hiệu lực",cls:"b-ok",d}; };
   const en=quotes.map(q=>({...q,_tt:tt(q)})); const sapHet=en.filter(q=>q._tt.d>=0&&q._tt.d<=7).length; const hetHan=en.filter(q=>q._tt.d<0).length;
   const canAdd=can("ncc","THAO_TAC");
-  const canXoaBG=can("ncc","DUYET");
+  const canXoaBG=laQTV();
   const rows=en.sort((a,b)=>a._tt.d-b._tt.d).map(q=>`<tr class="${q._tt.d<0?'qh':''}"><td>${hhName(q.hang_hoa_id)}</td><td>${supName(q.nha_cung_cap_id)}</td>
     <td class="num">${vnd(q.don_gia)}</td><td class="num">${Number(q.so_luong_toi_thieu||0)}</td>
     <td>${q.hieu_luc_den||'—'}</td><td><span class="badge b-info">${q.nguon||'THU_CONG'}</span></td>
@@ -4235,7 +4236,7 @@ async function nccPO(host){
     if(p.trang_thai==="CHO_DUYET") act+=canApprove?`<button class="btn-sm" onclick="duyetPO(${p.id},${Number(p.tong_tien)})">Duyệt</button> `:`<button class="btn-sm" disabled title="Không có quyền duyệt">Duyệt</button> `;
     if(p.trang_thai==="DA_DUYET" && p.trang_thai_nhan!=="DU" && can("kho","THAO_TAC")) act+=`<button class="btn-sm ghost" onclick="nccRecvOpen(${p.id})">Nhận hàng</button>`;
     if(can("ncc","THAO_TAC")) act+=` <button class="btn-sm ghost" onclick="nccPoSend(${p.id})">Gửi PO</button>`;
-    if(can("ncc","DUYET")) act+=` <button class="btn-sm ghost" style="color:var(--red)" title="Xóa PO" onclick="poXoa(${p.id},'${String(p.so||('PO-'+p.id)).replace(/'/g,'')}')">🗑</button>`;
+    if(laQTV()) act+=` <button class="btn-sm ghost" style="color:var(--red)" title="Xóa PO" onclick="poXoa(${p.id},'${String(p.so||('PO-'+p.id)).replace(/'/g,'')}')">🗑</button>`;
     return `<tr><td><b>${p.so||('PO-'+p.id)}</b></td><td>${supName(p.nha_cung_cap_id)}</td>
       <td>${ordNo(p.don_hang_id)}</td><td class="num">${vnd(Number(p.tong_tien))}</td>
       <td>${stt(p.trang_thai)}</td><td>${nhanBadge(p.trang_thai_nhan)}</td><td style="white-space:nowrap">${act||'—'}</td></tr>`;
@@ -4579,7 +4580,7 @@ async function ktQuy(host){
   const quy=S.mode==="live"?await api("/ke-toan/quy"):DEMO.ke_toan.quy;
   const rows=quy.map(q=>`<tr><td>${q.ma}</td><td>${q.ten}</td><td>${q.loai==="TIEN_MAT"?"Tiền mặt":"Ngân hàng"}${q.so_tk?(' · '+q.so_tk):''}</td>
     <td class="num">${q.tk_ke_toan}</td><td class="num"><b>${vnd(q.so_du)}</b></td>
-    <td style="white-space:nowrap"><button class="btn-sm ghost" onclick="ktSoQuy(${q.id})">Sổ quỹ</button>${can("ke_toan","DUYET")?` <button class="btn-sm ghost" style="color:var(--red)" title="Xóa quỹ" onclick="ktXoaQuy(${q.id},'${String(q.ten||'').replace(/'/g,'')}')">🗑</button>`:''}</td></tr>`).join('');
+    <td style="white-space:nowrap"><button class="btn-sm ghost" onclick="ktSoQuy(${q.id})">Sổ quỹ</button>${laQTV()?` <button class="btn-sm ghost" style="color:var(--red)" title="Xóa quỹ" onclick="ktXoaQuy(${q.id},'${String(q.ten||'').replace(/'/g,'')}')">🗑</button>`:''}</td></tr>`).join('');
   const form=canOp?`<div class="panel"><div class="panel-h"><h3>Tạo quỹ / tài khoản</h3><div class="spacer"></div><button class="btn-sm" onclick="$('#qForm').classList.toggle('hidden')">+ Quỹ</button></div>
     <div id="qForm" class="hidden" style="padding:0 18px 14px"><div class="formrow">
       <div class="f"><label>Tên quỹ</label><input id="q_ten" placeholder="VD: Quỹ tiền mặt CN2"></div>
@@ -4706,7 +4707,7 @@ async function ktHoaDon(host){
     let act='';
     if(canOp&&!h.da_hach_toan)act+=`<button class="btn-sm" onclick="ktHachToanHD(${h.id})">Hạch toán</button> `;
     if(canOp&&ban&&h.hddt_trang_thai!=="DA_PHAT_HANH")act+=`<button class="btn-sm ghost" onclick="ktPhatHanhHddt(${h.id})">Phát hành HĐĐT</button>`;
-    if(can("ke_toan","DUYET")&&h.hddt_trang_thai!=="DA_PHAT_HANH")act+=` <button class="btn-sm ghost" style="color:var(--red)" title="Xóa hóa đơn" onclick="ktXoaHoaDon(${h.id},'${String(h.so||'').replace(/'/g,'')}')">🗑</button>`;
+    if(laQTV()&&h.hddt_trang_thai!=="DA_PHAT_HANH")act+=` <button class="btn-sm ghost" style="color:var(--red)" title="Xóa hóa đơn" onclick="ktXoaHoaDon(${h.id},'${String(h.so||'').replace(/'/g,'')}')">🗑</button>`;
     return `<tr><td><b>${h.so}</b></td><td><span class="badge ${ban?'b-ok':'b-tc'}">${ban?'BÁN':'MUA'}</span></td>
       <td>${h.ten_doi_tac||'—'}</td><td>${h.ma_ban?`<span class="badge b-info">${h.ma_ban}</span>`:'—'}</td>
       <td class="num">${vnd(h.tien_truoc_thue)}</td><td class="num">${vnd(h.tien_thue)}</td><td class="num"><b>${vnd(h.tong_tien)}</b></td>
@@ -4785,7 +4786,7 @@ async function ktPhieu(host){
     if(p.trang_thai==="NHAP"&&canOp)act+=`<button class="btn-sm" onclick="ktTrinh(${p.id})">Trình</button> <button class="btn-sm ghost" onclick="ktHuy(${p.id})">Hủy</button>`;
     else if(p.trang_thai==="CHO_DUYET"&&canDuyet)act+=`<button class="btn-sm" onclick="ktDuyet(${p.id})">Duyệt</button> <button class="btn-sm ghost" onclick="ktTuChoi(${p.id})">Từ chối</button>`;
     else if(p.trang_thai==="CHO_DUYET"&&canOp)act+=`<button class="btn-sm ghost" onclick="ktHuy(${p.id})">Hủy</button>`;
-    if(canDuyet&&p.trang_thai!=="DA_DUYET")act+=` <button class="btn-sm ghost" style="color:var(--red)" title="Xóa phiếu" onclick="ktXoaPhieu(${p.id},'${String(p.so||('#'+p.id)).replace(/'/g,'')}')">🗑</button>`;
+    if(laQTV()&&p.trang_thai!=="DA_DUYET")act+=` <button class="btn-sm ghost" style="color:var(--red)" title="Xóa phiếu" onclick="ktXoaPhieu(${p.id},'${String(p.so||('#'+p.id)).replace(/'/g,'')}')">🗑</button>`;
     return `<tr><td><b>${p.so||('#'+p.id)}</b></td><td><span class="badge ${p.loai==="THU"?'b-ok':'b-tc'}">${p.loai}</span></td>
       <td>${p.ten_quy||''}</td><td>${p.ten_doi_tac||p.dien_giai||'—'}${p.la_tam_ung?` <span class="badge b-cho">Tạm ứng${p.con_lai_tam_ung>0?' · còn '+vnd(p.con_lai_tam_ung):' · đã cấn trừ'}</span>`:''}</td>
       <td>${p.ma_ban?`<span class="badge b-info">${p.ma_ban}</span>`:'—'}</td>
@@ -6028,7 +6029,7 @@ async function nsHoSo(host){
     <td class="num">${vnd(x.luong_co_ban)}</td><td class="num">${vnd(x.luong_dong_bh||x.luong_co_ban)}</td>
     <td class="num">${vnd((x.phu_cap_an||0)+(x.phu_cap_di_lai||0)+(x.phu_cap_dien_thoai||0)+(x.phu_cap_trach_nhiem||0))}</td>
     <td class="num">${x.so_phu_thuoc||0}</td><td>${x.email||'<span style="color:#dc2626">— thiếu —</span>'}</td>
-    ${canOp?`<td style="white-space:nowrap"><button class="btn-sm ghost" onclick='nsSuaHoSo(${JSON.stringify(x).replace(/'/g,"&#39;")})'>Sửa</button>${(S.role==='CEO'||S.role==='ADMIN')?`<button class="btn-sm ghost" onclick="nsTaoTK(${x.id})">🔑 Tạo tài khoản</button>`:''}${can("nhan_su","DUYET")?` <button class="btn-sm ghost" style="color:var(--red)" title="Xóa nhân viên" onclick="nsXoaNV(${x.id},'${String(x.ho_ten||'').replace(/'/g,'')}')">🗑</button>`:''}</td>`:'<td></td>'}</tr>`).join('');
+    ${canOp?`<td style="white-space:nowrap"><button class="btn-sm ghost" onclick='nsSuaHoSo(${JSON.stringify(x).replace(/'/g,"&#39;")})'>Sửa</button>${(S.role==='CEO'||S.role==='ADMIN')?`<button class="btn-sm ghost" onclick="nsTaoTK(${x.id})">🔑 Tạo tài khoản</button>`:''}${laQTV()?` <button class="btn-sm ghost" style="color:var(--red)" title="Xóa nhân viên" onclick="nsXoaNV(${x.id},'${String(x.ho_ten||'').replace(/'/g,'')}')">🗑</button>`:''}</td>`:'<td></td>'}</tr>`).join('');
   host.innerHTML=`<div class="note" style="padding:0 0 10px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
     <span style="flex:1">Khai báo lương cơ bản, lương đóng BH, phụ cấp, số người phụ thuộc (giảm trừ thuế), tài khoản & <b>email</b> nhận phiếu lương cho từng nhân viên.</span>
     ${can("nhan_su","DUYET")?'<button class="btn-sm ghost" onclick="nsThamSo()">⚖️ Tham số lương theo luật</button>':''}</div>
@@ -6332,7 +6333,7 @@ async function tcVay(host){
       <td class="num"><b>${vnd(v.con_lai_goc)}</b></td>
       <td>${sap?`${sap.ngay_den_han}<div style="font-size:11px;color:${sap.qua_han?'#dc2626':'var(--muted)'}">${sap.qua_han?'QUÁ HẠN · ':''}${vnd(sap.tong)}</div>`:'—'}</td>
       <td>${v.trang_thai==='DA_TAT_TOAN'?'<span class="badge b-ok">Tất toán</span>':(v.so_ky_qua_han?`<span class="badge b-tc">${v.so_ky_qua_han} kỳ quá hạn</span>`:'<span class="badge b-info">Đang vay</span>')}</td>
-      <td style="white-space:nowrap"><button class="btn-sm ghost" onclick="tcVayChiTiet(${v.id})">Lịch & trả nợ</button>${can("tai_chinh","DUYET")?` <button class="btn-sm ghost" style="color:var(--red)" title="Xóa khế ước" onclick="tcXoaVay(${v.id},'${String(v.so||('#'+v.id)).replace(/'/g,'')}')">🗑</button>`:''}</td></tr>`;}).join('');
+      <td style="white-space:nowrap"><button class="btn-sm ghost" onclick="tcVayChiTiet(${v.id})">Lịch & trả nợ</button>${laQTV()?` <button class="btn-sm ghost" style="color:var(--red)" title="Xóa khế ước" onclick="tcXoaVay(${v.id},'${String(v.so||('#'+v.id)).replace(/'/g,'')}')">🗑</button>`:''}</td></tr>`;}).join('');
   html+=`<div class="panel"><div class="panel-h"><h3>Khế ước vay</h3></div><div class="panel-b"><table>
     <thead><tr><th>Số/Phương thức</th><th>Bên cho vay</th><th>Loại</th><th class="num">Gốc vay</th><th class="num">Lãi/năm</th><th class="num">Dư nợ</th><th>Kỳ tới</th><th>Trạng thái</th><th></th></tr></thead>
     <tbody>${rows||'<tr><td colspan="9" class="empty">Chưa có khoản vay nào.</td></tr>'}</tbody></table></div></div>`;
@@ -6684,7 +6685,7 @@ async function viewDuAn(m){
         <div class="f" style="flex:2"><label>Tên dự án</label><input id="da_ten" placeholder="Trạm XLNT 1.200 m³/ngày"></div>
         <button class="btn-sm" style="align-self:end" onclick="daTao()">Tạo dự án</button></div></div></div>`;
   }
-  const canDel=can("du_an","DUYET");
+  const canDel=laQTV();
   const rows=(ds||[]).map(d=>`<tr style="cursor:pointer" onclick="daOpen(${d.id})">
     <td><b>${d.ma||('#'+d.id)}</b></td><td>${d.ten}${d.chu_dau_tu?`<div style="font-size:11px;color:var(--muted)">${d.chu_dau_tu}</div>`:''}</td>
     <td>${d.loai_du_an?`<span class="badge b-info">${DA_LOAI[d.loai_du_an]||d.loai_du_an}</span>`:'—'}</td>
@@ -6798,7 +6799,7 @@ async function daThongTin(h){
     <td class="num">${canOp?`<input type="number" step="any" id="cr_${c.id}" value="${c.gioi_han_ra??''}" style="width:84px;padding:3px 5px">`:(c.gioi_han_ra!=null?_num(c.gioi_han_ra,2):'—')}</td>
     <td class="num">${c.can_xu_ly!=null?`<b style="color:#0e7490">${_num(c.can_xu_ly,1)}%</b>`:'—'}</td>
     <td>${c.ghi_chu||''}</td>
-    <td>${canOp?`<button class="btn-sm ghost" onclick="daSuaChiTieu(${c.id})">Lưu</button> <button class="btn-sm ghost" onclick="daXoaChiTieu(${c.id})">✕</button>`:''}</td></tr>`).join('');
+    <td style="white-space:nowrap">${canOp?`<button class="btn-sm ghost" onclick="daSuaChiTieu(${c.id})">Lưu</button>`:''}${laQTV()?` <button class="btn-sm ghost" style="color:var(--red)" onclick="daXoaChiTieu(${c.id})">✕</button>`:''}</td></tr>`).join('');
   html+=`<table style="margin-top:10px"><thead><tr><th>#</th><th>Chỉ tiêu</th><th>Đơn vị</th><th class="num">Đầu vào</th><th class="num">Giới hạn đầu ra</th><th class="num">Cần xử lý</th><th>Ghi chú</th><th></th></tr></thead>
     <tbody>${rows||'<tr><td colspan="8" class="empty">Chưa có chỉ tiêu. Nhập chất lượng đầu vào và giới hạn đầu ra theo tiêu chuẩn áp dụng.</td></tr>'}</tbody></table>
     <div class="note" style="margin-top:8px;color:var(--muted)">Giá trị đầu vào & giới hạn đầu ra do anh nhập (theo số đo thực tế và cột tiêu chuẩn áp dụng). Danh sách QCVN chỉ là nhãn tham chiếu — hệ thống không tự điền giá trị giới hạn. "% cần xử lý" = (đầu vào − giới hạn)/đầu vào, chỉ hiện khi có đủ hai số.</div></div></div>`;
@@ -7046,7 +7047,7 @@ async function daAnToan(h){
     <td>${a.moi_nguy||'—'}</td><td><span class="badge ${a.muc_rui_ro==='CAO'?'b-tc':(a.muc_rui_ro==='THAP'?'b-ok':'b-cho')}">${DA_RR[a.muc_rui_ro]||a.muc_rui_ro}</span></td>
     <td>${a.bien_phap||'—'}</td><td>${a.han||'—'}</td>
     <td><span class="badge ${a.trang_thai==='DA_KIEM_SOAT'?'b-ok':'b-cho'}">${a.trang_thai==='DA_KIEM_SOAT'?'Đã kiểm soát':(a.trang_thai==='DANG_XU_LY'?'Đang xử lý':'Mở')}</span></td>
-    <td style="white-space:nowrap">${canOp?`<select onchange="daSuaAnToan(${a.id},this.value)" style="padding:3px 5px" data-nocbx><option ${a.trang_thai==='MO'?'selected':''} value="MO">Mở</option><option ${a.trang_thai==='DANG_XU_LY'?'selected':''} value="DANG_XU_LY">Đang xử lý</option><option ${a.trang_thai==='DA_KIEM_SOAT'?'selected':''} value="DA_KIEM_SOAT">Đã kiểm soát</option></select>`:''}${can("du_an","DUYET")?` <button class="btn-sm ghost" style="color:var(--red)" title="Xóa đánh giá" onclick="daXoaAnToan(${a.id})">🗑</button>`:''}</td></tr>`).join('');
+    <td style="white-space:nowrap">${canOp?`<select onchange="daSuaAnToan(${a.id},this.value)" style="padding:3px 5px" data-nocbx><option ${a.trang_thai==='MO'?'selected':''} value="MO">Mở</option><option ${a.trang_thai==='DANG_XU_LY'?'selected':''} value="DANG_XU_LY">Đang xử lý</option><option ${a.trang_thai==='DA_KIEM_SOAT'?'selected':''} value="DA_KIEM_SOAT">Đã kiểm soát</option></select>`:''}${laQTV()?` <button class="btn-sm ghost" style="color:var(--red)" title="Xóa đánh giá" onclick="daXoaAnToan(${a.id})">🗑</button>`:''}</td></tr>`).join('');
   html+=`<div class="panel"><div class="panel-h"><h3>Bảng đánh giá rủi ro an toàn (HIRA)</h3></div><div class="panel-b"><table>
     <thead><tr><th>Hạng mục</th><th>Mối nguy</th><th>Mức RR</th><th>Biện pháp</th><th>Hạn</th><th>Trạng thái</th><th></th></tr></thead>
     <tbody>${rows||'<tr><td colspan="7" class="empty">Chưa có đánh giá an toàn.</td></tr>'}</tbody></table>
@@ -7088,7 +7089,7 @@ async function daTrienKhai(h){
       <div class="formrow"><div class="f" style="flex:1"><label>Vấn đề / vướng mắc</label><input id="nk_vd"></div>
         <button class="btn-sm" style="align-self:end" onclick="daThemNhatKy()">Lưu nhật ký</button></div></div></div>`;
   }
-  const canXoaNK=can("du_an","DUYET");
+  const canXoaNK=laQTV();
   const rows=(ds||[]).map(r=>`<tr><td>${r.ngay}</td><td>${r.noi_dung||'—'}${r.van_de?`<div style="font-size:11px;color:#dc2626">⚠️ ${r.van_de}</div>`:''}</td>
     <td>${r.nhan_luc||'—'}</td><td>${r.thiet_bi||'—'}</td><td>${r.thoi_tiet||'—'}</td><td style="font-size:12px;color:var(--muted)">${r.nguoi_ghi||''}</td>
     <td>${canXoaNK?`<button class="btn-sm ghost" style="color:var(--red)" title="Xóa nhật ký" onclick="daXoaNhatKy(${r.id})">🗑</button>`:''}</td></tr>`).join('');
@@ -7134,7 +7135,7 @@ async function daTaiLieu(h){
   const rows=(d.danh_sach||[]).map(t=>`<tr><td><span class="badge b-info">${DA_TLOAI[t.loai]||t.loai}</span></td>
     <td><b>${t.ten}</b>${t.ghi_chu?`<div style="font-size:11px;color:var(--muted)">${t.ghi_chu}</div>`:''}</td><td>${t.ma_so||'—'}</td><td>${t.phien_ban||'—'}</td><td>${t.ngay||'—'}</td>
     <td>${t.co_file?`<button class="btn-sm ghost" onclick="daTaiVe(${t.id})">Tải về</button>`:'<span style="color:var(--muted);font-size:12px">không có tệp</span>'}</td>
-    <td>${canOp?`<button class="btn-sm ghost" onclick="daXoaTaiLieu(${t.id})">✕</button>`:''}</td></tr>`).join('');
+    <td>${laQTV()?`<button class="btn-sm ghost" style="color:var(--red)" onclick="daXoaTaiLieu(${t.id})">✕</button>`:''}</td></tr>`).join('');
   html+=`<div class="panel"><div class="panel-h"><h3>Hồ sơ tài liệu dự án</h3></div><div class="panel-b"><table>
     <thead><tr><th>Loại</th><th>Tên</th><th>Mã số</th><th>P.bản</th><th>Ngày</th><th>Tệp</th><th></th></tr></thead>
     <tbody>${rows||'<tr><td colspan="7" class="empty">Chưa có tài liệu.</td></tr>'}</tbody></table>
@@ -7181,7 +7182,7 @@ async function daKpi(h){
     <td>${canOp?`<input type="number" id="kt_${k.id}" value="${k.thuc_te}" style="width:80px;padding:3px 5px">`:_num(k.thuc_te,2)+' '+(k.don_vi||'')}</td>
     <td class="num">${_num(k.trong_so,1)}</td>
     <td class="num"><b style="color:${mau}">${dat==null?'—':_num(dat,1)+'%'}</b></td>
-    <td>${canOp?`<button class="btn-sm ghost" onclick="daSuaKpi(${k.id})">Lưu</button> <button class="btn-sm ghost" onclick="daXoaKpi(${k.id})">✕</button>`:''}</td></tr>`;}).join('');
+    <td style="white-space:nowrap">${canOp?`<button class="btn-sm ghost" onclick="daSuaKpi(${k.id})">Lưu</button>`:''}${laQTV()?` <button class="btn-sm ghost" style="color:var(--red)" onclick="daXoaKpi(${k.id})">✕</button>`:''}</td></tr>`;}).join('');
   html+=`<div class="panel"><div class="panel-h"><h3>KPI dự án</h3></div><div class="panel-b"><table>
     <thead><tr><th>KPI</th><th>Chiều</th><th class="num">Mục tiêu</th><th>Thực tế</th><th class="num">Trọng số</th><th class="num">Đạt</th><th></th></tr></thead>
     <tbody>${rows||'<tr><td colspan="7" class="empty">Chưa có KPI. Tự định nghĩa mục tiêu/thực tế theo dự án.</td></tr>'}</tbody></table>

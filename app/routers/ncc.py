@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from ..database import get_db
-from ..rbac import yeu_cau, kiem_han_muc
+from ..rbac import yeu_cau, kiem_han_muc, chi_vai_tro
 from ..deps import nhan_vien_id_cua
 from ..audit import ghi_audit
 from ..models import (NguoiDung, NhaCungCap, DonMua, DonMuaCt, DanhGiaNcc, YeuCauMua, YeuCauMuaCt,
@@ -124,7 +124,7 @@ def sua_san_pham(sp_id: int, data: SanPhamNccVao, db: Session = Depends(get_db),
 
 @router.delete("/san-pham/{sp_id}")
 def xoa_san_pham(sp_id: int, db: Session = Depends(get_db),
-                 nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+                 nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
     sp = db.get(SanPhamNcc, sp_id)
     if sp is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy sản phẩm")
@@ -377,7 +377,7 @@ def tao_po_tu_de_xuat(ycm_id: int, data: TaoPoTuDeXuatVao, db: Session = Depends
 # ----- DUYET: xóa nhà cung cấp (chặn khi có chứng từ mua hàng/kế toán) -----
 @router.delete("/nha-cung-cap/{ncc_id}")
 def xoa_ncc(ncc_id: int, db: Session = Depends(get_db),
-            nd: NguoiDung = Depends(yeu_cau(MODULE, "DUYET"))):
+            nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
     """Xóa NCC cùng sản phẩm, báo giá NCC và lịch sử đánh giá. Chặn khi NCC đã có
     đơn mua, hóa đơn, công nợ hoặc phiếu thu/chi (giữ vết kế toán)."""
     from sqlalchemy import text as _sql
@@ -424,7 +424,7 @@ def xoa_ncc(ncc_id: int, db: Session = Depends(get_db),
 # ----- DUYET: xóa đề xuất mua (chặn khi đã tạo PO) -----
 @router.delete("/yeu-cau-mua/{ycm_id}")
 def xoa_de_xuat(ycm_id: int, db: Session = Depends(get_db),
-                nd: NguoiDung = Depends(yeu_cau(MODULE, "DUYET"))):
+                nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
     y = db.get(YeuCauMua, ycm_id)
     if y is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đề xuất")
@@ -448,7 +448,7 @@ def xoa_de_xuat(ycm_id: int, db: Session = Depends(get_db),
 # ----- DUYET: xóa báo giá NCC -----
 @router.delete("/bao-gia/{bg_id}")
 def xoa_bao_gia_ncc(bg_id: int, db: Session = Depends(get_db),
-                    nd: NguoiDung = Depends(yeu_cau(MODULE, "DUYET"))):
+                    nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
     bg = db.get(BaoGiaNcc, bg_id)
     if bg is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy báo giá NCC")
@@ -462,7 +462,7 @@ def xoa_bao_gia_ncc(bg_id: int, db: Session = Depends(get_db),
 # ----- DUYET: xóa đơn mua PO (chỉ PO chưa nhận hàng, chưa có hóa đơn) -----
 @router.delete("/don-mua/{dm_id}")
 def xoa_don_mua(dm_id: int, db: Session = Depends(get_db),
-                nd: NguoiDung = Depends(yeu_cau(MODULE, "DUYET"))):
+                nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
     """Xóa PO cùng dòng hàng; đề xuất mua liên quan tự gỡ liên kết. Chặn khi PO
     đã nhận hàng (phiếu kho) hoặc đã có hóa đơn (giữ vết kế toán)."""
     from sqlalchemy import text as _sql

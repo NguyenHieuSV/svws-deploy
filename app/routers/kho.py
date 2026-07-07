@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from ..database import get_db
-from ..rbac import yeu_cau
+from ..rbac import yeu_cau, chi_vai_tro
 from ..deps import nhan_vien_id_cua
 from ..kho_service import nhap_ton, xuat_ton
 from ..audit import ghi_audit
@@ -89,7 +89,7 @@ def sua_hang_hoa(
 # ----- DUYET: xóa hàng hóa (chỉ khi chưa phát sinh chứng từ, tồn = 0) -----
 @router.delete("/hang-hoa/{hh_id}")
 def xoa_hang_hoa(hh_id: int, db: Session = Depends(get_db),
-                 nd: NguoiDung = Depends(yeu_cau(MODULE, "DUYET"))):
+                 nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
     """Xóa hàng hóa khỏi danh mục. Chặn khi còn tồn kho hoặc đã xuất hiện trong
     báo giá, đơn hàng, đơn mua, phiếu kho, đề xuất mua, báo giá NCC, định mức,
     tài sản cho thuê (giữ vết chứng từ)."""

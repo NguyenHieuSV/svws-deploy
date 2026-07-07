@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from ..database import get_db
-from ..rbac import yeu_cau
+from ..rbac import yeu_cau, chi_vai_tro
 from ..deps import nhan_vien_id_cua
 from ..audit import ghi_audit
 from ..models import NguoiDung, KhoanVay, LichTraNo, ButToan, TaiKhoanQuy
@@ -92,7 +92,7 @@ def ds_khoan_vay(trang_thai: str | None = None, db: Session = Depends(get_db),
 # ----- DUYET: xóa khế ước vay (chỉ khi CHƯA trả kỳ nào) -----
 @router.delete("/{vay_id}")
 def xoa_khoan_vay(vay_id: int, db: Session = Depends(get_db),
-                  nd: NguoiDung = Depends(yeu_cau(MODULE, "DUYET"))):
+                  nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
     """Hủy khế ước tạo nhầm: xóa lịch trả nợ, hoàn tác bút toán nhận tiền và số dư
     quỹ. Chặn khi đã trả bất kỳ kỳ nào (đã phát sinh chi tiền thật)."""
     v = db.get(KhoanVay, vay_id)

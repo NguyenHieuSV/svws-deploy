@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from ..database import get_db
-from ..rbac import yeu_cau, kiem_han_muc
+from ..rbac import yeu_cau, kiem_han_muc, chi_vai_tro
 from ..deps import nhan_vien_id_cua
 from ..audit import ghi_audit
 from ..kho_service import xuat_ton
@@ -73,7 +73,7 @@ def sua_kh(kh_id: int, data: KhachHangSua, db: Session = Depends(get_db),
 
 @router.delete("/khach-hang/{kh_id}")
 def xoa_kh(kh_id: int, db: Session = Depends(get_db),
-           nd: NguoiDung = Depends(yeu_cau(MODULE, "DUYET"))):
+           nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
     """Xóa khách hàng CHƯA có chứng từ thật. Báo giá nháp / nhật ký email /
     CRM tự gỡ theo; báo giá chính thức, đơn hàng, công nợ, dự án... thì chặn
     và trả lỗi liệt kê rõ đang vướng gì."""
@@ -139,7 +139,7 @@ def dich_hop_dong(p: DichVao, nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"
 # ----- DUYET: xóa đơn hàng (chỉ đơn chưa phát sinh kho/kế toán) -----
 @router.delete("/don-hang/{dh_id}")
 def xoa_don_hang(dh_id: int, db: Session = Depends(get_db),
-                 nd: NguoiDung = Depends(yeu_cau(MODULE, "DUYET"))):
+                 nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
     """Xóa đơn hàng cùng dòng hàng và tệp đính kèm. Chặn khi đơn đã xuất kho,
     có hóa đơn, phiếu thu/chi hoặc bút toán liên quan (giữ vết kế toán)."""
     from sqlalchemy import text as _sql
@@ -310,7 +310,7 @@ def gui_bao_gia_email(bgf_id: int, data: GuiBaoGiaVao, db: Session = Depends(get
 
 @router.delete("/bao-gia-form/{bgf_id}")
 def xoa_bao_gia_form(bgf_id: int, db: Session = Depends(get_db),
-                     nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+                     nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
     bgf = db.get(BaoGiaForm, bgf_id)
     if bgf is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy báo giá nháp")
@@ -388,7 +388,7 @@ def tao_don_tu_bao_gia(bg_id: int, db: Session = Depends(get_db),
 # ----- DUYET: xóa báo giá nội bộ (chặn khi đã sinh đơn hàng) -----
 @router.delete("/bao-gia/{bg_id}")
 def xoa_bao_gia(bg_id: int, db: Session = Depends(get_db),
-                nd: NguoiDung = Depends(yeu_cau(MODULE, "DUYET"))):
+                nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
     """Xóa báo giá nội bộ cùng dòng hàng. Chặn khi đã có đơn hàng tạo từ báo giá
     này (giữ vết bán hàng); cơ hội CRM liên quan chỉ bị gỡ liên kết."""
     from sqlalchemy.exc import IntegrityError

@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from ..database import get_db
-from ..rbac import yeu_cau, kiem_han_muc
+from ..rbac import yeu_cau, kiem_han_muc, chi_vai_tro
 from ..audit import ghi_audit
 from ..deps import nhan_vien_id_cua
 from ..models import (NguoiDung, TaiKhoanQuy, PhieuThuChi, ButToan, CongNo,
@@ -326,7 +326,7 @@ def huy_phieu(pid: int, db: Session = Depends(get_db),
 # ---------- DUYET: xóa phiếu thu/chi (chỉ phiếu CHƯA DUYỆT) ----------
 @router.delete("/phieu/{pid}")
 def xoa_phieu(pid: int, db: Session = Depends(get_db),
-              nd: NguoiDung = Depends(yeu_cau(MODULE, "DUYET"))):
+              nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
     p = db.get(PhieuThuChi, pid)
     if p is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy phiếu")
@@ -344,7 +344,7 @@ def xoa_phieu(pid: int, db: Session = Depends(get_db),
 # ---------- DUYET: xóa quỹ (chỉ quỹ chưa có phiếu/bút toán) ----------
 @router.delete("/quy/{quy_id}")
 def xoa_quy(quy_id: int, db: Session = Depends(get_db),
-            nd: NguoiDung = Depends(yeu_cau(MODULE, "DUYET"))):
+            nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
     q = db.get(TaiKhoanQuy, quy_id)
     if q is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy quỹ")
@@ -367,7 +367,7 @@ def xoa_quy(quy_id: int, db: Session = Depends(get_db),
 # ---------- DUYET: xóa hóa đơn (chưa phát hành HĐĐT, chưa thu/trả tiền) ----------
 @router.delete("/hoa-don/{hd_id}")
 def xoa_hoa_don(hd_id: int, db: Session = Depends(get_db),
-                nd: NguoiDung = Depends(yeu_cau(MODULE, "DUYET"))):
+                nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
     """Hủy hóa đơn ghi nhận nhầm: xóa kèm công nợ và bút toán do chính hóa đơn
     sinh ra. Chặn khi đã phát hành HĐĐT hoặc công nợ đã thu/trả một phần."""
     hd = db.get(HoaDon, hd_id)

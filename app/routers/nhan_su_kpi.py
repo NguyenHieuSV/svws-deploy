@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from ..database import get_db
-from ..rbac import yeu_cau
+from ..rbac import yeu_cau, chi_vai_tro
 from ..deps import nhan_vien_id_cua
 from ..audit import ghi_audit
 from ..models import (NguoiDung, NhanVien, VaiTro, MoTaCongViec, KpiViTri,
@@ -198,7 +198,7 @@ def sua_kpi(kpi_id: int, data: KpiSua, db: Session = Depends(get_db),
 
 @router.delete("/kpi/{kpi_id}")
 def xoa_kpi(kpi_id: int, db: Session = Depends(get_db),
-            nd: NguoiDung = Depends(yeu_cau(MODULE, "DUYET"))):
+            nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
     k = db.get(KpiViTri, kpi_id)
     if k is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy KPI")
