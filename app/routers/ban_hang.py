@@ -366,22 +366,52 @@ def luu_pdf_kho(bgf_id: int, db: Session = Depends(get_db),
     return {"ok": True, "tep_id": tep.id, "ten_file": tep.ten_file, "kich_thuoc": tep.kich_thuoc}
 
 
-@router.get("/kho-pdf")
-def ds_kho_pdf(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
-    """Kho PDF báo giá dùng chung — danh sách bản PDF mới nhất của từng báo giá."""
-    from ..models import TepDinhKem
-    rows = (db.query(TepDinhKem, BaoGiaForm)
-            .outerjoin(BaoGiaForm, TepDinhKem.doi_tuong_id == BaoGiaForm.id)
-            .filter(TepDinhKem.doi_tuong == "BAO_GIA_FORM")
-            .order_by(TepDinhKem.id.desc()).all())
+@router.get("/kho-tep")
+def ds_kho_tep(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
+    """KHO TỆP DÙNG CHUNG toàn app — mọi tệp đính kèm/PDF sinh ra đều liệt kê tại đây:
+    báo giá PDF, PO/HĐ đơn hàng, tệp chiến dịch email, PO đơn mua, dự toán đề xuất,
+    tài liệu cho thuê và tài liệu dự án."""
+    from ..models import (TepDinhKem, ChienDichEmail, DonMua, YeuCauMua,
+                          TaiSanChoThue, DuAnTaiLieu, DuAn)
+    NHOM = {"BAO_GIA_FORM": "Báo giá (PDF)", "DON_HANG": "Đơn hàng — PO/HĐ",
+            "CHIEN_DICH": "Email chào hàng", "DON_MUA": "Đơn mua NCC (PO)",
+            "YEU_CAU_MUA": "Đề xuất mua — dự toán", "CHO_THUE_DA": "Cho thuê — tài liệu"}
     out = []
-    for t, bgf in rows:
-        d = (bgf.noi_dung if bgf else None) or {}
-        out.append({"tep_id": t.id, "ten_file": t.ten_file, "kich_thuoc": t.kich_thuoc,
-                    "so": d.get("so") or (bgf.so if bgf else None),
-                    "khach_ten": d.get("khach_ten"),
-                    "trang_thai": bgf.trang_thai if bgf else None,
-                    "tao_luc": str(getattr(t, "created_at", "") or "")[:16]})
+    for t in db.query(TepDinhKem).order_by(TepDinhKem.id.desc()).limit(500).all():
+        ref = None
+        if t.doi_tuong == "BAO_GIA_FORM":
+            b = db.get(BaoGiaForm, t.doi_tuong_id)
+            d = (b.noi_dung if b else None) or {}
+            so = d.get("so") or (b.so if b else None)
+            ref = (so or "") + (f" · {d.get('khach_ten')}" if d.get("khach_ten") else "")
+        elif t.doi_tuong == "DON_HANG":
+            o = db.get(DonHang, t.doi_tuong_id)
+            ref = o.so if o else None
+        elif t.doi_tuong == "CHIEN_DICH":
+            c = db.get(ChienDichEmail, t.doi_tuong_id)
+            ref = c.ten if c else None
+        elif t.doi_tuong == "DON_MUA":
+            p = db.get(DonMua, t.doi_tuong_id)
+            ref = p.so if p else None
+        elif t.doi_tuong == "YEU_CAU_MUA":
+            y = db.get(YeuCauMua, t.doi_tuong_id)
+            ref = f"Đề xuất #{t.doi_tuong_id}" + (f" · {y.cho_thue_ma}" if y and y.cho_thue_ma else "")
+        elif t.doi_tuong == "CHO_THUE_DA":
+            ts = db.get(TaiSanChoThue, t.doi_tuong_id)
+            ref = f"{ts.ma} · {ts.ten}" if ts else None
+        out.append({"nhom": NHOM.get(t.doi_tuong, t.doi_tuong), "ref": ref or f"#{t.doi_tuong_id}",
+                    "ten_file": t.ten_file, "kich_thuoc": t.kich_thuoc,
+                    "tao_luc": str(getattr(t, "created_at", "") or "")[:16],
+                    "kind": "tep", "id": t.id})
+    rows_da = (db.query(DuAnTaiLieu, DuAn)
+               .outerjoin(DuAn, DuAnTaiLieu.du_an_id == DuAn.id)
+               .filter(DuAnTaiLieu.duong_dan.isnot(None))
+               .order_by(DuAnTaiLieu.id.desc()).limit(300).all())
+    for tl, da in rows_da:
+        out.append({"nhom": "Dự án — tài liệu",
+                    "ref": ((da.ma or da.ten) if da else None) or f"DA #{tl.du_an_id}",
+                    "ten_file": tl.ten, "kich_thuoc": tl.kich_thuoc,
+                    "tao_luc": str(tl.ngay or "")[:16], "kind": "du_an", "id": tl.id})
     return out
 
 
@@ -392,6 +422,11 @@ def xoa_bao_gia_form(bgf_id: int, db: Session = Depends(get_db),
     if bgf is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy báo giá nháp")
     so_cu = bgf.so
+    from ..models import TepDinhKem
+    from ..luu_tru import xoa as _xoa_tep
+    for t in db.query(TepDinhKem).filter_by(doi_tuong="BAO_GIA_FORM", doi_tuong_id=bgf_id).all():
+        _xoa_tep(t.duong_dan)
+        db.delete(t)
     db.delete(bgf)
     ghi_audit(db, nd.id, "XOA", "bao_gia_form", bgf_id, cu={"so": so_cu})
     db.commit()

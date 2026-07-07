@@ -1912,7 +1912,7 @@ const kb=n=>n?Math.max(1,Math.round(n/1024)).toLocaleString('vi-VN')+" KB":'—'
 async function viewBanHang(m){
   if(!S.bhTab)S.bhTab="khach_hang";
   m.innerHTML=head("Bán hàng","Báo giá · Đơn hàng &amp; PO/Hợp đồng · Email chào hàng");
-  const tabs=[["khach_hang","Khách hàng"],["bao_gia","Báo giá"],["kho_pdf","📁 Kho PDF"],["don_hang","Đơn hàng & PO/Hợp đồng"],["email","Email chào hàng"],["phan_hoi","Hộp thư phản hồi"],["cong_viec","Công việc (SLA)"],["co_hoi","Cơ hội"],["tong_quan","Tổng quan"]];
+  const tabs=[["khach_hang","Khách hàng"],["bao_gia","Báo giá"],["kho_pdf","📁 Kho tệp"],["don_hang","Đơn hàng & PO/Hợp đồng"],["email","Email chào hàng"],["phan_hoi","Hộp thư phản hồi"],["cong_viec","Công việc (SLA)"],["co_hoi","Cơ hội"],["tong_quan","Tổng quan"]];
   m.innerHTML+=`<div class="tabs">${tabs.map(([k,l])=>`<button class="${S.bhTab===k?'active':''}" onclick="bhSwitch('${k}')">${l}</button>`).join('')}</div><div id="bhBody"></div>`;
   const host=$("#bhBody");
   if(S.bhTab==="khach_hang") await bhKhachHang(host);
@@ -1927,23 +1927,38 @@ async function viewBanHang(m){
 }
 function bhSwitch(t){S.bhTab=t;S.khSel=null;cdSelKH=[];viewBanHang($("#main"));}
 
-/* --- Tab Kho PDF: kho tệp báo giá dùng chung trên máy chủ --- */
+/* --- Tab Kho tệp: MỘT nguồn lưu trữ dùng chung trên máy chủ cho mọi tệp --- */
 async function bhKhoPdf(host){
   let list=[];
-  if(S.mode==="live"){ try{list=await api("/ban-hang/kho-pdf");}catch(e){toast(e.detail||e.message,"err");} }
-  const rows=list.map(t=>{
-    const st=t.trang_thai==="DA_GUI"?'<span class="badge b-ok">Đã gửi khách</span>':
-             t.trang_thai==="DA_XUAT"?'<span class="badge b-info">Đã xuất PDF</span>':
-             t.trang_thai?'<span class="badge b-cho">Nháp</span>':'—';
-    return `<tr><td><b>${t.so||'—'}</b></td><td>${t.khach_ten||'—'}</td><td>${st}</td>
+  if(S.mode==="live"){ try{list=await api("/ban-hang/kho-tep");}catch(e){toast(e.detail||e.message,"err");} }
+  S._khoTep=list;
+  const nhoms=[...new Set(list.map(t=>t.nhom))];
+  const f=S.khoTepLoc||'';
+  const flt=f?list.filter(t=>t.nhom===f):list;
+  const chips=`<select onchange="S.khoTepLoc=this.value;viewBanHang($('#main'))" data-nocbx style="max-width:230px">
+    <option value="">Tất cả nhóm (${list.length})</option>
+    ${nhoms.map(n=>`<option value="${n}"${f===n?' selected':''}>${n} (${list.filter(t=>t.nhom===n).length})</option>`).join('')}</select>`;
+  const rows=flt.map(t=>{
+    const dl=t.kind==="du_an"
+      ?`<button class="btn-sm ghost" onclick="taiTepDuAn(${t.id},'${(t.ten_file||'tai-lieu').replace(/'/g,'')}')">⬇ Tải về</button>`
+      :`<button class="btn-sm ghost" onclick="taiTep(${t.id},'${(t.ten_file||'tep').replace(/'/g,'')}')">⬇ Tải về</button>`;
+    return `<tr><td><span class="badge b-info">${t.nhom}</span></td><td><b>${t.ref||'—'}</b></td>
       <td>${t.ten_file}</td><td class="num">${kb(t.kich_thuoc)}</td>
       <td style="color:var(--muted);font-size:12px;white-space:nowrap">${(t.tao_luc||'').replace('T',' ')}</td>
-      <td><button class="btn-sm ghost" onclick="taiTep(${t.tep_id},'${(t.ten_file||'bao-gia.pdf').replace(/'/g,'')}')">⬇ Tải về</button></td></tr>`;
+      <td>${dl}</td></tr>`;
   }).join('');
-  host.innerHTML=`<div class="note" style="padding:0 0 12px">Kho tệp PDF báo giá <b>dùng chung trên máy chủ</b> — bản PDF được tự lưu vào đây khi <b>Xuất PDF</b> hoặc <b>Gửi email</b> (và khi bấm 💾 Lưu kho ở tab Báo giá). Mỗi báo giá giữ đúng một bản mới nhất, mọi người đều tải cùng một nguồn thay vì mỗi người lưu một nơi.</div>
-    <div class="panel"><div class="panel-h"><h3>📁 Kho PDF báo giá</h3><div class="spacer"></div><span style="color:var(--muted);font-size:12px">${list.length} tệp</span></div>
-    <div class="panel-b"><table><thead><tr><th>Số báo giá</th><th>Khách hàng</th><th>Trạng thái BG</th><th>Tệp</th><th class="num">Cỡ</th><th>Lưu lúc</th><th></th></tr></thead>
-    <tbody>${rows||`<tr><td colspan="7" class="empty" style="padding:20px">${S.mode==="live"?'Chưa có tệp nào — mở tab Báo giá và bấm 🖨 PDF hoặc 💾 Lưu kho.':'Kho PDF hoạt động ở bản kết nối backend (đăng nhập máy chủ).'}</td></tr>`}</tbody></table></div></div>`;
+  host.innerHTML=`<div class="note" style="padding:0 0 12px">KHO TỆP <b>dùng chung trên máy chủ</b> — mọi tệp trong app đều về một nguồn: PDF báo giá (tự lưu khi Xuất PDF / Gửi email), PO-Hợp đồng tải lên đơn hàng, tệp chiến dịch email, PDF đơn mua NCC, dự toán đề xuất mua, tài liệu dự án và cho thuê. Mọi người xem/tải cùng một bản tại đây thay vì mỗi người lưu một nơi.</div>
+    <div class="panel"><div class="panel-h"><h3>📁 Kho tệp dùng chung</h3><div class="spacer"></div>${chips}</div>
+    <div class="panel-b"><table><thead><tr><th>Nhóm</th><th>Thuộc về</th><th>Tệp</th><th class="num">Cỡ</th><th>Lưu lúc</th><th></th></tr></thead>
+    <tbody>${rows||`<tr><td colspan="6" class="empty" style="padding:20px">${S.mode==="live"?'Chưa có tệp nào trong nhóm này.':'Kho tệp hoạt động ở bản kết nối backend (đăng nhập máy chủ).'}</td></tr>`}</tbody></table></div></div>`;
+}
+async function taiTepDuAn(id,name){
+  if(S.mode!=="live"){toast("Demo: tải tệp “"+name+"”","ok");return;}
+  try{ const h={}; if(S.token)h['Authorization']='Bearer '+S.token;
+    const r=await fetch(S.api+`/du-an/tai-lieu/${id}/tai-ve`,{headers:h}); if(!r.ok)throw new Error('Không tải được');
+    const blob=await r.blob(), url=URL.createObjectURL(blob), a=document.createElement('a');
+    a.href=url; a.download=name; a.click(); URL.revokeObjectURL(url);
+  }catch(e){toast(e.message,"err");}
 }
 
 /* --- Tab Báo giá --- */

@@ -13,7 +13,9 @@ from ..rbac import yeu_cau, kiem_han_muc, chi_vai_tro
 from ..deps import nhan_vien_id_cua
 from ..audit import ghi_audit
 from ..models import (NguoiDung, NhaCungCap, DonMua, DonMuaCt, DanhGiaNcc, YeuCauMua, YeuCauMuaCt,
-                      TonKho, PhieuKho, PhieuKhoCt, CongNo, ThanhToan, HangHoa, BaoGiaNcc, Rfq, RfqLog)
+                      TonKho, PhieuKho, PhieuKhoCt, CongNo, ThanhToan, HangHoa, BaoGiaNcc, Rfq, RfqLog,
+                      TepDinhKem)
+from ..luu_tru import luu as luu_tep_chung, xoa as xoa_tep_chung, phan_hoi_tai
 from ..schemas import (NccVao, NccRa, DanhGiaVao, DonMuaVao, DonMuaRa, YeuCauMuaRa,
                        NhanHangVao, DonMuaChiTietRa, ThuTienVao,
                        YeuCauMuaVao, YeuCauMuaItemVao, TaoPoTuDeXuatVao, LyDoVao,
@@ -225,17 +227,20 @@ async def dinh_kem_de_xuat(ycm_id: int, file: UploadFile = File(...),
     y = db.get(YeuCauMua, ycm_id)
     if y is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đề xuất")
-    base = (getattr(settings, "storage_dir", None) or os.environ.get("STORAGE_DIR") or "/tmp")
-    thu_muc = os.path.join(base, "de_xuat")
-    os.makedirs(thu_muc, exist_ok=True)
-    safe = "".join(ch if ch.isalnum() or ch in "-_." else "_" for ch in (file.filename or "dutoan"))
-    fn = f"{ycm_id}_{safe}"
-    with open(os.path.join(thu_muc, fn), "wb") as f:
-        f.write(await file.read())
-    y.dinh_kem_file = fn
-    ghi_audit(db, nd.id, "DINH_KEM", "yeu_cau_mua", y.id, moi={"file": file.filename})
+    ten = file.filename or "dutoan"
+    data = await file.read()
+    # Lưu vào KHO TỆP DÙNG CHUNG (R2/đĩa) — thay bản cũ nếu đính kèm lại
+    for t in db.query(TepDinhKem).filter_by(doi_tuong="YEU_CAU_MUA", doi_tuong_id=ycm_id).all():
+        xoa_tep_chung(t.duong_dan)
+        db.delete(t)
+    ref = luu_tep_chung(data, "de_xuat", ycm_id, ten, file.content_type)
+    db.add(TepDinhKem(doi_tuong="YEU_CAU_MUA", doi_tuong_id=ycm_id, loai="KHAC",
+                      ten_file=ten, duong_dan=ref, kich_thuoc=len(data),
+                      content_type=file.content_type, nguoi_tai_len=nhan_vien_id_cua(db, nd.id)))
+    y.dinh_kem_file = ten
+    ghi_audit(db, nd.id, "DINH_KEM", "yeu_cau_mua", y.id, moi={"file": ten})
     db.commit()
-    return {"dinh_kem_file": fn, "ten": file.filename}
+    return {"dinh_kem_file": ten, "ten": ten}
 
 
 @router.get("/yeu-cau-mua/{ycm_id}/dinh-kem")
@@ -244,6 +249,11 @@ def tai_dinh_kem(ycm_id: int, db: Session = Depends(get_db),
     y = db.get(YeuCauMua, ycm_id)
     if y is None or not y.dinh_kem_file:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không có tệp đính kèm")
+    # Ưu tiên kho tệp dùng chung; tệp cũ (trước khi hợp nhất kho) vẫn đọc từ đĩa
+    t = db.query(TepDinhKem).filter_by(doi_tuong="YEU_CAU_MUA", doi_tuong_id=ycm_id) \
+          .order_by(TepDinhKem.id.desc()).first()
+    if t is not None:
+        return phan_hoi_tai(t.duong_dan, t.ten_file, t.content_type)
     base = (getattr(settings, "storage_dir", None) or os.environ.get("STORAGE_DIR") or "/tmp")
     path = os.path.join(base, "de_xuat", y.dinh_kem_file)
     if not os.path.exists(path):
@@ -431,6 +441,9 @@ def xoa_de_xuat(ycm_id: int, db: Session = Depends(get_db),
     if y.don_mua_id or y.trang_thai == "DA_TAO_PO":
         raise HTTPException(status.HTTP_400_BAD_REQUEST,
                             "Đề xuất đã được tạo PO — không thể xóa. Hãy xóa PO liên quan trước.")
+    for t in db.query(TepDinhKem).filter_by(doi_tuong="YEU_CAU_MUA", doi_tuong_id=ycm_id).all():
+        xoa_tep_chung(t.duong_dan)
+        db.delete(t)
     if y.dinh_kem_file:
         base = (getattr(settings, "storage_dir", None) or os.environ.get("STORAGE_DIR") or "/tmp")
         try:
@@ -484,6 +497,9 @@ def xoa_don_mua(dm_id: int, db: Session = Depends(get_db),
             status.HTTP_400_BAD_REQUEST,
             f"PO '{dm.so or dm_id}' đang gắn với {', '.join(ban)} — không thể xóa để giữ vết kế toán.")
     so_cu = dm.so
+    for t in db.query(TepDinhKem).filter_by(doi_tuong="DON_MUA", doi_tuong_id=dm_id).all():
+        xoa_tep_chung(t.duong_dan)
+        db.delete(t)
     db.query(DonMuaCt).filter_by(don_mua_id=dm_id).delete()
     try:
         db.delete(dm)
@@ -1031,14 +1047,34 @@ def _xuat_po_pdf(db, dm, d) -> str:
     return path
 
 
+def _luu_po_pdf_kho(db, nd, dm, path):
+    """Lưu bản PDF của PO vào kho tệp dùng chung — mỗi PO giữ một bản mới nhất."""
+    with open(path, "rb") as f:
+        data = f.read()
+    for t in db.query(TepDinhKem).filter_by(doi_tuong="DON_MUA",
+                                            doi_tuong_id=dm.id, loai="PDF").all():
+        xoa_tep_chung(t.duong_dan)
+        db.delete(t)
+    ref = luu_tep_chung(data, "don_mua", dm.id, os.path.basename(path), "application/pdf")
+    db.add(TepDinhKem(doi_tuong="DON_MUA", doi_tuong_id=dm.id, loai="PDF",
+                      ten_file=os.path.basename(path), duong_dan=ref, kich_thuoc=len(data),
+                      content_type="application/pdf",
+                      nguoi_tai_len=nhan_vien_id_cua(db, nd.id) if nd else None))
+
+
 @router.post("/don-mua/{dm_id}/po-pdf")
 def po_pdf(dm_id: int, data: PoPdfVao, db: Session = Depends(get_db),
-           _=Depends(yeu_cau(MODULE, "XEM"))):
-    """Xuất chứng từ PO dạng PDF (theo mẫu SVWS) để tải về / lưu lại."""
+           nd: NguoiDung = Depends(yeu_cau(MODULE, "XEM"))):
+    """Xuất chứng từ PO dạng PDF (theo mẫu SVWS) — đồng thời lưu một bản vào kho tệp dùng chung."""
     dm = db.get(DonMua, dm_id)
     if dm is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy PO")
     path = _xuat_po_pdf(db, dm, data)
+    try:
+        _luu_po_pdf_kho(db, nd, dm, path)
+        db.commit()
+    except Exception:
+        db.rollback()
     return FileResponse(path, media_type="application/pdf", filename=os.path.basename(path))
 
 
@@ -1085,6 +1121,10 @@ def gui_po(dm_id: int, data: GuiPoVao, db: Session = Depends(get_db),
             ppath = _xuat_po_pdf(db, dm, data)
             dinh_kem = [{"duong_dan": ppath, "ten_file": os.path.basename(ppath)}]
             co_pdf = True
+            try:
+                _luu_po_pdf_kho(db, nd, dm, ppath)   # bản gửi NCC cũng vào kho tệp dùng chung
+            except Exception:
+                pass
         except Exception:
             dinh_kem = None
     kq = lay_email_provider().gui(ncc.email, tieu_de, than, dinh_kem, gui_tu=settings.email_from_ncc)
