@@ -301,11 +301,88 @@ def gui_bao_gia_email(bgf_id: int, data: GuiBaoGiaVao, db: Session = Depends(get
         raise HTTPException(status.HTTP_502_BAD_GATEWAY,
                             "Gửi email thất bại: " + (kq.get("ghi_chu") or "lỗi SMTP"))
     bgf.trang_thai = "DA_GUI"
+    # Lưu bản PDF vừa gửi vào kho tệp dùng chung trên máy chủ
+    try:
+        _luu_pdf_bao_gia(db, nd, bgf)
+    except Exception:
+        pass
     ghi_audit(db, nd.id, "GUI", "bao_gia_form", bgf.id,
               moi={"den": data.den, "gui_tu": kq.get("gui_tu"), "pdf": bool(dinh_kem)})
     db.commit()
     return {"gui_tu": kq.get("gui_tu"), "den": data.den, "pdf_dinh_kem": bool(dinh_kem),
             "trang_thai": kq.get("trang_thai"), "ghi_chu": kq.get("ghi_chu")}
+
+
+def _luu_pdf_bao_gia(db: Session, nd: NguoiDung, bgf: BaoGiaForm):
+    """Sinh PDF báo giá và lưu vào KHO TỆP DÙNG CHUNG trên máy chủ (R2/đĩa).
+    Mỗi báo giá giữ đúng một bản PDF mới nhất — lưu lại sẽ thay bản cũ."""
+    import os as _os, re as _re, tempfile as _tmp
+    from ..config import settings as _st
+    from ..bao_gia_pdf import tao_bao_gia_pdf
+    from ..luu_tru import luu as _luu, xoa as _xoa
+    from ..models import TepDinhKem
+    d = bgf.noi_dung or {}
+    so = d.get("so") or bgf.so or f"BG-{bgf.id}"
+    ten_file = "Bao_gia_" + _re.sub(r"[^A-Za-z0-9._-]", "-", so) + ".pdf"
+    pdf_path = _os.path.join(_tmp.gettempdir(), f"kho_{bgf.id}_{ten_file}")
+    tao_bao_gia_pdf(pdf_path, d,
+                    font_path=_st.pdf_font_path, font_bold_path=_st.pdf_font_bold_path)
+    with open(pdf_path, "rb") as f:
+        data = f.read()
+    try:
+        _os.remove(pdf_path)
+    except OSError:
+        pass
+    for t in db.query(TepDinhKem).filter_by(doi_tuong="BAO_GIA_FORM",
+                                            doi_tuong_id=bgf.id, loai="PDF").all():
+        _xoa(t.duong_dan)
+        db.delete(t)
+    ref = _luu(data, "bao_gia_form", bgf.id, ten_file, "application/pdf")
+    tep = TepDinhKem(doi_tuong="BAO_GIA_FORM", doi_tuong_id=bgf.id, loai="PDF",
+                     ten_file=ten_file, duong_dan=ref, kich_thuoc=len(data),
+                     content_type="application/pdf", nguoi_tai_len=nhan_vien_id_cua(db, nd.id))
+    db.add(tep)
+    db.flush()
+    return tep
+
+
+@router.post("/bao-gia-form/{bgf_id}/luu-pdf")
+def luu_pdf_kho(bgf_id: int, db: Session = Depends(get_db),
+                nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    """Sinh PDF báo giá và lưu vào kho tệp dùng chung — mọi người tải cùng một bản."""
+    bgf = db.get(BaoGiaForm, bgf_id)
+    if bgf is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy báo giá")
+    if (bgf.noi_dung or {}).get("loai") == "HOP_DONG":
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Hợp đồng xuất PDF từ trình duyệt — lưu bản ký lên Đơn hàng & PO/Hợp đồng.")
+    try:
+        tep = _luu_pdf_bao_gia(db, nd, bgf)
+    except Exception as e:
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR,
+                            f"Không sinh được PDF: {e}")
+    ghi_audit(db, nd.id, "LUU_PDF", "bao_gia_form", bgf.id, moi={"ten_file": tep.ten_file})
+    db.commit()
+    return {"ok": True, "tep_id": tep.id, "ten_file": tep.ten_file, "kich_thuoc": tep.kich_thuoc}
+
+
+@router.get("/kho-pdf")
+def ds_kho_pdf(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
+    """Kho PDF báo giá dùng chung — danh sách bản PDF mới nhất của từng báo giá."""
+    from ..models import TepDinhKem
+    rows = (db.query(TepDinhKem, BaoGiaForm)
+            .outerjoin(BaoGiaForm, TepDinhKem.doi_tuong_id == BaoGiaForm.id)
+            .filter(TepDinhKem.doi_tuong == "BAO_GIA_FORM")
+            .order_by(TepDinhKem.id.desc()).all())
+    out = []
+    for t, bgf in rows:
+        d = (bgf.noi_dung if bgf else None) or {}
+        out.append({"tep_id": t.id, "ten_file": t.ten_file, "kich_thuoc": t.kich_thuoc,
+                    "so": d.get("so") or (bgf.so if bgf else None),
+                    "khach_ten": d.get("khach_ten"),
+                    "trang_thai": bgf.trang_thai if bgf else None,
+                    "tao_luc": str(getattr(t, "created_at", "") or "")[:16]})
+    return out
 
 
 @router.delete("/bao-gia-form/{bgf_id}")
