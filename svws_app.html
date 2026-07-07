@@ -594,6 +594,7 @@ async function viewDieuHanh(m){
     html+=`<div class="panel"><div class="panel-h"><h3>${sec.g}</h3></div>
       <div class="panel-b"><div class="cards" style="margin-bottom:0">${tiles}</div></div></div>`;
   });
+  html+=`<div id="dhKhoTep"><div class="panel"><div class="panel-b" style="color:var(--muted)">Đang tải 📁 Kho tệp dùng chung…</div></div></div>`;
   m.innerHTML+=html;
   if(isCEO){
     m.innerHTML+=`<div class="panel" style="border:1px solid var(--teal)">
@@ -602,6 +603,7 @@ async function viewDieuHanh(m){
       <div class="panel-b" id="dhRoles">Đang tải ma trận phân quyền…</div></div>`;
     _dhLoadMatrix();
   }
+  bhKhoPdf($("#dhKhoTep"));
 }
 function _qOpts(cur){return Object.keys(MUC_TEN).map(v=>`<option value="${v}" ${cur===v?'selected':''}>${MUC_TEN[v]}</option>`).join('');}
 const _QBG={KHONG:'#f3f6f8',XEM:'#eaf3f8',THAO_TAC:'#e6f5f1',DUYET:'#fdf3e3',QUAN_TRI:'#e9f7ec'};
@@ -1912,12 +1914,11 @@ const kb=n=>n?Math.max(1,Math.round(n/1024)).toLocaleString('vi-VN')+" KB":'—'
 async function viewBanHang(m){
   if(!S.bhTab)S.bhTab="khach_hang";
   m.innerHTML=head("Bán hàng","Báo giá · Đơn hàng &amp; PO/Hợp đồng · Email chào hàng");
-  const tabs=[["khach_hang","Khách hàng"],["bao_gia","Báo giá"],["kho_pdf","📁 Kho tệp"],["don_hang","Đơn hàng & PO/Hợp đồng"],["email","Email chào hàng"],["phan_hoi","Hộp thư phản hồi"],["cong_viec","Công việc (SLA)"],["co_hoi","Cơ hội"],["tong_quan","Tổng quan"]];
+  const tabs=[["khach_hang","Khách hàng"],["bao_gia","Báo giá"],["don_hang","Đơn hàng & PO/Hợp đồng"],["email","Email chào hàng"],["phan_hoi","Hộp thư phản hồi"],["cong_viec","Công việc (SLA)"],["co_hoi","Cơ hội"],["tong_quan","Tổng quan"]];
   m.innerHTML+=`<div class="tabs">${tabs.map(([k,l])=>`<button class="${S.bhTab===k?'active':''}" onclick="bhSwitch('${k}')">${l}</button>`).join('')}</div><div id="bhBody"></div>`;
   const host=$("#bhBody");
   if(S.bhTab==="khach_hang") await bhKhachHang(host);
   else if(S.bhTab==="bao_gia") await bhBaoGia(host);
-  else if(S.bhTab==="kho_pdf") await bhKhoPdf(host);
   else if(S.bhTab==="don_hang") await bhDonHang(host);
   else if(S.bhTab==="phan_hoi") await bhPhanHoi(host);
   else if(S.bhTab==="cong_viec") await bhCongViec(host);
@@ -1927,15 +1928,16 @@ async function viewBanHang(m){
 }
 function bhSwitch(t){S.bhTab=t;S.khSel=null;cdSelKH=[];viewBanHang($("#main"));}
 
-/* --- Tab Kho tệp: MỘT nguồn lưu trữ dùng chung trên máy chủ cho mọi tệp --- */
+/* --- Kho tệp (Overall Operation): MỘT nguồn lưu trữ dùng chung trên máy chủ cho mọi tệp --- */
 async function bhKhoPdf(host){
+  window._khoTepHost=host;
   let list=[];
   if(S.mode==="live"){ try{list=await api("/ban-hang/kho-tep");}catch(e){toast(e.detail||e.message,"err");} }
   S._khoTep=list;
   const nhoms=[...new Set(list.map(t=>t.nhom))];
   const f=S.khoTepLoc||'';
   const flt=f?list.filter(t=>t.nhom===f):list;
-  const chips=`<select onchange="S.khoTepLoc=this.value;viewBanHang($('#main'))" data-nocbx style="max-width:230px">
+  const chips=`<select onchange="S.khoTepLoc=this.value;bhKhoPdf(window._khoTepHost)" data-nocbx style="max-width:230px">
     <option value="">Tất cả nhóm (${list.length})</option>
     ${nhoms.map(n=>`<option value="${n}"${f===n?' selected':''}>${n} (${list.filter(t=>t.nhom===n).length})</option>`).join('')}</select>`;
   const rows=flt.map(t=>{
@@ -2142,7 +2144,7 @@ async function bgfPdf(){
   _bgfPrint(S.bgfEdit.d);
   if(S.mode==="live"&&S.bgfEdit&&S.bgfEdit.id){
     api(`/ban-hang/bao-gia-form/${S.bgfEdit.id}/luu-pdf`,{method:'POST'})
-      .then(()=>toast("Đã mở bản in — bản PDF cũng đã lưu vào 📁 Kho PDF","ok"))
+      .then(()=>toast("Đã mở bản in — bản PDF cũng đã lưu vào 📁 Kho tệp (Overall Operation)","ok"))
       .catch(()=>toast("Đã mở bản in — chọn 'Save as PDF' trong hộp thoại in","ok"));
   }else{
     toast("Đã mở bản in — chọn 'Save as PDF' trong hộp thoại in","ok");
@@ -2152,7 +2154,7 @@ async function bgfLuuPdfKho(id){
   if(S.mode!=="live"){toast("Lưu vào kho PDF chạy ở bản kết nối backend","err");return;}
   try{
     const r=await api(`/ban-hang/bao-gia-form/${id}/luu-pdf`,{method:'POST'});
-    toast("Đã lưu "+r.ten_file+" vào 📁 Kho PDF dùng chung","ok");
+    toast("Đã lưu "+r.ten_file+" vào 📁 Kho tệp (Overall Operation)","ok");
   }catch(e){toast(e.detail||e.message,"err");}
 }
 function bgfSua(id){const g=(S._bgfList||[]).find(x=>x.id===id)||(DEMO.bgf||[]).find(x=>x.id===id);
@@ -2164,7 +2166,7 @@ function bgfPdfTu(id){const g=(S._bgfList||[]).find(x=>x.id===id)||(DEMO.bgf||[]
   if(!g)return;_bgfPrint(g.noi_dung||{});
   if(S.mode==="live"&&(g.noi_dung||{}).loai!=="HOP_DONG")
     api(`/ban-hang/bao-gia-form/${id}/luu-pdf`,{method:'POST'})
-      .then(()=>toast("Bản PDF cũng đã lưu vào 📁 Kho PDF","ok")).catch(()=>{});}
+      .then(()=>toast("Bản PDF cũng đã lưu vào 📁 Kho tệp (Overall Operation)","ok")).catch(()=>{});}
 
 /* --- Gửi báo giá cho khách qua email công ty (sv-sales@watersolutions.company) --- */
 async function bgfGuiMail(id){
