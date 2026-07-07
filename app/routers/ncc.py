@@ -843,8 +843,7 @@ def _noi_dung_rfq(db, hang_hoa_id, so_luong, d):
           "1. Đơn giá (ghi rõ đã/chưa gồm VAT) và tổng giá trị.",
           "2. Thời hạn hiệu lực của báo giá.",
           "3. Thời gian giao hàng dự kiến.",
-          "4. Điều kiện giao hàng và thanh toán.",
-          "5. Chứng từ kèm theo (CO, CQ, catalogue...) nếu có.", ""]
+          "4. Điều kiện giao hàng và thanh toán.", ""]
     L.append(f"Vui lòng gửi báo giá{(' trước ngày ' + str(han)) if han else ''} về địa chỉ email {settings.email_from_ncc}.")
     L.append("Mọi trao đổi xin liên hệ Bộ phận Mua hàng theo email trên.")
     L += ["", "Trân trọng cảm ơn sự hợp tác của Quý công ty.", "",
