@@ -950,7 +950,7 @@ async function ctBaoCao(host){
   const btDenHan=rows.reduce((s,r)=>s+Number(r.bao_tri_den_han||0),0);
   const tyLe=so?Math.round(dangThue/so*1000)/10:0;
   const ttStrip=Object.entries(tt).map(([k,v])=>{const m=TT_TS[k]||[k,'b-info'];return `<span class="badge ${m[1]}" style="padding:5px 12px;font-size:12px">${m[0]}: <b>${v}</b></span>`;}).join('')||'<span style="color:var(--muted)">Chưa có tài sản</span>';
-  const pivRows=rows.map(r=>{const m=TT_TS[r.tinh_trang]||[r.tinh_trang,'b-info'];return `<tr style="cursor:pointer" onclick="ctSetDuAn('${r.tai_san_id}')"><td><b>${r.ten_du_an}</b></td><td>${r.ten}</td><td><span class="badge ${m[1]}">${m[0]}</span></td><td>${r.khach_hang||'<span style="color:var(--muted)">—</span>'}</td><td class="num">${vnd(r.doanh_thu_thang||0)}</td><td class="num" style="color:#dc2626">${vnd(r.chi_phi_luy_ke||0)}</td><td class="num">${r.bao_tri_den_han||0}</td></tr>`;}).join('')||`<tr><td colspan="7" style="color:var(--muted)">Chưa có dự án</td></tr>`;
+  const pivRows=rows.map(r=>{const m=TT_TS[r.tinh_trang]||[r.tinh_trang,'b-info'];return `<tr style="cursor:pointer" onclick="ctSetDuAn('${r.tai_san_id}')"><td><b>${r.ten_du_an}</b></td><td>${r.ten}</td><td><span class="badge ${m[1]}">${m[0]}</span></td><td>${r.khach_hang||'<span style="color:var(--muted)">—</span>'}</td><td class="num">${vnd(r.doanh_thu_thang||0)}</td><td class="num" style="color:#dc2626">${vnd(r.chi_phi_luy_ke||0)}</td><td class="num">${r.bao_tri_den_han||0}</td><td>${laQTV()?`<button class="btn-sm ghost" style="color:var(--red)" title="Xóa dự án/tài sản" onclick="event.stopPropagation();ctXoaTS(${r.tai_san_id},'${String(r.ten||r.ten_du_an||'').replace(/'/g,'')}')">🗑</button>`:''}</td></tr>`;}).join('')||`<tr><td colspan="8" style="color:var(--muted)">Chưa có dự án</td></tr>`;
   host.innerHTML=`<div class="cards">
     <div class="stat accent"><div class="k">Dự án cho thuê</div><div class="v">${so}</div><div class="d">Đang theo dõi</div></div>
     <div class="stat"><div class="k">Tỷ lệ sử dụng</div><div class="v small">${tyLe}%</div><div class="d">Đang thuê / tổng</div></div>
@@ -962,7 +962,7 @@ async function ctBaoCao(host){
   <div class="panel"><div class="panel-h"><h3>Phân bố theo tình trạng</h3></div>
     <div class="panel-b"><div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center">${ttStrip}</div></div></div>
   <div class="panel"><div class="panel-h"><h3>Phân bổ dữ liệu theo dự án</h3><div class="spacer"></div><span style="color:var(--muted);font-size:12px">Bấm một dòng để xem chi tiết dự án</span></div>
-    <div class="panel-b"><table><thead><tr><th>Tên Dự Án</th><th>Mô tả</th><th>Tình trạng</th><th>Khách thuê</th><th class="num">DT thuê/tháng</th><th class="num">Chi phí luỹ kế</th><th class="num">Bảo trì đến hạn</th></tr></thead>
+    <div class="panel-b"><table><thead><tr><th>Tên Dự Án</th><th>Mô tả</th><th>Tình trạng</th><th>Khách thuê</th><th class="num">DT thuê/tháng</th><th class="num">Chi phí luỹ kế</th><th class="num">Bảo trì đến hạn</th><th></th></tr></thead>
       <tbody>${pivRows}</tbody></table></div></div>`;
 }
 async function ctBaoCaoDuAn(host,pivot){
