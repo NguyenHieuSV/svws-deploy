@@ -3615,7 +3615,7 @@ async function bhTongQuan(host){
 async function viewNCC(m){
   if(!S.nccTab)S.nccTab="ncc";
   m.innerHTML=head("Nhà cung cấp","Mua hàng: hồ sơ NCC · đơn mua duyệt theo hạn mức · nhận hàng (nhập kho) · công nợ phải trả");
-  const tabs=[["ncc","Nhà cung cấp"],["san_pham","Sản phẩm NCC"],["po","Đơn mua (PO)"],["bao_gia","Báo giá"],["cong_no","Công nợ phải trả"],["kiem_soat","Kiểm soát"]];
+  const tabs=[["ncc","Nhà cung cấp"],["san_pham","Sản phẩm NCC"],["bao_gia","Báo giá"],["po","Đơn mua (PO)"],["cong_no","Công nợ phải trả"],["kiem_soat","Kiểm soát"]];
   m.innerHTML+=`<div class="tabs">${tabs.map(([k,l])=>`<button class="${S.nccTab===k?'active':''}" onclick="nccSwitch('${k}')">${l}</button>`).join('')}</div><div id="nccBody"></div>`;
   const host=$("#nccBody");
   if(S.nccTab==="ncc") await nccSuppliers(host);
