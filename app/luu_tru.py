@@ -82,6 +82,21 @@ def luu(data: bytes, nhom: str, doi_tuong_id, ten_file: str, content_type=None) 
     return path
 
 
+def doc(ref: str) -> bytes:
+    """Đọc lại nội dung tệp từ tham chiếu (R2 hoặc đĩa). Ném FileNotFoundError nếu mất tệp."""
+    if not ref:
+        raise FileNotFoundError("Thiếu tham chiếu tệp")
+    if ref.startswith(_R2):
+        cli, bucket = _client()
+        try:
+            obj = cli.get_object(Bucket=bucket, Key=ref[len(_R2):])
+            return obj["Body"].read()
+        except Exception as e:
+            raise FileNotFoundError(f"Không đọc được tệp trên kho lưu trữ ({type(e).__name__})")
+    with open(ref, "rb") as f:
+        return f.read()
+
+
 def ton_tai(ref: str) -> bool:
     if not ref:
         return False

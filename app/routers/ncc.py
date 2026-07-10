@@ -8,6 +8,7 @@ from datetime import date
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form
 from sqlalchemy.orm import Session
 from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
 from ..database import get_db
 from ..rbac import yeu_cau, kiem_han_muc, chi_vai_tro
 from ..deps import nhan_vien_id_cua
@@ -15,7 +16,7 @@ from ..audit import ghi_audit
 from ..models import (NguoiDung, NhaCungCap, DonMua, DonMuaCt, DanhGiaNcc, YeuCauMua, YeuCauMuaCt,
                       TonKho, PhieuKho, PhieuKhoCt, CongNo, ThanhToan, HangHoa, BaoGiaNcc, Rfq, RfqLog,
                       TepDinhKem)
-from ..luu_tru import luu as luu_tep_chung, xoa as xoa_tep_chung, phan_hoi_tai
+from ..luu_tru import luu as luu_tep_chung, xoa as xoa_tep_chung, phan_hoi_tai, doc as doc_tep_chung
 from ..schemas import (NccVao, NccRa, DanhGiaVao, DonMuaVao, DonMuaRa, YeuCauMuaRa,
                        NhanHangVao, DonMuaChiTietRa, ThuTienVao,
                        YeuCauMuaVao, YeuCauMuaItemVao, TaoPoTuDeXuatVao, LyDoVao,
@@ -444,10 +445,71 @@ def ds_bao_gia_file(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XE
             .outerjoin(NhaCungCap, TepDinhKem.doi_tuong_id == NhaCungCap.id)
             .filter(TepDinhKem.doi_tuong == "BAO_GIA_NCC_FILE")
             .order_by(TepDinhKem.id.desc()).limit(200).all())
-    return [{"tep_id": t.id, "ncc_ten": (n.ten if n else None), "ten_file": t.ten_file,
+    return [{"tep_id": t.id, "nha_cung_cap_id": t.doi_tuong_id,
+             "ncc_ten": (n.ten if n else None), "ten_file": t.ten_file,
              "kich_thuoc": t.kich_thuoc, "trang_thai": t.loai,
              "tao_luc": str(getattr(t, "created_at", "") or "")[:16]}
             for t, n in rows]
+
+
+@router.post("/don-mua/tu-bao-gia-file/{tep_id}")
+def tao_po_tu_bao_gia_file(tep_id: int, db: Session = Depends(get_db),
+                           nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    """AI đọc file báo giá đã lưu và tự tạo PO nháp (chờ duyệt) cho NCC của file:
+    mỗi dòng báo giá thành một dòng PO; hàng chưa có trong kho được tự thêm vào
+    danh mục hàng hóa. Số lượng thiếu trong báo giá mặc định = 1 (sửa trước khi duyệt)."""
+    t = db.get(TepDinhKem, tep_id)
+    if t is None or t.doi_tuong != "BAO_GIA_NCC_FILE":
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy file báo giá")
+    ncc = db.get(NhaCungCap, t.doi_tuong_id)
+    if ncc is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy nhà cung cấp của file")
+    try:
+        data = doc_tep_chung(t.duong_dan)
+    except FileNotFoundError as e:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(e))
+    try:
+        items = doc_bao_gia_file(data, t.content_type, t.ten_file)
+    except ValueError as e:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e))
+    if not items:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "AI không tìm thấy dòng sản phẩm nào trong file báo giá.")
+    dm = DonMua(nha_cung_cap_id=ncc.id, trang_thai="CHO_DUYET")
+    db.add(dm); db.flush()
+    dm.so = f"PO-{date.today():%Y%m%d}-{dm.id}"
+    tong = Decimal(0)
+    hh_moi = []
+    for it in items:
+        hh = None
+        if it["ma_sp"]:
+            hh = db.query(HangHoa).filter(HangHoa.ma == it["ma_sp"]).first()
+        if hh is None:
+            hh = db.query(HangHoa).filter(HangHoa.ten.ilike(it["ten"])).first()
+        if hh is None:
+            hh = HangHoa(ma=it["ma_sp"], ten=it["ten"], loai="VAT_TU",
+                         don_vi=it["don_vi"], gia_ban=it["don_gia"] or 0)
+            db.add(hh)
+            try:
+                db.flush()
+            except IntegrityError:   # trùng mã hàng đã có → dùng lại mã đó
+                db.rollback()
+                raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                    f"Mã hàng '{it['ma_sp']}' bị trùng trong kho — kiểm tra danh mục hàng hóa.")
+            _bao_dam_ton(db, hh.id)
+            hh_moi.append(hh.ten)
+        sl = Decimal(str(it.get("so_luong") or 1))
+        gia = Decimal(it["don_gia"] or 0)
+        db.add(DonMuaCt(don_mua_id=dm.id, hang_hoa_id=hh.id, so_luong=sl, don_gia=gia))
+        tong += sl * gia
+    dm.tong_tien = tong
+    ghi_audit(db, nd.id, "AI_TAO_PO", "don_mua", dm.id,
+              moi={"tu_file": t.ten_file, "ncc": ncc.ten, "so_dong": len(items),
+                   "tong_tien": float(tong), "hang_hoa_moi": len(hh_moi)})
+    db.commit()
+    return {"ok": True, "don_mua_id": dm.id, "so": dm.so, "ncc": ncc.ten,
+            "so_dong": len(items), "tong_tien": float(tong),
+            "hang_hoa_moi": hh_moi[:10], "so_hang_moi": len(hh_moi)}
 
 
 @router.delete("/bao-gia-file/{tep_id}")

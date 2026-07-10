@@ -165,7 +165,7 @@ def doc_bao_gia_file(data: bytes, content_type: str, filename: str) -> list[dict
            "CHỈ trả về đúng một mảng JSON, không thêm chữ nào khác, mỗi phần tử dạng: "
            '{"ten":"<tên sản phẩm>","ma_sp":"<mã SP hoặc null>","mo_ta":"<mô tả/quy cách hoặc null>",'
            '"nha_san_xuat":"<hãng sản xuất/xuất xứ hoặc null>","don_vi":"<đơn vị tính hoặc null>",'
-           '"don_gia":<đơn giá VND dạng số, hoặc null>}. '
+           '"don_gia":<đơn giá VND dạng số, hoặc null>,"so_luong":<số lượng trong báo giá dạng số, hoặc null>}. '
            "Đơn giá: bỏ dấu chấm/phẩy ngăn cách nghìn, quy về số VND; nếu giá bằng ngoại tệ thì để null. "
            "KHÔNG bịa thông tin không có trong file; thiếu trường nào để null trường đó.")
     body = {"model": settings.anthropic_model, "max_tokens": 8000, "system": sys,
@@ -201,7 +201,12 @@ def doc_bao_gia_file(data: bytes, content_type: str, filename: str) -> list[dict
             gia = round(float(gia)) if gia is not None else None
         except (TypeError, ValueError):
             gia = None
-        out.append({"ten": ten[:250],
+        sl = it.get("so_luong")
+        try:
+            sl = float(sl) if sl is not None and float(sl) > 0 else None
+        except (TypeError, ValueError):
+            sl = None
+        out.append({"ten": ten[:250], "so_luong": sl,
                     "ma_sp": (str(it.get("ma_sp")).strip()[:60] if it.get("ma_sp") else None),
                     "mo_ta": (str(it.get("mo_ta")).strip() if it.get("mo_ta") else None),
                     "nha_san_xuat": (str(it.get("nha_san_xuat")).strip()[:150] if it.get("nha_san_xuat") else None),

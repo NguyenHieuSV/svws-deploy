@@ -4255,6 +4255,29 @@ async function nccDxTaoPOChon(id){
   toast(newPo.length>1?`Đã tạo ${newPo.length} PO (demo, tách theo NCC)`:"Đã tạo PO (demo)","ok");
   S.nccTab="po"; viewNCC($("#main")); if(newPo.length===1)nccPoSend(newPo[0]);
 }
+/* --- AI tạo PO từ file báo giá đã lưu --- */
+function poBgFileRefresh(){
+  const sel=document.getElementById('po_bgfile'); if(!sel)return;
+  const ncc=Number(gv('po_ncc'))||0;
+  const ds=(window.POBGF||[]).filter(f=>f.nha_cung_cap_id===ncc);
+  sel.innerHTML='<option value="">'+(ds.length?'— chọn file báo giá ('+ds.length+' file) —':'— NCC này chưa có file báo giá —')+'</option>'
+    +ds.map(f=>`<option value="${f.tep_id}">${f.ten_file} · ${(f.tao_luc||'').slice(0,10)}</option>`).join('');
+}
+async function poTuBaoGiaFile(){
+  const tep=Number(gv('po_bgfile')); if(!tep)return;
+  const sel=document.getElementById('po_bgfile');
+  const ten=(sel&&sel.options[sel.selectedIndex])?sel.options[sel.selectedIndex].textContent:'file';
+  if(S.mode!=="live"){toast("AI tạo PO từ báo giá chạy ở bản kết nối backend","err");if(sel)sel.value='';return;}
+  if(!confirm("AI sẽ đọc "+ten+" và tự tạo PO nháp (chờ duyệt) với các dòng hàng trong báo giá. Tiếp tục?")){if(sel)sel.value='';return;}
+  if(sel)sel.disabled=true;
+  toast("⏳ AI đang đọc báo giá và lập PO…","ok");
+  try{
+    const r=await api("/ncc/don-mua/tu-bao-gia-file/"+tep,{method:'POST'});
+    toast(`✅ AI đã tạo ${r.so} — ${r.so_dong} dòng hàng, tổng ${vnd(r.tong_tien)}${r.so_hang_moi?` · tự thêm ${r.so_hang_moi} hàng hóa mới vào kho`:''}. PO đang chờ duyệt.`,"ok");
+    S.nccTab='po'; viewNCC($("#main"));
+  }catch(e){toast(e.detail||e.message,"err");if(sel){sel.disabled=false;sel.value='';}}
+}
+
 function _ungVienNganhDemo(ten){
   const t=(ten||"").toLowerCase(); const g=[];
   if(/hóa chất|hoa chat|pac|pam|clo|polymer|khử|phèn|naoh/.test(t)) g.push(["Nhà phân phối hóa chất xử lý nước","Kiểm chứng GPKD hóa chất, MSDS/COA, nguồn gốc lô."]);
@@ -4333,12 +4356,18 @@ async function nccPO(host){
       <td>${ordNo(p.don_hang_id)}</td><td class="num">${vnd(Number(p.tong_tien))}</td>
       <td>${stt(p.trang_thai)}</td><td>${nhanBadge(p.trang_thai_nhan)}</td><td style="white-space:nowrap">${act||'—'}</td></tr>`;
   }).join('');
+  let bgFiles=[];
+  if(S.mode==="live"){ try{bgFiles=await api("/ncc/bao-gia-file");}catch{bgFiles=[];} }
+  window.POBGF=bgFiles; window.POSUPS=sups;
   const createForm = can("ncc","THAO_TAC") ? `<div class="panel"><div class="panel-h"><h3>Tạo đơn mua (PO)</h3><div class="spacer"></div>
-      <button class="btn-sm" onclick="$('#poForm').classList.toggle('hidden')">+ Tạo PO</button></div>
+      <button class="btn-sm" onclick="$('#poForm').classList.toggle('hidden');poBgFileRefresh()">+ Tạo PO</button></div>
     <div id="poForm" class="hidden" style="padding:0 18px 14px">
-     <div class="formrow"><div class="f"><label>Nhà cung cấp</label><select id="po_ncc">${sups.map(s=>`<option value="${s.id}">${s.ten}</option>`).join('')}</select></div>
+     <div class="formrow"><div class="f"><label>Nhà cung cấp</label><select id="po_ncc" onchange="poBgFileRefresh()">${sups.map(s=>`<option value="${s.id}">${s.ten}</option>`).join('')}</select></div>
        <div class="f"><label>Mã đơn bán (tùy chọn)</label><select id="po_dh"><option value="">— không gắn —</option>${orders.map(o=>`<option value="${o.id}">${o.so||('DH-'+o.id)}</option>`).join('')}</select></div>
        <div class="f"><label>Ngày hẹn giao</label><input id="po_hen" type="date"></div></div>
+     <div class="formrow" style="padding-top:0"><div class="f" style="flex:2"><label>🤖 Chọn file báo giá (AI tự tạo PO)</label>
+        <select id="po_bgfile" data-nocbx onchange="poTuBaoGiaFile()"><option value="">— chọn file báo giá của NCC ở trên —</option></select></div>
+       <div class="f" style="flex:3;align-self:end"><div class="note" style="padding:0">Chọn một file báo giá đã lưu (mục Báo giá → 💾 Lưu file báo giá) — AI đọc file và tự tạo PO nháp với đầy đủ dòng hàng, đơn giá; hàng chưa có trong kho được tự thêm. PO tạo xong ở trạng thái <b>chờ duyệt</b>.</div></div></div>
      <div class="formrow" style="padding-top:0"><div class="f" style="flex:2"><label>Hàng hóa</label><select id="po_hh">${hhs.map(h=>`<option value="${h.id}">${h.ten}</option>`).join('')}</select></div>
        <div class="f"><label>Số lượng</label><input id="po_sl" type="number" value="1"></div>
        <div class="f"><label>Đơn giá</label><input id="po_dg" type="number" value="0"></div>
