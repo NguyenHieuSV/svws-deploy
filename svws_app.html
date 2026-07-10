@@ -4102,9 +4102,9 @@ async function nccGuiPO(poId){
 async function nccBaoGia(host){
   const sups=await _nccSups();
   let hhs = S.mode==="live" ? await api("/kho/hang-hoa").catch(()=>[]) : DEMO.hang_hoa;
-  let quotes, rfqs;
-  if(S.mode==="live"){ try{quotes=await api("/ncc/bao-gia");}catch(e){toast(e.detail||e.message,"err");quotes=[];} try{rfqs=await api("/ncc/rfq");}catch{rfqs=[];} }
-  else { quotes=(DEMO.bao_gia_ncc||[]); rfqs=(DEMO.rfq||[]); }
+  let quotes, rfqs, bgFiles=[];
+  if(S.mode==="live"){ try{quotes=await api("/ncc/bao-gia");}catch(e){toast(e.detail||e.message,"err");quotes=[];} try{rfqs=await api("/ncc/rfq");}catch{rfqs=[];} try{bgFiles=await api("/ncc/bao-gia-file");}catch{bgFiles=[];} }
+  else { quotes=(DEMO.bao_gia_ncc||[]); rfqs=(DEMO.rfq||[]); bgFiles=DEMO.bg_files||[]; }
   const hhName=id=>{const h=hhs.find(x=>x.id===id);return h?h.ten:("HH #"+id);};
   const supName=id=>{const s=sups.find(x=>x.id===id);return s?s.ten:("NCC #"+id);};
   const today=new Date();
@@ -4134,10 +4134,23 @@ async function nccBaoGia(host){
       <div style="flex:1;min-width:150px;background:#fff7ed;border-radius:10px;padding:10px 12px"><div style="color:#b45309;font-size:12px">Sắp hết hạn (≤7 ngày)</div><div style="font-weight:700">${sapHet}</div></div>
       <div style="flex:1;min-width:150px;background:var(--red-bg);border-radius:10px;padding:10px 12px"><div style="color:#b91c1c;font-size:12px">Đã hết hạn</div><div style="font-weight:700">${hetHan}</div></div></div>
     <div class="panel"><div class="panel-h"><h3>Báo giá theo mặt hàng / NCC</h3><div class="spacer"></div>
-      ${canAdd?`<button class="btn-sm" onclick="$('#bgForm2').classList.toggle('hidden')">+ Báo giá</button>`:''}</div>
+      ${canAdd?`<button class="btn-sm" onclick="$('#bgForm2').classList.toggle('hidden')">+ Báo giá</button>`:''}
+      ${canAdd?`<button class="btn-sm ghost" style="margin-left:6px" onclick="$('#bgFileForm').classList.toggle('hidden')">💾 Lưu file báo giá</button>`:''}</div>
+      ${canAdd?`<div id="bgFileForm" class="formrow hidden">
+        <div class="f" style="flex:2"><label>Nhà cung cấp</label><select id="bga_ncc">${sups.map(s=>`<option value="${s.id}">${s.ten}</option>`).join('')}</select></div>
+        <div class="f" style="flex:2"><label>File báo giá (PDF / ảnh / CSV)</label><input type="file" id="bga_file" accept=".pdf,.png,.jpg,.jpeg,.webp,.csv,.txt"></div>
+        <button class="btn-sm" id="bga_btn" onclick="nccBgFileAI()">🤖 AI đọc &amp; nhập sản phẩm</button>
+        <div class="note" style="flex-basis:100%;padding:6px 0 0">AI đọc file, trích <b>Tên SP · Mã SP · Mô tả · NSX · ĐVT · Đơn giá</b> rồi tự nhập vào tab <b>Sản phẩm NCC</b>. Sản phẩm trùng (cùng tên + mã) sẽ bỏ qua và báo <b>Có file trùng</b>; file luôn được lưu ở danh mục <b>Lưu file báo giá</b> bên dưới.</div></div>`:''}
       ${form}
       <div class="panel-b"><table><thead><tr><th>Hàng hóa</th><th>NCC</th><th class="num">Đơn giá</th><th class="num">SL tối thiểu</th><th>Hiệu lực đến</th><th>Nguồn</th><th>Trạng thái</th><th></th></tr></thead>
       <tbody>${rows||'<tr><td colspan="8" class="empty" style="padding:20px">Chưa có báo giá.</td></tr>'}</tbody></table></div></div>
+    <div class="panel"><div class="panel-h"><h3>💾 Lưu file báo giá</h3><div class="spacer"></div><span style="color:var(--muted);font-size:12px">File gốc lưu trên máy chủ — cũng xem được ở 📁 Kho tệp (Overall Operation)</span></div>
+      <div class="panel-b"><table><thead><tr><th>Nhà cung cấp</th><th>Tệp</th><th class="num">Cỡ</th><th>Lưu lúc</th><th>Kết quả AI</th><th></th></tr></thead>
+      <tbody>${bgFiles.map(t=>`<tr><td><b>${t.ncc_ten||'—'}</b></td><td>${t.ten_file}</td><td class="num">${kb(t.kich_thuoc)}</td>
+        <td style="color:var(--muted);font-size:12px;white-space:nowrap">${(t.tao_luc||'').replace('T',' ')}</td>
+        <td>${t.trang_thai==='BG_TRUNG'?'<span class="badge b-cho">⚠ Có SP trùng</span>':'<span class="badge b-ok">Đã nhập SP</span>'}</td>
+        <td style="white-space:nowrap"><button class="btn-sm ghost" onclick="taiTep(${t.tep_id},'${(t.ten_file||'bao-gia').replace(/'/g,'')}')">⬇ Tải</button>${laQTV()?` <button class="btn-sm ghost" style="color:var(--red)" title="Xóa file" onclick="nccBgFileXoa(${t.tep_id})">🗑</button>`:''}</td></tr>`).join('')
+        ||`<tr><td colspan="6" class="empty" style="padding:16px">${S.mode==="live"?'Chưa có file báo giá nào — bấm 💾 Lưu file báo giá phía trên.':'Danh mục hoạt động ở bản kết nối backend.'}</td></tr>`}</tbody></table></div></div>
     <div class="panel"><div class="panel-h"><h3>Nhật ký RFQ — gửi từ inf@watersolutions.company</h3></div>
       <div class="panel-b"><table><thead><tr><th>Hàng hóa</th><th class="num">SL</th><th>Ngày gửi</th><th>Hạn báo giá</th><th>Đầu mối</th><th>Đã gửi</th><th>Email</th></tr></thead>
       <tbody>${rfqRows||'<tr><td colspan="7" class="empty" style="padding:18px">Chưa gửi RFQ nào. Gửi từ panel “chờ tạo PO” (nút ✉️ RFQ).</td></tr>'}</tbody></table></div></div>`;
@@ -4184,6 +4197,32 @@ async function poXoa(id,so){
     i=(DEMO.ncc.don_mua||[]).findIndex(x=>x.id===id); if(i>=0)DEMO.ncc.don_mua.splice(i,1);
   }
   toast("Đã xóa PO "+so+(S.mode==="demo"?" (demo)":""),"ok");
+  viewNCC($("#main"));
+}
+async function nccBgFileAI(){
+  if(S.mode!=="live"){toast("AI đọc file báo giá chạy ở bản kết nối backend","err");return;}
+  const ncc=Number(gv('bga_ncc')), inp=document.getElementById('bga_file'), f=inp&&inp.files[0];
+  if(!ncc){toast("Chọn nhà cung cấp","err");return;}
+  if(!f){toast("Chọn file báo giá (PDF / ảnh / CSV)","err");return;}
+  const btn=document.getElementById('bga_btn');
+  if(btn){btn.disabled=true;btn.textContent="⏳ AI đang đọc file…";}
+  try{
+    const fd=new FormData(); fd.append('nha_cung_cap_id',ncc); fd.append('file',f);
+    const r=await apiUpload("/ncc/bao-gia-file",fd);
+    if(r.so_trung>0){
+      toast(`⚠ Có file trùng: ${r.so_trung}/${r.so_doc} sản phẩm trùng (tên + mã) không nhập lại — file đã lưu tạm ở mục Lưu file báo giá.`+(r.so_them?` Đã nhập mới ${r.so_them} SP.`:''),"err");
+    }else{
+      toast(`✅ AI đã đọc ${r.so_doc} dòng — nhập ${r.so_them} sản phẩm vào Sản phẩm NCC (${r.ncc}). File lưu ở mục Lưu file báo giá.`,"ok");
+    }
+    viewNCC($("#main"));
+  }catch(e){toast(e.detail||e.message,"err");}
+  finally{if(btn){btn.disabled=false;btn.textContent="🤖 AI đọc & nhập sản phẩm";}}
+}
+async function nccBgFileXoa(id){
+  if(!confirm("Xóa file báo giá này khỏi kho? Sản phẩm đã nhập vào danh mục KHÔNG bị xóa theo. Không thể hoàn tác."))return;
+  try{await api("/ncc/bao-gia-file/"+id,{method:'DELETE'});}
+  catch(e){return toast(e.detail||e.message,"err");}
+  toast("Đã xóa file báo giá","ok");
   viewNCC($("#main"));
 }
 async function nccBgCreate(){

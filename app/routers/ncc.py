@@ -5,7 +5,7 @@ Khuôn phân quyền vẫn dùng lại y nguyên: yeu_cau("ncc", "<mức>").
 """
 from decimal import Decimal
 from datetime import date
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from ..database import get_db
@@ -23,7 +23,7 @@ from ..schemas import (NccVao, NccRa, DanhGiaVao, DonMuaVao, DonMuaRa, YeuCauMua
                        RfqVao, GuiRfqVao, RfqRa, RfqLogRa, RfqNoiDungVao,
                        PoNoiDungVao, GuiPoVao, PoPdfVao)
 from ..kho_service import nhap_ton
-from ..ai_gateway import goi_y_ncc_ai, tim_ncc_web
+from ..ai_gateway import goi_y_ncc_ai, tim_ncc_web, doc_bao_gia_file
 from ..config import settings
 from ..email_gateway import lay_email_provider
 from ..po_pdf import tao_po_pdf
@@ -384,6 +384,86 @@ def tao_po_tu_de_xuat(ycm_id: int, data: TaoPoTuDeXuatVao, db: Session = Depends
 
 
 # ----- XEM: danh sách đơn mua -----
+# ----- Lưu file báo giá NCC + AI đọc & nhập vào danh mục sản phẩm -----
+@router.post("/bao-gia-file")
+async def luu_bao_gia_file(nha_cung_cap_id: int = Form(...), file: UploadFile = File(...),
+                           db: Session = Depends(get_db),
+                           nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    """Tải file báo giá của NCC lên kho tệp dùng chung; AI đọc file, trích các dòng
+    sản phẩm (tên, mã SP, mô tả, NSX, ĐVT, đơn giá) và tự nhập vào tab Sản phẩm NCC.
+    Sản phẩm trùng (cùng tên + mã) bị bỏ qua và báo 'Có file trùng'."""
+    ncc = db.get(NhaCungCap, nha_cung_cap_id)
+    if ncc is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy nhà cung cấp")
+    ten_file = file.filename or "bao_gia"
+    data = await file.read()
+    if len(data) > 15 * 1024 * 1024:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "File quá lớn (tối đa 15MB)")
+    try:
+        items = doc_bao_gia_file(data, file.content_type, ten_file)
+    except ValueError as e:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e))
+    if not items:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "AI không tìm thấy dòng sản phẩm nào trong file — kiểm tra lại nội dung báo giá.")
+    # đối chiếu trùng (cùng tên + mã) trong danh mục sản phẩm của NCC này
+    hien_co = {( (sp.ten or "").strip().lower(), (sp.ma_sp or "").strip().lower() )
+               for sp in db.query(SanPhamNcc).filter_by(nha_cung_cap_id=nha_cung_cap_id).all()}
+    them, trung = [], []
+    for it in items:
+        khoa = (it["ten"].strip().lower(), (it["ma_sp"] or "").strip().lower())
+        if khoa in hien_co:
+            trung.append(it["ten"])
+            continue
+        hien_co.add(khoa)
+        db.add(SanPhamNcc(nha_cung_cap_id=nha_cung_cap_id, ten=it["ten"], ma_sp=it["ma_sp"],
+                          mo_ta=it["mo_ta"], nha_san_xuat=it["nha_san_xuat"],
+                          don_vi=it["don_vi"], don_gia=it["don_gia"] or 0,
+                          ghi_chu=f"AI nhập từ file {ten_file}"))
+        them.append(it["ten"])
+    # lưu file vào kho tệp dùng chung (danh mục Lưu file báo giá)
+    ref = luu_tep_chung(data, "bao_gia_ncc", nha_cung_cap_id, ten_file, file.content_type)
+    tep = TepDinhKem(doi_tuong="BAO_GIA_NCC_FILE", doi_tuong_id=nha_cung_cap_id,
+                     loai="BG_TRUNG" if trung else "BG_OK", ten_file=ten_file,
+                     duong_dan=ref, kich_thuoc=len(data), content_type=file.content_type,
+                     nguoi_tai_len=nhan_vien_id_cua(db, nd.id))
+    db.add(tep)
+    db.flush()
+    ghi_audit(db, nd.id, "AI_NHAP_BG", "san_pham_ncc", None,
+              moi={"ncc": ncc.ten, "file": ten_file, "so_them": len(them), "so_trung": len(trung)})
+    db.commit()
+    return {"ok": True, "tep_id": tep.id, "ncc": ncc.ten,
+            "so_doc": len(items), "so_them": len(them), "so_trung": len(trung),
+            "ds_trung": trung[:10], "ds_them": them[:10]}
+
+
+@router.get("/bao-gia-file")
+def ds_bao_gia_file(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
+    """Danh mục Lưu file báo giá — các file báo giá NCC đã tải lên kho tệp dùng chung."""
+    rows = (db.query(TepDinhKem, NhaCungCap)
+            .outerjoin(NhaCungCap, TepDinhKem.doi_tuong_id == NhaCungCap.id)
+            .filter(TepDinhKem.doi_tuong == "BAO_GIA_NCC_FILE")
+            .order_by(TepDinhKem.id.desc()).limit(200).all())
+    return [{"tep_id": t.id, "ncc_ten": (n.ten if n else None), "ten_file": t.ten_file,
+             "kich_thuoc": t.kich_thuoc, "trang_thai": t.loai,
+             "tao_luc": str(getattr(t, "created_at", "") or "")[:16]}
+            for t, n in rows]
+
+
+@router.delete("/bao-gia-file/{tep_id}")
+def xoa_bao_gia_file(tep_id: int, db: Session = Depends(get_db),
+                     nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
+    t = db.get(TepDinhKem, tep_id)
+    if t is None or t.doi_tuong != "BAO_GIA_NCC_FILE":
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy file báo giá")
+    ten_cu = t.ten_file
+    xoa_tep_chung(t.duong_dan)
+    db.delete(t)
+    ghi_audit(db, nd.id, "XOA", "tep_dinh_kem", tep_id, cu={"ten_file": ten_cu, "loai": "BAO_GIA_NCC_FILE"})
+    db.commit()
+    return {"ok": True}
+
+
 # ----- DUYET: xóa nhà cung cấp (chặn khi có chứng từ mua hàng/kế toán) -----
 @router.delete("/nha-cung-cap/{ncc_id}")
 def xoa_ncc(ncc_id: int, db: Session = Depends(get_db),

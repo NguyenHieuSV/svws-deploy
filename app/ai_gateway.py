@@ -135,6 +135,81 @@ def dich_vn_sang_en(texts: list[str]) -> list[str] | None:
     return None
 
 
+# ============ AI ĐỌC FILE BÁO GIÁ NCC → trích danh mục sản phẩm ============
+def doc_bao_gia_file(data: bytes, content_type: str, filename: str) -> list[dict]:
+    """Đọc file báo giá của NCC (PDF/ảnh/text-CSV) bằng Claude, trích danh sách sản phẩm.
+    Trả list các dict {ten, ma_sp, mo_ta, nha_san_xuat, don_vi, don_gia}.
+    Ném ValueError nếu chưa bật AI / định dạng không hỗ trợ / đọc thất bại."""
+    if settings.ai_provider.upper() != "ANTHROPIC" or not settings.anthropic_api_key:
+        raise ValueError("Chưa bật AI — cần AI_PROVIDER=ANTHROPIC và ANTHROPIC_API_KEY trên máy chủ.")
+    import base64, urllib.request
+    ct = (content_type or "").lower()
+    fn = (filename or "").lower()
+    if ct == "application/pdf" or fn.endswith(".pdf"):
+        khoi = {"type": "document",
+                "source": {"type": "base64", "media_type": "application/pdf",
+                           "data": base64.b64encode(data).decode()}}
+    elif ct in ("image/png", "image/jpeg", "image/webp", "image/gif") or \
+            fn.endswith((".png", ".jpg", ".jpeg", ".webp", ".gif")):
+        mt = ct if ct.startswith("image/") else ("image/png" if fn.endswith(".png") else "image/jpeg")
+        khoi = {"type": "image",
+                "source": {"type": "base64", "media_type": mt,
+                           "data": base64.b64encode(data).decode()}}
+    elif ct.startswith("text/") or fn.endswith((".txt", ".csv")):
+        khoi = {"type": "text", "text": data.decode("utf-8", errors="replace")[:60000]}
+    else:
+        raise ValueError("Định dạng chưa hỗ trợ — dùng PDF, ảnh (PNG/JPG) hoặc CSV/TXT. "
+                         "File Excel hãy xuất sang PDF trước.")
+    sys = ("Bạn là trợ lý mua hàng của công ty xử lý nước SVWS. Người dùng gửi một FILE BÁO GIÁ "
+           "của nhà cung cấp. Hãy đọc và trích TOÀN BỘ các dòng sản phẩm/dịch vụ thành JSON. "
+           "CHỈ trả về đúng một mảng JSON, không thêm chữ nào khác, mỗi phần tử dạng: "
+           '{"ten":"<tên sản phẩm>","ma_sp":"<mã SP hoặc null>","mo_ta":"<mô tả/quy cách hoặc null>",'
+           '"nha_san_xuat":"<hãng sản xuất/xuất xứ hoặc null>","don_vi":"<đơn vị tính hoặc null>",'
+           '"don_gia":<đơn giá VND dạng số, hoặc null>}. '
+           "Đơn giá: bỏ dấu chấm/phẩy ngăn cách nghìn, quy về số VND; nếu giá bằng ngoại tệ thì để null. "
+           "KHÔNG bịa thông tin không có trong file; thiếu trường nào để null trường đó.")
+    body = {"model": settings.anthropic_model, "max_tokens": 8000, "system": sys,
+            "messages": [{"role": "user", "content": [
+                khoi,
+                {"type": "text", "text": "Trích danh sách sản phẩm từ báo giá này thành mảng JSON."}]}]}
+    req = urllib.request.Request(
+        "https://api.anthropic.com/v1/messages",
+        data=json.dumps(body).encode("utf-8"),
+        headers={"content-type": "application/json",
+                 "x-api-key": settings.anthropic_api_key,
+                 "anthropic-version": "2023-06-01"})
+    try:
+        with urllib.request.urlopen(req, timeout=120) as r:
+            resp = json.loads(r.read().decode("utf-8"))
+    except Exception as e:
+        raise ValueError(f"Gọi AI thất bại ({type(e).__name__}) — thử lại sau.")
+    txt = "".join(b.get("text", "") for b in resp.get("content", []) if b.get("type") == "text")
+    txt = txt.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+    try:
+        import re as _re
+        m = _re.search(r"\[[\s\S]*\]", txt)
+        items = json.loads(m.group(0) if m else txt)
+    except Exception:
+        raise ValueError("AI không đọc được cấu trúc báo giá — kiểm tra file có bảng sản phẩm rõ ràng.")
+    out = []
+    for it in items if isinstance(items, list) else []:
+        ten = str(it.get("ten") or "").strip()
+        if not ten:
+            continue
+        gia = it.get("don_gia")
+        try:
+            gia = round(float(gia)) if gia is not None else None
+        except (TypeError, ValueError):
+            gia = None
+        out.append({"ten": ten[:250],
+                    "ma_sp": (str(it.get("ma_sp")).strip()[:60] if it.get("ma_sp") else None),
+                    "mo_ta": (str(it.get("mo_ta")).strip() if it.get("mo_ta") else None),
+                    "nha_san_xuat": (str(it.get("nha_san_xuat")).strip()[:150] if it.get("nha_san_xuat") else None),
+                    "don_vi": (str(it.get("don_vi")).strip()[:30] if it.get("don_vi") else None),
+                    "don_gia": gia})
+    return out
+
+
 # ============ AI SOURCING AGENT — tự tìm/khuyến nghị NCC cho 1 đề xuất ============
 def _ung_vien_nganh(ten: str):
     t = (ten or "").lower()
