@@ -601,6 +601,82 @@ def xoa_de_xuat(ycm_id: int, db: Session = Depends(get_db),
     return {"ok": True}
 
 
+# ----- Thanh toán mua hàng: theo dõi đề nghị thanh toán từng PO -----
+@router.get("/thanh-toan-mua")
+def ds_thanh_toan_mua(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
+    """Danh sách PO kèm tình trạng thanh toán: tổng, đề nghị thanh toán lũy kế,
+    ngày thanh toán tiếp theo, số báo giá + mã đơn bán liên quan."""
+    from ..models import DonHang, BaoGia
+    out = []
+    for dm in db.query(DonMua).order_by(DonMua.id.desc()).limit(300).all():
+        ncc = db.get(NhaCungCap, dm.nha_cung_cap_id)
+        so_bg = None
+        if dm.don_hang_id:
+            o = db.get(DonHang, dm.don_hang_id)
+            if o and o.bao_gia_id:
+                bg = db.get(BaoGia, o.bao_gia_id)
+                so_bg = bg.so if bg else None
+        out.append({"id": dm.id, "so": dm.so, "ngay": str(dm.ngay or "")[:10],
+                    "so_bao_gia": so_bg, "ma_don_ban": _ma_ban_hang_po(db, dm),
+                    "ncc_ten": ncc.ten if ncc else None,
+                    "tong_tien": float(dm.tong_tien or 0),
+                    "de_nghi_tt": float(dm.de_nghi_tt or 0),
+                    "ngay_tt_tiep": str(dm.ngay_tt_tiep) if dm.ngay_tt_tiep else None,
+                    "tt_du": bool(dm.tt_du),
+                    "ngay_tt_du": str(dm.ngay_tt_du) if dm.ngay_tt_du else None,
+                    "trang_thai": dm.trang_thai})
+    return out
+
+
+class ThanhToanMuaVao(_SPBase):
+    de_nghi_tt: Decimal = Decimal(0)
+    ngay_tt_tiep: date | None = None
+
+
+@router.post("/don-mua/{dm_id}/thanh-toan")
+def cap_nhat_thanh_toan_mua(dm_id: int, data: ThanhToanMuaVao, db: Session = Depends(get_db),
+                            nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    """Ghi nhận đề nghị thanh toán của PO. Đề nghị = tổng → PO đánh dấu ĐÃ THANH
+    TOÁN 100% (lưu ở tab Kiểm soát). Còn thiếu → phần còn lại nằm ở Công nợ phải trả."""
+    dm = db.get(DonMua, dm_id)
+    if dm is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đơn mua")
+    tong = Decimal(dm.tong_tien or 0)
+    dn = Decimal(data.de_nghi_tt or 0)
+    if dn < 0 or dn > tong:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Đề nghị thanh toán phải từ 0 đến Tổng thanh toán của PO.")
+    dm.de_nghi_tt = dn
+    dm.ngay_tt_tiep = data.ngay_tt_tiep
+    cn = db.query(CongNo).filter_by(don_mua_id=dm_id).first()
+    da_tt_100 = tong > 0 and dn >= tong
+    if da_tt_100:
+        dm.tt_du = True
+        dm.ngay_tt_du = date.today()
+        if cn is not None:
+            cn.da_thanh_toan = cn.so_tien
+            cn.trang_thai = "DA_TRA"
+    else:
+        dm.tt_du = False
+        dm.ngay_tt_du = None
+        if cn is None:
+            cn = CongNo(loai="PHAI_TRA", nha_cung_cap_id=dm.nha_cung_cap_id, don_mua_id=dm.id,
+                        so_tien=tong, da_thanh_toan=dn, han=data.ngay_tt_tiep,
+                        trang_thai="TRA_MOT_PHAN" if dn > 0 else "CHUA_TRA")
+            db.add(cn)
+        else:
+            cn.so_tien = tong
+            cn.da_thanh_toan = dn
+            if data.ngay_tt_tiep:
+                cn.han = data.ngay_tt_tiep
+            cn.trang_thai = "TRA_MOT_PHAN" if dn > 0 else "CHUA_TRA"
+    ghi_audit(db, nd.id, "THANH_TOAN_MUA", "don_mua", dm.id,
+              moi={"de_nghi_tt": float(dn), "tong": float(tong), "tt_du": da_tt_100,
+                   "ngay_tt_tiep": str(data.ngay_tt_tiep) if data.ngay_tt_tiep else None})
+    db.commit()
+    return {"ok": True, "da_tt_100": da_tt_100, "con_lai": float(tong - dn)}
+
+
 # ----- DUYET: xóa báo giá NCC -----
 @router.delete("/bao-gia/{bg_id}")
 def xoa_bao_gia_ncc(bg_id: int, db: Session = Depends(get_db),
@@ -627,7 +703,8 @@ def xoa_don_mua(dm_id: int, db: Session = Depends(get_db),
     if dm is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đơn mua")
     ban = []
-    for ten_ref, bang in (("phiếu kho (đã nhận hàng)", "phieu_kho"), ("hóa đơn", "hoa_don")):
+    for ten_ref, bang in (("phiếu kho (đã nhận hàng)", "phieu_kho"), ("hóa đơn", "hoa_don"),
+                          ("công nợ phải trả", "cong_no")):
         try:
             n = db.execute(_sql(f"SELECT COUNT(*) FROM {bang} WHERE don_mua_id = :i"),
                            {"i": dm_id}).scalar() or 0

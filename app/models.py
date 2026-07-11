@@ -193,6 +193,10 @@ class DonMua(Base):
     ngay_hen_giao: Mapped[date | None] = mapped_column(Date, nullable=True)
     ngay_giao_thuc: Mapped[date | None] = mapped_column(Date, nullable=True)
     trang_thai_nhan: Mapped[str] = mapped_column(String(12), default="CHUA")
+    de_nghi_tt: Mapped[Decimal] = mapped_column(Numeric(18, 0), default=0)
+    ngay_tt_tiep: Mapped[date | None] = mapped_column(Date, nullable=True)
+    tt_du: Mapped[bool] = mapped_column(Boolean, default=False)
+    ngay_tt_du: Mapped[date | None] = mapped_column(Date, nullable=True)
     chi_tiet: Mapped[list["DonMuaCt"]] = relationship(cascade="all, delete-orphan", lazy="selectin")
 
 
@@ -437,6 +441,7 @@ class CongNo(Base):
     da_thanh_toan: Mapped[Decimal] = mapped_column(Numeric(18, 0), default=0)
     han: Mapped[date | None] = mapped_column(Date, nullable=True)
     trang_thai: Mapped[str] = mapped_column(String(20), default="CHUA_THU")
+    don_mua_id: Mapped[int | None] = mapped_column(ForeignKey("don_mua.id", ondelete="SET NULL"), nullable=True)
 
 
 # ---------- Module Kế toán: thanh toán & sổ cái ----------

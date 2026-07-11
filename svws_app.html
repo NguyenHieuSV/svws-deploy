@@ -3615,12 +3615,13 @@ async function bhTongQuan(host){
 async function viewNCC(m){
   if(!S.nccTab)S.nccTab="ncc";
   m.innerHTML=head("Nhà cung cấp","Mua hàng: hồ sơ NCC · đơn mua duyệt theo hạn mức · nhận hàng (nhập kho) · công nợ phải trả");
-  const tabs=[["ncc","Nhà cung cấp"],["san_pham","Sản phẩm NCC"],["bao_gia","Báo giá"],["po","Đơn mua (PO)"],["cong_no","Công nợ phải trả"],["kiem_soat","Kiểm soát"]];
+  const tabs=[["ncc","Nhà cung cấp"],["san_pham","Sản phẩm NCC"],["bao_gia","Báo giá"],["po","Đơn mua (PO)"],["thanh_toan_mua","Thanh toán mua hàng"],["cong_no","Công nợ phải trả"],["kiem_soat","Kiểm soát"]];
   m.innerHTML+=`<div class="tabs">${tabs.map(([k,l])=>`<button class="${S.nccTab===k?'active':''}" onclick="nccSwitch('${k}')">${l}</button>`).join('')}</div><div id="nccBody"></div>`;
   const host=$("#nccBody");
   if(S.nccTab==="ncc") await nccSuppliers(host);
   else if(S.nccTab==="san_pham") await nccSanPham(host);
   else if(S.nccTab==="po") await nccPO(host);
+  else if(S.nccTab==="thanh_toan_mua") await nccTTMua(host);
   else if(S.nccTab==="bao_gia") await nccBaoGia(host);
   else if(S.nccTab==="cong_no") await nccCongNo(host);
   else await nccKiemSoat(host);
@@ -4582,6 +4583,67 @@ function _agingDemo(cns){
     const k=qua<=0?'chua_den_han':qua<=30?'b_0_30':qua<=60?'b_31_60':qua<=90?'b_61_90':'b_90p'; b[k]+=con;});
   return b;
 }
+/* --- Tab Thanh toán mua hàng: đề nghị thanh toán từng PO --- */
+async function _ttmDanhSach(){
+  if(S.mode==="live"){ try{return await api("/ncc/thanh-toan-mua");}catch(e){toast(e.detail||e.message,"err");return [];} }
+  const sups=DEMO.ncc.suppliers||[];
+  return (DEMO.don_mua||[]).map(p=>({id:p.id,so:p.so,ngay:p.ngay||'',so_bao_gia:p.so_bao_gia||null,
+    ma_don_ban:((DEMO.don_hang||[]).find(o=>o.id===p.don_hang_id)||{}).so||null,
+    ncc_ten:((sups.find(s=>s.id===p.nha_cung_cap_id))||{}).ten||'—',
+    tong_tien:Number(p.tong_tien||0),de_nghi_tt:Number(p.de_nghi_tt||0),
+    ngay_tt_tiep:p.ngay_tt_tiep||null,tt_du:!!p.tt_du,ngay_tt_du:p.ngay_tt_du||null,trang_thai:p.trang_thai}));
+}
+async function nccTTMua(host){
+  const list=await _ttmDanhSach(); S._ttmList=list;
+  const pend=list.filter(x=>!x.tt_du);
+  const canOp=can("ncc","THAO_TAC");
+  const rows=pend.map((x,i)=>{
+    const conLai=x.tong_tien-(x.de_nghi_tt||0);
+    return `<tr><td>${i+1}</td><td style="white-space:nowrap">${x.ngay||'—'}</td>
+      <td>${x.so_bao_gia||'—'}</td><td>${x.ma_don_ban?`<span class="badge b-info">${x.ma_don_ban}</span>`:'—'}</td>
+      <td><b>${x.ncc_ten||'—'}</b><div style="font-size:11px;color:var(--muted)">${x.so||''}</div></td>
+      <td class="num"><b>${vnd(x.tong_tien)}</b></td>
+      <td><input id="ttm_dn_${x.id}" type="number" min="0" max="${x.tong_tien}" value="${x.de_nghi_tt||0}" style="width:130px" ${canOp?'':'disabled'}></td>
+      <td><input id="ttm_nd_${x.id}" type="date" value="${x.ngay_tt_tiep||''}" style="width:145px" ${canOp?'':'disabled'}></td>
+      <td class="num" style="color:${conLai>0?'#dc2626':'#16a34a'}">${vnd(conLai)}</td>
+      <td>${canOp?`<button class="btn-sm" onclick="ttMuaLuu(${x.id})">💾 Lưu</button>`:'—'}</td></tr>`;
+  }).join('');
+  const daDu=list.filter(x=>x.tt_du).length;
+  host.innerHTML=`<div class="note" style="padding:0 0 12px">Theo dõi thanh toán từng PO. Nhập <b>Đề nghị thanh toán</b> (lũy kế đã/đang đề nghị chi) và <b>Ngày thanh toán tiếp theo</b> rồi bấm Lưu:
+    • Đề nghị = Tổng thanh toán → PO chuyển vào <b>Kiểm soát → Đơn hàng đã thanh toán 100%</b>.
+    • Còn thiếu → phần còn lại tự nằm ở tab <b>Công nợ phải trả</b> (kèm hạn = ngày thanh toán tiếp theo).</div>
+    <div class="panel"><div class="panel-h"><h3>Thanh toán mua hàng</h3><div class="spacer"></div>
+      <span style="color:var(--muted);font-size:12px">${pend.length} PO đang theo dõi · ${daDu} PO đã thanh toán 100% (xem tab Kiểm soát)</span></div>
+    <div class="panel-b"><table><thead><tr><th>Stt</th><th>Ngày</th><th>Số báo giá</th><th>Mã đơn bán</th><th>Nhà cung cấp</th><th class="num">Tổng thanh toán</th><th>Đề nghị thanh toán</th><th>Ngày TT tiếp theo</th><th class="num">Còn lại</th><th></th></tr></thead>
+    <tbody>${rows||'<tr><td colspan="10" class="empty" style="padding:20px">Không có PO nào cần theo dõi thanh toán.</td></tr>'}</tbody></table></div></div>`;
+}
+async function ttMuaLuu(id){
+  const x=(S._ttmList||[]).find(t=>t.id===id); if(!x)return;
+  const dn=Number(gv('ttm_dn_'+id)||0), ngayTT=gv('ttm_nd_'+id)||null;
+  if(isNaN(dn)||dn<0||dn>x.tong_tien)return toast("Đề nghị thanh toán phải từ 0 đến Tổng thanh toán ("+vnd(x.tong_tien)+")","err");
+  if(S.mode==="live"){
+    try{
+      const r=await api(`/ncc/don-mua/${id}/thanh-toan`,{method:'POST',body:JSON.stringify({de_nghi_tt:dn,ngay_tt_tiep:ngayTT})});
+      toast(r.da_tt_100?"✅ "+(x.so||'PO')+" đã thanh toán 100% — lưu vào Kiểm soát → Đơn hàng đã thanh toán 100%"
+                       :"Đã ghi nhận — còn lại "+vnd(r.con_lai)+" chuyển sang Công nợ phải trả","ok");
+    }catch(e){return toast(e.detail||e.message,"err");}
+  }else{
+    const p=(DEMO.don_mua||[]).find(d=>d.id===id); if(!p)return;
+    p.de_nghi_tt=dn; p.ngay_tt_tiep=ngayTT;
+    p.tt_du=p.tong_tien>0&&dn>=p.tong_tien;
+    p.ngay_tt_du=p.tt_du?new Date().toISOString().slice(0,10):null;
+    DEMO.cong_no_ncc=DEMO.cong_no_ncc||[];
+    let cn=DEMO.cong_no_ncc.find(c=>c.don_mua_id===id);
+    if(p.tt_du){ if(cn){cn.da_thanh_toan=cn.so_tien;cn.trang_thai="DA_TRA";} }
+    else{
+      if(!cn){DEMO.cong_no_ncc.push({id:Date.now(),don_mua_id:id,nha_cung_cap_id:p.nha_cung_cap_id,so_tien:p.tong_tien,da_thanh_toan:dn,han:ngayTT,trang_thai:dn>0?"TRA_MOT_PHAN":"CHUA_TRA"});}
+      else{cn.so_tien=p.tong_tien;cn.da_thanh_toan=dn;if(ngayTT)cn.han=ngayTT;cn.trang_thai=dn>0?"TRA_MOT_PHAN":"CHUA_TRA";}
+    }
+    toast(p.tt_du?"✅ Đã thanh toán 100% (demo) — xem Kiểm soát":"Đã ghi nhận (demo) — còn lại "+vnd(p.tong_tien-dn)+" ở Công nợ phải trả","ok");
+  }
+  viewNCC($("#main"));
+}
+
 async function nccCongNo(host){
   const sups=await _nccSups(); let cns, aging;
   if(S.mode==="live"){
@@ -4643,6 +4705,7 @@ async function nccKiemSoat(host){
     try{tre=await api("/ncc/giao-hang/tre-han");}catch(e){toast(e.detail||e.message,"err");tre=[];}
     try{ks=await api("/ncc/kiem-soat-cong-no");}catch{ks=[];}
   } else { tre=_treHanDemo(); ks=_kiemSoatDemo(); }
+  const daTT=(await _ttmDanhSach()).filter(x=>x.tt_du);
   const treRows=tre.map(x=>`<tr class="${x.so_ngay_tre>7?'qh':''}"><td><b>${x.so}</b></td><td>${x.ten_ncc||'—'}</td>
     <td>${x.ngay_hen_giao||'—'}</td><td>${x.ngay_giao_thuc||'<span style="color:var(--muted)">chưa giao</span>'}</td>
     <td class="num"><b style="color:#dc2626">${x.so_ngay_tre}</b></td>
@@ -4661,7 +4724,16 @@ async function nccKiemSoat(host){
     <div class="panel"><div class="panel-h"><h3>Kiểm soát hạn mức công nợ</h3></div>
       <div class="note">Dư nợ phải trả từng NCC so với hạn mức. Khi duyệt PO làm vượt trần, hệ thống sẽ chặn.</div>
       <div class="panel-b"><table><thead><tr><th>Nhà cung cấp</th><th class="num">Hạn mức</th><th class="num">Dư nợ</th><th>Mức sử dụng</th><th>Cảnh báo</th></tr></thead>
-      <tbody>${ksRows||'<tr><td colspan="5" class="empty" style="padding:18px">Chưa có dữ liệu.</td></tr>'}</tbody></table></div></div>`;
+      <tbody>${ksRows||'<tr><td colspan="5" class="empty" style="padding:18px">Chưa có dữ liệu.</td></tr>'}</tbody></table></div></div>
+    <div class="panel"><div class="panel-h"><h3>✅ Đơn hàng đã thanh toán 100%</h3><div class="spacer"></div>
+      <span style="color:var(--muted);font-size:12px">${daTT.length} PO — lưu trữ từ tab Thanh toán mua hàng</span></div>
+      <div class="note">PO có Đề nghị thanh toán = Tổng thanh toán được lưu trữ tại đây (dữ liệu mua hàng đã tất toán).</div>
+      <div class="panel-b"><table><thead><tr><th>Stt</th><th>Ngày PO</th><th>Số PO</th><th>Số báo giá</th><th>Mã đơn bán</th><th>Nhà cung cấp</th><th class="num">Tổng thanh toán</th><th>Ngày tất toán</th></tr></thead>
+      <tbody>${daTT.map((x,i)=>`<tr><td>${i+1}</td><td>${x.ngay||'—'}</td><td><b>${x.so||('#'+x.id)}</b></td>
+        <td>${x.so_bao_gia||'—'}</td><td>${x.ma_don_ban?`<span class="badge b-info">${x.ma_don_ban}</span>`:'—'}</td>
+        <td>${x.ncc_ten||'—'}</td><td class="num"><b>${vnd(x.tong_tien)}</b></td>
+        <td><span class="badge b-ok">${x.ngay_tt_du||'—'}</span></td></tr>`).join('')
+        ||'<tr><td colspan="8" class="empty" style="padding:18px">Chưa có PO nào thanh toán đủ 100%.</td></tr>'}</tbody></table></div></div>`;
 }
 
 /* ---------- KẾ TOÁN: quỹ tiền · phiếu thu–chi (duyệt nhiều cấp) · lãi/lỗ mã bán · cân đối ---------- */
