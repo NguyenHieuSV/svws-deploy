@@ -137,11 +137,54 @@ def xoa_san_pham(sp_id: int, db: Session = Depends(get_db),
     return {"ok": True}
 
 
+# ----- Mã NCC tự sinh: chữ cái đầu tên (bỏ từ loại hình) + "-" + số thứ tự -----
+_TU_LOAI_HINH_NCC = {
+    "CONG", "TY", "CTY", "CO", "PHAN", "CP", "TNHH", "MTV", "DNTN",
+    "TRACH", "NHIEM", "HUU", "HAN", "THANH", "VIEN", "MOT", "HAI",
+    "THUONG", "MAI", "TM", "DICH", "VU", "DV", "KY", "THUAT", "KT",
+    "SAN", "XUAT", "SX", "DAU", "TU", "XAY", "DUNG", "XD", "PHAT", "TRIEN",
+    "QUOC", "TE", "TAP", "DOAN", "XNK", "NHAP", "KHAU",
+    "JSC", "LTD", "CORP", "INC", "COMPANY", "LIMITED", "JOINT", "STOCK", "GROUP",
+}
+
+
+def _bo_dau_ncc(s: str) -> str:
+    import unicodedata
+    s = (s or "").replace("Đ", "D").replace("đ", "d")
+    return "".join(c for c in unicodedata.normalize("NFD", s)
+                   if unicodedata.category(c) != "Mn")
+
+
+def _ma_ncc_tu_ten(db, ten: str) -> str:
+    """Sinh mã NCC: chữ cái đầu các từ đặc trưng của tên (bỏ CÔNG TY/TNHH/CP/TM/DV...)
+    + '-' + số thứ tự. VD: CÔNG TY TNHH TM DV KỸ THUẬT KHOA NAM -> KN-7.
+    Tên chỉ còn 1 từ -> lấy 3 chữ cái đầu của từ đó: VEOLIA -> VEO-7."""
+    import re as _re
+    tu = [w for w in _re.split(r"[^A-Za-z0-9]+", _bo_dau_ncc(ten).upper()) if w]
+    loi = [w for w in tu if w not in _TU_LOAI_HINH_NCC] or tu
+    if len(loi) == 1:
+        dau = "".join(c for c in loi[0] if c.isalpha())[:3] or "NCC"
+    else:
+        dau = "".join(w[0] for w in loi if w[0].isalpha())[:5] or "NCC"
+    n = (db.query(NhaCungCap).count() or 0) + 1
+    ma = f"{dau}-{n}"
+    while db.query(NhaCungCap).filter(NhaCungCap.ma == ma).first() is not None:
+        n += 1
+        ma = f"{dau}-{n}"
+    return ma
+
+
 # ----- THAO_TAC: tạo NCC -----
 @router.post("/nha-cung-cap", response_model=NccRa, status_code=201)
 def tao_ncc(data: NccVao, db: Session = Depends(get_db),
             nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
-    ncc = NhaCungCap(ma=data.ma, ten=data.ten, ma_so_thue=data.ma_so_thue,
+    ma = (data.ma or "").strip() or None
+    if ma and db.query(NhaCungCap).filter(NhaCungCap.ma == ma).first() is not None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            f"Mã NCC {ma} đã tồn tại — để trống ô Mã để hệ thống tự tạo.")
+    if not ma:
+        ma = _ma_ncc_tu_ten(db, data.ten)
+    ncc = NhaCungCap(ma=ma, ten=data.ten, ma_so_thue=data.ma_so_thue,
                      dien_thoai=data.dien_thoai, email=data.email, dia_chi=data.dia_chi,
                      han_muc_cong_no=data.han_muc_cong_no or 0,
                      nguoi_phu_trach=data.nguoi_phu_trach, ghi_chu=data.ghi_chu, diem_danh_gia=0)
@@ -409,6 +452,9 @@ def _ai_ap_mot_ncc(db, info, ten_file):
     cap_nhat, khac_biet = [], []
     if ncc is not None:
         tao_moi = False
+        if not ncc.ma:
+            ncc.ma = _ma_ncc_tu_ten(db, ncc.ten)
+            cap_nhat.append("mã NCC")
         for f in ("ma_so_thue", "dien_thoai", "email", "dia_chi"):
             v = info.get(f)
             if not v:
@@ -426,7 +472,8 @@ def _ai_ap_mot_ncc(db, info, ten_file):
                 cap_nhat.append("ghi chú")
     else:
         tao_moi = True
-        ncc = NhaCungCap(ten=info["ten"], ma_so_thue=info.get("ma_so_thue"),
+        ncc = NhaCungCap(ma=_ma_ncc_tu_ten(db, info["ten"]),
+                         ten=info["ten"], ma_so_thue=info.get("ma_so_thue"),
                          dien_thoai=info.get("dien_thoai"), email=info.get("email"),
                          dia_chi=info.get("dia_chi"),
                          ghi_chu=((info.get("ghi_chu") or "") +
