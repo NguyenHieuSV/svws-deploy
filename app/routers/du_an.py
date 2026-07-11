@@ -811,6 +811,147 @@ def xoa_du_toan(dt_id: int, db: Session = Depends(get_db),
     return {"da_xoa": True}
 
 
+_DT_NHAN = {"THIET_BI": "THIẾT BỊ", "VAT_TU": "VẬT TƯ", "NHAN_SU": "NHÂN SỰ",
+            "CHI_PHI_KHAC": "CHI PHÍ KHÁC"}
+
+
+@router.get("/{da_id}/du-toan/xuat-excel")
+def xuat_excel_du_toan(da_id: int, db: Session = Depends(get_db),
+                       _=Depends(yeu_cau(MODULE, "XEM"))):
+    """Xuất bảng dự toán thiết bị - vật tư ra Excel (gửi khách hàng)."""
+    import io
+    from fastapi.responses import StreamingResponse
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from openpyxl.utils import get_column_letter
+    da = _da_404(db, da_id)
+    rs = db.query(DuAnDuToan).filter_by(du_an_id=da_id).order_by(
+        DuAnDuToan.thu_tu, DuAnDuToan.id).all()
+    ds = [_dt_ra(x) for x in rs]
+
+    wb = Workbook(); ws = wb.active; ws.title = "Dự toán"
+    hdr_fill = PatternFill("solid", fgColor="0E7490")
+    grp_fill = PatternFill("solid", fgColor="E8F1F4")
+    hdr_font = Font(bold=True, color="FFFFFF")
+    bold = Font(bold=True)
+    center = Alignment(horizontal="center", vertical="center")
+    thin = Border(*[Side(style="thin", color="D7DEE3")] * 4)
+    money = "#,##0"
+
+    ws.merge_cells("A1:I1")
+    ws["A1"] = "BẢNG DỰ TOÁN THIẾT BỊ - VẬT TƯ"
+    ws["A1"].font = Font(bold=True, size=15, color="0E7490"); ws["A1"].alignment = center
+    ws.append([])
+    ws.append(["Dự án:", f"{(da.ma + ' · ') if da.ma else ''}{da.ten}"]); ws.cell(row=3, column=1).font = bold
+    if da.chu_dau_tu:
+        ws.append(["Chủ đầu tư:", da.chu_dau_tu]); ws.cell(row=ws.max_row, column=1).font = bold
+    if da.cong_suat:
+        ws.append(["Công suất:", da.cong_suat]); ws.cell(row=ws.max_row, column=1).font = bold
+    ws.append(["Ngày lập:", date.today().strftime("%d/%m/%Y")]); ws.cell(row=ws.max_row, column=1).font = bold
+    ws.append([])
+
+    head = ["STT", "Loại", "Tên thiết bị / vật tư / hạng mục", "Quy cách / thông số",
+            "ĐVT", "SL", "Đơn giá (VND)", "Thành tiền (VND)", "Ghi chú"]
+    ws.append(head)
+    hr = ws.max_row
+    for c in ws[hr]:
+        c.fill = hdr_fill; c.font = hdr_font; c.alignment = center; c.border = thin
+
+    stt = 0
+    tong = 0
+    for loai in _DT_LOAI:
+        nhom = [d for d in ds if d["loai"] == loai]
+        if not nhom:
+            continue
+        tong_nhom = sum(d["thanh_tien"] for d in nhom)
+        tong += tong_nhom
+        ws.append([_DT_NHAN.get(loai, loai), "", "", "", "", "", "", tong_nhom, ""])
+        gr = ws.max_row
+        ws.merge_cells(start_row=gr, start_column=1, end_row=gr, end_column=7)
+        for c in ws[gr]:
+            c.fill = grp_fill; c.font = bold; c.border = thin
+        ws.cell(row=gr, column=8).number_format = money
+        for d in nhom:
+            stt += 1
+            ws.append([stt, "", d["ten"], d["quy_cach"] or "", d["don_vi"] or "",
+                       d["so_luong"], d["don_gia"], d["thanh_tien"], d["ghi_chu"] or ""])
+            rr = ws.max_row
+            for c in ws[rr]:
+                c.border = thin
+            ws.cell(row=rr, column=7).number_format = money
+            ws.cell(row=rr, column=8).number_format = money
+    ws.append(["", "", "", "", "", "", "TỔNG DỰ TOÁN", tong, ""])
+    tr = ws.max_row
+    for c in ws[tr]:
+        c.font = bold; c.border = thin
+    ws.cell(row=tr, column=8).number_format = money
+    ws.cell(row=tr, column=8).font = Font(bold=True, color="0E7490")
+
+    for w, i in zip([6, 14, 38, 32, 8, 8, 14, 16, 22], range(1, 10)):
+        ws.column_dimensions[get_column_letter(i)].width = w
+    ws.freeze_panes = f"A{hr + 1}"
+
+    buf = io.BytesIO(); wb.save(buf); buf.seek(0)
+    fn = f"du-toan_{(da.ma or ('DA' + str(da_id))).replace('/', '-')}.xlsx"
+    return StreamingResponse(
+        buf, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{fn}"'})
+
+
+@router.post("/{da_id}/du-toan/ai-nhap")
+async def ai_nhap_du_toan(da_id: int, file: UploadFile = File(...), loai: str = Form("THIET_BI"),
+                          db: Session = Depends(get_db),
+                          nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    """AI đọc file báo giá (PDF/ảnh/Excel/CSV) → đổ danh sách thiết bị/vật tư
+    thẳng vào danh mục dự toán của dự án. Trùng tên đã có thì bỏ qua.
+    File gốc lưu vào Kho tệp dùng chung."""
+    from ..ai_gateway import doc_bao_gia_file
+    from ..models import TepDinhKem
+    _da_404(db, da_id)
+    ten_file = file.filename or "bao_gia"
+    data = await file.read()
+    if len(data) > 15 * 1024 * 1024:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "File quá lớn (tối đa 15MB)")
+    try:
+        items = doc_bao_gia_file(data, file.content_type, ten_file)
+    except ValueError as e:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e))
+    if not items:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "AI không tìm thấy sản phẩm nào trong file — kiểm tra lại nội dung.")
+    loai = (loai or "THIET_BI").upper()
+    if loai not in _DT_LOAI:
+        loai = "THIET_BI"
+    da_co = {(x.ten or "").strip().lower()
+             for x in db.query(DuAnDuToan).filter_by(du_an_id=da_id).all()}
+    base = db.query(func.coalesce(func.max(DuAnDuToan.thu_tu), 0)).filter(
+        DuAnDuToan.du_an_id == da_id).scalar() or 0
+    them, bo_qua = 0, 0
+    for it in items[:100]:
+        ten = (it.get("ten") or "").strip()
+        if not ten:
+            continue
+        if ten.lower() in da_co:
+            bo_qua += 1
+            continue
+        qc = " — ".join([p for p in (it.get("mo_ta"), it.get("nha_san_xuat")) if p])
+        base += 1
+        db.add(DuAnDuToan(du_an_id=da_id, loai=loai, ten=ten[:250], quy_cach=(qc[:300] or None),
+                          don_vi=(str(it.get("don_vi"))[:40] if it.get("don_vi") else None),
+                          so_luong=it.get("so_luong") if it.get("so_luong") else 1,
+                          don_gia=it.get("don_gia") or 0,
+                          ghi_chu=f"AI nhập từ {ten_file}"[:300], thu_tu=base))
+        da_co.add(ten.lower())
+        them += 1
+    ref = luu(data, "du_an_du_toan", da_id, ten_file, file.content_type)
+    db.add(TepDinhKem(doi_tuong="DU_AN_DU_TOAN", doi_tuong_id=da_id, loai="KHAC",
+                      ten_file=ten_file, duong_dan=ref, kich_thuoc=len(data),
+                      content_type=file.content_type, nguoi_tai_len=nhan_vien_id_cua(db, nd.id)))
+    ghi_audit(db, nd.id, "TAO", "du_an_du_toan", da_id, moi={"ai_nhap": them, "file": ten_file})
+    db.commit()
+    return {"them": them, "bo_qua": bo_qua}
+
+
 @router.post("/{da_id}/phan-tich-ai")
 def phan_tich_ai(da_id: int, data: PhanTichVao, db: Session = Depends(get_db),
                  nd: NguoiDung = Depends(yeu_cau(MODULE, "XEM"))):
