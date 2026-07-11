@@ -155,23 +155,49 @@ def _bo_dau_ncc(s: str) -> str:
                    if unicodedata.category(c) != "Mn")
 
 
-def _ma_ncc_tu_ten(db, ten: str) -> str:
-    """Sinh mã NCC: chữ cái đầu các từ đặc trưng của tên (bỏ CÔNG TY/TNHH/CP/TM/DV...)
-    + '-' + số thứ tự. VD: CÔNG TY TNHH TM DV KỸ THUẬT KHOA NAM -> KN-7.
-    Tên chỉ còn 1 từ -> lấy 3 chữ cái đầu của từ đó: VEOLIA -> VEO-7."""
+def _dau_ma_ncc(ten: str) -> str:
+    """Tiền tố mã NCC: chữ cái đầu các từ đặc trưng của tên (bỏ CÔNG TY/TNHH/CP/TM/DV...);
+    tên chỉ còn 1 từ -> lấy 3 chữ cái đầu của từ đó (VEOLIA -> VEO)."""
     import re as _re
     tu = [w for w in _re.split(r"[^A-Za-z0-9]+", _bo_dau_ncc(ten).upper()) if w]
     loi = [w for w in tu if w not in _TU_LOAI_HINH_NCC] or tu
     if len(loi) == 1:
-        dau = "".join(c for c in loi[0] if c.isalpha())[:3] or "NCC"
-    else:
-        dau = "".join(w[0] for w in loi if w[0].isalpha())[:5] or "NCC"
+        return "".join(c for c in loi[0] if c.isalpha())[:3] or "NCC"
+    return "".join(w[0] for w in loi if w[0].isalpha())[:5] or "NCC"
+
+
+def _ma_ncc_tu_ten(db, ten: str) -> str:
+    """Sinh mã NCC mới: tiền tố + '-' + số thứ tự.
+    VD: CÔNG TY TNHH TM DV KỸ THUẬT KHOA NAM -> KN-7."""
+    dau = _dau_ma_ncc(ten)
     n = (db.query(NhaCungCap).count() or 0) + 1
     ma = f"{dau}-{n}"
     while db.query(NhaCungCap).filter(NhaCungCap.ma == ma).first() is not None:
         n += 1
         ma = f"{dau}-{n}"
     return ma
+
+
+# ----- QUAN_TRI: tạo lại mã cho TOÀN BỘ danh sách NCC theo quy tắc mới -----
+@router.post("/nha-cung-cap/tao-lai-ma")
+def tao_lai_ma_ncc(db: Session = Depends(get_db),
+                   nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
+    """Đánh lại mã tất cả NCC hiện có: tiền tố từ tên + '-' + số thứ tự (theo thứ tự tạo)."""
+    ds = db.query(NhaCungCap).order_by(NhaCungCap.id).all()
+    if not ds:
+        return {"so_luong": 0, "ket_qua": []}
+    ma_cu = {n.id: n.ma for n in ds}
+    for n in ds:
+        n.ma = None          # xả mã cũ trước để tránh đụng ràng buộc unique khi đổi chéo
+    db.flush()
+    ket_qua = []
+    for i, n in enumerate(ds, start=1):
+        n.ma = f"{_dau_ma_ncc(n.ten)}-{i}"
+        ket_qua.append({"id": n.id, "ten": n.ten, "ma_cu": ma_cu[n.id], "ma_moi": n.ma})
+    ghi_audit(db, nd.id, "SUA", "nha_cung_cap", ds[0].id,
+              moi={"tao_lai_ma_toan_bo": len(ds)})
+    db.commit()
+    return {"so_luong": len(ds), "ket_qua": ket_qua}
 
 
 # ----- THAO_TAC: tạo NCC -----
