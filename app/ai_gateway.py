@@ -136,8 +136,36 @@ def dich_vn_sang_en(texts: list[str]) -> list[str] | None:
 
 
 # ============ AI ĐỌC FILE (báo giá / hồ sơ NCC) ============
+def _excel_sang_text(data: bytes) -> str:
+    """Giải mã file Excel (.xlsx/.xlsm) thành bảng văn bản cho AI đọc —
+    mỗi sheet một khối, mỗi dòng là các ô cách nhau bằng ' | '."""
+    import io
+    try:
+        from openpyxl import load_workbook
+        wb = load_workbook(io.BytesIO(data), read_only=True, data_only=True)
+    except Exception:
+        raise ValueError("Không mở được file Excel — kiểm tra file .xlsx không hỏng "
+                         "và không đặt mật khẩu.")
+    phan = []
+    for ws in wb.worksheets:
+        dong = []
+        for row in ws.iter_rows(values_only=True):
+            o = [("" if v is None else str(v)).strip() for v in row]
+            if any(o):
+                dong.append(" | ".join(o).rstrip(" |"))
+            if len(dong) >= 1500:
+                break
+        if dong:
+            phan.append(f"### Sheet: {ws.title}\n" + "\n".join(dong))
+    wb.close()
+    txt = "\n\n".join(phan)
+    if not txt.strip():
+        raise ValueError("File Excel không có dữ liệu để đọc.")
+    return txt[:60000]
+
+
 def _khoi_noi_dung_file(data: bytes, content_type: str, filename: str) -> dict:
-    """Dựng khối nội dung gửi Claude từ file người dùng tải lên (PDF/ảnh/CSV-TXT)."""
+    """Dựng khối nội dung gửi Claude từ file người dùng tải lên (PDF/ảnh/Excel/CSV-TXT)."""
     import base64
     ct = (content_type or "").lower()
     fn = (filename or "").lower()
@@ -151,10 +179,14 @@ def _khoi_noi_dung_file(data: bytes, content_type: str, filename: str) -> dict:
         return {"type": "image",
                 "source": {"type": "base64", "media_type": mt,
                            "data": base64.b64encode(data).decode()}}
+    if ct == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" or \
+            fn.endswith((".xlsx", ".xlsm")):
+        return {"type": "text", "text": _excel_sang_text(data)}
     if ct.startswith("text/") or fn.endswith((".txt", ".csv")):
         return {"type": "text", "text": data.decode("utf-8", errors="replace")[:60000]}
-    raise ValueError("Định dạng chưa hỗ trợ — dùng PDF, ảnh (PNG/JPG) hoặc CSV/TXT. "
-                     "File Excel hãy xuất sang PDF hoặc CSV trước.")
+    if fn.endswith(".xls") or ct == "application/vnd.ms-excel":
+        raise ValueError("File .xls là Excel đời cũ — mở bằng Excel rồi lưu lại thành .xlsx là đọc được.")
+    raise ValueError("Định dạng chưa hỗ trợ — dùng PDF, ảnh (PNG/JPG), Excel (.xlsx) hoặc CSV/TXT.")
 
 
 def _loi_ai_ro_rang(e: Exception) -> str:
