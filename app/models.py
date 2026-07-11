@@ -197,6 +197,7 @@ class DonMua(Base):
     ngay_tt_tiep: Mapped[date | None] = mapped_column(Date, nullable=True)
     tt_du: Mapped[bool] = mapped_column(Boolean, default=False)
     ngay_tt_du: Mapped[date | None] = mapped_column(Date, nullable=True)
+    ngay_tt: Mapped[date | None] = mapped_column(Date, nullable=True)
     chi_tiet: Mapped[list["DonMuaCt"]] = relationship(cascade="all, delete-orphan", lazy="selectin")
 
 

@@ -606,7 +606,7 @@ def xoa_de_xuat(ycm_id: int, db: Session = Depends(get_db),
 def ds_thanh_toan_mua(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
     """Danh sách PO kèm tình trạng thanh toán: tổng, đề nghị thanh toán lũy kế,
     ngày thanh toán tiếp theo, số báo giá + mã đơn bán liên quan."""
-    from ..models import DonHang, BaoGia
+    from ..models import DonHang, BaoGia, ThanhToan as _TT
     out = []
     for dm in db.query(DonMua).order_by(DonMua.id.desc()).limit(300).all():
         ncc = db.get(NhaCungCap, dm.nha_cung_cap_id)
@@ -616,11 +616,21 @@ def ds_thanh_toan_mua(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "
             if o and o.bao_gia_id:
                 bg = db.get(BaoGia, o.bao_gia_id)
                 so_bg = bg.so if bg else None
+        cn = db.query(CongNo).filter_by(don_mua_id=dm.id).first()
+        da_tt = float(cn.da_thanh_toan or 0) if cn else 0.0
+        ngay_tt = str(dm.ngay_tt) if dm.ngay_tt else None
+        if cn:
+            tt_cuoi = (db.query(_TT).filter_by(cong_no_id=cn.id)
+                       .order_by(_TT.id.desc()).first())
+            if tt_cuoi and tt_cuoi.ngay:
+                ngay_tt = str(tt_cuoi.ngay)
         out.append({"id": dm.id, "so": dm.so, "ngay": str(dm.ngay or "")[:10],
                     "so_bao_gia": so_bg, "ma_don_ban": _ma_ban_hang_po(db, dm),
                     "ncc_ten": ncc.ten if ncc else None,
                     "tong_tien": float(dm.tong_tien or 0),
                     "de_nghi_tt": float(dm.de_nghi_tt or 0),
+                    "da_thanh_toan": da_tt, "ngay_tt": ngay_tt,
+                    "co_cong_no": cn is not None,
                     "ngay_tt_tiep": str(dm.ngay_tt_tiep) if dm.ngay_tt_tiep else None,
                     "tt_du": bool(dm.tt_du),
                     "ngay_tt_du": str(dm.ngay_tt_du) if dm.ngay_tt_du else None,
@@ -646,6 +656,8 @@ def cap_nhat_thanh_toan_mua(dm_id: int, data: ThanhToanMuaVao, db: Session = Dep
     if dn < 0 or dn > tong:
         raise HTTPException(status.HTTP_400_BAD_REQUEST,
                             "Đề nghị thanh toán phải từ 0 đến Tổng thanh toán của PO.")
+    if dn > 0 and dn != Decimal(dm.de_nghi_tt or 0):
+        dm.ngay_tt = date.today()   # ngày ghi nhận thanh toán gần nhất
     dm.de_nghi_tt = dn
     dm.ngay_tt_tiep = data.ngay_tt_tiep
     cn = db.query(CongNo).filter_by(don_mua_id=dm_id).first()
