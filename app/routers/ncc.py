@@ -398,23 +398,9 @@ def tao_po_tu_de_xuat(ycm_id: int, data: TaoPoTuDeXuatVao, db: Session = Depends
 _NCC_NHAN = {"ma_so_thue": "MST", "dien_thoai": "điện thoại", "email": "email", "dia_chi": "địa chỉ"}
 
 
-@router.post("/nha-cung-cap/ai-cap-nhat")
-async def ai_cap_nhat_ncc(file: UploadFile = File(...), db: Session = Depends(get_db),
-                          nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
-    """AI đọc file báo giá / hồ sơ NCC (PDF, ảnh, CSV): NCC đã có (trùng MST hoặc tên)
-    → điền bổ sung các trường còn trống; chưa có → tạo NCC mới (cần kiểm chứng).
-    File gốc lưu vào kho tệp dùng chung."""
-    ten_file = file.filename or "ho_so_ncc"
-    data = await file.read()
-    if len(data) > 15 * 1024 * 1024:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "File quá lớn (tối đa 15MB)")
-    try:
-        info = doc_thong_tin_ncc(data, file.content_type, ten_file)
-    except ValueError as e:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e))
-    if not info.get("ten"):
-        raise HTTPException(status.HTTP_400_BAD_REQUEST,
-                            "AI không tìm thấy tên nhà cung cấp trong file — kiểm tra lại nội dung.")
+def _ai_ap_mot_ncc(db, info, ten_file):
+    """Áp thông tin 1 NCC do AI trích: trùng MST/tên → điền ô trống; chưa có → tạo mới.
+    Trả (ncc, tao_moi, cap_nhat, khac_biet)."""
     ncc = None
     if info.get("ma_so_thue"):
         ncc = db.query(NhaCungCap).filter(NhaCungCap.ma_so_thue == info["ma_so_thue"]).first()
@@ -448,17 +434,45 @@ async def ai_cap_nhat_ncc(file: UploadFile = File(...), db: Session = Depends(ge
         db.add(ncc)
         db.flush()
         cap_nhat = [_NCC_NHAN[f] for f in ("ma_so_thue", "dien_thoai", "email", "dia_chi") if info.get(f)]
-    # lưu file hồ sơ vào kho tệp dùng chung
-    ref = luu_tep_chung(data, "ncc_ho_so", ncc.id, ten_file, file.content_type)
-    db.add(TepDinhKem(doi_tuong="NCC_HO_SO", doi_tuong_id=ncc.id, loai="KHAC",
+    return ncc, tao_moi, cap_nhat, khac_biet
+
+
+@router.post("/nha-cung-cap/ai-cap-nhat")
+async def ai_cap_nhat_ncc(file: UploadFile = File(...), db: Session = Depends(get_db),
+                          nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    """AI đọc file báo giá / hồ sơ / danh sách NCC (PDF, ảnh, CSV) — nhận diện MỘT hoặc
+    NHIỀU nhà cung cấp trong cùng file: đã có (trùng MST/tên) → điền bổ sung ô trống;
+    chưa có → tạo mới (cần kiểm chứng). File gốc lưu vào kho tệp dùng chung."""
+    ten_file = file.filename or "ho_so_ncc"
+    data = await file.read()
+    if len(data) > 15 * 1024 * 1024:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "File quá lớn (tối đa 15MB)")
+    try:
+        ds = doc_thong_tin_ncc(data, file.content_type, ten_file)
+    except ValueError as e:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e))
+    if not ds:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "AI không tìm thấy nhà cung cấp nào trong file — kiểm tra lại nội dung.")
+    ket_qua = []
+    ncc_dau = None
+    for info in ds[:20]:   # trần 20 NCC/file
+        ncc, tao_moi, cap_nhat, khac_biet = _ai_ap_mot_ncc(db, info, ten_file)
+        ncc_dau = ncc_dau or ncc
+        ket_qua.append({"ncc_id": ncc.id, "ten": ncc.ten, "tao_moi": tao_moi,
+                        "cap_nhat": cap_nhat, "khac_biet": khac_biet})
+    # lưu file gốc vào kho tệp dùng chung (gắn NCC đầu tiên trong file)
+    ref = luu_tep_chung(data, "ncc_ho_so", ncc_dau.id, ten_file, file.content_type)
+    db.add(TepDinhKem(doi_tuong="NCC_HO_SO", doi_tuong_id=ncc_dau.id, loai="KHAC",
                       ten_file=ten_file, duong_dan=ref, kich_thuoc=len(data),
                       content_type=file.content_type, nguoi_tai_len=nhan_vien_id_cua(db, nd.id)))
-    ghi_audit(db, nd.id, "AI_CAP_NHAT_NCC" if not tao_moi else "AI_TAO_NCC",
-              "nha_cung_cap", ncc.id,
-              moi={"file": ten_file, "cap_nhat": cap_nhat, "khac_biet": khac_biet})
+    so_tao = sum(1 for k in ket_qua if k["tao_moi"])
+    ghi_audit(db, nd.id, "AI_NCC_TU_FILE", "nha_cung_cap", ncc_dau.id,
+              moi={"file": ten_file, "so_ncc": len(ket_qua), "so_tao_moi": so_tao,
+                   "ds": [k["ten"] for k in ket_qua][:20]})
     db.commit()
-    return {"ok": True, "tao_moi": tao_moi, "ncc_id": ncc.id, "ten": ncc.ten,
-            "cap_nhat": cap_nhat, "khac_biet": khac_biet}
+    return {"ok": True, "so_ncc": len(ket_qua), "so_tao_moi": so_tao,
+            "so_cap_nhat": len(ket_qua) - so_tao, "ket_qua": ket_qua}
 
 
 # ----- Lưu file báo giá NCC + AI đọc & nhập vào danh mục sản phẩm -----

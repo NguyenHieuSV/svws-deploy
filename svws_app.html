@@ -3762,11 +3762,23 @@ async function nccAiCapNhat(){
   try{
     const fd=new FormData(); fd.append('file',f);
     const r=await apiUpload("/ncc/nha-cung-cap/ai-cap-nhat",fd);
-    let msg=r.tao_moi?`✅ Đã tạo NCC mới: ${r.ten} (cần kiểm chứng)`:`✅ Đã cập nhật NCC ${r.ten}`;
-    if(r.cap_nhat&&r.cap_nhat.length)msg+=` — điền thêm: ${r.cap_nhat.join(', ')}`;
-    if(r.khac_biet&&r.khac_biet.length)msg+=` · ⚠ Khác dữ liệu hiện có, giữ nguyên: ${r.khac_biet.join('; ')}`;
-    if(!r.tao_moi&&(!r.cap_nhat||!r.cap_nhat.length)&&(!r.khac_biet||!r.khac_biet.length))msg+=" — hồ sơ đã đầy đủ, không có gì mới";
-    toast(msg,"ok");
+    const kq=r.ket_qua||[];
+    if(kq.length<=1){
+      const k=kq[0]||{};
+      let msg=k.tao_moi?`✅ Đã tạo NCC mới: ${k.ten} (cần kiểm chứng)`:`✅ Đã cập nhật NCC ${k.ten}`;
+      if(k.cap_nhat&&k.cap_nhat.length)msg+=` — điền thêm: ${k.cap_nhat.join(', ')}`;
+      if(k.khac_biet&&k.khac_biet.length)msg+=` · ⚠ Khác dữ liệu hiện có, giữ nguyên: ${k.khac_biet.join('; ')}`;
+      if(!k.tao_moi&&(!k.cap_nhat||!k.cap_nhat.length)&&(!k.khac_biet||!k.khac_biet.length))msg+=" — hồ sơ đã đầy đủ, không có gì mới";
+      toast(msg,"ok");
+    }else{
+      toast(`✅ AI nhận diện ${r.so_ncc} NCC trong file — tạo mới ${r.so_tao_moi}, cập nhật ${r.so_cap_nhat}`,"ok");
+      _ktModal(`🤖 AI đọc file — ${r.so_ncc} nhà cung cấp`,`
+        <table><thead><tr><th>Nhà cung cấp</th><th>Kết quả</th><th>Điền thêm</th><th>Khác dữ liệu (giữ nguyên)</th></tr></thead>
+        <tbody>${kq.map(k=>`<tr><td><b>${k.ten}</b></td>
+          <td>${k.tao_moi?'<span class="badge b-info">Tạo mới — cần kiểm chứng</span>':'<span class="badge b-ok">Cập nhật</span>'}</td>
+          <td>${(k.cap_nhat||[]).join(', ')||'—'}</td>
+          <td style="color:var(--amber);font-size:12px">${(k.khac_biet||[]).join('; ')||'—'}</td></tr>`).join('')}</tbody></table>`);
+    }
     viewNCC($("#main"));
   }catch(e){toast(e.detail||e.message,"err");}
   finally{if(btn){btn.disabled=false;btn.textContent="🤖 AI đọc & cập nhật NCC";}}

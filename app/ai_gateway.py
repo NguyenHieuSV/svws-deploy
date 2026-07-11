@@ -177,32 +177,44 @@ def _goi_claude_json(khoi: dict, sys: str, cau_hoi: str, max_tokens: int = 4000,
     return txt.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
 
 
-def doc_thong_tin_ncc(data: bytes, content_type: str, filename: str) -> dict:
-    """Đọc file báo giá / hồ sơ NCC, trích THÔNG TIN NHÀ CUNG CẤP:
-    {ten, ma_so_thue, dien_thoai, email, dia_chi, ghi_chu}. Ném ValueError khi lỗi."""
+def doc_thong_tin_ncc(data: bytes, content_type: str, filename: str) -> list[dict]:
+    """Đọc file báo giá / hồ sơ / danh sách NCC — file có thể chứa MỘT hoặc NHIỀU
+    nhà cung cấp. Trả list dict {ten, ma_so_thue, dien_thoai, email, dia_chi, ghi_chu}."""
     if settings.ai_provider.upper() != "ANTHROPIC" or not settings.anthropic_api_key:
         raise ValueError("Chưa bật AI — cần AI_PROVIDER=ANTHROPIC và ANTHROPIC_API_KEY trên máy chủ.")
     khoi = _khoi_noi_dung_file(data, content_type, filename)
     sys = ("Bạn là trợ lý mua hàng của công ty xử lý nước SVWS. Người dùng gửi một file "
-           "báo giá hoặc hồ sơ của MỘT nhà cung cấp. Hãy trích thông tin về CHÍNH nhà cung cấp "
-           "(công ty phát hành báo giá / được giới thiệu trong hồ sơ — KHÔNG phải khách nhận). "
-           "CHỈ trả về đúng một JSON, không thêm chữ nào khác, dạng: "
+           "báo giá / hồ sơ / danh bạ nhà cung cấp — file có thể chứa MỘT hoặc NHIỀU nhà cung cấp. "
+           "Hãy trích thông tin của TỪNG nhà cung cấp xuất hiện trong file "
+           "(công ty phát hành báo giá hoặc được giới thiệu — KHÔNG phải khách nhận báo giá). "
+           "CHỈ trả về đúng một MẢNG JSON, không thêm chữ nào khác, mỗi phần tử dạng: "
            '{"ten":"<tên công ty>","ma_so_thue":"<MST hoặc null>","dien_thoai":"<SĐT hoặc null>",'
            '"email":"<email hoặc null>","dia_chi":"<địa chỉ hoặc null>",'
            '"ghi_chu":"<người liên hệ, website, ngành hàng... nếu có, hoặc null>"} '
-           "KHÔNG bịa thông tin không có trong file; thiếu trường nào để null trường đó.")
-    txt = _goi_claude_json(khoi, sys, "Trích thông tin nhà cung cấp từ file này thành JSON.", 1500, 90)
+           "Mỗi công ty chỉ xuất hiện một lần. KHÔNG bịa thông tin không có trong file; "
+           "thiếu trường nào để null trường đó.")
+    txt = _goi_claude_json(khoi, sys,
+                           "Trích danh sách nhà cung cấp trong file này thành mảng JSON.", 4000, 120)
     try:
         import re as _re
-        m = _re.search(r"\{[\s\S]*\}", txt)
-        info = json.loads(m.group(0) if m else txt)
+        m = _re.search(r"\[[\s\S]*\]", txt)
+        if m:
+            ds = json.loads(m.group(0))
+        else:
+            m1 = _re.search(r"\{[\s\S]*\}", txt)
+            ds = [json.loads(m1.group(0) if m1 else txt)]
     except Exception:
         raise ValueError("AI không đọc được thông tin NCC trong file — kiểm tra lại nội dung.")
-    out = {}
-    for k, gh in (("ten", 200), ("ma_so_thue", 20), ("dien_thoai", 30),
-                  ("email", 120), ("dia_chi", 300), ("ghi_chu", 1000)):
-        v = info.get(k)
-        out[k] = (str(v).strip()[:gh] if v else None)
+    out = []
+    for info in ds if isinstance(ds, list) else []:
+        if not isinstance(info, dict) or not str(info.get("ten") or "").strip():
+            continue
+        item = {}
+        for k, gh in (("ten", 200), ("ma_so_thue", 20), ("dien_thoai", 30),
+                      ("email", 120), ("dia_chi", 300), ("ghi_chu", 1000)):
+            v = info.get(k)
+            item[k] = (str(v).strip()[:gh] if v else None)
+        out.append(item)
     return out
 
 
