@@ -4239,12 +4239,23 @@ async function nccDxTaoPOChon(id){
   const ncc=Number(gv('dxncc_'+id)), gia=Number(gv('dxgia_'+id)||0), hen=gv('dxhen_'+id)||null;
   if(!ncc){toast("Chọn nhà cung cấp","err");return;}
   if(gia<=0){toast("Nhập đơn giá","err");return;}
-  if(S.mode==="live"){ try{const r=await api(`/ncc/yeu-cau-mua/${id}/tao-po`,{method:'POST',body:JSON.stringify({nha_cung_cap_id:ncc,don_gia:gia,ngay_hen_giao:hen})});
+  if(S.mode==="live"){
+    const body={nha_cung_cap_id:ncc,don_gia:gia,ngay_hen_giao:hen};
+    let r=null;
+    try{r=await api(`/ncc/yeu-cau-mua/${id}/tao-po`,{method:'POST',body:JSON.stringify(body)});}
+    catch(e){
+      if(e&&e.status===409&&laQTV()){
+        if(!confirm((e.detail||"Mặt hàng đã mua cho mã bán hàng này.")+"\n\nBạn là CEO/ADMIN — XÁC NHẬN mua bổ sung?"))return;
+        try{r=await api(`/ncc/yeu-cau-mua/${id}/tao-po`,{method:'POST',body:JSON.stringify({...body,xac_nhan_trung:true})});}
+        catch(e2){toast(e2.detail||e2.message,"err");return;}
+      } else {toast(e.detail||e.message,"err");return;}
+    }
     const n=r.so_po||1; toast(n>1?`Đã tạo ${n} PO (tách theo NCC)`:("Đã tạo PO "+((r.po&&r.po[0]&&r.po[0].so)||"")),"ok");
     S.nccTab="po";viewNCC($("#main")); if(n===1 && r.po && r.po[0]) nccPoSend(r.po[0].id);
-  }catch(e){toast(e.detail||e.message,"err");} return; }
+    return; }
   const x=DEMO.de_xuat.find(p=>p.id===id); if(!x)return;
   const items=(x.items&&x.items.length)?x.items:[{hang_hoa_id:x.hang_hoa_id,ten_hh:x.ten_hh,so_luong:x.so_luong,don_gia:gia,nha_cung_cap_id:ncc}];
+  if(_demoTrungMua(x.don_hang_id,items.map(it=>it.hang_hoa_id)))return;
   const groups={};
   items.forEach((it,i)=>{const nid=it.nha_cung_cap_id||ncc; const g=(i===0?gia:(it.don_gia||gia)); (groups[nid]=groups[nid]||[]).push({hang_hoa_id:it.hang_hoa_id,ten:it.ten_hh,so_luong:it.so_luong,don_gia:it.don_gia||g});});
   const newPo=[]; let base=Date.now();
@@ -4493,18 +4504,72 @@ async function nccPO(host){
   const dxPanel = dxDuyet.length ? `<div class="panel" style="border:1px solid #16a34a55"><div class="panel-h"><h3>Đề xuất đã duyệt — chờ tạo PO</h3><div class="spacer"></div><span class="badge b-ok">${dxDuyet.length}</span></div>
     <div class="note">Đề xuất đã duyệt chuyển sang đây. <b>AI Sourcing tự chạy khi duyệt</b> (nếu bật <code>AUTO_TIM_NCC</code>) — gợi ý NCC tối ưu kèm rủi ro; có thể bấm <b>🤖 AI</b> để chạy lại, <b>🌐 Web</b> để dò NCC mới (cần kiểm chứng). Đổi NCC/đơn giá/hẹn giao trước khi <b>Tạo PO</b>. PO giữ nguyên Mã bán hàng.</div>
     <div class="panel-b"><table><thead><tr><th>Hàng hóa</th><th class="num">SL</th><th>Mã bán hàng</th><th>Nhà cung cấp (gợi ý/đổi)</th><th class="num">Đơn giá</th><th>Hẹn giao</th><th>Hành động</th></tr></thead><tbody>${dxRows}</tbody></table></div></div>` : '';
-  host.innerHTML=`<div class="note" style="padding:0 0 12px">Tạo PO, gắn <b>mã đơn Bán hàng</b> để tính giá vốn; duyệt theo hạn mức; <b>nhận hàng</b> sẽ nhập kho và sinh công nợ phải trả.</div>
+  host.innerHTML=`<div class="note" style="padding:0 0 12px">Tạo PO, gắn <b>mã đơn Bán hàng</b> để tính giá vốn; duyệt theo hạn mức; <b>nhận hàng</b> sẽ nhập kho và sinh công nợ phải trả. Hệ thống <b>chặn mua trùng</b>: mặt hàng đã có PO cho cùng mã bán hàng sẽ bị từ chối — chỉ CEO/ADMIN xác nhận mới mua bổ sung được.</div>
     ${dxPanel}${createForm}${recvPanel}
     <div class="panel"><div class="panel-h"><h3>Đơn mua hàng</h3></div>
     <div class="panel-b"><table><thead><tr><th>Số</th><th>Nhà cung cấp</th><th>Mã đơn bán</th><th class="num">Giá trị</th><th>Duyệt</th><th>Nhận</th><th>Hành động</th></tr></thead>
-    <tbody>${rows||'<tr><td colspan="7" class="empty" style="padding:20px">Chưa có đơn mua.</td></tr>'}</tbody></table></div></div>`;
+    <tbody>${rows||'<tr><td colspan="7" class="empty" style="padding:20px">Chưa có đơn mua.</td></tr>'}</tbody></table></div></div>
+    <div class="panel"><div class="panel-h"><h3>🔎 Đã mua theo mã bán hàng</h3><div class="spacer"></div>
+      <select id="damua_dh" data-nocbx onchange="poDaMua()" style="max-width:240px"><option value="">— chọn mã đơn bán —</option>${orders.map(o=>`<option value="${o.id}">${o.so||('DH-'+o.id)}</option>`).join('')}</select></div>
+      <div class="note">Chọn một mã bán hàng để xem toàn bộ mặt hàng đã mua (PO nào, số lượng đặt/nhận, đơn giá) — kiểm tra trước khi tạo PO mới, tránh mua trùng.</div>
+      <div class="panel-b" id="daMuaBody"><div class="empty" style="padding:14px">Chưa chọn mã đơn bán.</div></div></div>`;
+}
+async function poDaMua(){
+  const dh=Number(gv('damua_dh'))||0;
+  const box=document.getElementById('daMuaBody'); if(!box)return;
+  if(!dh){box.innerHTML='<div class="empty" style="padding:14px">Chưa chọn mã đơn bán.</div>';return;}
+  let ds=[];
+  if(S.mode==="live"){ try{ds=await api("/ncc/da-mua/"+dh);}catch(e){box.innerHTML=`<div class="empty" style="padding:14px;color:#dc2626">${e.detail||e.message}</div>`;return;} }
+  else{
+    const sups=DEMO.ncc.suppliers||[];
+    (DEMO.don_mua||[]).forEach(p=>{ if(p.don_hang_id===dh&&p.trang_thai!=="TU_CHOI")
+      (p.chi_tiet||[]).forEach(ct=>ds.push({po_so:p.so,ngay:p.ngay||'—',ncc_ten:((sups.find(s=>s.id===p.nha_cung_cap_id))||{}).ten||'—',
+        hang_hoa:ct.ten||('HH#'+ct.hang_hoa_id),ma_hh:null,so_luong:ct.so_luong,so_luong_nhan:ct.so_luong_nhan||0,
+        don_gia:ct.don_gia,thanh_tien:ct.so_luong*ct.don_gia,trang_thai:p.trang_thai})); });
+  }
+  const tong=ds.reduce((s,x)=>s+(x.thanh_tien||0),0);
+  box.innerHTML=`<table><thead><tr><th>Mặt hàng</th><th>PO</th><th>Ngày</th><th>NCC</th><th class="num">SL đặt</th><th class="num">SL nhận</th><th class="num">Đơn giá</th><th class="num">Thành tiền</th><th>Trạng thái</th></tr></thead>
+    <tbody>${ds.map(x=>`<tr><td><b>${x.hang_hoa}</b>${x.ma_hh?` <span style="color:var(--muted);font-size:11px">${x.ma_hh}</span>`:''}</td>
+      <td>${x.po_so}</td><td style="white-space:nowrap">${x.ngay}</td><td>${x.ncc_ten||'—'}</td>
+      <td class="num">${Number(x.so_luong)}</td><td class="num">${Number(x.so_luong_nhan)}</td>
+      <td class="num">${vnd(x.don_gia)}</td><td class="num">${vnd(x.thanh_tien)}</td>
+      <td>${x.trang_thai==='DA_DUYET'?'<span class="badge b-ok">Đã duyệt</span>':x.trang_thai==='TU_CHOI'?'<span class="badge b-tc">Từ chối</span>':'<span class="badge b-cho">Chờ duyệt</span>'}</td></tr>`).join('')
+      ||'<tr><td colspan="9" class="empty" style="padding:14px">Mã này chưa mua mặt hàng nào.</td></tr>'}</tbody>
+    ${ds.length?`<tfoot><tr><td colspan="7" style="text-align:right;font-weight:700">Tổng đã mua:</td><td class="num" style="font-weight:700">${vnd(tong)}</td><td></td></tr></tfoot>`:''}</table>`;
+}
+/* Lỗi 409 = trùng mua theo mã bán hàng: QTV được xác nhận mua bổ sung, người khác bị chặn */
+async function _xuLyTrungMua(e,guiLai){
+  if(e&&e.status===409&&laQTV()){
+    if(confirm((e.detail||"Mặt hàng đã mua cho mã bán hàng này.")+"\n\nBạn là CEO/ADMIN — XÁC NHẬN mua bổ sung?")){
+      try{await guiLai();return true;}catch(e2){toast(e2.detail||e2.message,"err");return false;}
+    }
+    return false;
+  }
+  toast(e.detail||e.message,"err"); return false;
+}
+function _demoTrungMua(dh,hhIds){
+  if(!dh)return false;
+  const trung=[];
+  (DEMO.don_mua||[]).forEach(p=>{ if(p.don_hang_id===dh&&p.trang_thai!=="TU_CHOI")
+    (p.chi_tiet||[]).forEach(ct=>{ if(hhIds.includes(ct.hang_hoa_id))trung.push(`${ct.ten||('HH#'+ct.hang_hoa_id)} đã mua trong ${p.so}`); }); });
+  if(!trung.length)return false;
+  if(laQTV())return !confirm("⚠ TRÙNG MUA: "+trung.join(" | ")+"\n\nBạn là CEO/ADMIN — XÁC NHẬN mua bổ sung?");
+  toast("⚠ TRÙNG MUA: "+trung.join(" | ")+" — chỉ CEO/ADMIN mới xác nhận mua bổ sung được.","err");
+  return true;
 }
 async function poCreate(){
   const ncc=Number(gv('po_ncc')), hh=Number(gv('po_hh')), sl=Number(gv('po_sl')||0), dg=Number(gv('po_dg')||0);
   const dh=gv('po_dh')?Number(gv('po_dh')):null, hen=gv('po_hen')||null;
   if(!ncc||!hh||sl<=0){toast("Chọn NCC, hàng hóa và số lượng > 0","err");return;}
-  if(S.mode==="live"){ try{await api("/ncc/don-mua",{method:'POST',body:JSON.stringify({nha_cung_cap_id:ncc,don_hang_id:dh,ngay_hen_giao:hen,chi_tiet:[{hang_hoa_id:hh,so_luong:sl,don_gia:dg}]})});
-    toast("Đã tạo PO (chờ duyệt)","ok");viewNCC($("#main"));}catch(e){toast(e.detail||e.message,"err");} return; }
+  if(S.mode==="live"){
+    const body={nha_cung_cap_id:ncc,don_hang_id:dh,ngay_hen_giao:hen,chi_tiet:[{hang_hoa_id:hh,so_luong:sl,don_gia:dg}]};
+    try{await api("/ncc/don-mua",{method:'POST',body:JSON.stringify(body)});}
+    catch(e){
+      const ok=await _xuLyTrungMua(e,()=>api("/ncc/don-mua",{method:'POST',body:JSON.stringify({...body,xac_nhan_trung:true})}));
+      if(!ok)return;
+    }
+    toast("Đã tạo PO (chờ duyệt)","ok");viewNCC($("#main")); return; }
+  if(_demoTrungMua(dh,[hh]))return;
   const id=Date.now(); const hhObj=(DEMO.hang_hoa||[]).find(x=>x.id===hh);
   DEMO.don_mua.push({id,so:"PO-"+id,nha_cung_cap_id:ncc,don_hang_id:dh,tong_tien:sl*dg,trang_thai:"CHO_DUYET",trang_thai_nhan:"CHUA",ngay_hen_giao:hen,
     chi_tiet:[{id:id+1,hang_hoa_id:hh,ten:hhObj?hhObj.ten:("HH#"+hh),so_luong:sl,don_gia:dg,so_luong_nhan:0}]});

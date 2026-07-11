@@ -347,6 +347,13 @@ def tao_po_tu_de_xuat(ycm_id: int, data: TaoPoTuDeXuatVao, db: Session = Depends
     if not lines:
         lines = [YeuCauMuaCt(hang_hoa_id=ycm.hang_hoa_id, so_luong=ycm.so_luong,
                              don_gia=ycm.don_gia, nha_cung_cap_id=ycm.nha_cung_cap_id)]
+    # CHẶN mua trùng theo mã bán hàng (CEO/ADMIN xác nhận mới mua bổ sung được)
+    da_xac_nhan_trung = False
+    if ycm.don_hang_id or getattr(ycm, "cho_thue_ma", None):
+        da_xac_nhan_trung = _chan_mua_trung(
+            db, nd, [l.hang_hoa_id for l in lines], don_hang_id=ycm.don_hang_id,
+            cho_thue_ma=getattr(ycm, "cho_thue_ma", None),
+            xac_nhan=getattr(data, "xac_nhan_trung", False))
     # gom dòng theo NCC (mỗi NCC -> 1 PO)
     nhom = {}
     for i, l in enumerate(lines):
@@ -377,7 +384,8 @@ def tao_po_tu_de_xuat(ycm_id: int, data: TaoPoTuDeXuatVao, db: Session = Depends
         pos.append(dm)
     ycm.trang_thai = "DA_TAO_PO"; ycm.don_mua_id = pos[0].id
     ghi_audit(db, nd.id, "TAO_PO", "yeu_cau_mua", ycm.id,
-              moi={"so_po": len(pos), "po": [p.so for p in pos]})
+              moi={"so_po": len(pos), "po": [p.so for p in pos],
+                   "mua_bo_sung_xac_nhan": da_xac_nhan_trung})
     db.commit()
     for p in pos:
         db.refresh(p)
@@ -750,6 +758,86 @@ def ds_don_mua(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM")))
     return db.query(DonMua).order_by(DonMua.id.desc()).all()
 
 
+# ----- Kiểm soát mua trùng theo mã bán hàng -----
+def _po_da_mua(db, hang_hoa_id, don_hang_id=None, cho_thue_ma=None):
+    """Các dòng PO (chưa bị từ chối) đã mua mặt hàng này cho CÙNG mã bán hàng."""
+    kq = []
+    dm_ids = set()
+    if don_hang_id:
+        for dm, ct in (db.query(DonMua, DonMuaCt)
+                       .join(DonMuaCt, DonMuaCt.don_mua_id == DonMua.id)
+                       .filter(DonMuaCt.hang_hoa_id == hang_hoa_id,
+                               DonMua.don_hang_id == don_hang_id,
+                               DonMua.trang_thai != "TU_CHOI").all()):
+            if dm.id not in dm_ids:
+                dm_ids.add(dm.id)
+                kq.append({"so": dm.so or f"PO#{dm.id}", "ngay": str(dm.ngay or "")[:10],
+                           "so_luong": float(ct.so_luong), "so_luong_nhan": float(ct.so_luong_nhan or 0),
+                           "trang_thai": dm.trang_thai})
+    if cho_thue_ma:
+        po_ct = [y.don_mua_id for y in db.query(YeuCauMua)
+                 .filter(YeuCauMua.cho_thue_ma == cho_thue_ma,
+                         YeuCauMua.don_mua_id.isnot(None)).all()]
+        if po_ct:
+            for dm, ct in (db.query(DonMua, DonMuaCt)
+                           .join(DonMuaCt, DonMuaCt.don_mua_id == DonMua.id)
+                           .filter(DonMuaCt.hang_hoa_id == hang_hoa_id,
+                                   DonMua.id.in_(po_ct),
+                                   DonMua.trang_thai != "TU_CHOI").all()):
+                if dm.id not in dm_ids:
+                    dm_ids.add(dm.id)
+                    kq.append({"so": dm.so or f"PO#{dm.id}", "ngay": str(dm.ngay or "")[:10],
+                               "so_luong": float(ct.so_luong), "so_luong_nhan": float(ct.so_luong_nhan or 0),
+                               "trang_thai": dm.trang_thai})
+    return kq
+
+
+def _chan_mua_trung(db, nd, cap_hang_hoa, don_hang_id=None, cho_thue_ma=None, xac_nhan=False):
+    """CHẶN tạo PO trùng: mặt hàng đã có PO cho cùng mã bán hàng → lỗi 409.
+    CEO/ADMIN gửi kèm xac_nhan_trung=True mới được mua bổ sung (ghi audit ở nơi gọi)."""
+    canh_bao = []
+    for hh_id in cap_hang_hoa:
+        trung = _po_da_mua(db, hh_id, don_hang_id, cho_thue_ma)
+        if trung:
+            hh = db.get(HangHoa, hh_id)
+            ct = "; ".join(f"{t['so']} ngày {t['ngay']} (SL {t['so_luong']:g}, đã nhận {t['so_luong_nhan']:g})"
+                           for t in trung[:3])
+            canh_bao.append(f"'{hh.ten if hh else hh_id}' đã mua trong {ct}")
+    if not canh_bao:
+        return False
+    la_qtv = getattr(getattr(nd, "vai_tro", None), "ma", None) in ("CEO", "ADMIN")
+    if xac_nhan and la_qtv:
+        return True   # QTV xác nhận mua bổ sung
+    ma = (f"mã bán hàng {cho_thue_ma}" if cho_thue_ma else "mã bán hàng này")
+    raise HTTPException(
+        status.HTTP_409_CONFLICT,
+        "⚠ TRÙNG MUA cho " + ma + ": " + " | ".join(canh_bao) +
+        (" — Bấm xác nhận để mua bổ sung." if la_qtv
+         else " — Chỉ CEO/ADMIN mới được xác nhận mua bổ sung; liên hệ quản trị nếu thật sự cần mua thêm."))
+
+
+@router.get("/da-mua/{don_hang_id}")
+def da_mua_theo_ma(don_hang_id: int, db: Session = Depends(get_db),
+                   _=Depends(yeu_cau(MODULE, "XEM"))):
+    """Lịch sử đã mua của một mã bán hàng: mọi dòng hàng thuộc các PO gắn mã này."""
+    out = []
+    for dm, ct in (db.query(DonMua, DonMuaCt)
+                   .join(DonMuaCt, DonMuaCt.don_mua_id == DonMua.id)
+                   .filter(DonMua.don_hang_id == don_hang_id, DonMua.trang_thai != "TU_CHOI")
+                   .order_by(DonMua.id.desc()).all()):
+        hh = db.get(HangHoa, ct.hang_hoa_id)
+        ncc = db.get(NhaCungCap, dm.nha_cung_cap_id)
+        out.append({"po_so": dm.so or f"PO#{dm.id}", "ngay": str(dm.ngay or "")[:10],
+                    "ncc_ten": ncc.ten if ncc else None,
+                    "hang_hoa": hh.ten if hh else f"HH#{ct.hang_hoa_id}",
+                    "ma_hh": hh.ma if hh else None,
+                    "so_luong": float(ct.so_luong), "so_luong_nhan": float(ct.so_luong_nhan or 0),
+                    "don_gia": float(ct.don_gia or 0),
+                    "thanh_tien": float((ct.so_luong or 0) * (ct.don_gia or 0)),
+                    "trang_thai": dm.trang_thai})
+    return out
+
+
 # ----- THAO_TAC: tạo đơn mua (nháp -> chờ duyệt). NV_MUA tạo được, chưa tự duyệt. -----
 @router.post("/don-mua", response_model=DonMuaRa, status_code=201)
 def tao_don_mua(data: DonMuaVao, db: Session = Depends(get_db),
@@ -759,6 +847,10 @@ def tao_don_mua(data: DonMuaVao, db: Session = Depends(get_db),
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy NCC")
     if ncc.blacklist:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "NCC đang trong blacklist")
+    da_xac_nhan = False
+    if data.don_hang_id:
+        da_xac_nhan = _chan_mua_trung(db, nd, [ct.hang_hoa_id for ct in data.chi_tiet],
+                                      don_hang_id=data.don_hang_id, xac_nhan=data.xac_nhan_trung)
     tong = sum(ct.so_luong * ct.don_gia for ct in data.chi_tiet)
     dm = DonMua(so=data.so, nha_cung_cap_id=data.nha_cung_cap_id,
                 don_hang_id=data.don_hang_id, ngay_hen_giao=data.ngay_hen_giao,
@@ -771,7 +863,8 @@ def tao_don_mua(data: DonMuaVao, db: Session = Depends(get_db),
         db.add(DonMuaCt(don_mua_id=dm.id, hang_hoa_id=ct.hang_hoa_id,
                         so_luong=ct.so_luong, don_gia=ct.don_gia))
     ghi_audit(db, nd.id, "TAO", "don_mua", dm.id,
-              moi={"tong_tien": float(tong), "trang_thai": "CHO_DUYET"})
+              moi={"tong_tien": float(tong), "trang_thai": "CHO_DUYET",
+                   "mua_bo_sung_xac_nhan": da_xac_nhan})
     db.commit()
     db.refresh(dm)
     return dm

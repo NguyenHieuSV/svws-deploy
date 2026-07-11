@@ -114,6 +114,7 @@ class DonMuaVao(BaseModel):
     don_hang_id: int | None = None
     ngay_hen_giao: date | None = None
     chi_tiet: list[DonMuaCtVao] = Field(min_length=1)
+    xac_nhan_trung: bool = False   # CEO/ADMIN xác nhận mua bổ sung dù trùng mã bán hàng
 
 
 class DonMuaRa(BaseModel):
@@ -156,6 +157,7 @@ class TaoPoTuDeXuatVao(BaseModel):
     nha_cung_cap_id: int | None = None
     don_gia: Decimal | None = None
     ngay_hen_giao: date | None = None
+    xac_nhan_trung: bool = False   # CEO/ADMIN xác nhận mua bổ sung dù trùng mã bán hàng
 
 
 class LyDoVao(BaseModel):
