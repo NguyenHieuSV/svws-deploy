@@ -3741,11 +3741,35 @@ async function nccSuppliers(host){
     <div class="f"><label>Điện thoại</label><input id="n_dt"></div>
     <div class="f"><label>Hạn mức công nợ</label><input id="n_hm" type="number" value="0"></div>
     <button class="btn-sm" onclick="nccAdd()">Lưu</button></div>`:'';
+  const aiForm=canAdd?`<div id="nccAiForm" class="formrow hidden">
+    <div class="f" style="flex:2"><label>File báo giá / hồ sơ NCC (PDF, ảnh, CSV — Excel hãy xuất PDF)</label><input type="file" id="nai_file" accept=".pdf,.png,.jpg,.jpeg,.webp,.csv,.txt"></div>
+    <button class="btn-sm" id="nai_btn" onclick="nccAiCapNhat()">🤖 AI đọc &amp; cập nhật NCC</button>
+    <div class="note" style="flex-basis:100%;padding:6px 0 0">AI trích tên, MST, điện thoại, email, địa chỉ từ file: NCC <b>đã có</b> (trùng MST hoặc tên) → tự điền các ô còn trống; <b>chưa có</b> → tạo NCC mới (đánh dấu cần kiểm chứng). File gốc lưu vào 📁 Kho tệp.</div></div>`:'';
   host.innerHTML=`<div class="panel"><div class="panel-h"><h3>Hồ sơ nhà cung cấp</h3><div class="spacer"></div>
-      ${canAdd?`<button class="btn-sm" onclick="$('#nccForm').classList.toggle('hidden')">+ Thêm NCC</button>`:''}</div>
+      ${canAdd?`<button class="btn-sm" onclick="$('#nccForm').classList.toggle('hidden')">+ Thêm NCC</button>`:''}
+      ${canAdd?`<button class="btn-sm ghost" style="margin-left:6px" onclick="$('#nccAiForm').classList.toggle('hidden')">🤖 AI từ file</button>`:''}</div>
+    ${aiForm}
     ${canAdd?form:`<div class="perm-denied">Vai trò ${S.role} chỉ được xem nhà cung cấp.</div>`}
     <div class="panel-b"><table><thead><tr><th>Mã</th><th>Tên</th><th>Email</th><th class="num">Hạn mức CN</th><th>Đánh giá</th><th>Trạng thái</th><th></th></tr></thead>
     <tbody>${rows}</tbody></table></div></div>`;
+}
+async function nccAiCapNhat(){
+  if(S.mode!=="live"){toast("AI đọc hồ sơ NCC chạy ở bản kết nối backend","err");return;}
+  const inp=document.getElementById('nai_file'), f=inp&&inp.files[0];
+  if(!f){toast("Chọn file báo giá / hồ sơ NCC (PDF, ảnh, CSV)","err");return;}
+  const btn=document.getElementById('nai_btn');
+  if(btn){btn.disabled=true;btn.textContent="⏳ AI đang đọc file…";}
+  try{
+    const fd=new FormData(); fd.append('file',f);
+    const r=await apiUpload("/ncc/nha-cung-cap/ai-cap-nhat",fd);
+    let msg=r.tao_moi?`✅ Đã tạo NCC mới: ${r.ten} (cần kiểm chứng)`:`✅ Đã cập nhật NCC ${r.ten}`;
+    if(r.cap_nhat&&r.cap_nhat.length)msg+=` — điền thêm: ${r.cap_nhat.join(', ')}`;
+    if(r.khac_biet&&r.khac_biet.length)msg+=` · ⚠ Khác dữ liệu hiện có, giữ nguyên: ${r.khac_biet.join('; ')}`;
+    if(!r.tao_moi&&(!r.cap_nhat||!r.cap_nhat.length)&&(!r.khac_biet||!r.khac_biet.length))msg+=" — hồ sơ đã đầy đủ, không có gì mới";
+    toast(msg,"ok");
+    viewNCC($("#main"));
+  }catch(e){toast(e.detail||e.message,"err");}
+  finally{if(btn){btn.disabled=false;btn.textContent="🤖 AI đọc & cập nhật NCC";}}
 }
 async function nccAdd(){
   const ten=gv('n_ten'); if(!ten){toast("Nhập tên NCC","err");return;}

@@ -135,31 +135,85 @@ def dich_vn_sang_en(texts: list[str]) -> list[str] | None:
     return None
 
 
-# ============ AI ĐỌC FILE BÁO GIÁ NCC → trích danh mục sản phẩm ============
-def doc_bao_gia_file(data: bytes, content_type: str, filename: str) -> list[dict]:
-    """Đọc file báo giá của NCC (PDF/ảnh/text-CSV) bằng Claude, trích danh sách sản phẩm.
-    Trả list các dict {ten, ma_sp, mo_ta, nha_san_xuat, don_vi, don_gia}.
-    Ném ValueError nếu chưa bật AI / định dạng không hỗ trợ / đọc thất bại."""
-    if settings.ai_provider.upper() != "ANTHROPIC" or not settings.anthropic_api_key:
-        raise ValueError("Chưa bật AI — cần AI_PROVIDER=ANTHROPIC và ANTHROPIC_API_KEY trên máy chủ.")
-    import base64, urllib.request
+# ============ AI ĐỌC FILE (báo giá / hồ sơ NCC) ============
+def _khoi_noi_dung_file(data: bytes, content_type: str, filename: str) -> dict:
+    """Dựng khối nội dung gửi Claude từ file người dùng tải lên (PDF/ảnh/CSV-TXT)."""
+    import base64
     ct = (content_type or "").lower()
     fn = (filename or "").lower()
     if ct == "application/pdf" or fn.endswith(".pdf"):
-        khoi = {"type": "document",
+        return {"type": "document",
                 "source": {"type": "base64", "media_type": "application/pdf",
                            "data": base64.b64encode(data).decode()}}
-    elif ct in ("image/png", "image/jpeg", "image/webp", "image/gif") or \
+    if ct in ("image/png", "image/jpeg", "image/webp", "image/gif") or \
             fn.endswith((".png", ".jpg", ".jpeg", ".webp", ".gif")):
         mt = ct if ct.startswith("image/") else ("image/png" if fn.endswith(".png") else "image/jpeg")
-        khoi = {"type": "image",
+        return {"type": "image",
                 "source": {"type": "base64", "media_type": mt,
                            "data": base64.b64encode(data).decode()}}
-    elif ct.startswith("text/") or fn.endswith((".txt", ".csv")):
-        khoi = {"type": "text", "text": data.decode("utf-8", errors="replace")[:60000]}
-    else:
-        raise ValueError("Định dạng chưa hỗ trợ — dùng PDF, ảnh (PNG/JPG) hoặc CSV/TXT. "
-                         "File Excel hãy xuất sang PDF trước.")
+    if ct.startswith("text/") or fn.endswith((".txt", ".csv")):
+        return {"type": "text", "text": data.decode("utf-8", errors="replace")[:60000]}
+    raise ValueError("Định dạng chưa hỗ trợ — dùng PDF, ảnh (PNG/JPG) hoặc CSV/TXT. "
+                     "File Excel hãy xuất sang PDF hoặc CSV trước.")
+
+
+def _goi_claude_json(khoi: dict, sys: str, cau_hoi: str, max_tokens: int = 4000, timeout: int = 120):
+    """Gửi 1 khối nội dung + câu hỏi tới Claude, trả về text kết quả (đã bỏ ```json)."""
+    import urllib.request
+    body = {"model": settings.anthropic_model, "max_tokens": max_tokens, "system": sys,
+            "messages": [{"role": "user", "content": [khoi, {"type": "text", "text": cau_hoi}]}]}
+    req = urllib.request.Request(
+        "https://api.anthropic.com/v1/messages",
+        data=json.dumps(body).encode("utf-8"),
+        headers={"content-type": "application/json",
+                 "x-api-key": settings.anthropic_api_key,
+                 "anthropic-version": "2023-06-01"})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            resp = json.loads(r.read().decode("utf-8"))
+    except Exception as e:
+        raise ValueError(f"Gọi AI thất bại ({type(e).__name__}) — thử lại sau.")
+    txt = "".join(b.get("text", "") for b in resp.get("content", []) if b.get("type") == "text")
+    return txt.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+
+
+def doc_thong_tin_ncc(data: bytes, content_type: str, filename: str) -> dict:
+    """Đọc file báo giá / hồ sơ NCC, trích THÔNG TIN NHÀ CUNG CẤP:
+    {ten, ma_so_thue, dien_thoai, email, dia_chi, ghi_chu}. Ném ValueError khi lỗi."""
+    if settings.ai_provider.upper() != "ANTHROPIC" or not settings.anthropic_api_key:
+        raise ValueError("Chưa bật AI — cần AI_PROVIDER=ANTHROPIC và ANTHROPIC_API_KEY trên máy chủ.")
+    khoi = _khoi_noi_dung_file(data, content_type, filename)
+    sys = ("Bạn là trợ lý mua hàng của công ty xử lý nước SVWS. Người dùng gửi một file "
+           "báo giá hoặc hồ sơ của MỘT nhà cung cấp. Hãy trích thông tin về CHÍNH nhà cung cấp "
+           "(công ty phát hành báo giá / được giới thiệu trong hồ sơ — KHÔNG phải khách nhận). "
+           "CHỈ trả về đúng một JSON, không thêm chữ nào khác, dạng: "
+           '{"ten":"<tên công ty>","ma_so_thue":"<MST hoặc null>","dien_thoai":"<SĐT hoặc null>",'
+           '"email":"<email hoặc null>","dia_chi":"<địa chỉ hoặc null>",'
+           '"ghi_chu":"<người liên hệ, website, ngành hàng... nếu có, hoặc null>"} '
+           "KHÔNG bịa thông tin không có trong file; thiếu trường nào để null trường đó.")
+    txt = _goi_claude_json(khoi, sys, "Trích thông tin nhà cung cấp từ file này thành JSON.", 1500, 90)
+    try:
+        import re as _re
+        m = _re.search(r"\{[\s\S]*\}", txt)
+        info = json.loads(m.group(0) if m else txt)
+    except Exception:
+        raise ValueError("AI không đọc được thông tin NCC trong file — kiểm tra lại nội dung.")
+    out = {}
+    for k, gh in (("ten", 200), ("ma_so_thue", 20), ("dien_thoai", 30),
+                  ("email", 120), ("dia_chi", 300), ("ghi_chu", 1000)):
+        v = info.get(k)
+        out[k] = (str(v).strip()[:gh] if v else None)
+    return out
+
+
+def doc_bao_gia_file(data: bytes, content_type: str, filename: str) -> list[dict]:
+    """Đọc file báo giá của NCC (PDF/ảnh/text-CSV) bằng Claude, trích danh sách sản phẩm.
+    Trả list các dict {ten, ma_sp, mo_ta, nha_san_xuat, don_vi, don_gia, so_luong}.
+    Ném ValueError nếu chưa bật AI / định dạng không hỗ trợ / đọc thất bại."""
+    if settings.ai_provider.upper() != "ANTHROPIC" or not settings.anthropic_api_key:
+        raise ValueError("Chưa bật AI — cần AI_PROVIDER=ANTHROPIC và ANTHROPIC_API_KEY trên máy chủ.")
+    import urllib.request
+    khoi = _khoi_noi_dung_file(data, content_type, filename)
     sys = ("Bạn là trợ lý mua hàng của công ty xử lý nước SVWS. Người dùng gửi một FILE BÁO GIÁ "
            "của nhà cung cấp. Hãy đọc và trích TOÀN BỘ các dòng sản phẩm/dịch vụ thành JSON. "
            "CHỈ trả về đúng một mảng JSON, không thêm chữ nào khác, mỗi phần tử dạng: "

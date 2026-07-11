@@ -376,7 +376,7 @@ def ds_kho_tep(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM")))
     NHOM = {"BAO_GIA_FORM": "Báo giá (PDF)", "DON_HANG": "Đơn hàng — PO/HĐ",
             "CHIEN_DICH": "Email chào hàng", "DON_MUA": "Đơn mua NCC (PO)",
             "YEU_CAU_MUA": "Đề xuất mua — dự toán", "CHO_THUE_DA": "Cho thuê — tài liệu",
-            "BAO_GIA_NCC_FILE": "Báo giá NCC — file"}
+            "BAO_GIA_NCC_FILE": "Báo giá NCC — file", "NCC_HO_SO": "Hồ sơ NCC"}
     out = []
     for t in db.query(TepDinhKem).order_by(TepDinhKem.id.desc()).limit(500).all():
         ref = None
@@ -400,7 +400,7 @@ def ds_kho_tep(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM")))
         elif t.doi_tuong == "CHO_THUE_DA":
             ts = db.get(TaiSanChoThue, t.doi_tuong_id)
             ref = f"{ts.ma} · {ts.ten}" if ts else None
-        elif t.doi_tuong == "BAO_GIA_NCC_FILE":
+        elif t.doi_tuong in ("BAO_GIA_NCC_FILE", "NCC_HO_SO"):
             nc = db.get(NhaCungCap, t.doi_tuong_id)
             ref = nc.ten if nc else None
         out.append({"nhom": NHOM.get(t.doi_tuong, t.doi_tuong), "ref": ref or f"#{t.doi_tuong_id}",
