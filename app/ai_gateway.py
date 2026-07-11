@@ -157,6 +157,37 @@ def _khoi_noi_dung_file(data: bytes, content_type: str, filename: str) -> dict:
                      "File Excel hãy xuất sang PDF hoặc CSV trước.")
 
 
+def _loi_ai_ro_rang(e: Exception) -> str:
+    """Đổi lỗi kỹ thuật khi gọi Claude thành thông báo tiếng Việt cụ thể."""
+    import urllib.error
+    if isinstance(e, urllib.error.HTTPError):
+        chi_tiet = ""
+        try:
+            body = json.loads(e.read().decode("utf-8", errors="replace"))
+            chi_tiet = str((body.get("error") or {}).get("message") or "")[:300]
+        except Exception:
+            pass
+        if e.code == 401:
+            return ("Khóa API không hợp lệ hoặc đã bị thu hồi (lỗi 401). "
+                    "Vào Render → Environment → ANTHROPIC_API_KEY, dán khóa mới rồi Save.")
+        if e.code == 400 and "credit" in chi_tiet.lower():
+            return ("Tài khoản Anthropic hết credit (lỗi 400). "
+                    "Vào console.anthropic.com → Billing để nạp thêm credit API.")
+        if e.code == 404:
+            return (f"Model AI không khả dụng (lỗi 404): {settings.anthropic_model}. "
+                    "Kiểm tra biến ANTHROPIC_MODEL trên Render.")
+        if e.code == 403:
+            return "Khóa API không có quyền dùng model này (lỗi 403) — kiểm tra tài khoản Anthropic."
+        if e.code == 429:
+            return "Vượt giới hạn gọi AI (lỗi 429) — chờ khoảng 1 phút rồi thử lại."
+        if e.code >= 500:
+            return f"Máy chủ AI đang quá tải (lỗi {e.code}) — thử lại sau ít phút."
+        return f"Gọi AI thất bại (lỗi {e.code}). {chi_tiet}".strip()
+    if isinstance(e, urllib.error.URLError):
+        return "Không kết nối được máy chủ AI (lỗi mạng) — thử lại sau."
+    return f"Gọi AI thất bại ({type(e).__name__}) — thử lại sau."
+
+
 def _goi_claude_json(khoi: dict, sys: str, cau_hoi: str, max_tokens: int = 4000, timeout: int = 120):
     """Gửi 1 khối nội dung + câu hỏi tới Claude, trả về text kết quả (đã bỏ ```json)."""
     import urllib.request
@@ -172,7 +203,7 @@ def _goi_claude_json(khoi: dict, sys: str, cau_hoi: str, max_tokens: int = 4000,
         with urllib.request.urlopen(req, timeout=timeout) as r:
             resp = json.loads(r.read().decode("utf-8"))
     except Exception as e:
-        raise ValueError(f"Gọi AI thất bại ({type(e).__name__}) — thử lại sau.")
+        raise ValueError(_loi_ai_ro_rang(e))
     txt = "".join(b.get("text", "") for b in resp.get("content", []) if b.get("type") == "text")
     return txt.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
 
@@ -248,7 +279,7 @@ def doc_bao_gia_file(data: bytes, content_type: str, filename: str) -> list[dict
         with urllib.request.urlopen(req, timeout=120) as r:
             resp = json.loads(r.read().decode("utf-8"))
     except Exception as e:
-        raise ValueError(f"Gọi AI thất bại ({type(e).__name__}) — thử lại sau.")
+        raise ValueError(_loi_ai_ro_rang(e))
     txt = "".join(b.get("text", "") for b in resp.get("content", []) if b.get("type") == "text")
     txt = txt.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
     try:
