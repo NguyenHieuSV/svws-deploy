@@ -3957,7 +3957,7 @@ function _rfqBodyDemo(o){
   if(o.quy_cach)L.push(`- Quy cách / thông số: ${o.quy_cach}`);
   L.push(`- Đơn vị tính: ${o.don_vi||'-'}`,`- Số lượng: ${o.so_luong}`,"");
   L.push("YÊU CẦU GIAO HÀNG & THANH TOÁN",
-    `- Nơi giao: ${o.noi_giao||'Theo thỏa thuận'}`,
+    `- Nơi giao: ${o.noi_giao||'275 An Phú Đông 3, P. An Phú Đông, Tp.HCM'}`,
     `- Thời gian giao mong muốn: ${o.thoi_gian_giao||'Theo thỏa thuận'}`,
     `- Điều kiện thanh toán: ${o.dieu_kien_thanh_toan||'Theo thỏa thuận'}`);
   if(o.yeu_cau_khac)L.push(`- Yêu cầu khác: ${o.yeu_cau_khac}`);
@@ -4010,7 +4010,7 @@ function _poBodyDemo(po,f){
   (po.chi_tiet||[]).forEach((ct,i)=>{const hh=(DEMO.hang_hoa||[]).find(h=>h.id===ct.hang_hoa_id)||{};const tt=ct.so_luong*ct.don_gia;tong+=tt;
     L.push(`${i+1}. ${ct.ten||hh.ten} | ĐVT: ${hh.don_vi||''} | SL: ${ct.so_luong} | Đơn giá: ${v(ct.don_gia)} | Thành tiền: ${v(tt)}`);});
   L.push(`Tổng cộng (chưa gồm VAT): ${v(tong)}`,"","ĐIỀU KIỆN");
-  L.push(`- Nơi giao: ${f.noi_giao||'448 Võ Văn Tần, Phường Bàn Cờ, TP. Hồ Chí Minh'}`);
+  L.push(`- Nơi giao: ${f.noi_giao||'275 An Phú Đông 3, P. An Phú Đông, Tp.HCM'}`);
   L.push(`- Ngày giao yêu cầu: ${f.ngay_hen_giao||po.ngay_hen_giao||'Theo thỏa thuận'}`);
   L.push(`- Điều kiện giao hàng: ${f.dieu_kien_giao_hang||'Theo thỏa thuận'}`);
   L.push(`- Điều kiện thanh toán: ${f.dieu_kien_thanh_toan||'Theo thỏa thuận'}`);
@@ -4048,7 +4048,7 @@ async function nccPoSend(poId){
       <div class="f"><label>Hiệu lực đến</label><input id="po_hl_${poId}" placeholder="dd/mm/yyyy"></div>
       <div class="f"><label>VAT (%)</label><input id="po_vat_${poId}" type="number" value="8" style="width:90px"></div></div>
     <div class="formrow">
-      <div class="f"><label>Nơi giao hàng</label><input id="po_ng_${poId}" value="448 Võ Văn Tần, P. Bàn Cờ, TP.HCM"></div>
+      <div class="f"><label>Nơi giao hàng</label><input id="po_ng_${poId}" value="275 An Phú Đông 3, P. An Phú Đông, Tp.HCM"></div>
       <div class="f"><label>Ngày hẹn giao</label><input id="po_hen_${poId}" type="date"></div>
       <div class="f"><label>Thời gian giao hàng</label><input id="po_tgg_${poId}" value="7-10 ngày làm việc"></div></div>
     <div class="formrow">
@@ -4444,7 +4444,7 @@ async function nccPO(host){
             <div class="f"><label>Đơn vị tính</label><input id="rfq_dv_${x.id}" placeholder="kg / cái / m³"></div>
           </div>
           <div class="formrow">
-            <div class="f"><label>Nơi giao hàng</label><input id="rfq_ng_${x.id}" value="448 Võ Văn Tần, P. Bàn Cờ, TP.HCM"></div>
+            <div class="f"><label>Nơi giao hàng</label><input id="rfq_ng_${x.id}" value="275 An Phú Đông 3, P. An Phú Đông, Tp.HCM"></div>
             <div class="f"><label>Thời gian giao mong muốn</label><input id="rfq_tg_${x.id}" placeholder="VD: trong 7 ngày"></div>
           </div>
           <div class="formrow">

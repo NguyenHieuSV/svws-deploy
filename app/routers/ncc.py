@@ -34,6 +34,7 @@ from fastapi.responses import FileResponse
 router = APIRouter(prefix="/ncc", tags=["ncc"])
 MODULE = "ncc"
 LOAI_DUYET = "po"  # khớp seed han_muc_duyet
+DIA_CHI_GIAO_HANG = "275 An Phú Đông 3, P. An Phú Đông, Tp.HCM"  # kho nhận hàng mặc định
 
 
 def gui_email_ncc(db: Session, don_mua: DonMua) -> bool:
@@ -976,7 +977,7 @@ def _noi_dung_rfq(db, hang_hoa_id, so_luong, d):
     L.append(f"- Đơn vị tính: {don_vi}")
     L.append(f"- Số lượng: {so_luong}")
     L += ["", "YÊU CẦU GIAO HÀNG & THANH TOÁN",
-          f"- Nơi giao: {getattr(d, 'noi_giao', None) or 'Theo thỏa thuận'}",
+          f"- Nơi giao: {getattr(d, 'noi_giao', None) or DIA_CHI_GIAO_HANG}",
           f"- Thời gian giao mong muốn: {getattr(d, 'thoi_gian_giao', None) or 'Theo thỏa thuận'}",
           f"- Điều kiện thanh toán: {getattr(d, 'dieu_kien_thanh_toan', None) or 'Theo thỏa thuận'}"]
     if getattr(d, "yeu_cau_khac", None):
@@ -1131,7 +1132,7 @@ def _noi_dung_po(db, dm, d=None):
     L += [f"Tổng cộng (chưa gồm VAT): {_v(tong)}", "", "ĐIỀU KIỆN"]
     g = lambda k: (getattr(d, k, None) if d else None)
     ngay_hen = g("ngay_hen_giao") or dm.ngay_hen_giao
-    L.append(f"- Nơi giao: {g('noi_giao') or settings.cong_ty_dia_chi}")
+    L.append(f"- Nơi giao: {g('noi_giao') or DIA_CHI_GIAO_HANG}")
     L.append(f"- Ngày giao yêu cầu: {ngay_hen if ngay_hen else 'Theo thỏa thuận'}")
     L.append(f"- Điều kiện giao hàng: {g('dieu_kien_giao_hang') or 'Theo thỏa thuận'}")
     L.append(f"- Điều kiện thanh toán: {g('dieu_kien_thanh_toan') or 'Theo thỏa thuận'}")
@@ -1179,7 +1180,7 @@ def _po_pdf_data(db, dm, d):
         "nguoi_lien_he": nlh, "lines": L,
         "thanh_toan": getattr(d, "dieu_kien_thanh_toan", None) or "Theo thỏa thuận",
         "thoi_gian_giao": getattr(d, "thoi_gian_giao", None) or "Theo thỏa thuận",
-        "dia_diem_giao": getattr(d, "noi_giao", None) or settings.cong_ty_dia_chi,
+        "dia_diem_giao": getattr(d, "noi_giao", None) or DIA_CHI_GIAO_HANG,
         "nguoi_dat": getattr(d, "nguoi_dat", None) or "",
         "nguoi_duyet": getattr(d, "nguoi_duyet", None) or "",
     }
