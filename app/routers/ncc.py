@@ -1144,6 +1144,20 @@ def _noi_dung_po(db, dm, d=None):
     return _po_tieu_de(dm), "\n".join(L)
 
 
+def _ma_ban_hang_po(db, dm):
+    """Mã bán hàng của PO — kế thừa từ đề xuất mua hàng: số đơn bán gắn PO,
+    hoặc mã cho thuê (cho_thue_ma) của đề xuất đã sinh ra PO này."""
+    if dm.don_hang_id:
+        from ..models import DonHang
+        o = db.get(DonHang, dm.don_hang_id)
+        if o and o.so:
+            return o.so
+    y = db.query(YeuCauMua).filter_by(don_mua_id=dm.id).first()
+    if y and y.cho_thue_ma:
+        return y.cho_thue_ma
+    return None
+
+
 def _po_pdf_data(db, dm, d):
     ncc = db.get(NhaCungCap, dm.nha_cung_cap_id)
     lines = db.query(DonMuaCt).filter(DonMuaCt.don_mua_id == dm.id).all()
@@ -1159,7 +1173,7 @@ def _po_pdf_data(db, dm, d):
     today = date.today().strftime("%d/%m/%Y")
     nlh = getattr(d, "nguoi_lien_he", None) or (getattr(ncc, "nguoi_phu_trach", None) if ncc else None) or ""
     return {
-        "ma_yeu_cau": getattr(d, "ma_yeu_cau", None) or dm.so,
+        "ma_yeu_cau": getattr(d, "ma_yeu_cau", None) or _ma_ban_hang_po(db, dm) or dm.so,
         "ngay": today, "hieu_luc_den": getattr(d, "hieu_luc_den", None) or "",
         "ncc_ten": ncc.ten if ncc else "", "ncc_email": ncc.email if ncc else "",
         "nguoi_lien_he": nlh, "lines": L,

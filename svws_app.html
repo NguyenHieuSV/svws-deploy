@@ -4042,8 +4042,9 @@ async function nccPoPdf(poId){
 }
 async function nccPoSend(poId){
   const old=document.getElementById('poModal'); if(old)old.remove();
+  const _maBH=(window.POMA||{})[poId]||'';
   const fld=`<div class="formrow">
-      <div class="f"><label>Mã yêu cầu (PO)</label><input id="po_ma_${poId}" placeholder="(mặc định lấy số PO)"></div>
+      <div class="f"><label>Mã yêu cầu (PO) = Mã bán hàng</label><input id="po_ma_${poId}" value="${_maBH}" placeholder="(tự lấy Mã bán hàng từ đề xuất mua; trống thì lấy số PO)"></div>
       <div class="f"><label>Hiệu lực đến</label><input id="po_hl_${poId}" placeholder="dd/mm/yyyy"></div>
       <div class="f"><label>VAT (%)</label><input id="po_vat_${poId}" type="number" value="8" style="width:90px"></div></div>
     <div class="formrow">
@@ -4344,6 +4345,7 @@ async function nccPO(host){
   const supName=id=>{const s=sups.find(x=>x.id===id);return s?s.ten:("NCC #"+id);};
   const ordNo=id=>{if(!id)return '—';const o=orders.find(x=>x.id===id);return o?(o.so||('DH-'+id)):('Đơn #'+id);};
   const canApprove=can("ncc","XEM")&&HANMUC.po[S.role]!==undefined;
+  window.POMA={}; pos.forEach(p=>{if(p.don_hang_id){const _o=orders.find(x=>x.id===p.don_hang_id); if(_o&&_o.so)window.POMA[p.id]=_o.so;}});
   const stt=s=>s==="DA_DUYET"?'<span class="badge b-ok">Đã duyệt</span>':s==="TU_CHOI"?'<span class="badge b-tc">Từ chối</span>':'<span class="badge b-cho">Chờ duyệt</span>';
   const nhanBadge=n=>n==="DU"?'<span class="badge b-ok">Đủ</span>':n==="MOT_PHAN"?'<span class="badge b-cho">Một phần</span>':'<span class="badge b-info">Chưa</span>';
   const rows=pos.map(p=>{
