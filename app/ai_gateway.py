@@ -208,6 +208,25 @@ def _goi_claude_json(khoi: dict, sys: str, cau_hoi: str, max_tokens: int = 4000,
     return txt.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
 
 
+def _vot_json_mang(txt: str) -> list:
+    """Tách mảng JSON từ câu trả lời AI. Nếu mảng bị cắt cụt (trả lời dài quá
+    giới hạn token), vẫn vớt các object phẳng hoàn chỉnh, bỏ phần tử dở dang."""
+    import re as _re
+    m = _re.search(r"\[[\s\S]*\]", txt)
+    try:
+        ds = json.loads(m.group(0) if m else txt)
+        return ds if isinstance(ds, list) else [ds]
+    except Exception:
+        pass
+    ds = []
+    for mo in _re.finditer(r"\{[^{}]*\}", txt):
+        try:
+            ds.append(json.loads(mo.group(0)))
+        except Exception:
+            continue
+    return ds
+
+
 def doc_thong_tin_ncc(data: bytes, content_type: str, filename: str) -> list[dict]:
     """Đọc file báo giá / hồ sơ / danh sách NCC — file có thể chứa MỘT hoặc NHIỀU
     nhà cung cấp. Trả list dict {ten, ma_so_thue, dien_thoai, email, dia_chi, ghi_chu}."""
@@ -225,17 +244,11 @@ def doc_thong_tin_ncc(data: bytes, content_type: str, filename: str) -> list[dic
            "Mỗi công ty chỉ xuất hiện một lần. KHÔNG bịa thông tin không có trong file; "
            "thiếu trường nào để null trường đó.")
     txt = _goi_claude_json(khoi, sys,
-                           "Trích danh sách nhà cung cấp trong file này thành mảng JSON.", 4000, 120)
-    try:
-        import re as _re
-        m = _re.search(r"\[[\s\S]*\]", txt)
-        if m:
-            ds = json.loads(m.group(0))
-        else:
-            m1 = _re.search(r"\{[\s\S]*\}", txt)
-            ds = [json.loads(m1.group(0) if m1 else txt)]
-    except Exception:
-        raise ValueError("AI không đọc được thông tin NCC trong file — kiểm tra lại nội dung.")
+                           "Trích danh sách nhà cung cấp trong file này thành mảng JSON.", 8000, 180)
+    ds = _vot_json_mang(txt)
+    if not ds:
+        raise ValueError("AI không đọc được thông tin NCC trong file — kiểm tra lại nội dung. "
+                         "Nếu file là ảnh scan mờ, thử file rõ nét hơn hoặc PDF gốc.")
     out = []
     for info in ds if isinstance(ds, list) else []:
         if not isinstance(info, dict) or not str(info.get("ten") or "").strip():
@@ -282,11 +295,8 @@ def doc_bao_gia_file(data: bytes, content_type: str, filename: str) -> list[dict
         raise ValueError(_loi_ai_ro_rang(e))
     txt = "".join(b.get("text", "") for b in resp.get("content", []) if b.get("type") == "text")
     txt = txt.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
-    try:
-        import re as _re
-        m = _re.search(r"\[[\s\S]*\]", txt)
-        items = json.loads(m.group(0) if m else txt)
-    except Exception:
+    items = _vot_json_mang(txt)
+    if not items:
         raise ValueError("AI không đọc được cấu trúc báo giá — kiểm tra file có bảng sản phẩm rõ ràng.")
     out = []
     for it in items if isinstance(items, list) else []:
