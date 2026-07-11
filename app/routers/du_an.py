@@ -22,10 +22,11 @@ from ..audit import ghi_audit
 from ..deps import nhan_vien_id_cua
 from ..models import (NguoiDung, NhanVien, DuAn, DuToanCt, DuAnChiPhi, NghiemThu,
                       DuAnThietKe, DuAnMoc, DuAnAnToan, DuAnNhatKy, DuAnTaiLieu,
-                      DuAnKpi, DuAnBaoCao, DuAnChiTieu)
+                      DuAnKpi, DuAnBaoCao, DuAnChiTieu, DuAnDuToan)
 from ..schemas import (DuAnVao, DuAnRa, NhapDuToanVao, ChiPhiVao, ChiPhiRa, NghiemThuVao,
                        DuAnThongTinVao, ThietKeVao, MocVao, MocSuaVao, AnToanVao,
-                       NhatKyVao, TaiLieuMetaVao, KpiVao, BaoCaoVao, ChiTieuVao, NapChiTieuVao, PhanTichVao)
+                       NhatKyVao, TaiLieuMetaVao, KpiVao, BaoCaoVao, ChiTieuVao, NapChiTieuVao,
+                       PhanTichVao, DuToanVao)
 
 router = APIRouter(prefix="/du-an", tags=["du_an"])
 MODULE = "du_an"
@@ -742,6 +743,72 @@ def nap_mau_chi_tieu(da_id: int, data: NapChiTieuVao, db: Session = Depends(get_
         them += 1
     db.commit()
     return {"them": them, "bo_qua": bo_qua}
+
+
+# ----- Danh mục thiết bị - Vật tư - Nhân sự (lập dự toán dự án) -----
+_DT_LOAI = ("THIET_BI", "VAT_TU", "NHAN_SU", "CHI_PHI_KHAC")
+
+
+def _dt_ra(x):
+    sl = _f(x.so_luong) if x.so_luong is not None else 0
+    dg = _f(x.don_gia) if x.don_gia is not None else 0
+    return {"id": x.id, "loai": x.loai, "ten": x.ten, "quy_cach": x.quy_cach,
+            "don_vi": x.don_vi, "so_luong": sl, "don_gia": dg,
+            "thanh_tien": round(sl * dg), "ghi_chu": x.ghi_chu, "thu_tu": x.thu_tu}
+
+
+@router.get("/{da_id}/du-toan")
+def ds_du_toan(da_id: int, db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
+    _da_404(db, da_id)
+    rs = db.query(DuAnDuToan).filter_by(du_an_id=da_id).order_by(
+        DuAnDuToan.thu_tu, DuAnDuToan.id).all()
+    ds = [_dt_ra(x) for x in rs]
+    tong_loai = {l: sum(d["thanh_tien"] for d in ds if d["loai"] == l) for l in _DT_LOAI}
+    return {"danh_sach": ds, "tong_theo_loai": tong_loai,
+            "tong_cong": sum(d["thanh_tien"] for d in ds)}
+
+
+@router.post("/{da_id}/du-toan")
+def them_du_toan(da_id: int, data: DuToanVao, db: Session = Depends(get_db),
+                 nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    _da_404(db, da_id)
+    if not (data.ten or "").strip():
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Thiếu tên thiết bị / vật tư / hạng mục")
+    loai = (data.loai or "THIET_BI").upper()
+    if loai not in _DT_LOAI:
+        loai = "CHI_PHI_KHAC"
+    base = db.query(func.coalesce(func.max(DuAnDuToan.thu_tu), 0)).filter(
+        DuAnDuToan.du_an_id == da_id).scalar() or 0
+    x = DuAnDuToan(du_an_id=da_id, loai=loai, ten=data.ten.strip(), quy_cach=data.quy_cach,
+                   don_vi=data.don_vi, so_luong=data.so_luong if data.so_luong is not None else 1,
+                   don_gia=data.don_gia or 0, ghi_chu=data.ghi_chu, thu_tu=base + 1)
+    db.add(x); db.commit()
+    return _dt_ra(x)
+
+
+@router.put("/du-toan/{dt_id}")
+def sua_du_toan(dt_id: int, data: DuToanVao, db: Session = Depends(get_db),
+                nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    x = db.get(DuAnDuToan, dt_id)
+    if x is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy dòng dự toán")
+    for k in ("loai", "ten", "quy_cach", "don_vi", "so_luong", "don_gia", "ghi_chu", "thu_tu"):
+        v = getattr(data, k)
+        if v is not None:
+            setattr(x, k, v)
+    db.commit()
+    return _dt_ra(x)
+
+
+@router.delete("/du-toan/{dt_id}")
+def xoa_du_toan(dt_id: int, db: Session = Depends(get_db),
+                nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
+    x = db.get(DuAnDuToan, dt_id)
+    if x is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy dòng dự toán")
+    ghi_audit(db, nd.id, "XOA", "du_an_du_toan", dt_id, cu={"ten": x.ten})
+    db.delete(x); db.commit()
+    return {"da_xoa": True}
 
 
 @router.post("/{da_id}/phan-tich-ai")

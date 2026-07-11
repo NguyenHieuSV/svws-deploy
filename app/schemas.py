@@ -851,6 +851,17 @@ class ChiTieuVao(BaseModel):
     ghi_chu: str | None = None
 
 
+class DuToanVao(BaseModel):
+    loai: str | None = None          # THIET_BI | VAT_TU | NHAN_SU | CHI_PHI_KHAC
+    ten: str | None = None
+    quy_cach: str | None = None
+    don_vi: str | None = None
+    so_luong: Decimal | None = None
+    don_gia: Decimal | None = None
+    ghi_chu: str | None = None
+    thu_tu: int | None = None
+
+
 class PhanTichVao(BaseModel):
     mo_ta: str | None = None
 

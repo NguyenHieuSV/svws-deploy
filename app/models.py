@@ -940,6 +940,21 @@ class DuAnChiTieu(Base):
     ghi_chu: Mapped[str | None] = mapped_column(String(200), nullable=True)
 
 
+class DuAnDuToan(Base):
+    """Danh mục thiết bị - vật tư - nhân sự... phục vụ lập dự toán dự án."""
+    __tablename__ = "du_an_du_toan"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    du_an_id: Mapped[int] = mapped_column(ForeignKey("du_an.id", ondelete="CASCADE"))
+    loai: Mapped[str] = mapped_column(Text, default="THIET_BI")
+    ten: Mapped[str] = mapped_column(String(250))
+    quy_cach: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    don_vi: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    so_luong: Mapped[Decimal] = mapped_column(Numeric(18, 3), default=1)
+    don_gia: Mapped[Decimal] = mapped_column(Numeric(18, 0), default=0)
+    ghi_chu: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    thu_tu: Mapped[int] = mapped_column(Integer, default=0)
+
+
 # ---------- Mô tả công việc (JD) & KPI theo vị trí + đánh giá theo kỳ ----------
 class MoTaCongViec(Base):
     __tablename__ = "mo_ta_cong_viec"
