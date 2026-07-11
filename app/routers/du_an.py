@@ -952,6 +952,43 @@ async def ai_nhap_du_toan(da_id: int, file: UploadFile = File(...), loai: str = 
     return {"them": them, "bo_qua": bo_qua}
 
 
+@router.post("/du-toan/{dt_id}/de-xuat-mua", status_code=201)
+def de_xuat_mua_tu_du_toan(dt_id: int, db: Session = Depends(get_db),
+                           nd: NguoiDung = Depends(yeu_cau("ncc", "THAO_TAC"))):
+    """Chuyển 1 dòng dự toán thành đề xuất mua hàng (hiện ở mục Đề xuất mua hàng).
+    Hàng chưa có trong kho → tự thêm (VAT_TU). Dòng đã đề xuất rồi → chặn tạo trùng."""
+    from ..models import HangHoa, TonKho, YeuCauMua, YeuCauMuaCt
+    x = db.get(DuAnDuToan, dt_id)
+    if x is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy dòng dự toán")
+    if "Đã đề xuất mua #" in (x.ghi_chu or ""):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            f"Dòng này đã được đề xuất mua rồi ({x.ghi_chu.split('Đã đề xuất mua ')[-1]}) "
+                            "— xem ở mục Đề xuất mua hàng.")
+    da = db.get(DuAn, x.du_an_id)
+    hh = db.query(HangHoa).filter(HangHoa.ten.ilike(x.ten)).first()
+    hh_moi = False
+    if hh is None:
+        hh = HangHoa(ma=None, ten=x.ten, loai="VAT_TU", don_vi=x.don_vi, gia_ban=x.don_gia or 0)
+        db.add(hh); db.flush()
+        if db.query(TonKho).filter_by(hang_hoa_id=hh.id).first() is None:
+            db.add(TonKho(hang_hoa_id=hh.id, so_luong=0)); db.flush()
+        hh_moi = True
+    sl = x.so_luong or 1
+    ly_do = f"Dự toán dự án {(da.ma or da.ten) if da else ('#' + str(x.du_an_id))}"[:200]
+    ycm = YeuCauMua(hang_hoa_id=hh.id, so_luong=sl, ly_do=ly_do,
+                    don_gia=x.don_gia or None, ghi_chu=(x.quy_cach or None),
+                    nguoi_tao=nhan_vien_id_cua(db, nd.id), trang_thai="MOI")
+    db.add(ycm); db.flush()
+    db.add(YeuCauMuaCt(yeu_cau_mua_id=ycm.id, hang_hoa_id=hh.id, so_luong=sl,
+                       don_gia=x.don_gia or None, ghi_chu=x.quy_cach))
+    x.ghi_chu = (((x.ghi_chu + " · ") if x.ghi_chu else "") + f"Đã đề xuất mua #{ycm.id}")[:300]
+    ghi_audit(db, nd.id, "TAO", "yeu_cau_mua", ycm.id,
+              moi={"tu_du_toan": dt_id, "du_an": x.du_an_id, "hang_hoa_moi": hh_moi})
+    db.commit()
+    return {"ok": True, "yeu_cau_mua_id": ycm.id, "hang_hoa_moi": hh_moi}
+
+
 @router.post("/{da_id}/phan-tich-ai")
 def phan_tich_ai(da_id: int, data: PhanTichVao, db: Session = Depends(get_db),
                  nd: NguoiDung = Depends(yeu_cau(MODULE, "XEM"))):
