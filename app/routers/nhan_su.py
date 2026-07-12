@@ -427,6 +427,55 @@ def _wt_canh_bao(db, nv_id: int, ngay):
     return cb
 
 
+def _wt_so_lieu_luong(db, nv_id: int, thang: str):
+    """Gom số liệu WT ĐÃ DUYỆT của 1 NV cho 1 tháng lương: giờ OT theo loại +
+    ngày nghỉ bị khấu trừ (không phép, việc riêng không lương, phép vượt 12 ngày/năm).
+    Trả None nếu tháng đó NV không có bản ghi WT nào (giữ nguyên chấm công tay)."""
+    from datetime import date as _d
+    y, m = int(thang[:4]), int(thang[5:7])
+    dau_thang = _d(y, m, 1)
+    cuoi_thang = _d(y + 1, 1, 1) if m == 12 else _d(y, m + 1, 1)
+    rows = db.query(NgayNghiOt).filter(NgayNghiOt.nhan_vien_id == nv_id,
+                                       NgayNghiOt.trang_thai == "DA_DUYET",
+                                       NgayNghiOt.ngay >= _d(y, 1, 1),
+                                       NgayNghiOt.ngay < cuoi_thang).all()
+    thang_rs = [r for r in rows if r.ngay >= dau_thang]
+    if not thang_rs:
+        return None
+    gio = lambda lo: sum(float(r.so_gio or 0) for r in thang_rs if r.loai == lo)
+    ngay_ = lambda lo: sum(float(r.so_ngay or 0) for r in thang_rs if r.loai == lo)
+    # phép vượt quota 12 ngày/năm PHÁT SINH trong tháng này → ngày không lương (Đ113)
+    phep_truoc = sum(float(r.so_ngay or 0) for r in rows
+                     if r.loai == "NGHI_PHEP" and r.ngay < dau_thang)
+    phep_vuot = (max(0.0, phep_truoc + ngay_("NGHI_PHEP") - _WT_PHEP_NAM)
+                 - max(0.0, phep_truoc - _WT_PHEP_NAM))
+    khong_luong = ngay_("KHONG_PHEP") + ngay_("VIEC_RIENG_KHONG_LUONG") + phep_vuot
+    return {"gio_ot_thuong": gio("OT_THUONG"), "gio_ot_cuoi_tuan": gio("OT_CUOI_TUAN"),
+            "gio_ot_le": gio("OT_LE"), "ngay_nghi_kpep": round(khong_luong, 1)}
+
+
+def _wt_dong_bo_luong(db, nv_id: int, ngay) -> bool:
+    """Đồng bộ WT tháng chứa `ngay` vào bảng lương của NV (nếu kỳ đã sinh & chưa chốt).
+    Gọi sau khi duyệt / HR ghi / xóa bản ghi WT — cột tăng ca & khấu trừ tự cập nhật."""
+    thang = f"{ngay.year:04d}-{ngay.month:02d}"
+    ky = db.get(KyLuong, thang)
+    if ky is None or ky.trang_thai == "DA_CHOT":
+        return False
+    bl = db.query(BangLuong).filter_by(nhan_vien_id=nv_id, thang=thang).first()
+    nv = db.get(NhanVien, nv_id)
+    if bl is None or nv is None:
+        return False
+    wt = _wt_so_lieu_luong(db, nv_id, thang) or \
+        {"gio_ot_thuong": 0, "gio_ot_cuoi_tuan": 0, "gio_ot_le": 0, "ngay_nghi_kpep": 0}
+    bl.gio_ot_thuong = wt["gio_ot_thuong"]
+    bl.gio_ot_cuoi_tuan = wt["gio_ot_cuoi_tuan"]
+    bl.gio_ot_le = wt["gio_ot_le"]
+    bl.ngay_nghi_kpep = wt["ngay_nghi_kpep"]
+    _ap_dung_tinh(db, nv, bl)
+    _cap_nhat_tong_ky(db, ky)
+    return True
+
+
 @router.get("/working-time")
 def ds_working_time(thang: str | None = None, db: Session = Depends(get_db),
                     _=Depends(yeu_cau(MODULE, "XEM"))):
@@ -551,10 +600,17 @@ def ghi_working_time(data: NgayNghiOtVao, db: Session = Depends(get_db),
         canh_bao.append("Ngày này là Chủ nhật — tăng ca ngày nghỉ hằng tuần phải trả ≥200% (Đ98): chọn loại Tăng ca cuối tuần")
     if la_ot and loai == "OT_CUOI_TUAN" and data.ngay.weekday() < 5:
         canh_bao.append("Ngày này là ngày làm việc trong tuần — kiểm tra lại loại tăng ca (ngày thường ≥150%)")
+    # tự cập nhật bảng lương các tháng bị ảnh hưởng (nếu kỳ đã sinh & chưa chốt)
+    dong_bo = False
+    for thang_d in {(d.year, d.month) for d in cac_ngay}:
+        from datetime import date as _d
+        if _wt_dong_bo_luong(db, nv.id, _d(thang_d[0], thang_d[1], 1)):
+            dong_bo = True
     ghi_audit(db, nd.id, "TAO", "ngay_nghi_ot", nv.id,
-              moi={"loai": loai, "ngay": str(data.ngay), "so_dong": them + cap_nhat})
+              moi={"loai": loai, "ngay": str(data.ngay), "so_dong": them + cap_nhat,
+                   "dong_bo_luong": dong_bo})
     db.commit()
-    return {"them": them, "cap_nhat": cap_nhat, "canh_bao": canh_bao}
+    return {"them": them, "cap_nhat": cap_nhat, "canh_bao": canh_bao, "dong_bo_luong": dong_bo}
 
 
 @router.delete("/working-time/{wt_id}")
@@ -563,8 +619,11 @@ def xoa_working_time(wt_id: int, db: Session = Depends(get_db),
     r = db.get(NgayNghiOt, wt_id)
     if r is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy bản ghi")
+    nv_id, ngay_xoa = r.nhan_vien_id, r.ngay
     ghi_audit(db, nd.id, "XOA", "ngay_nghi_ot", wt_id, cu={"loai": r.loai, "ngay": str(r.ngay)})
-    db.delete(r); db.commit()
+    db.delete(r); db.flush()
+    _wt_dong_bo_luong(db, nv_id, ngay_xoa)   # rút số liệu khỏi bảng lương nếu kỳ chưa chốt
+    db.commit()
     return {"da_xoa": True}
 
 
@@ -698,10 +757,11 @@ def duyet_ot(wt_id: int, db: Session = Depends(get_db),
     r.nguoi_duyet = nhan_vien_id_cua(db, nd.id)
     db.flush()
     canh_bao = _wt_canh_bao(db, r.nhan_vien_id, r.ngay)
+    dong_bo = _wt_dong_bo_luong(db, r.nhan_vien_id, r.ngay)   # tự cập nhật bảng lương nếu kỳ đã sinh
     ghi_audit(db, nd.id, "DUYET", "ngay_nghi_ot", wt_id,
-              moi={"ngay": str(r.ngay), "so_gio": _f(r.so_gio)})
+              moi={"ngay": str(r.ngay), "so_gio": _f(r.so_gio), "dong_bo_luong": dong_bo})
     db.commit()
-    return {"ok": True, "canh_bao": canh_bao}
+    return {"ok": True, "canh_bao": canh_bao, "dong_bo_luong": dong_bo}
 
 
 @router.post("/working-time/{wt_id}/tu-choi")
@@ -965,7 +1025,7 @@ def tao_ky_luong(data: KyLuongVao, db: Session = Depends(get_db),
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Kỳ lương đã chốt, không thể sinh lại.")
     ky.cong_chuan = data.cong_chuan
     ky.ngay_chot = ngay_chot
-    n = 0
+    n, dong_bo_wt = 0, 0
     for nv in db.query(NhanVien).filter_by(trang_thai="DANG_LAM").all():
         bl = db.query(BangLuong).filter_by(nhan_vien_id=nv.id, thang=data.thang).first()
         moi = bl is None
@@ -976,13 +1036,23 @@ def tao_ky_luong(data: KyLuongVao, db: Session = Depends(get_db),
             bl.cong_thuc_te = data.cong_chuan
         bl.trang_thai = "CHO_DUYET"
         db.flush()
+        # kéo số liệu Working time & Overtime ĐÃ DUYỆT vào cột tăng ca + khấu trừ
+        wt = _wt_so_lieu_luong(db, nv.id, data.thang)
+        if wt is not None:
+            bl.gio_ot_thuong = wt["gio_ot_thuong"]
+            bl.gio_ot_cuoi_tuan = wt["gio_ot_cuoi_tuan"]
+            bl.gio_ot_le = wt["gio_ot_le"]
+            bl.ngay_nghi_kpep = wt["ngay_nghi_kpep"]
+            dong_bo_wt += 1
         _ap_dung_tinh(db, nv, bl)
         n += 1
     _cap_nhat_tong_ky(db, ky)
-    ghi_audit(db, nd.id, "TAO", "ky_luong", None, moi={"thang": data.thang, "so_nv": n})
+    ghi_audit(db, nd.id, "TAO", "ky_luong", None,
+              moi={"thang": data.thang, "so_nv": n, "dong_bo_wt": dong_bo_wt})
     db.commit()
     return {"thang": data.thang, "so_nhan_vien": n, "ngay_chot": str(ngay_chot),
-            "cong_chuan": _f(ky.cong_chuan), "trang_thai": ky.trang_thai}
+            "cong_chuan": _f(ky.cong_chuan), "trang_thai": ky.trang_thai,
+            "dong_bo_wt": dong_bo_wt}
 
 
 @router.get("/ky-luong")
