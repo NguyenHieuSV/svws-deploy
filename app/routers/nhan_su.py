@@ -577,32 +577,78 @@ def _wt_nv_cua_toi(db, nd) -> int:
     return nv_id
 
 
+# Lịch nghỉ lễ nhà nước (Đ112): lễ dương lịch cố định hằng năm + lễ âm lịch/liền kề chốt theo năm
+_WT_LE_CO_DINH = {"01-01", "04-30", "05-01", "09-02"}
+_WT_LE_THEO_NAM = {
+    2026: {"2026-02-16", "2026-02-17", "2026-02-18", "2026-02-19", "2026-02-20",  # Tết Bính Ngọ (5 ngày)
+           "2026-04-26",                                                          # Giỗ Tổ 10/3 ÂL
+           "2026-09-01"},                                                         # liền kề Quốc khánh
+}
+
+
+def _wt_loai_ngay(d) -> str:
+    """Phân loại OT theo lịch: ngày lễ → OT_LE; Chủ nhật → OT_CUOI_TUAN; còn lại OT_THUONG.
+    (Công chuẩn 26 — thứ Bảy tính ngày làm việc bình thường.)"""
+    s = str(d)
+    if s[5:] in _WT_LE_CO_DINH or s in _WT_LE_THEO_NAM.get(d.year, set()):
+        return "OT_LE"
+    return "OT_CUOI_TUAN" if d.weekday() == 6 else "OT_THUONG"
+
+
 @router.post("/working-time/dang-ky", status_code=201)
 def dang_ky_ot(data: DangKyOtVao, db: Session = Depends(get_db),
                nd: NguoiDung = Depends(lay_nguoi_dung_hien_tai)):
-    """NV tự đăng ký tăng ca cho CHÍNH MÌNH — vào hàng chờ duyệt (Đ107: OT phải có sự đồng ý)."""
+    """NV tự đăng ký tăng ca cho CHÍNH MÌNH — vào hàng chờ duyệt (Đ107: OT phải có sự đồng ý).
+    Khai Từ giờ/ngày → Đến giờ/ngày: loại + số giờ TỰ TÍNH theo lịch; ca qua đêm tách 2 phần theo ngày."""
+    from datetime import timedelta
     nv_id = _wt_nv_cua_toi(db, nd)
-    loai = (data.loai or "").upper()
-    if loai not in _WT_OT:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Chỉ đăng ký loại tăng ca (ngày thường / cuối tuần / lễ)")
-    gio = float(data.so_gio or 0)
-    if not (0 < gio <= 16):
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Số giờ tăng ca phải trong khoảng 0–16h")
-    cu = db.query(NgayNghiOt).filter_by(nhan_vien_id=nv_id, ngay=data.ngay, loai=loai).first()
-    if cu is not None and cu.trang_thai == "DA_DUYET":
-        raise HTTPException(status.HTTP_400_BAD_REQUEST,
-                            f"Ngày {data.ngay:%d/%m} đã có tăng ca loại này ĐÃ DUYỆT — liên hệ quản lý nếu cần sửa.")
-    if cu is not None:
-        cu.so_gio = data.so_gio; cu.ghi_chu = data.ghi_chu
-        cu.trang_thai = "CHO_DUYET"; cu.ly_do_tu_choi = None; cu.nguoi_duyet = None
+    phan = []                                    # [(ngay, so_gio, khung_gio)]
+    if data.tu_gio is not None and data.den_gio is not None:
+        t1, t2 = int(data.tu_gio), int(data.den_gio)
+        n1, n2 = data.ngay, data.den_ngay or data.ngay
+        if not (0 <= t1 <= 23) or not (1 <= t2 <= 24):
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Giờ không hợp lệ (Từ: 0–23, Đến: 1–24)")
+        if n2 == n1:
+            if t2 <= t1:
+                raise HTTPException(status.HTTP_400_BAD_REQUEST, "Giờ Đến phải sau giờ Từ")
+            phan = [(n1, t2 - t1, f"{t1}h–{t2}h")]
+        elif n2 == n1 + timedelta(days=1):
+            phan = [(n1, 24 - t1, f"{t1}h–24h")]
+            if t2 > 0 and t2 < 24:
+                phan.append((n2, t2, f"0h–{t2}h"))
+        else:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                "Chỉ đăng ký trong ngày hoặc ca qua đêm (Đến ngày = ngày kế tiếp)")
+        if not (0 < sum(p[1] for p in phan) <= 16):
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Tổng giờ tăng ca phải trong khoảng 0–16h")
     else:
-        db.add(NgayNghiOt(nhan_vien_id=nv_id, ngay=data.ngay, loai=loai, so_gio=data.so_gio,
-                          so_ngay=0, ghi_chu=data.ghi_chu, nguoi_tao=nv_id,
-                          trang_thai="CHO_DUYET"))
+        # tương thích cách cũ: gửi thẳng loai + so_gio
+        loai_cu = (data.loai or "").upper()
+        if loai_cu not in _WT_OT:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Thiếu khung giờ đăng ký (Từ / Đến)")
+        gio = float(data.so_gio or 0)
+        if not (0 < gio <= 16):
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Số giờ tăng ca phải trong khoảng 0–16h")
+        phan = [(data.ngay, gio, None)]
+    ket_qua = []
+    for ng, gio, khung in phan:
+        loai = _wt_loai_ngay(ng) if (data.tu_gio is not None) else (data.loai or "").upper()
+        cu = db.query(NgayNghiOt).filter_by(nhan_vien_id=nv_id, ngay=ng, loai=loai).first()
+        if cu is not None and cu.trang_thai == "DA_DUYET":
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                f"Ngày {ng:%d/%m} đã có tăng ca loại này ĐÃ DUYỆT — liên hệ quản lý nếu cần sửa.")
+        gc = " · ".join(x for x in ((data.ghi_chu or "").strip(), khung) if x)[:300] or None
+        if cu is not None:
+            cu.so_gio = gio; cu.ghi_chu = gc
+            cu.trang_thai = "CHO_DUYET"; cu.ly_do_tu_choi = None; cu.nguoi_duyet = None
+        else:
+            db.add(NgayNghiOt(nhan_vien_id=nv_id, ngay=ng, loai=loai, so_gio=gio,
+                              so_ngay=0, ghi_chu=gc, nguoi_tao=nv_id, trang_thai="CHO_DUYET"))
+        ket_qua.append({"ngay": str(ng), "loai": loai, "so_gio": gio})
     ghi_audit(db, nd.id, "DANG_KY_OT", "ngay_nghi_ot", nv_id,
-              moi={"ngay": str(data.ngay), "loai": loai, "so_gio": gio})
+              moi={"phan": ket_qua})
     db.commit()
-    return {"ok": True, "trang_thai": "CHO_DUYET"}
+    return {"ok": True, "trang_thai": "CHO_DUYET", "phan": ket_qua}
 
 
 @router.get("/working-time/cua-toi")

@@ -852,10 +852,16 @@ class ChiTieuVao(BaseModel):
 
 
 class DangKyOtVao(BaseModel):
-    """Nhân viên tự đăng ký tăng ca (chờ duyệt)."""
+    """Nhân viên tự đăng ký tăng ca (chờ duyệt).
+    Cách mới: khai Từ (tu_gio + ngay) → Đến (den_gio + den_ngay) — loại và số giờ
+    tự tính theo lịch (ngày thường / Chủ nhật / lịch nghỉ lễ nhà nước).
+    Cách cũ (loai + so_gio) vẫn nhận để tương thích."""
     ngay: date
-    loai: str                          # OT_THUONG | OT_CUOI_TUAN | OT_LE
-    so_gio: Decimal
+    tu_gio: int | None = None          # 0–23
+    den_gio: int | None = None         # 1–24
+    den_ngay: date | None = None       # ca qua đêm: ngày kế tiếp
+    loai: str | None = None
+    so_gio: Decimal | None = None
     ghi_chu: str | None = None
 
 
