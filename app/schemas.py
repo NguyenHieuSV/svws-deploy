@@ -851,6 +851,16 @@ class ChiTieuVao(BaseModel):
     ghi_chu: str | None = None
 
 
+class NgayNghiOtVao(BaseModel):
+    nhan_vien_id: int
+    ngay: date
+    den_ngay: date | None = None      # nghỉ nhiều ngày: ghi từng ngày trong khoảng
+    loai: str                          # NGHI_PHEP | KHONG_PHEP | NGHI_LE | VIEC_RIENG_* | NGHI_BU | OT_*
+    so_gio: Decimal | None = None      # giờ tăng ca
+    so_ngay: Decimal | None = None     # 0.5 hoặc 1 (nghỉ 1 ngày)
+    ghi_chu: str | None = None
+
+
 class DuToanVao(BaseModel):
     loai: str | None = None          # THIET_BI | VAT_TU | NHAN_SU | CHI_PHI_KHAC
     ten: str | None = None

@@ -529,6 +529,19 @@ class NghiPhep(Base):
     nguoi_duyet: Mapped[int | None] = mapped_column(ForeignKey("nhan_vien.id"), nullable=True)
 
 
+class NgayNghiOt(Base):
+    """Working time & Overtime — mỗi dòng là 1 ngày nghỉ hoặc 1 lần tăng ca của 1 NV."""
+    __tablename__ = "ngay_nghi_ot"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    nhan_vien_id: Mapped[int] = mapped_column(ForeignKey("nhan_vien.id", ondelete="CASCADE"))
+    ngay: Mapped[date] = mapped_column(Date)
+    loai: Mapped[str] = mapped_column(Text)
+    so_gio: Mapped[Decimal] = mapped_column(Numeric(5, 2), default=0)
+    so_ngay: Mapped[Decimal] = mapped_column(Numeric(4, 2), default=0)
+    ghi_chu: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    nguoi_tao: Mapped[int | None] = mapped_column(ForeignKey("nhan_vien.id"), nullable=True)
+
+
 class BangLuong(Base):
     __tablename__ = "bang_luong"
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)

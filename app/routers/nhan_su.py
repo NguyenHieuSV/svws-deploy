@@ -16,9 +16,11 @@ from ..deps import nhan_vien_id_cua
 from ..audit import ghi_audit
 from ..luong_service import tinh_luong
 from ..hach_toan import hach_toan_luong
-from ..models import (NguoiDung, NhanVien, ChamCong, NghiPhep, BangLuong, KyLuong, ThamSoLuong)
+from ..models import (NguoiDung, NhanVien, ChamCong, NghiPhep, BangLuong, KyLuong, ThamSoLuong,
+                      NgayNghiOt)
 from ..schemas import (NhanVienRa, ChamCongVao, NghiPhepVao, TinhLuongVao, BangLuongRa,
-                        HoSoLuongVao, KyLuongVao, ChamCongLuongVao, ThamSoLuongVao, ChamCongImportVao)
+                        HoSoLuongVao, KyLuongVao, ChamCongLuongVao, ThamSoLuongVao, ChamCongImportVao,
+                        NgayNghiOtVao)
 import json as _json
 from datetime import date, datetime
 from ..email_gateway import lay_email_provider
@@ -378,6 +380,177 @@ def import_cham_cong(thang: str, data: ChamCongImportVao, db: Session = Depends(
     ghi_audit(db, nd.id, "IMPORT", "cham_cong", None, moi={"thang": thang, "so_ban_ghi": cap_nhat})
     db.commit()
     return {"thang": thang, "cap_nhat": cap_nhat, "khong_tim_thay": khong_thay}
+
+
+# ===================== WORKING TIME & OVERTIME (BLLĐ 2019) =====================
+_WT_OT = ("OT_THUONG", "OT_CUOI_TUAN", "OT_LE")
+_WT_NGHI = ("NGHI_PHEP", "KHONG_PHEP", "NGHI_LE",
+            "VIEC_RIENG_CO_LUONG", "VIEC_RIENG_KHONG_LUONG", "NGHI_BU")
+# Trần luật: Đ105 (8h/ngày), Đ107 (OT ≤50%/ngày = 4h, ≤40h/tháng, ≤200h/năm — đặc thù 300h),
+# Đ113 (phép năm 12 ngày), Đ125 (không phép ≥5 ngày/tháng hoặc ≥20 ngày/năm → căn cứ sa thải)
+_WT_OT_NGAY, _WT_OT_THANG, _WT_OT_NAM, _WT_PHEP_NAM = 4, 40, 200, 12
+
+
+def _wt_canh_bao(db, nv_id: int, ngay):
+    """Cảnh báo vượt trần luật cho 1 NV tính đến tháng của `ngay`."""
+    from datetime import date as _d
+    y, m = ngay.year, ngay.month
+    dau_thang = _d(y, m, 1)
+    cuoi_thang = _d(y + 1, 1, 1) if m == 12 else _d(y, m + 1, 1)
+    rows = db.query(NgayNghiOt).filter(NgayNghiOt.nhan_vien_id == nv_id,
+                                       NgayNghiOt.ngay >= _d(y, 1, 1),
+                                       NgayNghiOt.ngay <= _d(y, 12, 31)).all()
+    cb = []
+    ot_ngay = sum(float(r.so_gio or 0) for r in rows if r.loai in _WT_OT and r.ngay == ngay)
+    ot_thang = sum(float(r.so_gio or 0) for r in rows
+                   if r.loai in _WT_OT and dau_thang <= r.ngay < cuoi_thang)
+    ot_nam = sum(float(r.so_gio or 0) for r in rows if r.loai in _WT_OT)
+    phep_nam = sum(float(r.so_ngay or 0) for r in rows if r.loai == "NGHI_PHEP")
+    kp_thang = sum(float(r.so_ngay or 0) for r in rows
+                   if r.loai == "KHONG_PHEP" and dau_thang <= r.ngay < cuoi_thang)
+    kp_nam = sum(float(r.so_ngay or 0) for r in rows if r.loai == "KHONG_PHEP")
+    if ot_ngay > _WT_OT_NGAY:
+        cb.append(f"OT {ot_ngay:g}h trong ngày {ngay:%d/%m} — vượt 50% giờ làm bình thường (tối đa 4h/ngày, Đ107)")
+    if ot_thang > _WT_OT_THANG:
+        cb.append(f"OT tháng {m:02d} đã {ot_thang:g}h — vượt trần 40h/tháng (Đ107)")
+    if ot_nam > 300:
+        cb.append(f"OT năm {y} đã {ot_nam:g}h — vượt cả trần 300h/năm ngành đặc thù (Đ107)")
+    elif ot_nam > _WT_OT_NAM:
+        cb.append(f"OT năm {y} đã {ot_nam:g}h — vượt trần 200h/năm (Đ107; tối đa 300h ngành đặc thù có thông báo)")
+    if phep_nam > _WT_PHEP_NAM:
+        cb.append(f"Đã nghỉ phép {phep_nam:g} ngày trong năm — vượt 12 ngày chuẩn (Đ113; kiểm tra thâm niên +1 ngày/5 năm, Đ114)")
+    if kp_thang >= 5:
+        cb.append(f"Nghỉ không phép {kp_thang:g} ngày trong tháng — đủ căn cứ xử lý kỷ luật sa thải (≥5 ngày cộng dồn/30 ngày, Đ125)")
+    elif kp_nam >= 20:
+        cb.append(f"Nghỉ không phép {kp_nam:g} ngày trong năm — đủ căn cứ xử lý kỷ luật sa thải (≥20 ngày cộng dồn/365 ngày, Đ125)")
+    return cb
+
+
+@router.get("/working-time")
+def ds_working_time(thang: str | None = None, db: Session = Depends(get_db),
+                    _=Depends(yeu_cau(MODULE, "XEM"))):
+    """Bảng kiểm soát Working time & Overtime: chi tiết tháng + tổng hợp năm/tháng
+    từng NV kèm cảnh báo vượt trần Bộ luật Lao động 2019."""
+    from datetime import date as _d
+    thang = thang or _d.today().strftime("%Y-%m")
+    try:
+        y, m = int(thang[:4]), int(thang[5:7])
+        dau_thang = _d(y, m, 1)
+    except (ValueError, IndexError):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Tháng không hợp lệ (YYYY-MM)")
+    cuoi_thang = _d(y + 1, 1, 1) if m == 12 else _d(y, m + 1, 1)
+    rows_nam = db.query(NgayNghiOt).filter(NgayNghiOt.ngay >= _d(y, 1, 1),
+                                           NgayNghiOt.ngay <= _d(y, 12, 31)).all()
+    nvs = [v for v in db.query(NhanVien).order_by(NhanVien.id).all()
+           if (v.trang_thai or "DANG_LAM") == "DANG_LAM"]
+    ten = {v.id: v for v in nvs}
+    danh_sach = [{"id": r.id, "nhan_vien_id": r.nhan_vien_id,
+                  "ma": ten[r.nhan_vien_id].ma if r.nhan_vien_id in ten else None,
+                  "ho_ten": ten[r.nhan_vien_id].ho_ten if r.nhan_vien_id in ten else f"NV #{r.nhan_vien_id}",
+                  "ngay": str(r.ngay), "loai": r.loai, "so_gio": _f(r.so_gio),
+                  "so_ngay": _f(r.so_ngay), "ghi_chu": r.ghi_chu}
+                 for r in sorted(rows_nam, key=lambda x: (x.ngay, x.nhan_vien_id))
+                 if dau_thang <= r.ngay < cuoi_thang]
+    tong_hop = []
+    for v in nvs:
+        rs = [r for r in rows_nam if r.nhan_vien_id == v.id]
+        thang_rs = [r for r in rs if dau_thang <= r.ngay < cuoi_thang]
+        gio = lambda lst, lo: sum(float(r.so_gio or 0) for r in lst if r.loai == lo)
+        ngay_ = lambda lst, lo: sum(float(r.so_ngay or 0) for r in lst if r.loai == lo)
+        ot_thang = sum(gio(thang_rs, lo) for lo in _WT_OT)
+        ot_nam = sum(gio(rs, lo) for lo in _WT_OT)
+        cb = []
+        if ot_thang > _WT_OT_THANG:
+            cb.append(f"OT tháng {ot_thang:g}h > 40h (Đ107)")
+        if ot_nam > 300:
+            cb.append(f"OT năm {ot_nam:g}h > 300h (Đ107)")
+        elif ot_nam > _WT_OT_NAM:
+            cb.append(f"OT năm {ot_nam:g}h > 200h (Đ107)")
+        if ngay_(rs, "NGHI_PHEP") > _WT_PHEP_NAM:
+            cb.append(f"Phép {ngay_(rs, 'NGHI_PHEP'):g} ngày > 12 (Đ113)")
+        if ngay_(thang_rs, "KHONG_PHEP") >= 5:
+            cb.append("Không phép ≥5 ngày/tháng — căn cứ sa thải (Đ125)")
+        elif ngay_(rs, "KHONG_PHEP") >= 20:
+            cb.append("Không phép ≥20 ngày/năm — căn cứ sa thải (Đ125)")
+        tong_hop.append({
+            "nhan_vien_id": v.id, "ma": v.ma, "ho_ten": v.ho_ten, "chuc_danh": v.chuc_danh,
+            "phep_nam": ngay_(rs, "NGHI_PHEP"), "quota_phep": _WT_PHEP_NAM,
+            "khong_phep_thang": ngay_(thang_rs, "KHONG_PHEP"),
+            "khong_phep_nam": ngay_(rs, "KHONG_PHEP"),
+            "viec_rieng_nam": ngay_(rs, "VIEC_RIENG_CO_LUONG") + ngay_(rs, "VIEC_RIENG_KHONG_LUONG"),
+            "nghi_le_nam": ngay_(rs, "NGHI_LE"), "nghi_bu_nam": ngay_(rs, "NGHI_BU"),
+            "ot_thuong": gio(thang_rs, "OT_THUONG"), "ot_cuoi_tuan": gio(thang_rs, "OT_CUOI_TUAN"),
+            "ot_le": gio(thang_rs, "OT_LE"), "ot_thang": ot_thang, "ot_nam": ot_nam,
+            "canh_bao": cb})
+    return {"thang": thang, "danh_sach": danh_sach, "tong_hop": tong_hop}
+
+
+@router.post("/working-time", status_code=201)
+def ghi_working_time(data: NgayNghiOtVao, db: Session = Depends(get_db),
+                     nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    """Ghi nhận nghỉ / tăng ca. Nghỉ nhiều ngày (den_ngay) → tạo từng dòng/ngày, bỏ Chủ nhật.
+    Trùng (NV + ngày + loại) → cập nhật dòng cũ. Trả kèm cảnh báo vượt trần luật."""
+    from datetime import timedelta
+    nv = db.get(NhanVien, data.nhan_vien_id)
+    if nv is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy nhân viên")
+    loai = (data.loai or "").upper()
+    if loai not in _WT_OT + _WT_NGHI:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Loại không hợp lệ")
+    la_ot = loai in _WT_OT
+    if la_ot:
+        gio = float(data.so_gio or 0)
+        if not (0 < gio <= 16):
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Nhập số giờ tăng ca (0–16h)")
+        cac_ngay = [data.ngay]
+    else:
+        den = data.den_ngay or data.ngay
+        if den < data.ngay:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Đến ngày phải sau Từ ngày")
+        if (den - data.ngay).days > 60:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Khoảng nghỉ tối đa 60 ngày/lần ghi")
+        cac_ngay = [data.ngay + timedelta(days=i) for i in range((den - data.ngay).days + 1)]
+        if len(cac_ngay) > 1:            # nghỉ dài ngày: bỏ Chủ nhật (ngày nghỉ hằng tuần)
+            cac_ngay = [d for d in cac_ngay if d.weekday() != 6]
+    so_ngay = float(data.so_ngay or 1)
+    if not la_ot and so_ngay not in (0.5, 1):
+        so_ngay = 1
+    them, cap_nhat = 0, 0
+    for d in cac_ngay:
+        cu = db.query(NgayNghiOt).filter_by(nhan_vien_id=nv.id, ngay=d, loai=loai).first()
+        if cu is not None:
+            cu.so_gio = data.so_gio or 0
+            cu.so_ngay = so_ngay if not la_ot else 0
+            cu.ghi_chu = data.ghi_chu
+            cap_nhat += 1
+        else:
+            db.add(NgayNghiOt(nhan_vien_id=nv.id, ngay=d, loai=loai,
+                              so_gio=(data.so_gio or 0) if la_ot else 0,
+                              so_ngay=0 if la_ot else so_ngay, ghi_chu=data.ghi_chu,
+                              nguoi_tao=nhan_vien_id_cua(db, nd.id)))
+            them += 1
+    db.flush()
+    canh_bao = _wt_canh_bao(db, nv.id, data.ngay)
+    # gợi ý chọn đúng loại theo thứ trong tuần (Chủ nhật = ngày nghỉ hằng tuần)
+    if la_ot and loai == "OT_THUONG" and data.ngay.weekday() == 6:
+        canh_bao.append("Ngày này là Chủ nhật — tăng ca ngày nghỉ hằng tuần phải trả ≥200% (Đ98): chọn loại Tăng ca cuối tuần")
+    if la_ot and loai == "OT_CUOI_TUAN" and data.ngay.weekday() < 5:
+        canh_bao.append("Ngày này là ngày làm việc trong tuần — kiểm tra lại loại tăng ca (ngày thường ≥150%)")
+    ghi_audit(db, nd.id, "TAO", "ngay_nghi_ot", nv.id,
+              moi={"loai": loai, "ngay": str(data.ngay), "so_dong": them + cap_nhat})
+    db.commit()
+    return {"them": them, "cap_nhat": cap_nhat, "canh_bao": canh_bao}
+
+
+@router.delete("/working-time/{wt_id}")
+def xoa_working_time(wt_id: int, db: Session = Depends(get_db),
+                     nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
+    r = db.get(NgayNghiOt, wt_id)
+    if r is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy bản ghi")
+    ghi_audit(db, nd.id, "XOA", "ngay_nghi_ot", wt_id, cu={"loai": r.loai, "ngay": str(r.ngay)})
+    db.delete(r); db.commit()
+    return {"da_xoa": True}
 
 
 # ----- Hồ sơ lương -----
