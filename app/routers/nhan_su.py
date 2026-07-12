@@ -396,6 +396,63 @@ def ds_ho_so(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
     return out
 
 
+@router.get("/ho-so-xuat-excel")
+def xuat_excel_ho_so(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
+    """Xuất bảng hồ sơ lương nhân viên ra Excel."""
+    import io
+    from datetime import date as _date
+    from fastapi.responses import StreamingResponse
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from openpyxl.utils import get_column_letter
+
+    wb = Workbook(); ws = wb.active; ws.title = "Hồ sơ lương"
+    hdr_fill = PatternFill("solid", fgColor="0E7490")
+    hdr_font = Font(bold=True, color="FFFFFF")
+    bold = Font(bold=True)
+    center = Alignment(horizontal="center", vertical="center")
+    thin = Border(*[Side(style="thin", color="D7DEE3")] * 4)
+    money = "#,##0"
+
+    ws.merge_cells("A1:P1")
+    ws["A1"] = "HỒ SƠ LƯƠNG NHÂN VIÊN"
+    ws["A1"].font = Font(bold=True, size=15, color="0E7490"); ws["A1"].alignment = center
+    ws.append(["Ngày lập:", _date.today().strftime("%d/%m/%Y")])
+    ws.cell(row=2, column=1).font = bold
+    ws.append([])
+
+    head = ["STT", "Mã NV", "Họ tên", "Chức danh", "Trạng thái", "Lương cơ bản",
+            "Lương đóng BH", "PC ăn", "PC đi lại", "PC điện thoại", "PC trách nhiệm",
+            "Tổng phụ cấp", "Phụ thuộc", "Email", "Số tài khoản", "Ngân hàng"]
+    ws.append(head)
+    hr = ws.max_row
+    for c in ws[hr]:
+        c.fill = hdr_fill; c.font = hdr_font; c.alignment = center; c.border = thin
+
+    for i, nv in enumerate(db.query(NhanVien).order_by(NhanVien.id).all(), start=1):
+        pc = [_f(nv.phu_cap_an) or 0, _f(nv.phu_cap_di_lai) or 0,
+              _f(nv.phu_cap_dien_thoai) or 0, _f(nv.phu_cap_trach_nhiem) or 0]
+        ws.append([i, nv.ma or nv.id, nv.ho_ten, nv.chuc_danh or "", nv.trang_thai or "",
+                   _f(nv.luong_co_ban) or 0, _f(nv.luong_dong_bh) or _f(nv.luong_co_ban) or 0,
+                   pc[0], pc[1], pc[2], pc[3], sum(pc), nv.so_phu_thuoc or 0,
+                   nv.email or "", nv.so_tai_khoan or "", nv.ngan_hang or ""])
+        rr = ws.max_row
+        for c in ws[rr]:
+            c.border = thin
+        for col in range(6, 13):
+            ws.cell(row=rr, column=col).number_format = money
+
+    for w, i in zip([6, 10, 26, 22, 12, 14, 14, 11, 11, 12, 13, 13, 10, 26, 16, 14], range(1, 17)):
+        ws.column_dimensions[get_column_letter(i)].width = w
+    ws.freeze_panes = f"A{hr + 1}"
+
+    buf = io.BytesIO(); wb.save(buf); buf.seek(0)
+    fn = f"ho-so-luong_{_date.today():%Y%m%d}.xlsx"
+    return StreamingResponse(
+        buf, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{fn}"'})
+
+
 @router.put("/nhan-vien/{nv_id}/ho-so")
 def cap_nhat_ho_so(nv_id: int, data: HoSoLuongVao, db: Session = Depends(get_db),
                    nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
