@@ -851,6 +851,18 @@ class ChiTieuVao(BaseModel):
     ghi_chu: str | None = None
 
 
+class DangKyOtVao(BaseModel):
+    """Nhân viên tự đăng ký tăng ca (chờ duyệt)."""
+    ngay: date
+    loai: str                          # OT_THUONG | OT_CUOI_TUAN | OT_LE
+    so_gio: Decimal
+    ghi_chu: str | None = None
+
+
+class TuChoiOtVao(BaseModel):
+    ly_do: str | None = None
+
+
 class NgayNghiOtVao(BaseModel):
     nhan_vien_id: int
     ngay: date

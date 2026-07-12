@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 from ..database import get_db
 from ..rbac import yeu_cau, chi_vai_tro
-from ..deps import nhan_vien_id_cua
+from ..deps import nhan_vien_id_cua, lay_nguoi_dung_hien_tai
 from ..audit import ghi_audit
 from ..luong_service import tinh_luong
 from ..hach_toan import hach_toan_luong
@@ -20,7 +20,7 @@ from ..models import (NguoiDung, NhanVien, ChamCong, NghiPhep, BangLuong, KyLuon
                       NgayNghiOt)
 from ..schemas import (NhanVienRa, ChamCongVao, NghiPhepVao, TinhLuongVao, BangLuongRa,
                         HoSoLuongVao, KyLuongVao, ChamCongLuongVao, ThamSoLuongVao, ChamCongImportVao,
-                        NgayNghiOtVao)
+                        NgayNghiOtVao, DangKyOtVao, TuChoiOtVao)
 import json as _json
 from datetime import date, datetime
 from ..email_gateway import lay_email_provider
@@ -398,6 +398,7 @@ def _wt_canh_bao(db, nv_id: int, ngay):
     dau_thang = _d(y, m, 1)
     cuoi_thang = _d(y + 1, 1, 1) if m == 12 else _d(y, m + 1, 1)
     rows = db.query(NgayNghiOt).filter(NgayNghiOt.nhan_vien_id == nv_id,
+                                       NgayNghiOt.trang_thai == "DA_DUYET",
                                        NgayNghiOt.ngay >= _d(y, 1, 1),
                                        NgayNghiOt.ngay <= _d(y, 12, 31)).all()
     cb = []
@@ -439,8 +440,9 @@ def ds_working_time(thang: str | None = None, db: Session = Depends(get_db),
     except (ValueError, IndexError):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Tháng không hợp lệ (YYYY-MM)")
     cuoi_thang = _d(y + 1, 1, 1) if m == 12 else _d(y, m + 1, 1)
-    rows_nam = db.query(NgayNghiOt).filter(NgayNghiOt.ngay >= _d(y, 1, 1),
-                                           NgayNghiOt.ngay <= _d(y, 12, 31)).all()
+    rows_ca = db.query(NgayNghiOt).filter(NgayNghiOt.ngay >= _d(y, 1, 1),
+                                          NgayNghiOt.ngay <= _d(y, 12, 31)).all()
+    rows_nam = [r for r in rows_ca if r.trang_thai == "DA_DUYET"]
     nvs = [v for v in db.query(NhanVien).order_by(NhanVien.id).all()
            if (v.trang_thai or "DANG_LAM") == "DANG_LAM"]
     ten = {v.id: v for v in nvs}
@@ -448,9 +450,17 @@ def ds_working_time(thang: str | None = None, db: Session = Depends(get_db),
                   "ma": ten[r.nhan_vien_id].ma if r.nhan_vien_id in ten else None,
                   "ho_ten": ten[r.nhan_vien_id].ho_ten if r.nhan_vien_id in ten else f"NV #{r.nhan_vien_id}",
                   "ngay": str(r.ngay), "loai": r.loai, "so_gio": _f(r.so_gio),
-                  "so_ngay": _f(r.so_ngay), "ghi_chu": r.ghi_chu}
-                 for r in sorted(rows_nam, key=lambda x: (x.ngay, x.nhan_vien_id))
+                  "so_ngay": _f(r.so_ngay), "ghi_chu": r.ghi_chu,
+                  "trang_thai": r.trang_thai, "ly_do_tu_choi": r.ly_do_tu_choi}
+                 for r in sorted(rows_ca, key=lambda x: (x.ngay, x.nhan_vien_id))
                  if dau_thang <= r.ngay < cuoi_thang]
+    # danh sách chờ duyệt (mọi tháng) cho người có quyền duyệt
+    cho_duyet = [{"id": r.id, "nhan_vien_id": r.nhan_vien_id,
+                  "ho_ten": ten[r.nhan_vien_id].ho_ten if r.nhan_vien_id in ten else f"NV #{r.nhan_vien_id}",
+                  "ngay": str(r.ngay), "loai": r.loai, "so_gio": _f(r.so_gio),
+                  "ghi_chu": r.ghi_chu}
+                 for r in sorted((x for x in rows_ca if x.trang_thai == "CHO_DUYET"),
+                                 key=lambda x: x.ngay, reverse=True)][:100]
     tong_hop = []
     for v in nvs:
         rs = [r for r in rows_nam if r.nhan_vien_id == v.id]
@@ -482,7 +492,7 @@ def ds_working_time(thang: str | None = None, db: Session = Depends(get_db),
             "ot_thuong": gio(thang_rs, "OT_THUONG"), "ot_cuoi_tuan": gio(thang_rs, "OT_CUOI_TUAN"),
             "ot_le": gio(thang_rs, "OT_LE"), "ot_thang": ot_thang, "ot_nam": ot_nam,
             "canh_bao": cb})
-    return {"thang": thang, "danh_sach": danh_sach, "tong_hop": tong_hop}
+    return {"thang": thang, "danh_sach": danh_sach, "tong_hop": tong_hop, "cho_duyet": cho_duyet}
 
 
 @router.post("/working-time", status_code=201)
@@ -515,6 +525,7 @@ def ghi_working_time(data: NgayNghiOtVao, db: Session = Depends(get_db),
     so_ngay = float(data.so_ngay or 1)
     if not la_ot and so_ngay not in (0.5, 1):
         so_ngay = 1
+    nguoi_ghi = nhan_vien_id_cua(db, nd.id)
     them, cap_nhat = 0, 0
     for d in cac_ngay:
         cu = db.query(NgayNghiOt).filter_by(nhan_vien_id=nv.id, ngay=d, loai=loai).first()
@@ -522,12 +533,16 @@ def ghi_working_time(data: NgayNghiOtVao, db: Session = Depends(get_db),
             cu.so_gio = data.so_gio or 0
             cu.so_ngay = so_ngay if not la_ot else 0
             cu.ghi_chu = data.ghi_chu
+            cu.trang_thai = "DA_DUYET"      # HR ghi trực tiếp = đã duyệt
+            cu.nguoi_duyet = nguoi_ghi
+            cu.ly_do_tu_choi = None
             cap_nhat += 1
         else:
             db.add(NgayNghiOt(nhan_vien_id=nv.id, ngay=d, loai=loai,
                               so_gio=(data.so_gio or 0) if la_ot else 0,
                               so_ngay=0 if la_ot else so_ngay, ghi_chu=data.ghi_chu,
-                              nguoi_tao=nhan_vien_id_cua(db, nd.id)))
+                              nguoi_tao=nguoi_ghi, trang_thai="DA_DUYET",
+                              nguoi_duyet=nguoi_ghi))
             them += 1
     db.flush()
     canh_bao = _wt_canh_bao(db, nv.id, data.ngay)
@@ -551,6 +566,112 @@ def xoa_working_time(wt_id: int, db: Session = Depends(get_db),
     ghi_audit(db, nd.id, "XOA", "ngay_nghi_ot", wt_id, cu={"loai": r.loai, "ngay": str(r.ngay)})
     db.delete(r); db.commit()
     return {"da_xoa": True}
+
+
+# ----- Nhân viên tự đăng ký tăng ca → chờ duyệt (chỉ cần đăng nhập) -----
+def _wt_nv_cua_toi(db, nd) -> int:
+    nv_id = nhan_vien_id_cua(db, nd.id)
+    if not nv_id:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Tài khoản của bạn chưa gắn với hồ sơ nhân viên — nhờ HR gắn ở Hồ sơ lương (nút 🔑 Tạo tài khoản).")
+    return nv_id
+
+
+@router.post("/working-time/dang-ky", status_code=201)
+def dang_ky_ot(data: DangKyOtVao, db: Session = Depends(get_db),
+               nd: NguoiDung = Depends(lay_nguoi_dung_hien_tai)):
+    """NV tự đăng ký tăng ca cho CHÍNH MÌNH — vào hàng chờ duyệt (Đ107: OT phải có sự đồng ý)."""
+    nv_id = _wt_nv_cua_toi(db, nd)
+    loai = (data.loai or "").upper()
+    if loai not in _WT_OT:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Chỉ đăng ký loại tăng ca (ngày thường / cuối tuần / lễ)")
+    gio = float(data.so_gio or 0)
+    if not (0 < gio <= 16):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Số giờ tăng ca phải trong khoảng 0–16h")
+    cu = db.query(NgayNghiOt).filter_by(nhan_vien_id=nv_id, ngay=data.ngay, loai=loai).first()
+    if cu is not None and cu.trang_thai == "DA_DUYET":
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            f"Ngày {data.ngay:%d/%m} đã có tăng ca loại này ĐÃ DUYỆT — liên hệ quản lý nếu cần sửa.")
+    if cu is not None:
+        cu.so_gio = data.so_gio; cu.ghi_chu = data.ghi_chu
+        cu.trang_thai = "CHO_DUYET"; cu.ly_do_tu_choi = None; cu.nguoi_duyet = None
+    else:
+        db.add(NgayNghiOt(nhan_vien_id=nv_id, ngay=data.ngay, loai=loai, so_gio=data.so_gio,
+                          so_ngay=0, ghi_chu=data.ghi_chu, nguoi_tao=nv_id,
+                          trang_thai="CHO_DUYET"))
+    ghi_audit(db, nd.id, "DANG_KY_OT", "ngay_nghi_ot", nv_id,
+              moi={"ngay": str(data.ngay), "loai": loai, "so_gio": gio})
+    db.commit()
+    return {"ok": True, "trang_thai": "CHO_DUYET"}
+
+
+@router.get("/working-time/cua-toi")
+def wt_cua_toi(db: Session = Depends(get_db),
+               nd: NguoiDung = Depends(lay_nguoi_dung_hien_tai)):
+    """Đăng ký tăng ca của chính mình trong năm + tổng OT đã duyệt tháng này / năm nay."""
+    from datetime import date as _d
+    nv_id = _wt_nv_cua_toi(db, nd)
+    hom_nay = _d.today()
+    rows = db.query(NgayNghiOt).filter(
+        NgayNghiOt.nhan_vien_id == nv_id, NgayNghiOt.loai.in_(_WT_OT),
+        NgayNghiOt.ngay >= _d(hom_nay.year, 1, 1)).order_by(NgayNghiOt.ngay.desc()).all()
+    thang_nay = hom_nay.strftime("%Y-%m")
+    ot_thang = sum(float(r.so_gio or 0) for r in rows
+                   if r.trang_thai == "DA_DUYET" and str(r.ngay)[:7] == thang_nay)
+    ot_nam = sum(float(r.so_gio or 0) for r in rows if r.trang_thai == "DA_DUYET")
+    return {"danh_sach": [{"id": r.id, "ngay": str(r.ngay), "loai": r.loai,
+                           "so_gio": _f(r.so_gio), "ghi_chu": r.ghi_chu,
+                           "trang_thai": r.trang_thai, "ly_do_tu_choi": r.ly_do_tu_choi}
+                          for r in rows],
+            "ot_thang": ot_thang, "ot_nam": ot_nam}
+
+
+@router.delete("/working-time/cua-toi/{wt_id}")
+def huy_dang_ky_ot(wt_id: int, db: Session = Depends(get_db),
+                   nd: NguoiDung = Depends(lay_nguoi_dung_hien_tai)):
+    """NV hủy đăng ký tăng ca của mình khi còn CHỜ DUYỆT."""
+    nv_id = _wt_nv_cua_toi(db, nd)
+    r = db.get(NgayNghiOt, wt_id)
+    if r is None or r.nhan_vien_id != nv_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đăng ký của bạn")
+    if r.trang_thai != "CHO_DUYET":
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Chỉ hủy được đăng ký còn chờ duyệt")
+    db.delete(r); db.commit()
+    return {"da_huy": True}
+
+
+@router.post("/working-time/{wt_id}/duyet")
+def duyet_ot(wt_id: int, db: Session = Depends(get_db),
+             nd: NguoiDung = Depends(yeu_cau(MODULE, "DUYET"))):
+    r = db.get(NgayNghiOt, wt_id)
+    if r is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đăng ký")
+    if r.trang_thai != "CHO_DUYET":
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Đăng ký này không ở trạng thái chờ duyệt")
+    r.trang_thai = "DA_DUYET"
+    r.nguoi_duyet = nhan_vien_id_cua(db, nd.id)
+    db.flush()
+    canh_bao = _wt_canh_bao(db, r.nhan_vien_id, r.ngay)
+    ghi_audit(db, nd.id, "DUYET", "ngay_nghi_ot", wt_id,
+              moi={"ngay": str(r.ngay), "so_gio": _f(r.so_gio)})
+    db.commit()
+    return {"ok": True, "canh_bao": canh_bao}
+
+
+@router.post("/working-time/{wt_id}/tu-choi")
+def tu_choi_ot(wt_id: int, data: TuChoiOtVao = TuChoiOtVao(), db: Session = Depends(get_db),
+               nd: NguoiDung = Depends(yeu_cau(MODULE, "DUYET"))):
+    r = db.get(NgayNghiOt, wt_id)
+    if r is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đăng ký")
+    if r.trang_thai != "CHO_DUYET":
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Đăng ký này không ở trạng thái chờ duyệt")
+    r.trang_thai = "TU_CHOI"
+    r.nguoi_duyet = nhan_vien_id_cua(db, nd.id)
+    r.ly_do_tu_choi = (data.ly_do or "").strip()[:300] or None
+    ghi_audit(db, nd.id, "TU_CHOI", "ngay_nghi_ot", wt_id, moi={"ly_do": r.ly_do_tu_choi})
+    db.commit()
+    return {"ok": True}
 
 
 # ----- Hồ sơ lương -----

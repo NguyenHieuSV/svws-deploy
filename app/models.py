@@ -540,6 +540,9 @@ class NgayNghiOt(Base):
     so_ngay: Mapped[Decimal] = mapped_column(Numeric(4, 2), default=0)
     ghi_chu: Mapped[str | None] = mapped_column(String(300), nullable=True)
     nguoi_tao: Mapped[int | None] = mapped_column(ForeignKey("nhan_vien.id"), nullable=True)
+    trang_thai: Mapped[str] = mapped_column(Text, default="DA_DUYET")   # CHO_DUYET | DA_DUYET | TU_CHOI
+    nguoi_duyet: Mapped[int | None] = mapped_column(ForeignKey("nhan_vien.id"), nullable=True)
+    ly_do_tu_choi: Mapped[str | None] = mapped_column(String(300), nullable=True)
 
 
 class BangLuong(Base):
