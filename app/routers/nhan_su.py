@@ -7,7 +7,7 @@ Tính lương (BHXH/TNCN) tách trong luong_service; bút toán trong hach_toan.
 """
 from decimal import Decimal
 from datetime import date
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from ..database import get_db
@@ -451,6 +451,140 @@ def xuat_excel_ho_so(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "X
     return StreamingResponse(
         buf, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f'attachment; filename="{fn}"'})
+
+
+def _hs_chuan(s) -> str:
+    """Chuẩn hóa tiêu đề cột Excel: bỏ dấu, thường, chỉ giữ chữ + số."""
+    import re as _re
+    import unicodedata
+    s = str(s or "").replace("Đ", "D").replace("đ", "d")
+    s = "".join(c for c in unicodedata.normalize("NFD", s) if unicodedata.category(c) != "Mn")
+    return _re.sub(r"[^a-z0-9]+", " ", s.lower()).strip()
+
+
+_HS_COT = {   # tên cột chuẩn hóa -> trường hồ sơ lương
+    "ma nv": "ma", "manv": "ma", "ma nhan vien": "ma",
+    "ho ten": "ho_ten", "ho va ten": "ho_ten", "ten nhan vien": "ho_ten",
+    "chuc danh": "chuc_danh", "vi tri": "chuc_danh",
+    "luong co ban": "luong_co_ban", "luong cb": "luong_co_ban",
+    "luong dong bh": "luong_dong_bh", "luong bh": "luong_dong_bh",
+    "luong dong bao hiem": "luong_dong_bh",
+    "pc an": "phu_cap_an", "phu cap an": "phu_cap_an",
+    "pc di lai": "phu_cap_di_lai", "phu cap di lai": "phu_cap_di_lai",
+    "pc dien thoai": "phu_cap_dien_thoai", "phu cap dien thoai": "phu_cap_dien_thoai",
+    "pc trach nhiem": "phu_cap_trach_nhiem", "phu cap trach nhiem": "phu_cap_trach_nhiem",
+    "phu thuoc": "so_phu_thuoc", "so phu thuoc": "so_phu_thuoc",
+    "so nguoi phu thuoc": "so_phu_thuoc",
+    "email": "email", "mst": "ma_so_thue", "ma so thue": "ma_so_thue",
+    "so tai khoan": "so_tai_khoan", "stk": "so_tai_khoan",
+    "ngan hang": "ngan_hang",
+}
+_HS_SO = ("luong_co_ban", "luong_dong_bh", "phu_cap_an", "phu_cap_di_lai",
+          "phu_cap_dien_thoai", "phu_cap_trach_nhiem", "so_phu_thuoc")
+
+
+@router.post("/ho-so-nhap-excel")
+async def nhap_excel_ho_so(file: UploadFile = File(...), db: Session = Depends(get_db),
+                           nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    """Cập nhật hồ sơ lương từ file Excel (.xlsx): khớp theo Mã NV rồi đến Họ tên —
+    có rồi thì cập nhật các cột có trong file; chưa có thì tạo nhân viên mới.
+    Dùng đúng bố cục file '⬇ Xuất Excel' hoặc file tự tạo có dòng tiêu đề cột."""
+    import io
+    import re as _re
+    from openpyxl import load_workbook
+    data = await file.read()
+    if len(data) > 10 * 1024 * 1024:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "File quá lớn (tối đa 10MB)")
+    try:
+        wb = load_workbook(io.BytesIO(data), read_only=True, data_only=True)
+    except Exception:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Không mở được file — cần file Excel .xlsx (file .xls đời cũ hãy lưu lại thành .xlsx)")
+    ws = wb.worksheets[0]
+    rows = list(ws.iter_rows(values_only=True))
+    wb.close()
+    # tìm dòng tiêu đề: có >= 2 cột khớp và phải có Họ tên hoặc Mã NV
+    cot, dong_bd = None, None
+    for i, r in enumerate(rows[:15]):
+        m = {}
+        for j, v in enumerate(r or ()):
+            f = _HS_COT.get(_hs_chuan(v))
+            if f and f not in m.values():
+                m[j] = f
+        if len(m) >= 2 and ("ho_ten" in m.values() or "ma" in m.values()):
+            cot, dong_bd = m, i + 1
+            break
+    if not cot:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Không tìm thấy dòng tiêu đề cột (cần các cột như Mã NV, Họ tên, Lương cơ bản...). "
+                            "Dễ nhất: bấm ⬇ Xuất Excel, sửa số liệu trong file đó rồi nhập lại.")
+
+    def so(v):
+        if v is None or v == "":
+            return None
+        if isinstance(v, (int, float)):
+            return round(float(v))
+        d = _re.sub(r"[^\d]", "", str(v))
+        return int(d) if d else None
+
+    cap_nhat, tao_moi, bo_qua, chi_tiet = 0, 0, 0, []
+    for r in rows[dong_bd:]:
+        if not r or all(v is None or str(v).strip() == "" for v in r):
+            continue
+        it = {}
+        for j, f in cot.items():
+            v = r[j] if j < len(r) else None
+            if v is None or str(v).strip() == "":
+                continue
+            it[f] = so(v) if f in _HS_SO else str(v).strip()
+        ten = (it.get("ho_ten") or "").strip()
+        ma = (it.get("ma") or "").strip()
+        if not ten and not ma:
+            continue
+        nv = None
+        if ma:
+            nv = db.query(NhanVien).filter(NhanVien.ma == ma).first()
+        if nv is None and ten:
+            nv = db.query(NhanVien).filter(NhanVien.ho_ten.ilike(ten)).first()
+        if nv is not None:
+            doi = []
+            for f, v in it.items():
+                if f in ("ma", "ho_ten"):
+                    continue
+                if v is not None and str(getattr(nv, f) or "") != str(v):
+                    setattr(nv, f, v)
+                    doi.append(f)
+            if doi:
+                cap_nhat += 1
+                chi_tiet.append({"ten": nv.ho_ten, "kq": "Cập nhật (" + str(len(doi)) + " cột)"})
+            else:
+                bo_qua += 1
+                chi_tiet.append({"ten": nv.ho_ten, "kq": "Không đổi"})
+        elif ten:
+            nv = NhanVien(ma=ma or None, ho_ten=ten, chuc_danh=it.get("chuc_danh"),
+                          luong_co_ban=it.get("luong_co_ban") or 0,
+                          luong_dong_bh=it.get("luong_dong_bh") or 0,
+                          so_phu_thuoc=it.get("so_phu_thuoc") or 0,
+                          phu_cap_an=it.get("phu_cap_an") or 0,
+                          phu_cap_di_lai=it.get("phu_cap_di_lai") or 0,
+                          phu_cap_dien_thoai=it.get("phu_cap_dien_thoai") or 0,
+                          phu_cap_trach_nhiem=it.get("phu_cap_trach_nhiem") or 0,
+                          ma_so_thue=it.get("ma_so_thue"), email=it.get("email"),
+                          so_tai_khoan=it.get("so_tai_khoan"), ngan_hang=it.get("ngan_hang"),
+                          tk_chi_phi="642", trang_thai="DANG_LAM")
+            db.add(nv); db.flush()
+            tao_moi += 1
+            chi_tiet.append({"ten": ten, "kq": "Tạo mới"})
+        else:
+            bo_qua += 1
+            chi_tiet.append({"ten": ma, "kq": "Bỏ qua — không có họ tên"})
+        if cap_nhat + tao_moi + bo_qua >= 300:
+            break
+    ghi_audit(db, nd.id, "NHAP_EXCEL", "nhan_vien", None,
+              moi={"file": file.filename, "cap_nhat": cap_nhat, "tao_moi": tao_moi})
+    db.commit()
+    return {"cap_nhat": cap_nhat, "tao_moi": tao_moi, "bo_qua": bo_qua,
+            "chi_tiet": chi_tiet[:60]}
 
 
 @router.put("/nhan-vien/{nv_id}/ho-so")
