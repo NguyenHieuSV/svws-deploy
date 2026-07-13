@@ -912,6 +912,26 @@ def ds_don_mua(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM")))
     return db.query(DonMua).order_by(DonMua.id.desc()).all()
 
 
+@router.post("/don-mua/{dm_id}/xac-nhan-dat-hang")
+def xac_nhan_dat_hang(dm_id: int, db: Session = Depends(get_db),
+                      nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    """Xác nhận ĐÃ ĐẶT HÀNG với NCC — PO chuyển sang danh sách CHỜ NHẬP KHO
+    (Kho hàng → Nhập/Xuất) để thủ kho tạo phiếu nhập khi hàng về."""
+    dm = db.get(DonMua, dm_id)
+    if dm is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy PO")
+    if dm.trang_thai != "DA_DUYET":
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            f"PO chưa được duyệt (đang {dm.trang_thai}) — duyệt xong mới xác nhận đặt hàng.")
+    if dm.da_dat_hang:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "PO này đã xác nhận đặt hàng rồi.")
+    dm.da_dat_hang = True
+    dm.ngay_dat_hang = date.today()
+    ghi_audit(db, nd.id, "DAT_HANG", "don_mua", dm.id, moi={"so": dm.so})
+    db.commit()
+    return {"ok": True, "so": dm.so or f"PO-{dm.id}", "ngay_dat_hang": str(dm.ngay_dat_hang)}
+
+
 # ----- Kiểm soát mua trùng theo mã bán hàng -----
 def _po_da_mua(db, hang_hoa_id, don_hang_id=None, cho_thue_ma=None):
     """Các dòng PO (chưa bị từ chối) đã mua mặt hàng này cho CÙNG mã bán hàng."""
@@ -1621,6 +1641,10 @@ def gui_po(dm_id: int, data: GuiPoVao, db: Session = Depends(get_db),
             dinh_kem = None
     kq = lay_email_provider().gui(ncc.email, tieu_de, than, dinh_kem, gui_tu=settings.email_from_ncc)
     ok = kq.get("trang_thai") == "GUI_OK"
+    if ok and dm.trang_thai == "DA_DUYET" and not dm.da_dat_hang:
+        # gửi PO cho NCC = đã đặt hàng → PO vào danh sách chờ nhập kho
+        dm.da_dat_hang = True
+        dm.ngay_dat_hang = date.today()
     ghi_audit(db, nd.id, "GUI_PO", "don_mua", dm.id,
               moi={"email": ncc.email, "da_gui": ok, "co_pdf": co_pdf, "gui_tu": settings.email_from_ncc})
     db.commit()

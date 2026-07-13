@@ -35,6 +35,39 @@ def ds_hang_hoa(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))
     return [_ra(hh) for hh in db.query(HangHoa).order_by(HangHoa.id).all()]
 
 
+# ----- XEM: PO đã xác nhận đặt hàng đang CHỜ NHẬP KHO -----
+@router.get("/cho-nhap")
+def ds_cho_nhap(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
+    """Danh sách đơn đặt hàng (PO) đã xác nhận với NCC nhưng chưa nhận đủ hàng —
+    thủ kho bấm Tạo phiếu nhập, dữ liệu PO tự điền vào phiếu nhập kho."""
+    from ..models import DonMua, DonMuaCt, NhaCungCap
+    out = []
+    q = (db.query(DonMua)
+         .filter(DonMua.da_dat_hang.is_(True), DonMua.trang_thai == "DA_DUYET",
+                 DonMua.trang_thai_nhan != "DU")
+         .order_by(DonMua.id.desc()))
+    for dm in q.all():
+        ncc = db.get(NhaCungCap, dm.nha_cung_cap_id)
+        ct = []
+        for c in db.query(DonMuaCt).filter_by(don_mua_id=dm.id).all():
+            con = float(c.so_luong or 0) - float(c.so_luong_nhan or 0)
+            if con <= 0:
+                continue
+            hh = db.get(HangHoa, c.hang_hoa_id)
+            ct.append({"don_mua_ct_id": c.id, "hang_hoa_id": c.hang_hoa_id,
+                       "ten": hh.ten if hh else f"HH #{c.hang_hoa_id}",
+                       "don_vi": hh.don_vi if hh else None,
+                       "so_luong": float(c.so_luong or 0),
+                       "da_nhan": float(c.so_luong_nhan or 0),
+                       "con_lai": con, "don_gia": float(c.don_gia or 0)})
+        out.append({"id": dm.id, "so": dm.so or f"PO-{dm.id}",
+                    "ncc": ncc.ten if ncc else None,
+                    "ngay_dat_hang": str(dm.ngay_dat_hang or dm.ngay or "")[:10],
+                    "ngay_hen_giao": str(dm.ngay_hen_giao) if dm.ngay_hen_giao else None,
+                    "tong_tien": float(dm.tong_tien or 0), "chi_tiet": ct})
+    return out
+
+
 # ----- THAO_TAC: tạo hàng hóa mới (kèm bản ghi tồn) -----
 @router.post("/hang-hoa", response_model=HangHoaRa, status_code=201)
 def tao_hang_hoa(

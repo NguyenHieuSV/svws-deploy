@@ -193,6 +193,8 @@ class DonMua(Base):
     ngay_hen_giao: Mapped[date | None] = mapped_column(Date, nullable=True)
     ngay_giao_thuc: Mapped[date | None] = mapped_column(Date, nullable=True)
     trang_thai_nhan: Mapped[str] = mapped_column(String(12), default="CHUA")
+    da_dat_hang: Mapped[bool] = mapped_column(Boolean, default=False)
+    ngay_dat_hang: Mapped[date | None] = mapped_column(Date, nullable=True)
     de_nghi_tt: Mapped[Decimal] = mapped_column(Numeric(18, 0), default=0)
     ngay_tt_tiep: Mapped[date | None] = mapped_column(Date, nullable=True)
     tt_du: Mapped[bool] = mapped_column(Boolean, default=False)
