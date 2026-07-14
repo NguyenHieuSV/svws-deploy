@@ -14,7 +14,7 @@ from ..deps import nhan_vien_id_cua
 from ..audit import ghi_audit
 from ..kho_service import xuat_ton
 from ..models import (NguoiDung, KhachHang, HangHoa, BaoGia, BaoGiaCt, BaoGiaForm,
-                      DonHang, DonHangCt, PhieuKho, PhieuKhoCt, HoaDon, CongNo)
+                      DonHang, DonHangCt, PhieuKho, PhieuKhoCt, HoaDon, CongNo, TonKho)
 from ..schemas import (KhachHangVao, KhachHangSua, KhachHangRa, BaoGiaVao, BaoGiaRa,
                        BaoGiaFormVao, BaoGiaFormRa, DonHangRa)
 
@@ -501,6 +501,79 @@ def tao_don_tu_bao_gia(bg_id: int, db: Session = Depends(get_db),
         db.add(DonHangCt(don_hang_id=dh.id, hang_hoa_id=ct.hang_hoa_id,
                          so_luong=ct.so_luong, don_gia=ct.don_gia))
     ghi_audit(db, nd.id, "TAO", "don_hang", dh.id, moi={"tu_bao_gia": bg.id})
+    db.commit(); db.refresh(dh)
+    return dh
+
+
+# ----- Cập nhật đơn hàng bán TRỰC TIẾP (khách gửi PO không qua báo giá) -----
+from pydantic import BaseModel as _DHBase
+
+
+class DonHangCtTrucTiepVao(_DHBase):
+    ten: str
+    hang_hoa_id: int | None = None   # có id thì dùng thẳng, không thì khớp/tạo theo tên
+    don_vi: str | None = None
+    so_luong: Decimal
+    don_gia: Decimal
+
+
+class DonHangTrucTiepVao(_DHBase):
+    khach_hang_id: int
+    so: str | None = None            # bỏ trống → tự tạo DH-YYYYMMDD-id
+    ngay: date | None = None
+    chi_tiet: list[DonHangCtTrucTiepVao]
+
+
+@router.post("/don-hang", response_model=DonHangRa, status_code=201)
+def tao_don_hang_truc_tiep(data: DonHangTrucTiepVao, db: Session = Depends(get_db),
+                           nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    """Tạo đơn hàng bán trực tiếp từ PO/HĐ khách gửi (không qua báo giá nội bộ).
+    Sản phẩm chưa có trong kho được tự thêm (SAN_PHAM, tồn 0) để mã đơn bán
+    liên thông được sang Mua hàng / Kho / Dự án / Cho thuê."""
+    kh = db.get(KhachHang, data.khach_hang_id)
+    if kh is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy khách hàng")
+    if not data.chi_tiet:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Đơn hàng cần ít nhất 1 dòng sản phẩm")
+    so = (data.so or "").strip() or None
+    if so and db.query(DonHang).filter_by(so=so).first() is not None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            f"Mã đơn hàng '{so}' đã tồn tại — chọn mã khác hoặc bỏ trống để tự tạo.")
+    lines = []
+    hang_moi = []
+    for it in data.chi_tiet:
+        ten = (it.ten or "").strip()
+        if it.so_luong <= 0:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Số lượng của '{ten}' phải lớn hơn 0")
+        if it.don_gia < 0:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Đơn giá của '{ten}' không được âm")
+        hh = db.get(HangHoa, it.hang_hoa_id) if it.hang_hoa_id else None
+        if hh is None and ten:
+            hh = db.query(HangHoa).filter(HangHoa.ten.ilike(ten)).first()
+        if hh is None:
+            if not ten:
+                raise HTTPException(status.HTTP_400_BAD_REQUEST, "Dòng sản phẩm thiếu tên")
+            hh = HangHoa(ten=ten, loai="SAN_PHAM", don_vi=(it.don_vi or None), gia_ban=it.don_gia)
+            db.add(hh)
+            db.flush()
+            if db.query(TonKho).filter_by(hang_hoa_id=hh.id).first() is None:
+                db.add(TonKho(hang_hoa_id=hh.id, so_luong=0))
+            hang_moi.append(hh.ten)
+        elif it.don_vi and not hh.don_vi:
+            hh.don_vi = it.don_vi
+        lines.append((hh.id, it.so_luong, it.don_gia))
+    tong = sum(sl * dg for _, sl, dg in lines)
+    dh = DonHang(so=so, khach_hang_id=data.khach_hang_id,
+                 ngay=data.ngay or date.today(), tong_tien=tong, trang_thai="MOI")
+    db.add(dh)
+    db.flush()
+    if not dh.so:
+        dh.so = f"DH-{date.today():%Y%m%d}-{dh.id}"
+    for hh_id, sl, dg in lines:
+        db.add(DonHangCt(don_hang_id=dh.id, hang_hoa_id=hh_id, so_luong=sl, don_gia=dg))
+    ghi_audit(db, nd.id, "TAO", "don_hang", dh.id,
+              moi={"truc_tiep": True, "tong_tien": float(tong), "so_dong": len(lines),
+                   "hang_moi": hang_moi[:20]})
     db.commit(); db.refresh(dh)
     return dh
 
