@@ -1314,6 +1314,47 @@ def xoa_cong_no_ncc(cn_id: int, db: Session = Depends(get_db),
     return {"da_xoa": True}
 
 
+class SuaCongNoVao(_SPBase):
+    so_tien: Decimal | None = None   # None = giữ nguyên
+    han: date | None = None          # gửi None = xóa hạn
+
+
+@router.put("/cong-no/{cn_id}")
+def sua_cong_no_ncc(cn_id: int, data: SuaCongNoVao, db: Session = Depends(get_db),
+                    nd: NguoiDung = Depends(yeu_cau("ke_toan", "THAO_TAC"))):
+    """Sửa công nợ phải trả: hạn thanh toán sửa được luôn; SỐ TIỀN chỉ sửa được khi
+    chưa có tiền trả thật và công nợ không sinh từ hóa đơn (giữ vết kế toán)."""
+    from ..models import PhieuThuChi
+    cn = db.get(CongNo, cn_id)
+    if cn is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy công nợ")
+    if cn.loai != "PHAI_TRA":
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Công nợ này không phải khoản phải trả")
+    cu = {"so_tien": float(cn.so_tien or 0), "han": str(cn.han) if cn.han else None}
+    if data.so_tien is not None and Decimal(data.so_tien) != (cn.so_tien or 0):
+        if data.so_tien <= 0:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Số tiền phải lớn hơn 0")
+        if cn.hoa_don_id:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                "Công nợ sinh từ hóa đơn mua — số tiền theo hóa đơn, "
+                                "muốn đổi hãy xử lý hóa đơn ở mục Kế toán.")
+        co_tien = (float(cn.da_thanh_toan or 0) > 0
+                   or db.query(ThanhToan).filter_by(cong_no_id=cn.id).first() is not None
+                   or db.query(PhieuThuChi).filter_by(cong_no_id=cn.id).first() is not None)
+        if co_tien:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                "Công nợ đã có tiền trả thật — không sửa được số tiền để giữ vết "
+                                "kế toán; chỉ sửa được hạn thanh toán.")
+        cn.so_tien = data.so_tien
+    cn.han = data.han
+    ghi_audit(db, nd.id, "CAP_NHAT", "cong_no", cn.id, cu=cu,
+              moi={"so_tien": float(cn.so_tien or 0), "han": str(cn.han) if cn.han else None})
+    db.commit()
+    return {"id": cn.id, "so_tien": float(cn.so_tien or 0),
+            "da_thanh_toan": float(cn.da_thanh_toan or 0),
+            "han": str(cn.han) if cn.han else None, "trang_thai": cn.trang_thai}
+
+
 # ============ Mua hàng — Giai đoạn 2: trễ hạn giao · tuổi nợ · kiểm soát hạn mức · thanh toán ============
 def _du_no_ncc(db: Session, ncc_id: int) -> float:
     return float(db.query(func.coalesce(func.sum(CongNo.so_tien - CongNo.da_thanh_toan), 0))
