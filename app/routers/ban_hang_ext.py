@@ -537,6 +537,26 @@ def danh_dau_xu_ly(ll_id: int, db: Session = Depends(get_db),
     return {"id": ll.id, "da_xu_ly": True}
 
 
+@router.delete("/phan-hoi/{ll_id}")
+def xoa_phan_hoi(ll_id: int, db: Session = Depends(get_db),
+                 nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
+    """Xóa một thư trong Hộp thư phản hồi (spam / thu nhầm). Chỉ xóa thư chiều NHẬN;
+    công việc và cơ hội đã sinh từ thư vẫn được giữ (chỉ gỡ liên kết)."""
+    ll = db.get(LienLac, ll_id)
+    if ll is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy thư")
+    if not (ll.kenh == "EMAIL" and ll.huong == "DEN"):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Chỉ xóa được thư trong Hộp thư phản hồi (email chiều nhận) — "
+                            "lịch sử liên lạc gửi đi không xóa tại đây.")
+    ghi_audit(db, nd.id, "XOA", "lien_lac", ll_id,
+              cu={"tu_email": ll.tu_email, "tieu_de": (ll.tieu_de or "")[:200],
+                  "khach_hang_id": ll.khach_hang_id, "da_xu_ly": ll.da_xu_ly})
+    db.delete(ll)
+    db.commit()
+    return {"da_xoa": True}
+
+
 # ============ (5) CƠ HỘI (PIPELINE CRM) + DASHBOARD (Giai đoạn 3) ============
 _GIAI_DOAN = ["MOI", "QUAN_TAM", "BAO_GIA", "DAM_PHAN", "THANG", "THUA"]
 
