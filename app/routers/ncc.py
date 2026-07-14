@@ -1075,6 +1075,56 @@ def tao_don_mua(data: DonMuaVao, db: Session = Depends(get_db),
     return dm
 
 
+@router.put("/don-mua/{dm_id}", response_model=DonMuaRa)
+def sua_don_mua(dm_id: int, data: DonMuaVao, db: Session = Depends(get_db),
+                nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    """Sửa PO khi còn CHỜ DUYỆT (hoặc bị TỪ CHỐI — sửa xong quay lại chờ duyệt).
+    PO đã duyệt/đã đặt hàng/đã nhận hàng không sửa được để giữ vết duyệt & kế toán."""
+    dm = db.get(DonMua, dm_id)
+    if dm is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đơn mua")
+    if dm.trang_thai not in ("CHO_DUYET", "TU_CHOI"):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Chỉ sửa được PO đang chờ duyệt hoặc bị từ chối. PO đã duyệt cần "
+                            "CEO/ADMIN xóa rồi tạo lại (nếu chưa nhận hàng), hoặc điều chỉnh "
+                            "bằng lần nhận hàng/PO bổ sung để giữ vết kế toán.")
+    ncc = db.get(NhaCungCap, data.nha_cung_cap_id)
+    if ncc is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy NCC")
+    if ncc.blacklist:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "NCC đang trong blacklist")
+    da_xac_nhan = False
+    if data.don_hang_id:
+        if data.don_hang_id != dm.don_hang_id:
+            kiem_tra = [ct.hang_hoa_id for ct in data.chi_tiet]
+        else:  # cùng mã bán hàng: chỉ kiểm mặt hàng MỚI thêm (dòng cũ sẽ khớp chính PO này)
+            cu_ids = {ct.hang_hoa_id for ct in dm.chi_tiet}
+            kiem_tra = [ct.hang_hoa_id for ct in data.chi_tiet if ct.hang_hoa_id not in cu_ids]
+        if kiem_tra:
+            da_xac_nhan = _chan_mua_trung(db, nd, kiem_tra, don_hang_id=data.don_hang_id,
+                                          xac_nhan=data.xac_nhan_trung)
+    cu = {"nha_cung_cap_id": dm.nha_cung_cap_id, "don_hang_id": dm.don_hang_id,
+          "tong_tien": float(dm.tong_tien or 0), "trang_thai": dm.trang_thai,
+          "so_dong": len(dm.chi_tiet)}
+    tong = sum(ct.so_luong * ct.don_gia for ct in data.chi_tiet)
+    dm.chi_tiet = [DonMuaCt(hang_hoa_id=ct.hang_hoa_id, so_luong=ct.so_luong, don_gia=ct.don_gia)
+                   for ct in data.chi_tiet]  # delete-orphan tự xóa dòng cũ
+    dm.nha_cung_cap_id = data.nha_cung_cap_id
+    dm.don_hang_id = data.don_hang_id
+    dm.ngay_hen_giao = data.ngay_hen_giao
+    dm.tong_tien = tong
+    if dm.trang_thai == "TU_CHOI":  # sửa lại sau khi bị từ chối → duyệt lại từ đầu
+        dm.trang_thai = "CHO_DUYET"
+        dm.nguoi_duyet = None
+    ghi_audit(db, nd.id, "CAP_NHAT", "don_mua", dm.id, cu=cu,
+              moi={"nha_cung_cap_id": dm.nha_cung_cap_id, "don_hang_id": dm.don_hang_id,
+                   "tong_tien": float(tong), "so_dong": len(data.chi_tiet),
+                   "mua_bo_sung_xac_nhan": da_xac_nhan})
+    db.commit()
+    db.refresh(dm)
+    return dm
+
+
 # ----- DUYỆT (cần mức ncc=DUYET) + KIỂM HẠN MỨC TIỀN theo vai trò -----
 @router.post("/don-mua/{dm_id}/duyet", response_model=DonMuaRa)
 def duyet_don_mua(dm_id: int, db: Session = Depends(get_db),
