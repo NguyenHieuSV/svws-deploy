@@ -1234,6 +1234,36 @@ def ds_cong_no(nha_cung_cap_id: int | None = None, chua_tra: bool = False,
     return out
 
 
+@router.delete("/cong-no/{cn_id}")
+def xoa_cong_no_ncc(cn_id: int, db: Session = Depends(get_db),
+                    nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
+    """Xóa công nợ phải trả ghi nhầm. Chặn khi đã có tiền trả thật hoặc chứng từ
+    liên quan (giữ vết kế toán); công nợ sinh từ hóa đơn phải hủy hóa đơn thay vì xóa."""
+    from ..models import PhieuThuChi
+    cn = db.get(CongNo, cn_id)
+    if cn is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy công nợ")
+    if cn.loai != "PHAI_TRA":
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Công nợ này không phải khoản phải trả")
+    if cn.hoa_don_id:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Công nợ này sinh từ hóa đơn mua — hãy xóa/hủy hóa đơn đó ở mục Kế toán, "
+                            "công nợ sẽ được gỡ kèm theo.")
+    co_lan_tt = db.query(ThanhToan).filter_by(cong_no_id=cn.id).first()
+    co_phieu = db.query(PhieuThuChi).filter_by(cong_no_id=cn.id).first()
+    if co_lan_tt is not None or co_phieu is not None or float(cn.da_thanh_toan or 0) > 0:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Công nợ này đã có tiền trả thật (lần thanh toán đã ghi / phiếu chi gắn kèm, "
+                            "kể cả đang chờ duyệt) — không thể xóa để giữ vết kế toán.")
+    ghi_audit(db, nd.id, "XOA", "cong_no", cn.id,
+              cu={"loai": cn.loai, "nha_cung_cap_id": cn.nha_cung_cap_id,
+                  "so_tien": float(cn.so_tien or 0), "don_mua_id": cn.don_mua_id,
+                  "han": str(cn.han) if cn.han else None})
+    db.delete(cn)
+    db.commit()
+    return {"da_xoa": True}
+
+
 # ============ Mua hàng — Giai đoạn 2: trễ hạn giao · tuổi nợ · kiểm soát hạn mức · thanh toán ============
 def _du_no_ncc(db: Session, ncc_id: int) -> float:
     return float(db.query(func.coalesce(func.sum(CongNo.so_tien - CongNo.da_thanh_toan), 0))
