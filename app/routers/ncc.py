@@ -851,6 +851,37 @@ def cap_nhat_thanh_toan_mua(dm_id: int, data: ThanhToanMuaVao, db: Session = Dep
     return {"ok": True, "da_tt_100": da_tt_100, "con_lai": float(tong - dn)}
 
 
+@router.delete("/don-mua/{dm_id}/thanh-toan")
+def xoa_thanh_toan_mua(dm_id: int, db: Session = Depends(get_db),
+                       nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
+    """Xóa theo dõi thanh toán của PO (nhập nhầm): reset đề nghị TT về 0 và gỡ công nợ
+    phải trả đi kèm. Chặn khi đã có tiền chi THẬT (phiếu chi đã duyệt / lần thanh toán
+    đã ghi) để giữ vết kế toán."""
+    from ..models import PhieuThuChi, ThanhToan
+    dm = db.get(DonMua, dm_id)
+    if dm is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đơn mua")
+    cn = db.query(CongNo).filter_by(don_mua_id=dm_id).first()
+    if cn is not None:
+        co_phieu = db.query(PhieuThuChi).filter_by(cong_no_id=cn.id).first()
+        co_lan_tt = db.query(ThanhToan).filter_by(cong_no_id=cn.id).first()
+        if co_phieu is not None or co_lan_tt is not None:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                "PO này đã có phiếu chi gắn công nợ (kể cả đang chờ duyệt) hoặc lần "
+                                "thanh toán đã ghi — không thể xóa theo dõi thanh toán để giữ vết kế toán. "
+                                "Điều chỉnh bằng phiếu chi hoặc đề nghị thanh toán mới.")
+        db.delete(cn)
+    cu = {"de_nghi_tt": float(dm.de_nghi_tt or 0), "tt_du": bool(dm.tt_du)}
+    dm.de_nghi_tt = 0
+    dm.ngay_tt_tiep = None
+    dm.tt_du = False
+    dm.ngay_tt_du = None
+    dm.ngay_tt = None
+    ghi_audit(db, nd.id, "XOA", "thanh_toan_mua", dm.id, cu=cu)
+    db.commit()
+    return {"da_xoa": True, "so": dm.so or f"PO-{dm.id}"}
+
+
 # ----- DUYET: xóa báo giá NCC -----
 @router.delete("/bao-gia/{bg_id}")
 def xoa_bao_gia_ncc(bg_id: int, db: Session = Depends(get_db),
