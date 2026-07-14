@@ -398,6 +398,7 @@ class DonHangRa(BaseModel):
     id: int
     so: str | None
     khach_hang_id: int
+    ngay: date | None = None
     tong_tien: Decimal
     trang_thai: str
 
