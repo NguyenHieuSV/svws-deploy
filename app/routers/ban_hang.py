@@ -613,6 +613,83 @@ def ds_don_hang(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))
     return db.query(DonHang).order_by(DonHang.id.desc()).all()
 
 
+@router.get("/don-hang/{dh_id}/chi-tiet")
+def chi_tiet_don_hang(dh_id: int, db: Session = Depends(get_db),
+                      _=Depends(yeu_cau(MODULE, "XEM"))):
+    """Chi tiết đơn hàng bán kèm dòng sản phẩm (tên, đơn vị) — phục vụ form sửa."""
+    dh = db.get(DonHang, dh_id)
+    if dh is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đơn hàng")
+    ct_out = []
+    for ct in dh.chi_tiet:
+        hh = db.get(HangHoa, ct.hang_hoa_id)
+        ct_out.append({"hang_hoa_id": ct.hang_hoa_id, "ten": hh.ten if hh else f"HH #{ct.hang_hoa_id}",
+                       "don_vi": hh.don_vi if hh else None,
+                       "so_luong": float(ct.so_luong), "don_gia": float(ct.don_gia)})
+    return {"id": dh.id, "so": dh.so, "khach_hang_id": dh.khach_hang_id,
+            "ngay": str(dh.ngay) if dh.ngay else None, "tong_tien": float(dh.tong_tien or 0),
+            "trang_thai": dh.trang_thai, "chi_tiet": ct_out}
+
+
+@router.put("/don-hang/{dh_id}", response_model=DonHangRa)
+def sua_don_hang(dh_id: int, data: DonHangTrucTiepVao, db: Session = Depends(get_db),
+                 nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    """Sửa đơn hàng bán (ngày, mã, khách, dòng sản phẩm). Chặn khi đã xuất kho
+    hoặc đã lập hóa đơn — giữ vết kho & kế toán."""
+    dh = db.get(DonHang, dh_id)
+    if dh is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đơn hàng")
+    if dh.trang_thai == "DA_XUAT":
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Đơn đã xuất kho — không sửa được để giữ vết kho/kế toán. "
+                            "Cần điều chỉnh hãy lập đơn bổ sung hoặc liên hệ CEO/ADMIN xử lý chứng từ.")
+    if db.query(HoaDon).filter_by(don_hang_id=dh_id).first() is not None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Đơn đã lập hóa đơn — không sửa được; xử lý hóa đơn ở mục Kế toán trước.")
+    kh = db.get(KhachHang, data.khach_hang_id)
+    if kh is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy khách hàng")
+    if not data.chi_tiet:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Đơn hàng cần ít nhất 1 dòng sản phẩm")
+    so = (data.so or "").strip() or None
+    if so and db.query(DonHang).filter(DonHang.so == so, DonHang.id != dh_id).first() is not None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Mã đơn hàng '{so}' đã tồn tại")
+    lines = []
+    for it in data.chi_tiet:
+        ten = (it.ten or "").strip()
+        if it.so_luong <= 0:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Số lượng của '{ten}' phải lớn hơn 0")
+        if it.don_gia < 0:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Đơn giá của '{ten}' không được âm")
+        hh = db.get(HangHoa, it.hang_hoa_id) if it.hang_hoa_id else None
+        if hh is None and ten:
+            hh = db.query(HangHoa).filter(HangHoa.ten.ilike(ten)).first()
+        if hh is None:
+            if not ten:
+                raise HTTPException(status.HTTP_400_BAD_REQUEST, "Dòng sản phẩm thiếu tên")
+            hh = HangHoa(ten=ten, loai="SAN_PHAM", don_vi=(it.don_vi or None), gia_ban=it.don_gia)
+            db.add(hh)
+            db.flush()
+            if db.query(TonKho).filter_by(hang_hoa_id=hh.id).first() is None:
+                db.add(TonKho(hang_hoa_id=hh.id, so_luong=0))
+        lines.append((hh.id, it.so_luong, it.don_gia))
+    cu = {"so": dh.so, "khach_hang_id": dh.khach_hang_id,
+          "tong_tien": float(dh.tong_tien or 0), "so_dong": len(dh.chi_tiet)}
+    tong = sum(sl * dg for _, sl, dg in lines)
+    dh.chi_tiet = [DonHangCt(hang_hoa_id=hid, so_luong=sl, don_gia=dg) for hid, sl, dg in lines]
+    dh.khach_hang_id = data.khach_hang_id
+    if so:
+        dh.so = so
+    if data.ngay:
+        dh.ngay = data.ngay
+    dh.tong_tien = tong
+    ghi_audit(db, nd.id, "CAP_NHAT", "don_hang", dh.id, cu=cu,
+              moi={"so": dh.so, "khach_hang_id": dh.khach_hang_id,
+                   "tong_tien": float(tong), "so_dong": len(lines)})
+    db.commit(); db.refresh(dh)
+    return dh
+
+
 # ----- XUẤT KHO: liên thông Kho + tạo Hóa đơn + Công nợ (giao dịch nguyên tử) -----
 @router.post("/don-hang/{dh_id}/xuat-kho")
 def xuat_kho_don_hang(dh_id: int, db: Session = Depends(get_db),
