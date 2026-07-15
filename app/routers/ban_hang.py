@@ -219,6 +219,45 @@ class GuiBaoGiaVao(_BM):
     den: str
     tieu_de: str | None = None
     loi_nhan: str | None = None
+    noi_dung: str | None = None   # bản thư đã xem trước/chỉnh sửa; trống → soạn theo mẫu
+
+
+def _soan_thu_bao_gia(bgf: BaoGiaForm, loi_nhan: str | None, ten_file: str | None,
+                      co_dinh_kem: bool = True):
+    """Soạn tiêu đề + nội dung thư báo giá theo văn phong thương mại chuẩn công ty."""
+    from ..config import settings as _st
+    from ..bao_gia_pdf import tinh_bao_gia
+    d = bgf.noi_dung or {}
+    so = d.get("so") or bgf.so or f"BG-{bgf.id}"
+    _sub, _vat, tong = tinh_bao_gia(d)
+    mn = lambda n: f"{round(n):,}".replace(",", ".")
+    khach = d.get("khach_ten") or "Quý công ty"
+    mo_dau = (loi_nhan or "").strip() or (
+        f"Công ty TNHH Giải pháp Kỹ thuật Sóng Việt trân trọng cảm ơn sự quan tâm của {khach}. "
+        f"Chúng tôi hân hạnh gửi đến Quý công ty báo giá cho hạng mục nêu dưới đây.")
+    L = [f"Kính gửi {khach},", "", mo_dau, "", "THÔNG TIN BÁO GIÁ:",
+         f"   •  Số báo giá: {so} — ngày {d.get('ngay') or ''}"]
+    if d.get("tieu_de"):
+        L.append(f"   •  Hạng mục: {d.get('tieu_de')}")
+    if tong > 0:
+        L.append(f"   •  Tổng giá trị (đã gồm VAT): {mn(tong)} VND")
+    if d.get("hieu_luc"):
+        L.append(f"   •  Hiệu lực báo giá: {d.get('hieu_luc')}")
+    if co_dinh_kem and ten_file:
+        L.append(f"   •  Chi tiết đầy đủ: vui lòng xem tệp đính kèm ({ten_file}).")
+    L += ["",
+          "Kính mong Quý công ty xem xét. Nếu cần trao đổi thêm về thông số kỹ thuật, "
+          "tiến độ cung cấp hoặc điều khoản thương mại, xin vui lòng liên hệ chúng tôi "
+          "theo thông tin bên dưới — chúng tôi luôn sẵn sàng hỗ trợ.",
+          "",
+          "Trân trọng,",
+          "",
+          (d.get("nguoi_bg") or "Bộ phận Kinh doanh"),
+          "CÔNG TY TNHH GIẢI PHÁP KỸ THUẬT SÓNG VIỆT — \"We Have Solutions\"",
+          f"Email: {_st.email_from} · Điện thoại: {_st.cong_ty_tel}",
+          f"Địa chỉ: {_st.cong_ty_dia_chi} · Website: {_st.cong_ty_website}"]
+    tieu_de = f"[Sóng Việt] Báo giá {so}" + (f" — {khach}" if d.get("khach_ten") else "")
+    return tieu_de, "\n".join(L)
 
 
 def _bgf_tinh(d: dict):
@@ -248,8 +287,6 @@ def gui_bao_gia_email(bgf_id: int, data: GuiBaoGiaVao, db: Session = Depends(get
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Email người nhận không hợp lệ")
     d = bgf.noi_dung or {}
     so = d.get("so") or bgf.so or f"BG-{bgf.id}"
-    sub, vat, tong = tinh_bao_gia(d)
-    mn = lambda n: f"{round(n):,}".replace(",", ".")
 
     # 1) Đính kèm: ưu tiên file báo giá/proposal đã tải lên; không có thì tự sinh PDF
     from ..models import TepDinhKem as _Tep
@@ -278,36 +315,13 @@ def gui_bao_gia_email(bgf_id: int, data: GuiBaoGiaVao, db: Session = Depends(get
         except Exception:
             dinh_kem = []   # không chặn việc gửi thư nếu sinh PDF lỗi
 
-    # 2) Nội dung thư — văn phong thương mại chuyên nghiệp
-    khach = d.get("khach_ten") or "Quý công ty"
-    mo_dau = (data.loi_nhan or "").strip() or (
-        f"Công ty TNHH Giải pháp Kỹ thuật Sóng Việt trân trọng cảm ơn sự quan tâm của {khach}. "
-        f"Chúng tôi hân hạnh gửi đến Quý công ty báo giá cho hạng mục nêu dưới đây.")
-    L = [f"Kính gửi {khach},", "", mo_dau, "", "THÔNG TIN BÁO GIÁ:",
-         f"   •  Số báo giá: {so} — ngày {d.get('ngay') or ''}"]
-    if d.get("tieu_de"):
-        L.append(f"   •  Hạng mục: {d.get('tieu_de')}")
-    if tong > 0:
-        L.append(f"   •  Tổng giá trị (đã gồm VAT): {mn(tong)} VND")
-    if d.get("hieu_luc"):
-        L.append(f"   •  Hiệu lực báo giá: {d.get('hieu_luc')}")
-    if dinh_kem:
-        L.append(f"   •  Chi tiết đầy đủ: vui lòng xem tệp PDF đính kèm ({ten_file}).")
-    L += ["",
-          "Kính mong Quý công ty xem xét. Nếu cần trao đổi thêm về thông số kỹ thuật, "
-          "tiến độ cung cấp hoặc điều khoản thương mại, xin vui lòng liên hệ chúng tôi "
-          "theo thông tin bên dưới — chúng tôi luôn sẵn sàng hỗ trợ.",
-          "",
-          "Trân trọng,",
-          "",
-          (d.get("nguoi_bg") or "Bộ phận Kinh doanh"),
-          "CÔNG TY TNHH GIẢI PHÁP KỸ THUẬT SÓNG VIỆT — \"We Have Solutions\"",
-          f"Email: {_st.email_from} · Điện thoại: {_st.cong_ty_tel}",
-          f"Địa chỉ: {_st.cong_ty_dia_chi} · Website: {_st.cong_ty_website}"]
-    tieu_de = data.tieu_de or f"[Sóng Việt] Báo giá {so}" + (f" — {khach}" if d.get("khach_ten") else "")
+    # 2) Nội dung thư — dùng bản đã xem trước/chỉnh sửa nếu có, không thì soạn theo mẫu
+    tieu_de_md, thu_md = _soan_thu_bao_gia(bgf, data.loi_nhan, ten_file, bool(dinh_kem))
+    noi_dung_thu = (data.noi_dung or "").strip() or thu_md
+    tieu_de = data.tieu_de or tieu_de_md
 
     try:
-        kq = lay_email_provider().gui(data.den.strip(), tieu_de, "\n".join(L), dinh_kem=dinh_kem)
+        kq = lay_email_provider().gui(data.den.strip(), tieu_de, noi_dung_thu, dinh_kem=dinh_kem)
     finally:
         try:
             if dinh_kem:
@@ -329,6 +343,30 @@ def gui_bao_gia_email(bgf_id: int, data: GuiBaoGiaVao, db: Session = Depends(get
     db.commit()
     return {"gui_tu": kq.get("gui_tu"), "den": data.den, "pdf_dinh_kem": bool(dinh_kem),
             "trang_thai": kq.get("trang_thai"), "ghi_chu": kq.get("ghi_chu")}
+
+
+class XemTruocEmailVao(_BM):
+    loi_nhan: str | None = None
+
+
+@router.post("/bao-gia-form/{bgf_id}/email-preview")
+def xem_truoc_email_bao_gia(bgf_id: int, data: XemTruocEmailVao, db: Session = Depends(get_db),
+                            _=Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    """Soạn trước tiêu đề + nội dung thư báo giá (KHÔNG gửi) để người dùng xem và chỉnh."""
+    import re as _re
+    from ..models import TepDinhKem as _Tep
+    bgf = db.get(BaoGiaForm, bgf_id)
+    if bgf is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy báo giá")
+    d = bgf.noi_dung or {}
+    so = d.get("so") or bgf.so or f"BG-{bgf.id}"
+    tep_prop = db.query(_Tep).filter_by(doi_tuong="BAO_GIA_FORM",
+                                        doi_tuong_id=bgf.id, loai="PROPOSAL").first()
+    ten_file = (tep_prop.ten_file if tep_prop is not None
+                else "Bao_gia_" + _re.sub(r"[^A-Za-z0-9._-]", "-", so) + ".pdf")
+    tieu_de, thu = _soan_thu_bao_gia(bgf, data.loi_nhan, ten_file, True)
+    return {"tieu_de": tieu_de, "noi_dung": thu, "dinh_kem_ten": ten_file,
+            "tu_proposal": tep_prop is not None}
 
 
 def _luu_pdf_bao_gia(db: Session, nd: NguoiDung, bgf: BaoGiaForm):
