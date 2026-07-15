@@ -5,7 +5,7 @@ Module BÁN HÀNG — lát cắt dọc thứ tư, minh họa LIÊN THÔNG rõ nh
 """
 from decimal import Decimal
 from datetime import date, timedelta
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from ..database import get_db
@@ -251,16 +251,32 @@ def gui_bao_gia_email(bgf_id: int, data: GuiBaoGiaVao, db: Session = Depends(get
     sub, vat, tong = tinh_bao_gia(d)
     mn = lambda n: f"{round(n):,}".replace(",", ".")
 
-    # 1) Sinh PDF báo giá đính kèm
+    # 1) Đính kèm: ưu tiên file báo giá/proposal đã tải lên; không có thì tự sinh PDF
+    from ..models import TepDinhKem as _Tep
+    tep_prop = db.query(_Tep).filter_by(doi_tuong="BAO_GIA_FORM",
+                                        doi_tuong_id=bgf.id, loai="PROPOSAL").first()
     ten_file = "Bao_gia_" + _re.sub(r"[^A-Za-z0-9._-]", "-", so) + ".pdf"
     pdf_path = _os.path.join(_tmp.gettempdir(), f"bgf_{bgf.id}_{ten_file}")
     dinh_kem = []
-    try:
-        tao_bao_gia_pdf(pdf_path, d,
-                        font_path=_st.pdf_font_path, font_bold_path=_st.pdf_font_bold_path)
-        dinh_kem = [{"duong_dan": pdf_path, "ten_file": ten_file}]
-    except Exception:
-        dinh_kem = []   # không chặn việc gửi thư nếu sinh PDF lỗi
+    if tep_prop is not None:
+        from ..luu_tru import doc as _doc
+        try:
+            raw = _doc(tep_prop.duong_dan)
+            ten_file = tep_prop.ten_file or ten_file
+            pdf_path = _os.path.join(_tmp.gettempdir(),
+                                     f"bgf_{bgf.id}_" + _re.sub(r"[^A-Za-z0-9._ -]", "-", ten_file))
+            with open(pdf_path, "wb") as f:
+                f.write(raw)
+            dinh_kem = [{"duong_dan": pdf_path, "ten_file": ten_file}]
+        except Exception:
+            dinh_kem = []
+    else:
+        try:
+            tao_bao_gia_pdf(pdf_path, d,
+                            font_path=_st.pdf_font_path, font_bold_path=_st.pdf_font_bold_path)
+            dinh_kem = [{"duong_dan": pdf_path, "ten_file": ten_file}]
+        except Exception:
+            dinh_kem = []   # không chặn việc gửi thư nếu sinh PDF lỗi
 
     # 2) Nội dung thư — văn phong thương mại chuyên nghiệp
     khach = d.get("khach_ten") or "Quý công ty"
@@ -271,7 +287,8 @@ def gui_bao_gia_email(bgf_id: int, data: GuiBaoGiaVao, db: Session = Depends(get
          f"   •  Số báo giá: {so} — ngày {d.get('ngay') or ''}"]
     if d.get("tieu_de"):
         L.append(f"   •  Hạng mục: {d.get('tieu_de')}")
-    L.append(f"   •  Tổng giá trị (đã gồm VAT): {mn(tong)} VND")
+    if tong > 0:
+        L.append(f"   •  Tổng giá trị (đã gồm VAT): {mn(tong)} VND")
     if d.get("hieu_luc"):
         L.append(f"   •  Hiệu lực báo giá: {d.get('hieu_luc')}")
     if dinh_kem:
@@ -301,11 +318,12 @@ def gui_bao_gia_email(bgf_id: int, data: GuiBaoGiaVao, db: Session = Depends(get
         raise HTTPException(status.HTTP_502_BAD_GATEWAY,
                             "Gửi email thất bại: " + (kq.get("ghi_chu") or "lỗi SMTP"))
     bgf.trang_thai = "DA_GUI"
-    # Lưu bản PDF vừa gửi vào kho tệp dùng chung trên máy chủ
-    try:
-        _luu_pdf_bao_gia(db, nd, bgf)
-    except Exception:
-        pass
+    # Lưu bản PDF vừa gửi vào kho tệp dùng chung (bỏ qua nếu đã có file proposal riêng)
+    if tep_prop is None:
+        try:
+            _luu_pdf_bao_gia(db, nd, bgf)
+        except Exception:
+            pass
     ghi_audit(db, nd.id, "GUI", "bao_gia_form", bgf.id,
               moi={"den": data.den, "gui_tu": kq.get("gui_tu"), "pdf": bool(dinh_kem)})
     db.commit()
@@ -364,6 +382,80 @@ def luu_pdf_kho(bgf_id: int, db: Session = Depends(get_db),
     ghi_audit(db, nd.id, "LUU_PDF", "bao_gia_form", bgf.id, moi={"ten_file": tep.ten_file})
     db.commit()
     return {"ok": True, "tep_id": tep.id, "ten_file": tep.ten_file, "kich_thuoc": tep.kich_thuoc}
+
+
+# ----- Đính kèm file báo giá/Proposal soạn sẵn (thay cho bảng chi tiết SP/DV) -----
+@router.post("/bao-gia-form/{bgf_id}/dinh-kem")
+def tai_dinh_kem_bao_gia(bgf_id: int, file: UploadFile = File(...),
+                         db: Session = Depends(get_db),
+                         nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    """Đính kèm file báo giá/proposal soạn sẵn (PDF/Word/Excel) vào báo giá —
+    khi có file thì không cần dùng bảng chi tiết SP/DV. Mỗi báo giá 1 file, tải lại sẽ thay."""
+    from ..luu_tru import luu as _luu, xoa as _xoa
+    from ..models import TepDinhKem
+    bgf = db.get(BaoGiaForm, bgf_id)
+    if bgf is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy báo giá")
+    data = file.file.read()
+    if not data:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Tệp rỗng")
+    if len(data) > 25 * 1024 * 1024:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Tệp quá lớn (tối đa 25MB)")
+    for t in db.query(TepDinhKem).filter_by(doi_tuong="BAO_GIA_FORM",
+                                            doi_tuong_id=bgf.id, loai="PROPOSAL").all():
+        _xoa(t.duong_dan)
+        db.delete(t)
+    ref = _luu(data, "bao_gia_form", bgf.id, file.filename or "proposal",
+               file.content_type or "application/octet-stream")
+    tep = TepDinhKem(doi_tuong="BAO_GIA_FORM", doi_tuong_id=bgf.id, loai="PROPOSAL",
+                     ten_file=file.filename or "proposal", duong_dan=ref, kich_thuoc=len(data),
+                     content_type=file.content_type or "application/octet-stream",
+                     nguoi_tai_len=nhan_vien_id_cua(db, nd.id))
+    db.add(tep)
+    db.flush()
+    d = dict(bgf.noi_dung or {})
+    d["dinh_kem_ten"] = tep.ten_file
+    bgf.noi_dung = d
+    ghi_audit(db, nd.id, "DINH_KEM", "bao_gia_form", bgf.id, moi={"ten_file": tep.ten_file})
+    db.commit()
+    return {"tep_id": tep.id, "ten_file": tep.ten_file, "kich_thuoc": tep.kich_thuoc}
+
+
+@router.get("/bao-gia-form/{bgf_id}/dinh-kem")
+def tai_ve_dinh_kem_bao_gia(bgf_id: int, db: Session = Depends(get_db),
+                            _=Depends(yeu_cau(MODULE, "XEM"))):
+    from ..luu_tru import phan_hoi_tai as _tai
+    from ..models import TepDinhKem
+    t = db.query(TepDinhKem).filter_by(doi_tuong="BAO_GIA_FORM",
+                                       doi_tuong_id=bgf_id, loai="PROPOSAL").first()
+    if t is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Báo giá chưa có file đính kèm")
+    return _tai(t.duong_dan, t.ten_file, t.content_type)
+
+
+@router.delete("/bao-gia-form/{bgf_id}/dinh-kem")
+def go_dinh_kem_bao_gia(bgf_id: int, db: Session = Depends(get_db),
+                        nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    """Gỡ file proposal khỏi báo giá (quay lại dùng bảng chi tiết SP/DV)."""
+    from ..luu_tru import xoa as _xoa
+    from ..models import TepDinhKem
+    bgf = db.get(BaoGiaForm, bgf_id)
+    if bgf is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy báo giá")
+    ts = db.query(TepDinhKem).filter_by(doi_tuong="BAO_GIA_FORM",
+                                        doi_tuong_id=bgf_id, loai="PROPOSAL").all()
+    if not ts:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Báo giá chưa có file đính kèm")
+    ten = ts[0].ten_file
+    for t in ts:
+        _xoa(t.duong_dan)
+        db.delete(t)
+    d = dict(bgf.noi_dung or {})
+    d.pop("dinh_kem_ten", None)
+    bgf.noi_dung = d
+    ghi_audit(db, nd.id, "GO_DINH_KEM", "bao_gia_form", bgf.id, cu={"ten_file": ten})
+    db.commit()
+    return {"da_go": True}
 
 
 @router.get("/kho-tep")
