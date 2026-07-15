@@ -320,8 +320,12 @@ def gui_bao_gia_email(bgf_id: int, data: GuiBaoGiaVao, db: Session = Depends(get
     noi_dung_thu = (data.noi_dung or "").strip() or thu_md
     tieu_de = data.tieu_de or tieu_de_md
 
+    cc = (_st.email_cc_bao_gia or "").strip()
+    if cc and cc.lower() == data.den.strip().lower():
+        cc = ""   # người nhận chính là địa chỉ CC → khỏi CC trùng
     try:
-        kq = lay_email_provider().gui(data.den.strip(), tieu_de, noi_dung_thu, dinh_kem=dinh_kem)
+        kq = lay_email_provider().gui(data.den.strip(), tieu_de, noi_dung_thu,
+                                      dinh_kem=dinh_kem, cc=cc or None)
     finally:
         try:
             if dinh_kem:
@@ -341,7 +345,8 @@ def gui_bao_gia_email(bgf_id: int, data: GuiBaoGiaVao, db: Session = Depends(get
     ghi_audit(db, nd.id, "GUI", "bao_gia_form", bgf.id,
               moi={"den": data.den, "gui_tu": kq.get("gui_tu"), "pdf": bool(dinh_kem)})
     db.commit()
-    return {"gui_tu": kq.get("gui_tu"), "den": data.den, "pdf_dinh_kem": bool(dinh_kem),
+    return {"gui_tu": kq.get("gui_tu"), "den": data.den, "cc": cc or None,
+            "pdf_dinh_kem": bool(dinh_kem),
             "trang_thai": kq.get("trang_thai"), "ghi_chu": kq.get("ghi_chu")}
 
 

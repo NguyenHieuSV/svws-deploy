@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     email_provider: str = "DEMO"
     email_from: str = "sv-sales@watersolutions.company"
     email_from_ncc: str = "inf@watersolutions.company"   # 1 đầu mối mua hàng / NCC
+    email_cc_bao_gia: str = "sv-hieu@watersolutions.company"  # CC tự động khi gửi báo giá
     cong_ty_ten: str = "CÔNG TY TNHH GPKT SÓNG VIỆT"
     cong_ty_slogan: str = "We Have Solutions"
     cong_ty_dia_chi: str = "448 Võ Văn Tần, P. Bàn Cờ, Q.3, Tp. HCM"

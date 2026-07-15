@@ -16,15 +16,17 @@ from .config import settings
 class EmailProvider(Protocol):
     ten: str
     def gui(self, to: str, tieu_de: str, noi_dung: str, dinh_kem: list | None = None,
-            gui_tu: str | None = None) -> dict: ...
+            gui_tu: str | None = None, cc: str | None = None) -> dict: ...
 
 
 class FakeEmailProvider:
     ten = "DEMO"
-    def gui(self, to, tieu_de, noi_dung, dinh_kem=None, gui_tu=None) -> dict:
+    def gui(self, to, tieu_de, noi_dung, dinh_kem=None, gui_tu=None, cc=None) -> dict:
         n = len(dinh_kem or [])
         nguoi_gui = gui_tu or settings.email_from
         base = f"demo - không gửi thật (từ {nguoi_gui})"
+        if cc:
+            base += f", CC {cc}"
         return {"trang_thai": "GUI_OK",
                 "gui_tu": nguoi_gui,
                 "ghi_chu": base + (f", {n} tệp đính kèm" if n else "")}
@@ -32,7 +34,7 @@ class FakeEmailProvider:
 
 class SmtpProvider:
     ten = "SMTP"
-    def gui(self, to, tieu_de, noi_dung, dinh_kem=None, gui_tu=None) -> dict:
+    def gui(self, to, tieu_de, noi_dung, dinh_kem=None, gui_tu=None, cc=None) -> dict:
         nguoi_gui = gui_tu or settings.email_from
         try:
             msg = MIMEMultipart()
@@ -40,6 +42,8 @@ class SmtpProvider:
             msg["From"] = nguoi_gui
             msg["Reply-To"] = nguoi_gui
             msg["To"] = to
+            if cc:
+                msg["Cc"] = cc   # send_message tự gửi tới cả To + Cc
             msg.attach(MIMEText(noi_dung, "plain", "utf-8"))
             for a in (dinh_kem or []):
                 with open(a["duong_dan"], "rb") as f:
