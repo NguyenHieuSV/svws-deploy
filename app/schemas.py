@@ -241,6 +241,12 @@ class NghiemThuVao(BaseModel):
 
 
 # ---------- Bán hàng ----------
+class LienHeVao(BaseModel):
+    ten: str | None = None
+    email: str | None = None
+    dien_thoai: str | None = None
+
+
 class KhachHangVao(BaseModel):
     ma: str | None = None
     ten: str
@@ -250,6 +256,7 @@ class KhachHangVao(BaseModel):
     email: str | None = None
     phan_loai_abc: str | None = None
     khong_nhan_email: bool = False
+    lien_he_phu: list[LienHeVao] | None = None
 
 
 class KhachHangSua(BaseModel):
@@ -262,6 +269,7 @@ class KhachHangSua(BaseModel):
     email: str | None = None
     phan_loai_abc: str | None = None
     khong_nhan_email: bool | None = None
+    lien_he_phu: list[LienHeVao] | None = None
 
 
 class KhachHangRa(BaseModel):
@@ -275,6 +283,7 @@ class KhachHangRa(BaseModel):
     ma_so_thue: str | None = None
     phan_loai_abc: str | None = None
     khong_nhan_email: bool = False
+    lien_he_phu: list[LienHeVao] | None = None
 
 
 class BaoGiaFormVao(BaseModel):

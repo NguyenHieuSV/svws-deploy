@@ -339,6 +339,7 @@ class KhachHang(Base):
     phan_loai_abc: Mapped[str | None] = mapped_column(String(1), nullable=True)
     email: Mapped[str | None] = mapped_column(String(120), nullable=True)
     khong_nhan_email: Mapped[bool] = mapped_column(Boolean, default=False)
+    lien_he_phu: Mapped[list | None] = mapped_column(JSONB, nullable=True, default=list)
     nguoi_phu_trach: Mapped[int | None] = mapped_column(ForeignKey("nhan_vien.id"), nullable=True)
 
 

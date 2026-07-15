@@ -25,6 +25,19 @@ THUE_SUAT = Decimal("0.08")
 
 
 # ----- Khách hàng -----
+def _lien_he_phu_sach(ds):
+    """Chuẩn hóa danh sách người liên hệ phụ → list[dict], bỏ dòng trống hoàn toàn."""
+    out = []
+    for lh in (ds or []):
+        d = lh.model_dump() if hasattr(lh, "model_dump") else dict(lh)
+        ten = (d.get("ten") or "").strip()
+        email = (d.get("email") or "").strip()
+        dt = (d.get("dien_thoai") or "").strip()
+        if ten or email or dt:
+            out.append({"ten": ten or None, "email": email or None, "dien_thoai": dt or None})
+    return out
+
+
 @router.get("/khach-hang", response_model=list[KhachHangRa])
 def ds_kh(q: str | None = None, db: Session = Depends(get_db),
           _=Depends(yeu_cau(MODULE, "XEM"))):
@@ -38,10 +51,11 @@ def ds_kh(q: str | None = None, db: Session = Depends(get_db),
 @router.post("/khach-hang", response_model=KhachHangRa, status_code=201)
 def tao_kh(data: KhachHangVao, db: Session = Depends(get_db),
            nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    phu = _lien_he_phu_sach(data.lien_he_phu)
     kh = KhachHang(ma=data.ma, ten=data.ten, ma_so_thue=data.ma_so_thue,
                    dien_thoai=data.dien_thoai, nguoi_lien_he=data.nguoi_lien_he,
                    email=data.email, phan_loai_abc=data.phan_loai_abc,
-                   nguoi_phu_trach=nhan_vien_id_cua(db, nd.id))
+                   lien_he_phu=phu, nguoi_phu_trach=nhan_vien_id_cua(db, nd.id))
     db.add(kh); db.flush()
     ghi_audit(db, nd.id, "TAO", "khach_hang", kh.id, moi={"ten": data.ten})
     db.commit(); db.refresh(kh)
@@ -57,6 +71,8 @@ def sua_kh(kh_id: int, data: KhachHangSua, db: Session = Depends(get_db),
     doi = data.model_dump(exclude_unset=True)
     if not doi:
         return kh
+    if "lien_he_phu" in doi:
+        doi["lien_he_phu"] = _lien_he_phu_sach(data.lien_he_phu)
     if "ma" in doi and doi["ma"]:
         trung = db.query(KhachHang).filter(KhachHang.ma == doi["ma"],
                                            KhachHang.id != kh.id).first()
