@@ -64,6 +64,15 @@ def hach_toan_thu_tien(db: Session, cong_no, so_tien: Decimal, tien_mat=False) -
     return bt
 
 
+def hach_toan_tra_ncc(db: Session, cong_no, so_tien: Decimal, tien_mat=False) -> ButToan:
+    """Nợ 331 / Có 111/112 (trả nợ phải trả cho NCC) — đối xứng với thu tiền khách."""
+    tk_chi = TK["TIEN_MAT"] if tien_mat else TK["TIEN_NH"]
+    bt = ButToan(tk_no=TK["PHAI_TRA"], tk_co=tk_chi, so_tien=so_tien,
+                 hoa_don_id=cong_no.hoa_don_id, dien_giai=f"Trả nợ NCC công nợ {cong_no.id}")
+    db.add(bt)
+    return bt
+
+
 def hach_toan_luong(db: Session, bl) -> list:
     """Lương đầy đủ:
     - Nợ CP(642/622/627) / Có 334  = tổng thu nhập (lương thực tế + phụ cấp + OT)

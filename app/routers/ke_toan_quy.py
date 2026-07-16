@@ -407,8 +407,13 @@ def tong_quan(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
     ptr = _f(db.query(func.coalesce(func.sum(CongNo.so_tien - CongNo.da_thanh_toan), 0))
              .filter(CongNo.loai == "PHAI_TRA").scalar())
     cho_duyet = db.query(func.count(PhieuThuChi.id)).filter(PhieuThuChi.trang_thai == "CHO_DUYET").scalar()
+    hd_chua_ht = db.query(func.count(HoaDon.id)).filter(HoaDon.da_hach_toan.is_(False)).scalar()
+    hd_mua_chua_ht = db.query(func.count(HoaDon.id)) \
+        .filter(HoaDon.da_hach_toan.is_(False), HoaDon.loai == "MUA").scalar()
     return {"tong_quy": tong_quy, "phai_thu": pt, "phai_tra": ptr,
             "phieu_cho_duyet": int(cho_duyet or 0),
+            "hoa_don_chua_hach_toan": int(hd_chua_ht or 0),
+            "hoa_don_mua_chua_hach_toan": int(hd_mua_chua_ht or 0),
             "quy": [_quy_dict(q) for q in db.query(TaiKhoanQuy).order_by(TaiKhoanQuy.id).all()]}
 
 

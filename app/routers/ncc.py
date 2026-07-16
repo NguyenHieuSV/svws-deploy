@@ -1229,11 +1229,21 @@ def nhan_hang(dm_id: int, data: NhanHangVao, db: Session = Depends(get_db),
     co_nhan = any(c.so_luong_nhan > 0 for c in cts.values())
     dm.trang_thai_nhan = "DU" if da_du else ("MOT_PHAN" if co_nhan else "CHUA")
     dm.ngay_giao_thuc = date.today()
-    # công nợ phải trả theo giá trị thực nhận
-    cn_id = None
+    # công nợ phải trả theo giá trị thực nhận + HÓA ĐƠN MUA nháp (liên thông Kế toán,
+    # đối xứng với bán hàng: xuất kho tự tạo hóa đơn bán). Một hóa đơn ↔ một công nợ.
+    cn_id = None; hd_mua_id = None
     if data.tao_cong_no and gia_tri_nhan > 0:
-        cn = CongNo(loai="PHAI_TRA", nha_cung_cap_id=dm.nha_cung_cap_id, so_tien=gia_tri_nhan,
-                    da_thanh_toan=0, han=data.han_thanh_toan, trang_thai="CHUA_TRA")
+        from ..models import HoaDon
+        hd = HoaDon(loai="MUA", nha_cung_cap_id=dm.nha_cung_cap_id, don_hang_id=dm.don_hang_id,
+                    ngay=date.today(), tien_truoc_thue=gia_tri_nhan, tien_thue=0,
+                    tong_tien=gia_tri_nhan, tk_chi_phi="632",  # giá vốn; kế toán đổi 642 nếu là chi phí
+                    dien_giai=f"Nhận hàng PO {dm.so or dm.id} (phiếu {pk.so}) — đối chiếu VAT theo HĐ NCC",
+                    da_hach_toan=False, trang_thai="GHI_NHAN")
+        db.add(hd); db.flush()
+        hd.so = f"HDM-{date.today():%Y%m%d}-{hd.id}"; hd_mua_id = hd.id
+        cn = CongNo(loai="PHAI_TRA", hoa_don_id=hd.id, nha_cung_cap_id=dm.nha_cung_cap_id,
+                    so_tien=gia_tri_nhan, da_thanh_toan=0, han=data.han_thanh_toan,
+                    trang_thai="CHUA_TRA")
         db.add(cn); db.flush(); cn_id = cn.id
     # TỰ CHẤM ĐIỂM NCC khi đã nhận ĐỦ (đúng hạn + đủ lượng + QC)
     diem_ncc = None
@@ -1245,11 +1255,11 @@ def nhan_hang(dm_id: int, data: NhanHangVao, db: Session = Depends(get_db),
     ghi_audit(db, nd.id, "NHAN_HANG", "don_mua", dm.id,
               moi={"phieu_kho": pk.so, "gia_tri_nhan": float(gia_tri_nhan),
                    "trang_thai_nhan": dm.trang_thai_nhan, "cong_no_id": cn_id,
-                   "diem_ncc": diem_ncc})
+                   "hoa_don_mua_id": hd_mua_id, "diem_ncc": diem_ncc})
     db.commit()
     return {"don_mua_id": dm.id, "phieu_kho": pk.so, "gia_tri_nhan": float(gia_tri_nhan),
             "trang_thai_nhan": dm.trang_thai_nhan, "ngay_giao_thuc": str(dm.ngay_giao_thuc),
-            "cong_no_id": cn_id, "danh_gia_ncc": diem_ncc}
+            "cong_no_id": cn_id, "hoa_don_mua_id": hd_mua_id, "danh_gia_ncc": diem_ncc}
 
 
 @router.get("/nha-cung-cap/{ncc_id}/lich-su-danh-gia")
@@ -1927,6 +1937,10 @@ def thanh_toan_ncc(cn_id: int, data: ThuTienVao, db: Session = Depends(get_db),
     db.add(ThanhToan(cong_no_id=cn.id, so_tien=data.so_tien, ngay=date.today(), hinh_thuc=data.hinh_thuc))
     cn.da_thanh_toan = cn.da_thanh_toan + data.so_tien
     cn.trang_thai = "DA_TRA" if cn.da_thanh_toan >= cn.so_tien else "TRA_MOT_PHAN"
+    # Bút toán sổ cái: Nợ 331 / Có 111/112 (đối xứng với thu tiền khách)
+    from ..hach_toan import hach_toan_tra_ncc
+    tien_mat = (data.hinh_thuc or "").upper() in ("TM", "TIEN_MAT", "MAT")
+    hach_toan_tra_ncc(db, cn, data.so_tien, tien_mat=tien_mat)
     ghi_audit(db, nd.id, "THANH_TOAN", "cong_no", cn.id,
               moi={"so_tien": float(data.so_tien), "trang_thai": cn.trang_thai})
     db.commit()
