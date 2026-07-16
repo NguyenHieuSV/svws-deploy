@@ -33,6 +33,61 @@ def dong_tien(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
     }
 
 
+@router.get("/dashboard")
+def dashboard(db: Session = Depends(get_db), _=Depends(yeu_cau("dashboard", "XEM"))):
+    """Tổng quan điều hành — TỔNG HỢP THẬT từ Bán hàng, Mua hàng (NCC), Kho, Công nợ.
+    Không nhập liệu trùng: đọc thẳng dữ liệu do các module sinh ra."""
+    from ..models import DonHang, DonMua, BaoGia
+    hom_nay = date.today()
+
+    # --- Tài chính: tách rõ đã THU (từ khách) vs đã TRẢ (cho NCC) ---
+    da_thu = db.query(func.coalesce(func.sum(ThanhToan.so_tien), 0)) \
+               .join(CongNo, ThanhToan.cong_no_id == CongNo.id) \
+               .filter(CongNo.loai == "PHAI_THU").scalar()
+    da_tra = db.query(func.coalesce(func.sum(ThanhToan.so_tien), 0)) \
+               .join(CongNo, ThanhToan.cong_no_id == CongNo.id) \
+               .filter(CongNo.loai == "PHAI_TRA").scalar()
+    phai_thu = db.query(func.coalesce(func.sum(CongNo.so_tien - CongNo.da_thanh_toan), 0)) \
+                 .filter(CongNo.loai == "PHAI_THU", CongNo.trang_thai != "THU_DU").scalar()
+    phai_tra = db.query(func.coalesce(func.sum(CongNo.so_tien - CongNo.da_thanh_toan), 0)) \
+                 .filter(CongNo.loai == "PHAI_TRA", CongNo.trang_thai != "THU_DU").scalar()
+    congno_qh = db.query(func.count(CongNo.id)) \
+                  .filter(CongNo.loai == "PHAI_THU", CongNo.trang_thai != "THU_DU",
+                          CongNo.so_tien - CongNo.da_thanh_toan > 0,
+                          CongNo.han.isnot(None), CongNo.han < hom_nay).scalar()
+
+    # --- Bán hàng ---
+    bh_so_don = db.query(func.count(DonHang.id)).scalar()
+    bh_gia_tri = db.query(func.coalesce(func.sum(DonHang.tong_tien), 0)).scalar()
+    bh_chua_xuat = db.query(func.count(DonHang.id)).filter(DonHang.trang_thai != "DA_XUAT").scalar()
+    bh_bao_gia_cho = db.query(func.count(BaoGia.id)) \
+                       .filter(BaoGia.trang_thai.in_(["NHAP", "CHO_DUYET"])).scalar()
+
+    # --- Mua hàng (NCC) ---
+    mh_q = db.query(DonMua).filter(DonMua.trang_thai != "TU_CHOI")
+    mh_so_po = mh_q.count()
+    mh_gia_tri = db.query(func.coalesce(func.sum(DonMua.tong_tien), 0)) \
+                   .filter(DonMua.trang_thai != "TU_CHOI").scalar()
+    mh_cho_duyet = db.query(func.count(DonMua.id)).filter(DonMua.trang_thai == "CHO_DUYET").scalar()
+    mh_cho_nhan = db.query(func.count(DonMua.id)) \
+                    .filter(DonMua.trang_thai == "DA_DUYET", DonMua.trang_thai_nhan != "DU").scalar()
+
+    # --- Kho: hàng dưới tồn tối thiểu ---
+    kho_duoi_min = db.query(func.count(TonKho.id)) \
+                     .filter(TonKho.ton_min > 0, TonKho.so_luong < TonKho.ton_min).scalar()
+
+    return {
+        "tai_chinh": {"da_thu": float(da_thu), "da_tra_ncc": float(da_tra),
+                      "con_phai_thu": float(phai_thu), "con_phai_tra": float(phai_tra)},
+        "ban_hang": {"so_don": int(bh_so_don), "gia_tri_don": float(bh_gia_tri),
+                     "so_don_chua_xuat": int(bh_chua_xuat), "so_bao_gia_cho": int(bh_bao_gia_cho)},
+        "mua_hang": {"so_po": int(mh_so_po), "gia_tri_po": float(mh_gia_tri),
+                     "so_po_cho_duyet": int(mh_cho_duyet), "so_po_cho_nhan": int(mh_cho_nhan)},
+        "kho": {"so_duoi_min": int(kho_duoi_min)},
+        "canh_bao": {"congno_qua_han": int(congno_qh)},
+    }
+
+
 @router.get("/cong-no-qua-han")
 def cong_no_qua_han(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
     hom_nay = date.today()
