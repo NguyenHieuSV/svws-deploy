@@ -130,6 +130,27 @@ def xoa_kh(kh_id: int, db: Session = Depends(get_db),
 
 
 # ----- CÔNG NỢ KHÁCH HÀNG (sales theo dõi thu hồi) -----
+@router.get("/don-hang-co-po")
+def ds_don_hang_co_po(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
+    """Đơn hàng bán ĐÃ CÓ tệp PO khách / hợp đồng đính kèm — nguồn cho droplist
+    Mã đơn hàng ở tab Công nợ (khớp bảng 'Danh sách đơn hàng bán đã có PO/HĐ')."""
+    from ..models import TepDinhKem
+    ids = {t.doi_tuong_id for t in db.query(TepDinhKem)
+           .filter(TepDinhKem.doi_tuong == "DON_HANG",
+                   TepDinhKem.loai.in_(["PO", "HOP_DONG"])).all()}
+    if not ids:
+        return []
+    out = []
+    for o in (db.query(DonHang).filter(DonHang.id.in_(ids))
+                .order_by(DonHang.id.desc()).all()):
+        kh = db.get(KhachHang, o.khach_hang_id) if o.khach_hang_id else None
+        out.append({"id": o.id, "so": o.so or f"DH-{o.id}",
+                    "khach_ten": kh.ten if kh else None,
+                    "ngay": str(o.ngay) if o.ngay else None,
+                    "tong_tien": float(o.tong_tien or 0)})
+    return out
+
+
 @router.get("/cong-no-khach")
 def ds_cong_no_khach(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
     """Công nợ PHẢI THU của khách — cho sales theo dõi: ngày, mã hàng bán, khách,
@@ -143,7 +164,9 @@ def ds_cong_no_khach(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "X
         if con_lai <= 0:
             continue                      # đã thu đủ thì không cần theo dõi
         hd = db.get(HoaDon, cn.hoa_don_id) if cn.hoa_don_id else None
-        dh = db.get(DonHang, hd.don_hang_id) if (hd and hd.don_hang_id) else None
+        # Mã đơn hàng: ưu tiên đơn hàng sales đã gắn, nếu trống thì theo hóa đơn gốc
+        dh_id = cn.don_hang_id or (hd.don_hang_id if hd else None)
+        dh = db.get(DonHang, dh_id) if dh_id else None
         kh_id = cn.khach_hang_id or (hd.khach_hang_id if hd else None)
         kh = db.get(KhachHang, kh_id) if kh_id else None
         moc = cn.ngay_tt_tiep or cn.han   # mốc nhắc: ưu tiên ngày TT tiếp theo
@@ -175,27 +198,34 @@ from pydantic import BaseModel as _CNBase
 class TheoDoiCongNoVao(_CNBase):
     ngay_tt_tiep: date | None = None
     ghi_chu: str | None = None
+    don_hang_id: int | None = None
+    doi_don_hang: bool = False          # True = áp dụng don_hang_id (kể cả gỡ về None)
 
 
 @router.put("/cong-no/{cn_id}/theo-doi")
 def cap_nhat_theo_doi_cong_no(cn_id: int, data: TheoDoiCongNoVao, db: Session = Depends(get_db),
                               nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
-    """Sales cập nhật ngày thanh toán tiếp theo + ghi chú cho công nợ khách."""
+    """Sales cập nhật ngày thanh toán tiếp theo, ghi chú và mã đơn hàng bán gắn kèm."""
     cn = db.get(CongNo, cn_id)
     if cn is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy công nợ")
     if cn.loai != "PHAI_THU":
         raise HTTPException(status.HTTP_400_BAD_REQUEST,
                             "Chỉ theo dõi được công nợ phải thu của khách hàng")
-    cu = {"ngay_tt_tiep": str(cn.ngay_tt_tiep) if cn.ngay_tt_tiep else None, "ghi_chu": cn.ghi_chu}
+    cu = {"ngay_tt_tiep": str(cn.ngay_tt_tiep) if cn.ngay_tt_tiep else None,
+          "ghi_chu": cn.ghi_chu, "don_hang_id": cn.don_hang_id}
     cn.ngay_tt_tiep = data.ngay_tt_tiep
     cn.ghi_chu = (data.ghi_chu or "").strip() or None
+    if data.doi_don_hang:
+        if data.don_hang_id and db.get(DonHang, data.don_hang_id) is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đơn hàng bán")
+        cn.don_hang_id = data.don_hang_id
     ghi_audit(db, nd.id, "CAP_NHAT", "cong_no", cn.id, cu=cu,
               moi={"ngay_tt_tiep": str(cn.ngay_tt_tiep) if cn.ngay_tt_tiep else None,
-                   "ghi_chu": cn.ghi_chu})
+                   "ghi_chu": cn.ghi_chu, "don_hang_id": cn.don_hang_id})
     db.commit()
     return {"id": cn.id, "ngay_tt_tiep": str(cn.ngay_tt_tiep) if cn.ngay_tt_tiep else None,
-            "ghi_chu": cn.ghi_chu}
+            "ghi_chu": cn.ghi_chu, "don_hang_id": cn.don_hang_id}
 
 
 @router.delete("/cong-no/{cn_id}")
