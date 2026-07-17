@@ -198,6 +198,37 @@ def cap_nhat_theo_doi_cong_no(cn_id: int, data: TheoDoiCongNoVao, db: Session = 
             "ghi_chu": cn.ghi_chu}
 
 
+@router.delete("/cong-no/{cn_id}")
+def xoa_cong_no_khach(cn_id: int, db: Session = Depends(get_db),
+                      nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
+    """Xóa công nợ phải thu ghi nhầm. Chặn khi đã có tiền thu thật hoặc công nợ
+    sinh từ hóa đơn bán (phải hủy hóa đơn ở Kế toán để gỡ kèm) — giữ vết kế toán."""
+    from ..models import ThanhToan, PhieuThuChi
+    cn = db.get(CongNo, cn_id)
+    if cn is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy công nợ")
+    if cn.loai != "PHAI_THU":
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Công nợ này không phải khoản phải thu")
+    co_tien = (float(cn.da_thanh_toan or 0) > 0
+               or db.query(ThanhToan).filter_by(cong_no_id=cn.id).first() is not None
+               or db.query(PhieuThuChi).filter_by(cong_no_id=cn.id).first() is not None)
+    if co_tien:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Công nợ này đã có tiền thu thật (lần thu đã ghi / phiếu thu gắn kèm) "
+                            "— không thể xóa để giữ vết kế toán.")
+    if cn.hoa_don_id:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Công nợ này sinh từ hóa đơn bán — hãy xóa/hủy hóa đơn đó ở mục "
+                            "Kế toán → Hóa đơn, công nợ sẽ được gỡ kèm theo.")
+    ghi_audit(db, nd.id, "XOA", "cong_no", cn.id,
+              cu={"loai": cn.loai, "khach_hang_id": cn.khach_hang_id,
+                  "so_tien": float(cn.so_tien or 0),
+                  "han": str(cn.han) if cn.han else None})
+    db.delete(cn)
+    db.commit()
+    return {"da_xoa": True}
+
+
 # ----- Dịch nội dung hợp đồng VN -> EN (AI) -----
 from pydantic import BaseModel as _BM
 from ..ai_gateway import dich_vn_sang_en
