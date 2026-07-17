@@ -446,6 +446,8 @@ class CongNo(Base):
     han: Mapped[date | None] = mapped_column(Date, nullable=True)
     trang_thai: Mapped[str] = mapped_column(String(20), default="CHUA_THU")
     don_mua_id: Mapped[int | None] = mapped_column(ForeignKey("don_mua.id", ondelete="SET NULL"), nullable=True)
+    ngay_tt_tiep: Mapped[date | None] = mapped_column(Date, nullable=True)   # Sales theo dõi công nợ
+    ghi_chu: Mapped[str | None] = mapped_column(String(300), nullable=True)
 
 
 # ---------- Module Kế toán: thanh toán & sổ cái ----------

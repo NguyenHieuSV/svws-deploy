@@ -129,6 +129,75 @@ def xoa_kh(kh_id: int, db: Session = Depends(get_db),
     return {"ok": True, "ten": ten_cu}
 
 
+# ----- CÔNG NỢ KHÁCH HÀNG (sales theo dõi thu hồi) -----
+@router.get("/cong-no-khach")
+def ds_cong_no_khach(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
+    """Công nợ PHẢI THU của khách — cho sales theo dõi: ngày, mã hàng bán, khách,
+    đã thanh toán, còn lại, ngày TT tiếp theo, ghi chú. Kèm cờ nhắc khi còn ≤7 ngày."""
+    hom_nay = date.today()
+    rows = (db.query(CongNo).filter(CongNo.loai == "PHAI_THU")
+              .order_by(CongNo.id.desc()).limit(300).all())
+    out = []
+    for cn in rows:
+        con_lai = float((cn.so_tien or 0) - (cn.da_thanh_toan or 0))
+        if con_lai <= 0:
+            continue                      # đã thu đủ thì không cần theo dõi
+        hd = db.get(HoaDon, cn.hoa_don_id) if cn.hoa_don_id else None
+        dh = db.get(DonHang, hd.don_hang_id) if (hd and hd.don_hang_id) else None
+        kh_id = cn.khach_hang_id or (hd.khach_hang_id if hd else None)
+        kh = db.get(KhachHang, kh_id) if kh_id else None
+        moc = cn.ngay_tt_tiep or cn.han   # mốc nhắc: ưu tiên ngày TT tiếp theo
+        con_ngay = (moc - hom_nay).days if moc else None
+        out.append({
+            "id": cn.id,
+            "ngay": str(hd.ngay) if (hd and hd.ngay) else (str(dh.ngay) if (dh and dh.ngay) else None),
+            "ma_ban": (dh.so if dh else None) or (f"DH-{dh.id}" if dh else None),
+            "don_hang_id": dh.id if dh else None,
+            "khach_ten": kh.ten if kh else None,
+            "so_tien": float(cn.so_tien or 0),
+            "da_thanh_toan": float(cn.da_thanh_toan or 0),
+            "con_lai": con_lai,
+            "han": str(cn.han) if cn.han else None,
+            "ngay_tt_tiep": str(cn.ngay_tt_tiep) if cn.ngay_tt_tiep else None,
+            "ghi_chu": cn.ghi_chu,
+            "trang_thai": cn.trang_thai,
+            "con_ngay": con_ngay,
+            "qua_han": bool(moc and con_ngay is not None and con_ngay < 0),
+            "sap_den_han": bool(moc and con_ngay is not None and 0 <= con_ngay <= 7),
+        })
+    out.sort(key=lambda x: (x["ngay_tt_tiep"] or x["han"] or "9999-12-31"))
+    return out
+
+
+from pydantic import BaseModel as _CNBase
+
+
+class TheoDoiCongNoVao(_CNBase):
+    ngay_tt_tiep: date | None = None
+    ghi_chu: str | None = None
+
+
+@router.put("/cong-no/{cn_id}/theo-doi")
+def cap_nhat_theo_doi_cong_no(cn_id: int, data: TheoDoiCongNoVao, db: Session = Depends(get_db),
+                              nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    """Sales cập nhật ngày thanh toán tiếp theo + ghi chú cho công nợ khách."""
+    cn = db.get(CongNo, cn_id)
+    if cn is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy công nợ")
+    if cn.loai != "PHAI_THU":
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Chỉ theo dõi được công nợ phải thu của khách hàng")
+    cu = {"ngay_tt_tiep": str(cn.ngay_tt_tiep) if cn.ngay_tt_tiep else None, "ghi_chu": cn.ghi_chu}
+    cn.ngay_tt_tiep = data.ngay_tt_tiep
+    cn.ghi_chu = (data.ghi_chu or "").strip() or None
+    ghi_audit(db, nd.id, "CAP_NHAT", "cong_no", cn.id, cu=cu,
+              moi={"ngay_tt_tiep": str(cn.ngay_tt_tiep) if cn.ngay_tt_tiep else None,
+                   "ghi_chu": cn.ghi_chu})
+    db.commit()
+    return {"id": cn.id, "ngay_tt_tiep": str(cn.ngay_tt_tiep) if cn.ngay_tt_tiep else None,
+            "ghi_chu": cn.ghi_chu}
+
+
 # ----- Dịch nội dung hợp đồng VN -> EN (AI) -----
 from pydantic import BaseModel as _BM
 from ..ai_gateway import dich_vn_sang_en
