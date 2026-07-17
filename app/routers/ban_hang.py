@@ -167,7 +167,8 @@ def ds_cong_no_khach(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "X
         # Mã đơn hàng: ưu tiên đơn hàng sales đã gắn, nếu trống thì theo hóa đơn gốc
         dh_id = cn.don_hang_id or (hd.don_hang_id if hd else None)
         dh = db.get(DonHang, dh_id) if dh_id else None
-        kh_id = cn.khach_hang_id or (hd.khach_hang_id if hd else None)
+        # Khách hàng lấy theo ĐƠN HÀNG (nguồn duy nhất), thiếu mới lùi về công nợ/hóa đơn
+        kh_id = (dh.khach_hang_id if dh else None) or cn.khach_hang_id or (hd.khach_hang_id if hd else None)
         kh = db.get(KhachHang, kh_id) if kh_id else None
         moc = cn.ngay_tt_tiep or cn.han   # mốc nhắc: ưu tiên ngày TT tiếp theo
         con_ngay = (moc - hom_nay).days if moc else None
@@ -177,6 +178,8 @@ def ds_cong_no_khach(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "X
             "ma_ban": (dh.so if dh else None) or (f"DH-{dh.id}" if dh else None),
             "don_hang_id": dh.id if dh else None,
             "khach_ten": kh.ten if kh else None,
+            # Giá trị đơn hàng: lấy từ tab Đơn hàng & PO/Hợp đồng (thiếu đơn thì dùng công nợ)
+            "gia_tri_don": float(dh.tong_tien or 0) if dh else None,
             "so_tien": float(cn.so_tien or 0),
             "da_thanh_toan": float(cn.da_thanh_toan or 0),
             "con_lai": con_lai,
