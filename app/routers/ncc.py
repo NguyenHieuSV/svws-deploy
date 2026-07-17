@@ -743,9 +743,13 @@ def xoa_de_xuat(ycm_id: int, db: Session = Depends(get_db),
     y = db.get(YeuCauMua, ycm_id)
     if y is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đề xuất")
-    if y.don_mua_id or y.trang_thai == "DA_TAO_PO":
+    # Chỉ chặn khi PO liên quan CÒN TỒN TẠI. (Trước đây chặn cả theo trang_thai
+    # 'DA_TAO_PO' — PO xóa rồi thì cờ vẫn kẹt khiến đề xuất không bao giờ xóa được.)
+    dm_lk = db.get(DonMua, y.don_mua_id) if y.don_mua_id else None
+    if dm_lk is not None:
         raise HTTPException(status.HTTP_400_BAD_REQUEST,
-                            "Đề xuất đã được tạo PO — không thể xóa. Hãy xóa PO liên quan trước.")
+                            f"Đề xuất đã được tạo PO '{dm_lk.so or dm_lk.id}' — không thể xóa. "
+                            "Hãy xóa PO đó ở Nhà cung cấp → Đơn mua trước.")
     for t in db.query(TepDinhKem).filter_by(doi_tuong="YEU_CAU_MUA", doi_tuong_id=ycm_id).all():
         xoa_tep_chung(t.duong_dan)
         db.delete(t)
@@ -925,6 +929,12 @@ def xoa_don_mua(dm_id: int, db: Session = Depends(get_db),
     for t in db.query(TepDinhKem).filter_by(doi_tuong="DON_MUA", doi_tuong_id=dm_id).all():
         xoa_tep_chung(t.duong_dan)
         db.delete(t)
+    # Trả đề xuất mua về hàng đợi: gỡ liên kết PO và bỏ cờ 'đã tạo PO'
+    # (nếu chỉ để DB SET NULL thì trang_thai kẹt DA_TAO_PO, đề xuất không xóa/tạo PO lại được)
+    for y in db.query(YeuCauMua).filter_by(don_mua_id=dm_id).all():
+        y.don_mua_id = None
+        if y.trang_thai == "DA_TAO_PO":
+            y.trang_thai = "DA_DUYET"
     db.query(DonMuaCt).filter_by(don_mua_id=dm_id).delete()
     try:
         db.delete(dm)
