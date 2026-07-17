@@ -307,6 +307,139 @@ def cap_nhat_theo_doi_cong_no(cn_id: int, data: TheoDoiCongNoVao, db: Session = 
             "ghi_chu": cn.ghi_chu, "don_hang_id": cn.don_hang_id}
 
 
+@router.get("/cong-no/{cn_id}/dot-thanh-toan")
+def ds_dot_thu(cn_id: int, db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
+    """Lịch sử các đợt khách đã thanh toán cho một khoản phải thu."""
+    from ..models import ThanhToan
+    rows = (db.query(ThanhToan).filter_by(cong_no_id=cn_id)
+              .order_by(ThanhToan.ngay, ThanhToan.id).all())
+    return [{"id": r.id, "ngay": str(r.ngay) if r.ngay else None,
+             "so_tien": float(r.so_tien or 0), "hinh_thuc": r.hinh_thuc} for r in rows]
+
+
+class ThuDotVao(_CNBase):
+    so_tien: Decimal = Decimal(0)
+    ngay_thanh_toan: date | None = None
+    ngay_tt_tiep: date | None = None
+    ghi_chu: str | None = None
+
+
+def _bt_dieu_chinh_thu(db: Session, cn, delta: Decimal, ly_do: str):
+    """Bút toán điều chỉnh khi sửa/xóa đợt thu: tăng → Nợ112/Có131, giảm → đảo lại."""
+    from ..models import ButToan
+    from ..hach_toan import TK
+    if delta > 0:
+        db.add(ButToan(tk_no=TK["TIEN_NH"], tk_co=TK["PHAI_THU"], so_tien=delta,
+                       hoa_don_id=cn.hoa_don_id, dien_giai=f"{ly_do} (tăng) công nợ {cn.id}"))
+    elif delta < 0:
+        db.add(ButToan(tk_no=TK["PHAI_THU"], tk_co=TK["TIEN_NH"], so_tien=-delta,
+                       hoa_don_id=cn.hoa_don_id, dien_giai=f"{ly_do} (giảm) công nợ {cn.id}"))
+
+
+def _cap_nhat_tt_cong_no(cn, da: Decimal):
+    cn.da_thanh_toan = da
+    cn.trang_thai = "THU_DU" if da >= Decimal(cn.so_tien or 0) else ("THU_MOT_PHAN" if da > 0 else "CHUA_THU")
+
+
+@router.post("/cong-no/{cn_id}/thu-dot")
+def thu_dot_cong_no(cn_id: int, data: ThuDotVao, db: Session = Depends(get_db),
+                    nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    """Ghi nhận MỘT ĐỢT khách thanh toán cho khoản phải thu (lưu lại thành 1 dòng lịch sử)."""
+    from ..models import ThanhToan
+    from ..hach_toan import hach_toan_thu_tien
+    cn = db.get(CongNo, cn_id)
+    if cn is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy công nợ")
+    if cn.loai != "PHAI_THU":
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Công nợ này không phải khoản phải thu")
+    tt = Decimal(data.so_tien or 0)
+    if tt < 0:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Số tiền không hợp lệ")
+    if tt > 0:
+        con_lai = Decimal(cn.so_tien or 0) - Decimal(cn.da_thanh_toan or 0)
+        if tt > con_lai:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                f"Số tiền {tt:,.0f} vượt số còn lại {con_lai:,.0f}")
+        db.add(ThanhToan(cong_no_id=cn.id, so_tien=tt,
+                         ngay=data.ngay_thanh_toan or date.today(), hinh_thuc="CK"))
+        _cap_nhat_tt_cong_no(cn, Decimal(cn.da_thanh_toan or 0) + tt)
+        hach_toan_thu_tien(db, cn, tt, tien_mat=False)   # Nợ 112 / Có 131
+    if data.ngay_tt_tiep is not None:
+        cn.ngay_tt_tiep = data.ngay_tt_tiep
+    if data.ghi_chu is not None:
+        cn.ghi_chu = (data.ghi_chu or "").strip() or None
+    ghi_audit(db, nd.id, "THU_TIEN" if tt > 0 else "CAP_NHAT", "cong_no", cn.id,
+              moi={"so_tien_dot": float(tt), "da_thanh_toan": float(cn.da_thanh_toan),
+                   "trang_thai": cn.trang_thai})
+    db.commit()
+    return {"id": cn.id, "da_thanh_toan": float(cn.da_thanh_toan),
+            "con_lai": float(Decimal(cn.so_tien or 0) - Decimal(cn.da_thanh_toan or 0)),
+            "trang_thai": cn.trang_thai}
+
+
+class SuaDotThuVao(_CNBase):
+    ngay: date | None = None
+    so_tien: Decimal | None = None
+
+
+@router.put("/dot-thu/{tt_id}")
+def sua_dot_thu(tt_id: int, data: SuaDotThuVao, db: Session = Depends(get_db),
+                nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
+    """Sửa một đợt thu đã ghi (ghi nhầm) — chỉ CEO/ADMIN. Sinh bút toán điều chỉnh."""
+    from ..models import ThanhToan
+    t = db.get(ThanhToan, tt_id)
+    if t is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đợt thanh toán")
+    cn = db.get(CongNo, t.cong_no_id)
+    if cn is None or cn.loai != "PHAI_THU":
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Đợt này không thuộc công nợ phải thu")
+    cu = {"ngay": str(t.ngay) if t.ngay else None, "so_tien": float(t.so_tien or 0)}
+    moi_tien = Decimal(data.so_tien) if data.so_tien is not None else Decimal(t.so_tien or 0)
+    if moi_tien < 0:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Số tiền không hợp lệ")
+    delta = moi_tien - Decimal(t.so_tien or 0)
+    da = Decimal(cn.da_thanh_toan or 0) + delta
+    if da < 0 or da > Decimal(cn.so_tien or 0):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            f"Sửa xong tổng đã thu ({da:,.0f}) phải nằm trong 0–{float(cn.so_tien or 0):,.0f}")
+    if data.ngay is not None:
+        t.ngay = data.ngay
+    t.so_tien = moi_tien
+    _cap_nhat_tt_cong_no(cn, da)
+    _bt_dieu_chinh_thu(db, cn, delta, "Sửa đợt thu")
+    ghi_audit(db, nd.id, "SUA_DOT_THU", "cong_no", cn.id, cu=cu,
+              moi={"dot_id": t.id, "so_tien": float(moi_tien), "da_thanh_toan": float(da)})
+    db.commit()
+    return {"ok": True, "da_thanh_toan": float(da),
+            "con_lai": float(Decimal(cn.so_tien or 0) - da)}
+
+
+@router.delete("/dot-thu/{tt_id}")
+def xoa_dot_thu(tt_id: int, db: Session = Depends(get_db),
+                nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
+    """Xóa một đợt thu ghi nhầm — chỉ CEO/ADMIN. Sinh bút toán đảo tương ứng."""
+    from ..models import ThanhToan
+    t = db.get(ThanhToan, tt_id)
+    if t is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đợt thanh toán")
+    cn = db.get(CongNo, t.cong_no_id)
+    if cn is None or cn.loai != "PHAI_THU":
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Đợt này không thuộc công nợ phải thu")
+    cu = {"ngay": str(t.ngay) if t.ngay else None, "so_tien": float(t.so_tien or 0)}
+    da = Decimal(cn.da_thanh_toan or 0) - Decimal(t.so_tien or 0)
+    if da < 0:
+        da = Decimal(0)
+    _bt_dieu_chinh_thu(db, cn, -Decimal(t.so_tien or 0), "Xóa đợt thu")
+    db.delete(t)
+    db.flush()
+    _cap_nhat_tt_cong_no(cn, da)
+    ghi_audit(db, nd.id, "XOA_DOT_THU", "cong_no", cn.id, cu=cu,
+              moi={"da_thanh_toan": float(da)})
+    db.commit()
+    return {"da_xoa": True, "da_thanh_toan": float(da),
+            "con_lai": float(Decimal(cn.so_tien or 0) - da)}
+
+
 @router.delete("/cong-no/{cn_id}")
 def xoa_cong_no_khach(cn_id: int, db: Session = Depends(get_db),
                       nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
