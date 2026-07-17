@@ -198,6 +198,61 @@ def ds_cong_no_khach(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "X
 from pydantic import BaseModel as _CNBase
 
 
+class TaoCongNoVao(_CNBase):
+    don_hang_id: int
+    tien_truoc_thue: Decimal
+    thue_suat: Decimal = Decimal(8)
+    han: date | None = None
+    ngay_tt_tiep: date | None = None
+    ghi_chu: str | None = None
+    xac_nhan_trung: bool = False      # đợt thanh toán khác của cùng đơn
+
+
+@router.post("/cong-no", status_code=201)
+def tao_cong_no_khach(data: TaoCongNoVao, db: Session = Depends(get_db),
+                      nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    """Sales tạo khoản phải thu từ đơn hàng (thu theo đợt cho dự án/dịch vụ) —
+    kèm hóa đơn bán NHÁP để kế toán hạch toán. Chặn trùng nếu đơn còn khoản chưa thu."""
+    dh = db.get(DonHang, data.don_hang_id)
+    if dh is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đơn hàng bán")
+    if data.tien_truoc_thue <= 0:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Giá trị phải lớn hơn 0")
+    # chặn trùng: đơn đã có khoản phải thu còn nợ (gắn trực tiếp hoặc qua hóa đơn bán)
+    hd_ids = [h.id for h in db.query(HoaDon).filter_by(don_hang_id=dh.id, loai="BAN").all()]
+    q = db.query(CongNo).filter(CongNo.loai == "PHAI_THU",
+                                CongNo.so_tien > CongNo.da_thanh_toan)
+    dk = [CongNo.don_hang_id == dh.id] + ([CongNo.hoa_don_id.in_(hd_ids)] if hd_ids else [])
+    from sqlalchemy import or_ as _or
+    da_co = q.filter(_or(*dk)).all() if dk else []
+    if da_co and not data.xac_nhan_trung:
+        tong_no = sum(float((c.so_tien or 0) - (c.da_thanh_toan or 0)) for c in da_co)
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"Đơn {dh.so or dh.id} đã có {len(da_co)} khoản phải thu còn nợ "
+            f"(tổng {tong_no:,.0f} đ). Bấm xác nhận nếu đây là ĐỢT THANH TOÁN KHÁC của cùng đơn.")
+    truoc = Decimal(data.tien_truoc_thue)
+    thue = (truoc * Decimal(data.thue_suat or 0) / 100).quantize(Decimal("1"))
+    tong = truoc + thue
+    hd = HoaDon(loai="BAN", don_hang_id=dh.id, khach_hang_id=dh.khach_hang_id,
+                ngay=date.today(), tien_truoc_thue=truoc, tien_thue=thue, tong_tien=tong,
+                hddt_trang_thai="CHUA_PHAT_HANH", da_hach_toan=False, trang_thai="GHI_NHAN",
+                dien_giai=f"Công nợ theo đợt — đơn {dh.so or dh.id}")
+    db.add(hd); db.flush()
+    hd.so = f"HDB-{date.today():%Y%m%d}-{hd.id}"
+    cn = CongNo(loai="PHAI_THU", hoa_don_id=hd.id, khach_hang_id=dh.khach_hang_id,
+                don_hang_id=dh.id, so_tien=tong, da_thanh_toan=0,
+                han=data.han or (date.today() + timedelta(days=30)),
+                ngay_tt_tiep=data.ngay_tt_tiep,
+                ghi_chu=(data.ghi_chu or "").strip() or None, trang_thai="CHUA_THU")
+    db.add(cn); db.flush()
+    ghi_audit(db, nd.id, "TAO", "cong_no", cn.id,
+              moi={"don_hang_id": dh.id, "hoa_don_id": hd.id, "so_tien": float(tong),
+                   "dot_bo_sung": bool(da_co)})
+    db.commit()
+    return {"id": cn.id, "hoa_don_id": hd.id, "so_hoa_don": hd.so, "so_tien": float(tong)}
+
+
 class TheoDoiCongNoVao(_CNBase):
     ngay_tt_tiep: date | None = None
     ghi_chu: str | None = None
