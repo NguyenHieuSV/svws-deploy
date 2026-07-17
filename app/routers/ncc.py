@@ -811,6 +811,112 @@ class ThanhToanMuaVao(_SPBase):
     ngay_thanh_toan: date | None = None  # ngày của đợt thanh toán này
 
 
+def _ap_dung_tt_mua(db: Session, dm: DonMua, dn: Decimal) -> bool:
+    """Đặt tổng đã thanh toán của PO = dn rồi đồng bộ cờ tt_du + công nợ phải trả."""
+    tong = Decimal(dm.tong_tien or 0)
+    dm.de_nghi_tt = dn
+    cn = db.query(CongNo).filter_by(don_mua_id=dm.id).first()
+    da_tt_100 = tong > 0 and dn >= tong
+    if da_tt_100:
+        dm.tt_du = True
+        dm.ngay_tt_du = date.today()
+        if cn is not None:
+            cn.da_thanh_toan = cn.so_tien
+            cn.trang_thai = "DA_TRA"
+    else:
+        dm.tt_du = False
+        dm.ngay_tt_du = None
+        if cn is None:
+            cn = CongNo(loai="PHAI_TRA", nha_cung_cap_id=dm.nha_cung_cap_id, don_mua_id=dm.id,
+                        so_tien=tong, da_thanh_toan=dn, han=dm.ngay_tt_tiep,
+                        trang_thai="TRA_MOT_PHAN" if dn > 0 else "CHUA_TRA")
+            db.add(cn)
+        else:
+            cn.so_tien = tong
+            cn.da_thanh_toan = dn
+            if dm.ngay_tt_tiep:
+                cn.han = dm.ngay_tt_tiep
+            cn.trang_thai = "TRA_MOT_PHAN" if dn > 0 else "CHUA_TRA"
+    return da_tt_100
+
+
+@router.get("/don-mua/{dm_id}/dot-thanh-toan")
+def ds_dot_thanh_toan(dm_id: int, db: Session = Depends(get_db),
+                      _=Depends(yeu_cau(MODULE, "XEM"))):
+    """Lịch sử các đợt thanh toán đã ghi của một PO."""
+    from ..models import DonMuaDotTt
+    rows = (db.query(DonMuaDotTt).filter_by(don_mua_id=dm_id)
+              .order_by(DonMuaDotTt.ngay, DonMuaDotTt.id).all())
+    return [{"id": r.id, "ngay": str(r.ngay) if r.ngay else None,
+             "so_tien": float(r.so_tien or 0), "ghi_chu": r.ghi_chu} for r in rows]
+
+
+class SuaDotTtVao(_SPBase):
+    ngay: date | None = None
+    so_tien: Decimal | None = None
+    ghi_chu: str | None = None
+
+
+@router.put("/dot-thanh-toan/{dot_id}")
+def sua_dot_thanh_toan(dot_id: int, data: SuaDotTtVao, db: Session = Depends(get_db),
+                       nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
+    """Sửa một đợt thanh toán đã ghi (ghi nhầm số/ngày) — chỉ CEO/ADMIN.
+    Tổng đã thanh toán của PO được tính lại theo chênh lệch."""
+    from ..models import DonMuaDotTt
+    d = db.get(DonMuaDotTt, dot_id)
+    if d is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đợt thanh toán")
+    dm = db.get(DonMua, d.don_mua_id)
+    if dm is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đơn mua")
+    cu = {"ngay": str(d.ngay) if d.ngay else None, "so_tien": float(d.so_tien or 0)}
+    moi_tien = Decimal(data.so_tien) if data.so_tien is not None else Decimal(d.so_tien or 0)
+    if moi_tien < 0:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Số tiền không hợp lệ")
+    chenh = moi_tien - Decimal(d.so_tien or 0)
+    dn = Decimal(dm.de_nghi_tt or 0) + chenh
+    tong = Decimal(dm.tong_tien or 0)
+    if dn < 0 or dn > tong:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            f"Sửa xong tổng đã thanh toán ({dn:,.0f}) phải nằm trong 0–{tong:,.0f}")
+    if data.ngay is not None:
+        d.ngay = data.ngay
+    d.so_tien = moi_tien
+    if data.ghi_chu is not None:
+        d.ghi_chu = (data.ghi_chu or "").strip() or None
+    _ap_dung_tt_mua(db, dm, dn)
+    ghi_audit(db, nd.id, "SUA_DOT_TT", "don_mua", dm.id, cu=cu,
+              moi={"dot_id": d.id, "ngay": str(d.ngay), "so_tien": float(moi_tien),
+                   "de_nghi_tt": float(dn)})
+    db.commit()
+    return {"ok": True, "da_thanh_toan": float(dn), "con_lai": float(tong - dn)}
+
+
+@router.delete("/dot-thanh-toan/{dot_id}")
+def xoa_dot_thanh_toan(dot_id: int, db: Session = Depends(get_db),
+                       nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
+    """Xóa một đợt thanh toán ghi nhầm — chỉ CEO/ADMIN. Tổng đã thanh toán trừ lại."""
+    from ..models import DonMuaDotTt
+    d = db.get(DonMuaDotTt, dot_id)
+    if d is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đợt thanh toán")
+    dm = db.get(DonMua, d.don_mua_id)
+    if dm is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đơn mua")
+    dn = Decimal(dm.de_nghi_tt or 0) - Decimal(d.so_tien or 0)
+    if dn < 0:
+        dn = Decimal(0)
+    cu = {"ngay": str(d.ngay) if d.ngay else None, "so_tien": float(d.so_tien or 0)}
+    db.delete(d)
+    db.flush()
+    _ap_dung_tt_mua(db, dm, dn)
+    ghi_audit(db, nd.id, "XOA_DOT_TT", "don_mua", dm.id, cu=cu,
+              moi={"de_nghi_tt": float(dn)})
+    db.commit()
+    return {"da_xoa": True, "da_thanh_toan": float(dn),
+            "con_lai": float(Decimal(dm.tong_tien or 0) - dn)}
+
+
 @router.post("/don-mua/{dm_id}/thanh-toan")
 def cap_nhat_thanh_toan_mua(dm_id: int, data: ThanhToanMuaVao, db: Session = Depends(get_db),
                             nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
@@ -839,30 +945,14 @@ def cap_nhat_thanh_toan_mua(dm_id: int, data: ThanhToanMuaVao, db: Session = Dep
                                 "Đề nghị thanh toán phải từ 0 đến Tổng thanh toán của PO.")
         if dn > 0 and dn != da_cu:
             dm.ngay_tt = date.today()   # ngày ghi nhận thanh toán gần nhất
-    dm.de_nghi_tt = dn
     dm.ngay_tt_tiep = data.ngay_tt_tiep
-    cn = db.query(CongNo).filter_by(don_mua_id=dm_id).first()
-    da_tt_100 = tong > 0 and dn >= tong
-    if da_tt_100:
-        dm.tt_du = True
-        dm.ngay_tt_du = date.today()
-        if cn is not None:
-            cn.da_thanh_toan = cn.so_tien
-            cn.trang_thai = "DA_TRA"
-    else:
-        dm.tt_du = False
-        dm.ngay_tt_du = None
-        if cn is None:
-            cn = CongNo(loai="PHAI_TRA", nha_cung_cap_id=dm.nha_cung_cap_id, don_mua_id=dm.id,
-                        so_tien=tong, da_thanh_toan=dn, han=data.ngay_tt_tiep,
-                        trang_thai="TRA_MOT_PHAN" if dn > 0 else "CHUA_TRA")
-            db.add(cn)
-        else:
-            cn.so_tien = tong
-            cn.da_thanh_toan = dn
-            if data.ngay_tt_tiep:
-                cn.han = data.ngay_tt_tiep
-            cn.trang_thai = "TRA_MOT_PHAN" if dn > 0 else "CHUA_TRA"
+    # lưu lịch sử đợt thanh toán (để mở lại form vẫn thấy từng lần trả)
+    if data.so_tien_dot is not None and Decimal(data.so_tien_dot) > 0:
+        from ..models import DonMuaDotTt
+        db.add(DonMuaDotTt(don_mua_id=dm.id, ngay=data.ngay_thanh_toan or date.today(),
+                           so_tien=Decimal(data.so_tien_dot),
+                           nguoi_tao=nhan_vien_id_cua(db, nd.id)))
+    da_tt_100 = _ap_dung_tt_mua(db, dm, dn)
     ghi_audit(db, nd.id, "THANH_TOAN_MUA", "don_mua", dm.id,
               moi={"de_nghi_tt": float(dn), "tong": float(tong), "tt_du": da_tt_100,
                    "so_tien_dot": float(data.so_tien_dot) if data.so_tien_dot is not None else None,

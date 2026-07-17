@@ -252,6 +252,17 @@ class DonMuaCt(Base):
     so_luong_nhan: Mapped[Decimal] = mapped_column(Numeric(15, 3), default=0)
 
 
+class DonMuaDotTt(Base):
+    """Lịch sử từng đợt thanh toán của một đơn mua (PO)."""
+    __tablename__ = "don_mua_dot_tt"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    don_mua_id: Mapped[int] = mapped_column(ForeignKey("don_mua.id", ondelete="CASCADE"))
+    ngay: Mapped[date] = mapped_column(Date, server_default=func.current_date())
+    so_tien: Mapped[Decimal] = mapped_column(Numeric(18, 0))
+    ghi_chu: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    nguoi_tao: Mapped[int | None] = mapped_column(ForeignKey("nhan_vien.id"), nullable=True)
+
+
 class DanhGiaNcc(Base):
     __tablename__ = "danh_gia_ncc"
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
