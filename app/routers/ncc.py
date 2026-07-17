@@ -805,8 +805,10 @@ def ds_thanh_toan_mua(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "
 
 
 class ThanhToanMuaVao(_SPBase):
-    de_nghi_tt: Decimal = Decimal(0)
+    de_nghi_tt: Decimal = Decimal(0)     # tổng lũy kế (dùng khi sửa nhanh trên dòng)
     ngay_tt_tiep: date | None = None
+    so_tien_dot: Decimal | None = None   # ghi nhận THÊM một đợt → cộng dồn vào lũy kế
+    ngay_thanh_toan: date | None = None  # ngày của đợt thanh toán này
 
 
 @router.post("/don-mua/{dm_id}/thanh-toan")
@@ -818,12 +820,25 @@ def cap_nhat_thanh_toan_mua(dm_id: int, data: ThanhToanMuaVao, db: Session = Dep
     if dm is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đơn mua")
     tong = Decimal(dm.tong_tien or 0)
-    dn = Decimal(data.de_nghi_tt or 0)
-    if dn < 0 or dn > tong:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST,
-                            "Đề nghị thanh toán phải từ 0 đến Tổng thanh toán của PO.")
-    if dn > 0 and dn != Decimal(dm.de_nghi_tt or 0):
-        dm.ngay_tt = date.today()   # ngày ghi nhận thanh toán gần nhất
+    da_cu = Decimal(dm.de_nghi_tt or 0)
+    if data.so_tien_dot is not None:      # ghi nhận THÊM một đợt → cộng dồn
+        dot = Decimal(data.so_tien_dot or 0)
+        if dot < 0:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Số tiền đợt này không hợp lệ")
+        if da_cu + dot > tong:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                f"Số tiền {dot:,.0f} vượt số còn lại {tong - da_cu:,.0f} của PO này.")
+        dn = da_cu + dot
+        if dot > 0:
+            dm.ngay_tt = data.ngay_thanh_toan or date.today()
+    else:                                  # đặt thẳng tổng lũy kế (sửa nhanh trên dòng)
+        dn = Decimal(data.de_nghi_tt or 0)
+        if dn < 0 or dn > tong:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                "Đề nghị thanh toán phải từ 0 đến Tổng thanh toán của PO.")
+        if dn > 0 and dn != da_cu:
+            dm.ngay_tt = date.today()   # ngày ghi nhận thanh toán gần nhất
     dm.de_nghi_tt = dn
     dm.ngay_tt_tiep = data.ngay_tt_tiep
     cn = db.query(CongNo).filter_by(don_mua_id=dm_id).first()
@@ -850,9 +865,11 @@ def cap_nhat_thanh_toan_mua(dm_id: int, data: ThanhToanMuaVao, db: Session = Dep
             cn.trang_thai = "TRA_MOT_PHAN" if dn > 0 else "CHUA_TRA"
     ghi_audit(db, nd.id, "THANH_TOAN_MUA", "don_mua", dm.id,
               moi={"de_nghi_tt": float(dn), "tong": float(tong), "tt_du": da_tt_100,
+                   "so_tien_dot": float(data.so_tien_dot) if data.so_tien_dot is not None else None,
                    "ngay_tt_tiep": str(data.ngay_tt_tiep) if data.ngay_tt_tiep else None})
     db.commit()
-    return {"ok": True, "da_tt_100": da_tt_100, "con_lai": float(tong - dn)}
+    return {"ok": True, "da_tt_100": da_tt_100, "da_thanh_toan": float(dn),
+            "con_lai": float(tong - dn)}
 
 
 @router.delete("/don-mua/{dm_id}/thanh-toan")
