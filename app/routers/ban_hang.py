@@ -986,9 +986,42 @@ def chi_tiet_don_hang(dh_id: int, db: Session = Depends(get_db),
         ct_out.append({"hang_hoa_id": ct.hang_hoa_id, "ten": hh.ten if hh else f"HH #{ct.hang_hoa_id}",
                        "don_vi": hh.don_vi if hh else None,
                        "so_luong": float(ct.so_luong), "don_gia": float(ct.don_gia)})
+    co_hd = db.query(HoaDon).filter_by(don_hang_id=dh_id).first() is not None
     return {"id": dh.id, "so": dh.so, "khach_hang_id": dh.khach_hang_id,
             "ngay": str(dh.ngay) if dh.ngay else None, "tong_tien": float(dh.tong_tien or 0),
-            "trang_thai": dh.trang_thai, "chi_tiet": ct_out}
+            "trang_thai": dh.trang_thai, "co_hoa_don": co_hd,
+            # khóa sửa nội dung đơn (vẫn đổi được TRẠNG THÁI) khi đã xuất kho / có hóa đơn
+            "khoa_sua": bool(dh.trang_thai == "DA_XUAT" or co_hd),
+            "chi_tiet": ct_out}
+
+
+_DH_TT_TAY = ("MOI", "DANG_THUC_HIEN", "HOAN_THANH")
+
+
+class TrangThaiDonVao(_CNBase):
+    trang_thai: str
+
+
+@router.put("/don-hang/{dh_id}/trang-thai")
+def doi_trang_thai_don_hang(dh_id: int, data: TrangThaiDonVao, db: Session = Depends(get_db),
+                            nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    """Đổi trạng thái theo dõi của đơn hàng (Mới / Đang thực hiện / Hoàn thành).
+    Cho phép cả khi đơn đã xuất kho hoặc đã có hóa đơn — đây là cờ theo dõi bán hàng,
+    không phải số liệu kế toán. Không cho đặt tay 'DA_XUAT' (do luồng xuất kho quyết định)."""
+    dh = db.get(DonHang, dh_id)
+    if dh is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đơn hàng")
+    tt = (data.trang_thai or "").strip().upper()
+    if tt not in _DH_TT_TAY:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Trạng thái phải là Mới / Đang thực hiện / Hoàn thành. "
+                            "Trạng thái 'Đã xuất kho' do luồng xuất kho tự đặt.")
+    cu = dh.trang_thai
+    dh.trang_thai = tt
+    ghi_audit(db, nd.id, "CAP_NHAT", "don_hang", dh.id,
+              cu={"trang_thai": cu}, moi={"trang_thai": tt})
+    db.commit()
+    return {"id": dh.id, "trang_thai": dh.trang_thai}
 
 
 @router.put("/don-hang/{dh_id}", response_model=DonHangRa)
