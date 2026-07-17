@@ -202,55 +202,76 @@ class TaoCongNoVao(_CNBase):
     don_hang_id: int
     tien_truoc_thue: Decimal
     thue_suat: Decimal = Decimal(8)
-    han: date | None = None
+    ngay_thanh_toan: date | None = None   # ngày của đợt thanh toán này
+    so_tien: Decimal = Decimal(0)         # số tiền khách trả đợt này (0 = chỉ mở công nợ)
     ngay_tt_tiep: date | None = None
     ghi_chu: str | None = None
-    xac_nhan_trung: bool = False      # đợt thanh toán khác của cùng đơn
+
+
+def _cong_no_cua_don(db: Session, dh_id: int):
+    """Khoản phải thu của một đơn hàng (gắn trực tiếp hoặc qua hóa đơn bán)."""
+    from sqlalchemy import or_ as _or
+    hd_ids = [h.id for h in db.query(HoaDon).filter_by(don_hang_id=dh_id, loai="BAN").all()]
+    dk = [CongNo.don_hang_id == dh_id]
+    if hd_ids:
+        dk.append(CongNo.hoa_don_id.in_(hd_ids))
+    return (db.query(CongNo).filter(CongNo.loai == "PHAI_THU", _or(*dk))
+              .order_by(CongNo.id.desc()).first())
 
 
 @router.post("/cong-no", status_code=201)
 def tao_cong_no_khach(data: TaoCongNoVao, db: Session = Depends(get_db),
                       nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
-    """Sales tạo khoản phải thu từ đơn hàng (thu theo đợt cho dự án/dịch vụ) —
-    kèm hóa đơn bán NHÁP để kế toán hạch toán. Chặn trùng nếu đơn còn khoản chưa thu."""
+    """Ghi nhận thanh toán theo ĐỢT cho một đơn hàng. Mỗi đơn chỉ MỘT khoản phải thu:
+    lần đầu tạo công nợ (kèm hóa đơn bán nháp), các lần sau cộng dồn vào chính khoản đó."""
+    from ..models import ThanhToan
+    from ..hach_toan import hach_toan_thu_tien
     dh = db.get(DonHang, data.don_hang_id)
     if dh is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đơn hàng bán")
-    if data.tien_truoc_thue <= 0:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Giá trị phải lớn hơn 0")
-    # chặn trùng: đơn đã có khoản phải thu còn nợ (gắn trực tiếp hoặc qua hóa đơn bán)
-    hd_ids = [h.id for h in db.query(HoaDon).filter_by(don_hang_id=dh.id, loai="BAN").all()]
-    q = db.query(CongNo).filter(CongNo.loai == "PHAI_THU",
-                                CongNo.so_tien > CongNo.da_thanh_toan)
-    dk = [CongNo.don_hang_id == dh.id] + ([CongNo.hoa_don_id.in_(hd_ids)] if hd_ids else [])
-    from sqlalchemy import or_ as _or
-    da_co = q.filter(_or(*dk)).all() if dk else []
-    if da_co and not data.xac_nhan_trung:
-        tong_no = sum(float((c.so_tien or 0) - (c.da_thanh_toan or 0)) for c in da_co)
-        raise HTTPException(
-            status.HTTP_409_CONFLICT,
-            f"Đơn {dh.so or dh.id} đã có {len(da_co)} khoản phải thu còn nợ "
-            f"(tổng {tong_no:,.0f} đ). Bấm xác nhận nếu đây là ĐỢT THANH TOÁN KHÁC của cùng đơn.")
-    truoc = Decimal(data.tien_truoc_thue)
-    thue = (truoc * Decimal(data.thue_suat or 0) / 100).quantize(Decimal("1"))
-    tong = truoc + thue
-    hd = HoaDon(loai="BAN", don_hang_id=dh.id, khach_hang_id=dh.khach_hang_id,
-                ngay=date.today(), tien_truoc_thue=truoc, tien_thue=thue, tong_tien=tong,
-                hddt_trang_thai="CHUA_PHAT_HANH", da_hach_toan=False, trang_thai="GHI_NHAN",
-                dien_giai=f"Công nợ theo đợt — đơn {dh.so or dh.id}")
-    db.add(hd); db.flush()
-    hd.so = f"HDB-{date.today():%Y%m%d}-{hd.id}"
-    cn = CongNo(loai="PHAI_THU", hoa_don_id=hd.id, khach_hang_id=dh.khach_hang_id,
-                don_hang_id=dh.id, so_tien=tong, da_thanh_toan=0,
-                han=data.han or (date.today() + timedelta(days=30)),
-                ngay_tt_tiep=data.ngay_tt_tiep,
-                ghi_chu=(data.ghi_chu or "").strip() or None, trang_thai="CHUA_THU")
-    db.add(cn); db.flush()
-    ghi_audit(db, nd.id, "TAO", "cong_no", cn.id,
-              moi={"don_hang_id": dh.id, "hoa_don_id": hd.id, "so_tien": float(tong),
-                   "dot_bo_sung": bool(da_co)})
+    cn = _cong_no_cua_don(db, dh.id)
+    hd_id = cn.hoa_don_id if cn else None
+    if cn is None:                       # lần đầu: mở công nợ + hóa đơn bán nháp
+        if data.tien_truoc_thue <= 0:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Giá trị chưa VAT phải lớn hơn 0")
+        truoc = Decimal(data.tien_truoc_thue)
+        thue = (truoc * Decimal(data.thue_suat or 0) / 100).quantize(Decimal("1"))
+        tong = truoc + thue
+        hd = HoaDon(loai="BAN", don_hang_id=dh.id, khach_hang_id=dh.khach_hang_id,
+                    ngay=date.today(), tien_truoc_thue=truoc, tien_thue=thue, tong_tien=tong,
+                    hddt_trang_thai="CHUA_PHAT_HANH", da_hach_toan=False, trang_thai="GHI_NHAN",
+                    dien_giai=f"Công nợ đơn {dh.so or dh.id}")
+        db.add(hd); db.flush()
+        hd.so = f"HDB-{date.today():%Y%m%d}-{hd.id}"; hd_id = hd.id
+        cn = CongNo(loai="PHAI_THU", hoa_don_id=hd.id, khach_hang_id=dh.khach_hang_id,
+                    don_hang_id=dh.id, so_tien=tong, da_thanh_toan=0,
+                    han=data.ngay_tt_tiep or (date.today() + timedelta(days=30)),
+                    trang_thai="CHUA_THU")
+        db.add(cn); db.flush()
+    # ghi nhận đợt thanh toán (nếu có)
+    tt = Decimal(data.so_tien or 0)
+    if tt > 0:
+        con_lai = Decimal(cn.so_tien) - Decimal(cn.da_thanh_toan)
+        if tt > con_lai:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                f"Số tiền {tt:,.0f} vượt số còn lại {con_lai:,.0f} của đơn này")
+        db.add(ThanhToan(cong_no_id=cn.id, so_tien=tt,
+                         ngay=data.ngay_thanh_toan or date.today(), hinh_thuc="CK"))
+        cn.da_thanh_toan = Decimal(cn.da_thanh_toan) + tt
+        cn.trang_thai = "THU_DU" if cn.da_thanh_toan >= cn.so_tien else "THU_MOT_PHAN"
+        hach_toan_thu_tien(db, cn, tt, tien_mat=False)   # Nợ 112 / Có 131
+    if data.ngay_tt_tiep is not None:
+        cn.ngay_tt_tiep = data.ngay_tt_tiep
+    if data.ghi_chu is not None:
+        cn.ghi_chu = (data.ghi_chu or "").strip() or None
+    ghi_audit(db, nd.id, "THANH_TOAN" if tt > 0 else "TAO", "cong_no", cn.id,
+              moi={"don_hang_id": dh.id, "hoa_don_id": hd_id, "so_tien_dot": float(tt),
+                   "da_thanh_toan": float(cn.da_thanh_toan), "trang_thai": cn.trang_thai})
     db.commit()
-    return {"id": cn.id, "hoa_don_id": hd.id, "so_hoa_don": hd.so, "so_tien": float(tong)}
+    return {"id": cn.id, "hoa_don_id": hd_id, "so_tien": float(cn.so_tien),
+            "da_thanh_toan": float(cn.da_thanh_toan),
+            "con_lai": float(Decimal(cn.so_tien) - Decimal(cn.da_thanh_toan)),
+            "trang_thai": cn.trang_thai}
 
 
 class TheoDoiCongNoVao(_CNBase):
