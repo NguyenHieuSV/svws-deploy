@@ -17,7 +17,7 @@ from ..audit import ghi_audit
 from ..luong_service import tinh_luong
 from ..hach_toan import hach_toan_luong
 from ..models import (NguoiDung, NhanVien, ChamCong, NghiPhep, BangLuong, KyLuong, ThamSoLuong,
-                      NgayNghiOt)
+                      NgayNghiOt, BaoCaoNgay)
 from ..schemas import (NhanVienRa, ChamCongVao, NghiPhepVao, TinhLuongVao, BangLuongRa,
                         HoSoLuongVao, KyLuongVao, ChamCongLuongVao, ThamSoLuongVao, ChamCongImportVao,
                         NgayNghiOtVao, DangKyOtVao, TuChoiOtVao)
@@ -778,6 +778,103 @@ def tu_choi_ot(wt_id: int, data: TuChoiOtVao = TuChoiOtVao(), db: Session = Depe
     ghi_audit(db, nd.id, "TU_CHOI", "ngay_nghi_ot", wt_id, moi={"ly_do": r.ly_do_tu_choi})
     db.commit()
     return {"ok": True}
+
+
+# ============ Daily Report — báo cáo công việc hằng ngày ============
+class BaoCaoNgayVao(_NVBase):
+    ngay: str | None = None
+    da_lam: str = ""
+    ket_qua: str = ""
+    kho_khan: str | None = None
+    ke_hoach: str | None = None
+    so_gio: float | None = 0
+    ma_lien_quan: str | None = None
+
+
+def _bc_ra(r: BaoCaoNgay, nv: NhanVien | None = None) -> dict:
+    return {"id": r.id, "nhan_vien_id": r.nhan_vien_id, "ngay": str(r.ngay),
+            "da_lam": r.da_lam or "", "ket_qua": r.ket_qua or "",
+            "kho_khan": r.kho_khan, "ke_hoach": r.ke_hoach,
+            "so_gio": _f(r.so_gio), "ma_lien_quan": r.ma_lien_quan,
+            "ho_ten": (nv.ho_ten if nv else None), "ma_nv": (nv.ma if nv else None)}
+
+
+@router.post("/bao-cao-ngay", status_code=201)
+def gui_bao_cao_ngay(data: BaoCaoNgayVao, db: Session = Depends(get_db),
+                     nd: NguoiDung = Depends(lay_nguoi_dung_hien_tai)):
+    """Nhân viên gửi/cập nhật báo cáo công việc của CHÍNH MÌNH cho một ngày (upsert theo ngày)."""
+    nv_id = _wt_nv_cua_toi(db, nd)
+    ngay = (data.ngay or "").strip() or str(date.today())
+    try:
+        ng = date.fromisoformat(ngay)
+    except ValueError:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Ngày không hợp lệ (YYYY-MM-DD)")
+    if not (data.da_lam or "").strip():
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Vui lòng nhập nội dung công việc đã làm")
+    r = db.query(BaoCaoNgay).filter(BaoCaoNgay.nhan_vien_id == nv_id,
+                                    BaoCaoNgay.ngay == ng).first()
+    moi = r is None
+    if moi:
+        r = BaoCaoNgay(nhan_vien_id=nv_id, ngay=ng)
+        db.add(r)
+    r.da_lam = (data.da_lam or "").strip()
+    r.ket_qua = (data.ket_qua or "").strip()
+    r.kho_khan = (data.kho_khan or "").strip() or None
+    r.ke_hoach = (data.ke_hoach or "").strip() or None
+    r.so_gio = _Dec(str(data.so_gio or 0))
+    r.ma_lien_quan = (data.ma_lien_quan or "").strip()[:120] or None
+    db.flush()
+    ghi_audit(db, nd.id, "TAO" if moi else "SUA", "bao_cao_ngay", r.id,
+              moi={"ngay": str(ng), "so_gio": _f(r.so_gio)})
+    db.commit()
+    return {"ok": True, "id": r.id, "moi": moi}
+
+
+@router.get("/bao-cao-ngay/cua-toi")
+def bao_cao_cua_toi(thang: str | None = None, db: Session = Depends(get_db),
+                    nd: NguoiDung = Depends(lay_nguoi_dung_hien_tai)):
+    """Danh sách báo cáo của chính mình trong tháng (mặc định tháng hiện tại)."""
+    nv_id = _wt_nv_cua_toi(db, nd)
+    thang = (thang or str(date.today())[:7]).strip()
+    q = db.query(BaoCaoNgay).filter(BaoCaoNgay.nhan_vien_id == nv_id)
+    if len(thang) == 7:
+        q = q.filter(func.to_char(BaoCaoNgay.ngay, "YYYY-MM") == thang)
+    rows = q.order_by(BaoCaoNgay.ngay.desc()).all()
+    return {"danh_sach": [_bc_ra(r) for r in rows], "nhan_vien_id": nv_id, "thang": thang}
+
+
+@router.get("/bao-cao-ngay")
+def ds_bao_cao_ngay(ngay: str | None = None, thang: str | None = None,
+                    nhan_vien_id: int | None = None, db: Session = Depends(get_db),
+                    _=Depends(yeu_cau(MODULE, "XEM"))):
+    """Quản lý xem báo cáo của toàn công ty — lọc theo ngày/tháng/nhân viên."""
+    q = db.query(BaoCaoNgay, NhanVien).join(NhanVien, BaoCaoNgay.nhan_vien_id == NhanVien.id)
+    if nhan_vien_id:
+        q = q.filter(BaoCaoNgay.nhan_vien_id == nhan_vien_id)
+    if ngay:
+        q = q.filter(BaoCaoNgay.ngay == ngay)
+    elif thang and len(thang) == 7:
+        q = q.filter(func.to_char(BaoCaoNgay.ngay, "YYYY-MM") == thang)
+    else:
+        q = q.filter(BaoCaoNgay.ngay == str(date.today()))
+    rows = q.order_by(BaoCaoNgay.ngay.desc(), NhanVien.ma).all()
+    return {"danh_sach": [_bc_ra(r, nv) for r, nv in rows]}
+
+
+@router.delete("/bao-cao-ngay/{bc_id}")
+def xoa_bao_cao_ngay(bc_id: int, db: Session = Depends(get_db),
+                     nd: NguoiDung = Depends(lay_nguoi_dung_hien_tai)):
+    """Xóa báo cáo — chủ nhân tự xóa được, hoặc CEO/ADMIN xóa bất kỳ."""
+    r = db.get(BaoCaoNgay, bc_id)
+    if r is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy báo cáo")
+    nv_id = nhan_vien_id_cua(db, nd.id)
+    la_qtv = (nd.vai_tro.ma if nd.vai_tro else "").upper() in ("CEO", "ADMIN")
+    if r.nhan_vien_id != nv_id and not la_qtv:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Chỉ được xóa báo cáo của chính mình")
+    ghi_audit(db, nd.id, "XOA", "bao_cao_ngay", bc_id, cu={"ngay": str(r.ngay)})
+    db.delete(r); db.commit()
+    return {"da_xoa": True}
 
 
 # ----- Hồ sơ lương -----

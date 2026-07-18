@@ -562,6 +562,20 @@ class NgayNghiOt(Base):
     ly_do_tu_choi: Mapped[str | None] = mapped_column(String(300), nullable=True)
 
 
+class BaoCaoNgay(Base):
+    """Daily Report — mỗi nhân viên tự báo cáo công việc mỗi ngày (1 báo cáo / người / ngày)."""
+    __tablename__ = "bao_cao_ngay"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    nhan_vien_id: Mapped[int] = mapped_column(ForeignKey("nhan_vien.id", ondelete="CASCADE"))
+    ngay: Mapped[date] = mapped_column(Date)
+    da_lam: Mapped[str] = mapped_column(Text, default="")
+    ket_qua: Mapped[str] = mapped_column(Text, default="")
+    kho_khan: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ke_hoach: Mapped[str | None] = mapped_column(Text, nullable=True)
+    so_gio: Mapped[Decimal] = mapped_column(Numeric(5, 2), default=0)
+    ma_lien_quan: Mapped[str | None] = mapped_column(String(120), nullable=True)
+
+
 class BangLuong(Base):
     __tablename__ = "bang_luong"
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
