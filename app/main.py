@@ -17,6 +17,7 @@ for r in (auth, kho, ncc, du_an, ban_hang, ke_toan, tai_chinh, nhan_su, cho_thue
 
 _HTML = os.path.join(os.path.dirname(__file__), "..", "svws_app.html")
 _HUONG_DAN = os.path.join(os.path.dirname(__file__), "..", "huong_dan.html")
+_SO_TAY = os.path.join(os.path.dirname(__file__), "..", "so_tay_quy_che.docx")
 
 
 # no-cache: trình duyệt phải hỏi lại server mỗi lần mở (ETag 304 nếu chưa đổi)
@@ -38,6 +39,18 @@ def huong_dan():
         return FileResponse(_HUONG_DAN, media_type="text/html; charset=utf-8",
                             headers=_NO_CACHE)
     return {"he_thong": "SVWS", "trang_thai": "chua co huong dan"}
+
+
+@app.get("/so-tay-quy-che")
+def so_tay_quy_che():
+    """Tải Sổ tay quy chế công ty (bản Word) cho mọi người tham khảo."""
+    if os.path.exists(_SO_TAY):
+        return FileResponse(
+            _SO_TAY,
+            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            filename="So tay quy che cong ty - Song Viet.docx",
+            headers=_NO_CACHE)
+    return {"he_thong": "SVWS", "trang_thai": "chua co so tay quy che"}
 
 
 @app.get("/health")
