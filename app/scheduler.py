@@ -6,7 +6,7 @@ An toàn khi khởi động lại vì mốc "đã gửi hôm nay" nằm trong CS
 """
 import threading
 import time
-from datetime import datetime
+from datetime import datetime  # noqa: F401 (giữ cho tương thích)
 
 from .config import settings
 from .database import SessionLocal
@@ -18,9 +18,10 @@ _luong: threading.Thread | None = None
 def _vong_lap():
     while True:
         try:
+            from .nhac_viec_service import gio_hien_tai, gui_ban_tin_ngay
             gio = settings.nhac_viec_gio_ban_tin
-            if settings.nhac_viec_ban_tin and datetime.now().hour == gio:
-                from .nhac_viec_service import gui_ban_tin_ngay
+            # so theo GIỜ VIỆT NAM, không phải giờ máy chủ (Render chạy UTC)
+            if settings.nhac_viec_ban_tin and gio_hien_tai().hour == gio:
                 db = SessionLocal()
                 try:
                     kq = gui_ban_tin_ngay(db)

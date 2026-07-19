@@ -7,7 +7,7 @@ Hai luồng:
 
 Mọi hàm ở đây đều NUỐT LỖI: gửi tin hỏng không được phép làm hỏng nghiệp vụ.
 """
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 from sqlalchemy.orm import Session
 
@@ -16,6 +16,17 @@ from .config import settings
 from .models import NhacViec, NhacViecBanTin, NhanVien
 
 _MUC_DO_NHAN = {"THAP": "Thấp", "BINH_THUONG": "Bình thường", "CAO": "Cao", "KHAN": "🔴 KHẨN"}
+
+
+def gio_hien_tai() -> datetime:
+    """Giờ ĐỊA PHƯƠNG (Việt Nam) dạng naive — khớp với cách lưu thoi_diem/han_hoan_thanh.
+    Máy chủ chạy UTC nên phải cộng offset, nếu không mọi so sánh 'quá hạn' lệch 7 tiếng."""
+    return (datetime.now(timezone.utc).replace(tzinfo=None)
+            + timedelta(hours=settings.tz_offset_gio))
+
+
+def ngay_hien_tai() -> date:
+    return gio_hien_tai().date()
 
 
 def _gio(d: datetime | None) -> str:
@@ -27,7 +38,7 @@ def _mo_ta(r: NhacViec, ten: dict) -> str:
     d = [f"*{r.tieu_de}*"]
     d.append(f"• Nhắc lúc: {_gio(r.thoi_diem)}")
     if r.han_hoan_thanh:
-        tre = " ⚠️ *ĐÃ QUÁ HẠN*" if r.han_hoan_thanh < datetime.now() else ""
+        tre = " ⚠️ *ĐÃ QUÁ HẠN*" if r.han_hoan_thanh < gio_hien_tai() else ""
         d.append(f"• Hạn hoàn thành: {_gio(r.han_hoan_thanh)}{tre}")
     if r.ma_lien_quan:
         d.append(f"• Mã liên quan: {r.ma_lien_quan}")
@@ -91,7 +102,7 @@ def _viec_can_nhac(db: Session, hom_nay: date) -> dict:
 def gui_ban_tin_ngay(db: Session, ep: bool = False) -> dict:
     """Bản tin đầu ngày. Chốt theo ngày trong bảng nhac_viec_ban_tin -> không gửi trùng.
     ep=True: bỏ qua chốt ngày (dùng cho nút gửi thử của quản trị)."""
-    hom_nay = date.today()
+    hom_nay = ngay_hien_tai()
     if not ep:
         if not settings.nhac_viec_ban_tin or not dang_bat():
             return {"bo_qua": "Chưa bật bản tin hoặc chưa cấu hình Google Chat"}
@@ -114,7 +125,7 @@ def gui_ban_tin_ngay(db: Session, ep: bool = False) -> dict:
         nv = db.get(NhanVien, nv_id)
         if nv is None:
             continue
-        qua_han = [r for r in ds if (r.han_hoan_thanh or r.thoi_diem) < datetime.now()]
+        qua_han = [r for r in ds if (r.han_hoan_thanh or r.thoi_diem) < gio_hien_tai()]
         dong = [f"☀️ *Chào {nv.ho_ten}* — việc cần làm hôm nay {hom_nay.strftime('%d/%m/%Y')}:"]
         if qua_han:
             dong.append(f"\n⚠️ *{len(qua_han)} việc đã quá hạn*")

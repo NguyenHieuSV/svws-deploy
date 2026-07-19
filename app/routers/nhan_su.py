@@ -893,6 +893,12 @@ _NV_MUC_DO = ("THAP", "BINH_THUONG", "CAO", "KHAN")
 _NV_TRANG_THAI = ("CHO_LAM", "DANG_LAM", "XONG", "HUY")
 
 
+def _gio_vn():
+    """Giờ Việt Nam — máy chủ chạy UTC, còn thoi_diem/xong_luc lưu giờ địa phương."""
+    from ..nhac_viec_service import gio_hien_tai
+    return gio_hien_tai()
+
+
 class NhacViecVao(_NVBase):
     nhan_vien_id: int | None = None          # nhắc ai (trống = nhắc chính mình)
     nhac_tat_ca: bool = False                # True = nhắc TOÀN BỘ nhân viên đang làm
@@ -1063,7 +1069,7 @@ def sua_nhac_viec(nv_id: int, data: NhacViecVao, db: Session = Depends(get_db),
         r.muc_do = data.muc_do
     if data.trang_thai in _NV_TRANG_THAI:
         r.trang_thai = data.trang_thai
-        r.xong_luc = datetime.now() if data.trang_thai == "XONG" else None
+        r.xong_luc = _gio_vn() if data.trang_thai == "XONG" else None
     ghi_audit(db, nd.id, "SUA", "nhac_viec", nv_id, moi={"tieu_de": r.tieu_de})
     db.commit()
     return {"ok": True}
@@ -1082,7 +1088,7 @@ def doi_trang_thai_nhac_viec(nv_id: int, trang_thai: str, db: Session = Depends(
         raise HTTPException(status.HTTP_403_FORBIDDEN,
                             "Chỉ người tạo, người được nhắc hoặc CEO/Admin mới đổi được trạng thái")
     r.trang_thai = trang_thai
-    r.xong_luc = datetime.now() if trang_thai == "XONG" else None
+    r.xong_luc = _gio_vn() if trang_thai == "XONG" else None
     ghi_audit(db, nd.id, "SUA", "nhac_viec", nv_id, moi={"trang_thai": trang_thai})
     db.commit()
     return {"ok": True, "trang_thai": trang_thai}
