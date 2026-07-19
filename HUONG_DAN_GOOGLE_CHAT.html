@@ -230,13 +230,18 @@
 
       <li>
         <h3>Cấu hình Chat app</h3>
-        <p>Vào <span class="path-str">Google Chat API › Configuration</span> và điền:</p>
+        <p>Vào <span class="path-str">Google Chat API › Configuration</span>.</p>
+
+        <div class="note" style="border-left-color:var(--warn);background:var(--warn-soft)">
+          <p><strong>Việc đầu tiên: TẮT công tắc “Enable Interactive features”</strong> ở đầu trang.</p>
+          <p style="margin-top:8px">Bot này <strong>chỉ gửi tin, không nhận tin</strong>. Các mục <em>Functionality · Connection settings · Triggers</em> là dành cho bot nhận tin nhắn — ta không dùng. Nếu để bật, Google bắt buộc điền <code>App command *</code> và <code>Added to space *</code> (dấu sao = bắt buộc) mà ta không có địa chỉ nào để điền. Tắt công tắc là toàn bộ các mục đó biến mất.</p>
+        </div>
+
+        <p>Sau đó điền phần thông tin app:</p>
         <ul>
           <li><strong>App name:</strong> <code>Nhắc việc SVWS</code></li>
+          <li><strong>Avatar URL:</strong> bắt buộc, phải là link ảnh công khai. Chưa có thì tạm dùng <code>https://www.gstatic.com/images/branding/product/2x/chat_48dp.png</code></li>
           <li><strong>Description:</strong> <code>Nhắc việc tự động từ hệ thống SVWS</code></li>
-          <li><strong>Avatar URL:</strong> để trống, hoặc dùng logo công ty</li>
-          <li><strong>Functionality:</strong> tích <strong>Receive 1:1 messages</strong></li>
-          <li><strong>Connection settings:</strong> chọn <strong>App URL</strong> và để trống — bot chỉ gửi, không nhận</li>
           <li><strong>Visibility:</strong> cho phép trong miền <code>watersolutions.company</code></li>
         </ul>
         <p>Bấm <strong>Save</strong>.</p>
@@ -251,6 +256,10 @@
           <li>Vào <span class="path-str">Apps › Google Workspace › Google Chat › Manage Chat apps</span></li>
           <li>Tìm app <code>Nhắc việc SVWS</code> và đặt trạng thái <strong>Allowed / ON for everyone</strong></li>
         </ul>
+        <div class="note" style="border-left-color:var(--warn);background:var(--surface)">
+          <p><strong>Có thể cần thêm một lần “chào” bot.</strong> Google chỉ cho bot nhắn riêng với người <em>đã có cuộc trò chuyện</em> với bot. Cài cho toàn miền giúp mọi người tìm thấy bot, nhưng có thể vẫn cần mỗi nhân viên mở Google Chat, tìm <code>Nhắc việc SVWS</code> và gửi một tin bất kỳ — chữ “hi” là đủ.</p>
+          <p style="margin-top:8px">Dấu hiệu: bấm <strong>Gửi tin thử</strong> báo <strong>HTTP 404 — không tìm thấy người nhận</strong> dù email đã đúng. Đó là do chưa có cuộc trò chuyện, không phải cấu hình sai.</p>
+        </div>
       </li>
 
       <li>

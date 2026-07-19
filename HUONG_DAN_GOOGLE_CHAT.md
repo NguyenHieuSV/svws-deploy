@@ -26,15 +26,24 @@ Hiện hệ thống đang ở chế độ **DEMO** (chưa gửi thật). Chọn 
 
 ### Bước 4. Cấu hình Chat app
 1. Vào **Google Chat API → Configuration** (trong cùng project)
-2. Điền:
+
+2. ⚠️ **TẮT công tắc "Enable Interactive features"** (ở đầu trang)
+
+   > Bot này **chỉ gửi tin, không nhận tin**. Mục *Functionality / Connection settings /
+   > Triggers* là dành cho bot NHẬN tin nhắn — ta không cần.
+   > Nếu để bật, Google bắt buộc điền các ô `App command *` và `Added to space *`
+   > (có dấu sao = bắt buộc), mà ta không có endpoint nào để điền.
+   > **Tắt công tắc là toàn bộ các mục đó biến mất.**
+
+3. Điền phần thông tin app:
    - **App name**: `Nhắc việc SVWS`
-   - **Avatar URL**: để trống hoặc dùng logo công ty
+   - **Avatar URL**: *bắt buộc*, phải là link ảnh công khai. Chưa có thì tạm dùng
+     `https://www.gstatic.com/images/branding/product/2x/chat_48dp.png`
    - **Description**: `Nhắc việc tự động từ hệ thống SVWS`
-3. Mục **Functionality**: tích **Receive 1:1 messages**
-4. Mục **Connection settings**: chọn **App URL** và để trống (bot chỉ gửi, không nhận)
-5. Mục **Visibility**: chọn **Make this Chat app available to specific people and groups
-   in <tên miền công ty>** rồi điền `watersolutions.company`, hoặc chọn cho toàn miền
-6. **Save**
+
+4. Mục **Visibility**: chọn cho miền `watersolutions.company` (hoặc toàn miền)
+
+5. **Save**
 
 ### Bước 5. Cài Chat app cho toàn công ty  ⚠️ BẮT BUỘC
 > Thiếu bước này thì bot **không nhắn riêng cho ai được**.
@@ -42,6 +51,14 @@ Hiện hệ thống đang ở chế độ **DEMO** (chưa gửi thật). Chọn 
 1. Vào **Google Admin console** (admin.google.com)
 2. **Apps → Google Workspace → Google Chat → Manage Chat apps**
 3. Tìm app `Nhắc việc SVWS` → đặt trạng thái **Allowed / ON for everyone**
+
+> **Có thể cần thêm một lần "chào" bot.** Google chỉ cho bot nhắn riêng với người
+> **đã có cuộc trò chuyện** với bot. Cài cho toàn miền giúp mọi người *tìm thấy* bot,
+> nhưng có thể vẫn cần mỗi nhân viên mở Google Chat → tìm `Nhắc việc SVWS` →
+> gửi một tin bất kỳ (chữ "hi" là đủ) để tạo cuộc trò chuyện.
+>
+> Dấu hiệu nhận biết: bấm **Gửi tin thử** báo lỗi **HTTP 404 — không tìm thấy người nhận**
+> dù email đã đúng. Đó là do chưa có cuộc trò chuyện, không phải cấu hình sai.
 
 ### Bước 6. Khai báo vào hệ thống SVWS
 1. Vào https://dashboard.render.com → dịch vụ **svws-app** → tab **Environment**
