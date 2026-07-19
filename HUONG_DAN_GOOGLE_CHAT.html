@@ -1,0 +1,392 @@
+<title>Kết nối Google Chat — Hướng dẫn cài đặt SVWS</title>
+<style>
+  :root{
+    --ground:#F7F9F9; --surface:#FFFFFF; --surface-2:#EFF4F4;
+    --ink:#10262E; --ink-2:#2E464E; --muted:#5C7078;
+    --line:#DCE5E6; --line-2:#C6D4D6;
+    --accent:#0E7C86; --accent-soft:#E4F1F2; --accent-ink:#0A5C64;
+    --warn:#B4531F; --warn-soft:#FBEDE4; --warn-line:#EBC7AE;
+    --ok:#1F7A4D; --ok-soft:#E6F2EB;
+    --mono:ui-monospace,SFMono-Regular,"SF Mono",Consolas,"Liberation Mono",Menlo,monospace;
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+    --serif:Georgia,"Times New Roman",serif;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{
+      --ground:#0D1719; --surface:#142226; --surface-2:#1B2E33;
+      --ink:#E3EDEF; --ink-2:#C2D3D6; --muted:#8CA3A9;
+      --line:#24393E; --line-2:#31494F;
+      --accent:#3DA9B4; --accent-soft:#163236; --accent-ink:#6FC7D0;
+      --warn:#E08A52; --warn-soft:#2E1F16; --warn-line:#5A3A22;
+      --ok:#5FBE8C; --ok-soft:#152A20;
+    }
+  }
+  :root[data-theme="dark"]{
+    --ground:#0D1719; --surface:#142226; --surface-2:#1B2E33;
+    --ink:#E3EDEF; --ink-2:#C2D3D6; --muted:#8CA3A9;
+    --line:#24393E; --line-2:#31494F;
+    --accent:#3DA9B4; --accent-soft:#163236; --accent-ink:#6FC7D0;
+    --warn:#E08A52; --warn-soft:#2E1F16; --warn-line:#5A3A22;
+    --ok:#5FBE8C; --ok-soft:#152A20;
+  }
+  :root[data-theme="light"]{
+    --ground:#F7F9F9; --surface:#FFFFFF; --surface-2:#EFF4F4;
+    --ink:#10262E; --ink-2:#2E464E; --muted:#5C7078;
+    --line:#DCE5E6; --line-2:#C6D4D6;
+    --accent:#0E7C86; --accent-soft:#E4F1F2; --accent-ink:#0A5C64;
+    --warn:#B4531F; --warn-soft:#FBEDE4; --warn-line:#EBC7AE;
+    --ok:#1F7A4D; --ok-soft:#E6F2EB;
+  }
+
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--ground);color:var(--ink);font-family:var(--sans);
+    font-size:16px;line-height:1.65;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:820px;margin:0 auto;padding:0 24px 96px}
+
+  /* ---- masthead ---- */
+  header{padding:56px 0 28px;border-bottom:2px solid var(--ink)}
+  .eyebrow{font-family:var(--mono);font-size:11.5px;letter-spacing:.13em;text-transform:uppercase;
+    color:var(--accent-ink);margin:0 0 14px}
+  h1{font-family:var(--serif);font-weight:400;font-size:clamp(30px,5vw,44px);line-height:1.15;
+    margin:0 0 14px;text-wrap:balance;letter-spacing:-.01em}
+  .lede{font-size:17px;color:var(--ink-2);margin:0;max-width:62ch}
+
+  /* ---- status strip ---- */
+  .status{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:22px 0 0;
+    padding:14px 16px;background:var(--warn-soft);border:1px solid var(--warn-line);border-radius:8px}
+  .status .dot{width:9px;height:9px;border-radius:50%;background:var(--warn);flex:none}
+  .status p{margin:0;font-size:14.5px;color:var(--ink)}
+
+  /* ---- nav ---- */
+  nav{position:sticky;top:0;z-index:5;background:var(--ground);
+    border-bottom:1px solid var(--line);padding:12px 0;margin-bottom:40px}
+  nav ul{display:flex;flex-wrap:wrap;gap:6px;list-style:none;margin:0;padding:0}
+  nav a{font-family:var(--mono);font-size:12px;letter-spacing:.02em;text-decoration:none;
+    color:var(--muted);padding:6px 11px;border-radius:6px;display:block}
+  nav a:hover{color:var(--accent-ink);background:var(--accent-soft)}
+  nav a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+  section{margin:0 0 56px;scroll-margin-top:64px}
+  h2{font-family:var(--serif);font-weight:400;font-size:27px;line-height:1.25;
+    margin:0 0 8px;letter-spacing:-.005em;text-wrap:balance}
+  h2 + .sub{color:var(--muted);font-size:15px;margin:0 0 26px;max-width:60ch}
+  p{max-width:68ch}
+
+  /* ---- choose path ---- */
+  .paths{display:grid;grid-template-columns:repeat(auto-fit,minmax(270px,1fr));gap:14px;margin:24px 0 0}
+  .path{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:20px}
+  .path.rec{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+  .path h3{margin:0 0 4px;font-size:16.5px;font-family:var(--sans);font-weight:650;letter-spacing:-.01em}
+  .path .tag{font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;
+    color:var(--accent-ink);background:var(--accent-soft);padding:3px 8px;border-radius:20px;
+    display:inline-block;margin-bottom:12px}
+  .path dl{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;margin:14px 0 0;font-size:14px}
+  .path dt{color:var(--muted)}
+  .path dd{margin:0;font-weight:600}
+
+  /* ---- steps ---- */
+  ol.steps{list-style:none;counter-reset:s;margin:28px 0 0;padding:0;
+    display:flex;flex-direction:column;gap:14px}
+  ol.steps > li{counter-increment:s;background:var(--surface);border:1px solid var(--line);
+    border-radius:10px;padding:22px 24px 22px 68px;position:relative}
+  ol.steps > li::before{content:counter(s);position:absolute;left:22px;top:20px;
+    font-family:var(--serif);font-size:26px;line-height:1;color:var(--line-2)}
+  ol.steps > li.critical{border-color:var(--warn-line);background:var(--warn-soft)}
+  ol.steps > li.critical::before{color:var(--warn)}
+  ol.steps h3{margin:0 0 8px;font-size:16.5px;font-weight:650;letter-spacing:-.01em}
+  ol.steps p{margin:0 0 10px}
+  ol.steps p:last-child, ol.steps ul:last-child, ol.steps .kv:last-child{margin-bottom:0}
+  ol.steps ul{margin:0 0 10px;padding-left:20px}
+  ol.steps li li{margin-bottom:5px}
+
+  .flag{display:inline-block;font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;
+    text-transform:uppercase;color:#fff;background:var(--warn);padding:3px 9px;border-radius:4px;
+    margin-bottom:10px}
+
+  code{font-family:var(--mono);font-size:.88em;background:var(--surface-2);
+    padding:2px 6px;border-radius:4px;border:1px solid var(--line);white-space:nowrap}
+  ol.steps li.critical code{background:var(--surface);border-color:var(--warn-line)}
+  .path-str{font-family:var(--mono);font-size:13.5px;color:var(--accent-ink);
+    background:var(--accent-soft);padding:2px 7px;border-radius:4px;white-space:normal}
+
+  /* ---- key/value config blocks ---- */
+  .kv{margin:14px 0;border:1px solid var(--line-2);border-radius:8px;overflow:hidden;background:var(--surface)}
+  .kv-head{font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;
+    color:var(--muted);padding:8px 14px;background:var(--surface-2);border-bottom:1px solid var(--line)}
+  .kv-row{display:grid;grid-template-columns:minmax(150px,auto) 1fr;gap:0;border-bottom:1px solid var(--line)}
+  .kv-row:last-child{border-bottom:0}
+  .kv-row > div{padding:11px 14px;font-family:var(--mono);font-size:13px;word-break:break-word}
+  .kv-row > div:first-child{color:var(--accent-ink);border-right:1px solid var(--line);font-weight:600}
+  .kv-row > div:last-child{color:var(--ink-2)}
+
+  /* ---- tables ---- */
+  .tw{overflow-x:auto;margin:18px 0;border:1px solid var(--line);border-radius:8px}
+  table{border-collapse:collapse;width:100%;font-size:14px;background:var(--surface)}
+  th,td{text-align:left;padding:11px 14px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{font-size:11.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);
+    background:var(--surface-2);font-weight:600;white-space:nowrap}
+  tr:last-child td{border-bottom:0}
+  td.err{font-family:var(--mono);font-size:12.5px;color:var(--warn);min-width:210px}
+
+  .note{border-left:3px solid var(--accent);background:var(--accent-soft);
+    padding:14px 18px;border-radius:0 8px 8px 0;margin:20px 0;font-size:15px;color:var(--ink)}
+  .note strong{color:var(--accent-ink)}
+  .note p{margin:0}
+
+  .check{list-style:none;padding:0;margin:20px 0;display:flex;flex-direction:column;gap:10px}
+  .check li{padding-left:30px;position:relative;max-width:66ch}
+  .check li::before{content:"";position:absolute;left:0;top:7px;width:15px;height:15px;
+    border:1.5px solid var(--line-2);border-radius:4px;background:var(--surface)}
+
+  footer{border-top:1px solid var(--line);padding-top:22px;color:var(--muted);font-size:13.5px}
+  footer code{font-size:12.5px}
+  @media (max-width:560px){
+    ol.steps > li{padding:20px 18px 20px 18px}
+    ol.steps > li::before{position:static;display:block;margin-bottom:6px}
+    .kv-row{grid-template-columns:1fr}
+    .kv-row > div:first-child{border-right:0;border-bottom:1px solid var(--line)}
+  }
+</style>
+
+<div class="wrap">
+  <header>
+    <p class="eyebrow">SVWS · Nhắc việc</p>
+    <h1>Kết nối Google&nbsp;Chat</h1>
+    <p class="lede">Sau khi cài đặt xong, hệ thống SVWS sẽ tự nhắn tin nhắc việc cho nhân viên qua Google Chat — ngay khi có người đặt lời nhắc, và một bản tin tổng hợp mỗi sáng.</p>
+    <div class="status">
+      <span class="dot"></span>
+      <p><strong>Hiện tại: chế độ thử.</strong> Lời nhắc vẫn hiện trong app nhưng <em>chưa thật sự gửi đi</em>. Làm xong một trong hai cách dưới là bắt đầu gửi thật.</p>
+    </div>
+  </header>
+
+  <nav>
+    <ul>
+      <li><a href="#chon">Chọn cách làm</a></li>
+      <li><a href="#cach-a">Cách A · Nhắn riêng</a></li>
+      <li><a href="#cach-b">Cách B · Phòng chung</a></li>
+      <li><a href="#kiem-tra">Kiểm tra</a></li>
+      <li><a href="#loi">Xử lý lỗi</a></li>
+      <li><a href="#bien">Biến cấu hình</a></li>
+    </ul>
+  </nav>
+
+  <section id="chon">
+    <h2>Chọn một trong hai cách</h2>
+    <p class="sub">Không cần làm cả hai. Có thể bắt đầu bằng cách nhanh, sau này chuyển sang cách đầy đủ mà không phải sửa phần mềm.</p>
+
+    <div class="paths">
+      <div class="path rec">
+        <span class="tag">Làm được ngay</span>
+        <h3>Cách B — Phòng chat chung</h3>
+        <p style="margin:0;font-size:14.5px;color:var(--ink-2)">Tin nhắc đăng vào một Phòng chung, mọi người trong phòng đều thấy.</p>
+        <dl>
+          <dt>Thời gian</dt><dd>5 phút</dd>
+          <dt>Quyền admin</dt><dd>Không cần</dd>
+          <dt>Nhắn riêng</dt><dd>Không</dd>
+        </dl>
+      </div>
+      <div class="path">
+        <span class="tag">Đầy đủ nhất</span>
+        <h3>Cách A — Nhắn riêng từng người</h3>
+        <p style="margin:0;font-size:14.5px;color:var(--ink-2)">Mỗi nhân viên nhận tin riêng vào hộp thư Chat của mình.</p>
+        <dl>
+          <dt>Thời gian</dt><dd>30–45 phút</dd>
+          <dt>Quyền admin</dt><dd>Bắt buộc có</dd>
+          <dt>Nhắn riêng</dt><dd>Có</dd>
+        </dl>
+      </div>
+    </div>
+
+    <div class="note">
+      <p><strong>Gợi ý:</strong> làm Cách B trước để dùng được ngay hôm nay. Khi thu xếp được quyền quản trị Workspace thì làm Cách A và chỉ cần đổi một dòng cấu hình — không phải sửa phần mềm, không mất dữ liệu.</p>
+    </div>
+  </section>
+
+  <section id="cach-a">
+    <h2>Cách A — Nhắn riêng từng người</h2>
+    <p class="sub">Dành cho người có quyền quản trị Google Workspace của công ty.</p>
+
+    <ol class="steps">
+      <li>
+        <h3>Tạo project trên Google Cloud</h3>
+        <p>Mở <span class="path-str">console.cloud.google.com</span> rồi tạo project mới, đặt tên <code>SVWS Bot</code>.</p>
+      </li>
+
+      <li>
+        <h3>Bật Google Chat API</h3>
+        <p>Trong project vừa tạo, vào <span class="path-str">APIs &amp; Services › Library</span>, tìm <strong>Google Chat API</strong> rồi bấm <strong>Enable</strong>.</p>
+      </li>
+
+      <li>
+        <h3>Tạo Service Account và tải khóa</h3>
+        <ul>
+          <li>Vào <span class="path-str">APIs &amp; Services › Credentials › Create Credentials › Service account</span></li>
+          <li>Đặt tên <code>svws-nhac-viec</code>, bấm <strong>Create and continue</strong> rồi <strong>Done</strong></li>
+          <li>Bấm vào service account vừa tạo, sang tab <strong>Keys</strong> › <strong>Add key</strong> › <strong>Create new key</strong></li>
+          <li>Chọn định dạng <strong>JSON</strong> › <strong>Create</strong>. Máy sẽ tải về một file <code>.json</code></li>
+        </ul>
+        <div class="note"><p><strong>Giữ file này cẩn thận.</strong> Nó là chìa khóa gửi tin — ai có file cũng nhắn được dưới danh nghĩa công ty. Không gửi qua chat công khai, không commit lên GitHub.</p></div>
+      </li>
+
+      <li>
+        <h3>Cấu hình Chat app</h3>
+        <p>Vào <span class="path-str">Google Chat API › Configuration</span> và điền:</p>
+        <ul>
+          <li><strong>App name:</strong> <code>Nhắc việc SVWS</code></li>
+          <li><strong>Description:</strong> <code>Nhắc việc tự động từ hệ thống SVWS</code></li>
+          <li><strong>Avatar URL:</strong> để trống, hoặc dùng logo công ty</li>
+          <li><strong>Functionality:</strong> tích <strong>Receive 1:1 messages</strong></li>
+          <li><strong>Connection settings:</strong> chọn <strong>App URL</strong> và để trống — bot chỉ gửi, không nhận</li>
+          <li><strong>Visibility:</strong> cho phép trong miền <code>watersolutions.company</code></li>
+        </ul>
+        <p>Bấm <strong>Save</strong>.</p>
+      </li>
+
+      <li class="critical">
+        <span class="flag">Không được bỏ qua</span>
+        <h3>Cài Chat app cho toàn công ty</h3>
+        <p>Thiếu bước này thì bot <strong>không nhắn riêng cho bất kỳ ai được</strong>, dù bốn bước trên đã làm đúng hết.</p>
+        <ul>
+          <li>Mở <span class="path-str">admin.google.com</span></li>
+          <li>Vào <span class="path-str">Apps › Google Workspace › Google Chat › Manage Chat apps</span></li>
+          <li>Tìm app <code>Nhắc việc SVWS</code> và đặt trạng thái <strong>Allowed / ON for everyone</strong></li>
+        </ul>
+      </li>
+
+      <li>
+        <h3>Khai báo vào hệ thống SVWS</h3>
+        <p>Mở <span class="path-str">dashboard.render.com</span> › dịch vụ <strong>svws-app</strong> › tab <strong>Environment</strong>, thêm hai biến:</p>
+        <div class="kv">
+          <div class="kv-head">Biến môi trường cần thêm</div>
+          <div class="kv-row"><div>CHAT_PROVIDER</div><div>APP</div></div>
+          <div class="kv-row"><div>GCHAT_SERVICE_ACCOUNT</div><div>Dán nguyên văn toàn bộ nội dung file .json ở bước 3</div></div>
+        </div>
+        <p>Bấm <strong>Save changes</strong>. Render tự khởi động lại, khoảng 2 phút.</p>
+        <div class="note"><p><strong>Khi dán file JSON:</strong> dán nguyên văn, không thêm dấu xuống dòng, không xóa bớt ký tự nào. Hệ thống có tự sửa trường hợp <code>private_key</code> bị mất xuống dòng, nhưng dán đúng ngay từ đầu vẫn chắc ăn hơn.</p></div>
+      </li>
+    </ol>
+  </section>
+
+  <section id="cach-b">
+    <h2>Cách B — Gửi vào một Phòng chung</h2>
+    <p class="sub">Không cần quyền quản trị. Tin nhắc đăng vào một Phòng chat, mọi người trong phòng cùng thấy.</p>
+
+    <ol class="steps">
+      <li>
+        <h3>Tạo Phòng chat</h3>
+        <p>Mở Google Chat, tạo <strong>Space</strong> mới tên <code>Nhắc việc SVWS</code>, rồi mời nhân viên vào phòng.</p>
+      </li>
+      <li>
+        <h3>Tạo webhook cho phòng</h3>
+        <p>Trong phòng đó, bấm vào tên phòng › <span class="path-str">Apps &amp; integrations › Webhooks › Add webhook</span>. Đặt tên <code>SVWS</code>, bấm <strong>Save</strong>.</p>
+      </li>
+      <li>
+        <h3>Sao chép đường link webhook</h3>
+        <p>Google sẽ hiện một đường link dài. Sao chép toàn bộ link đó.</p>
+      </li>
+      <li>
+        <h3>Khai báo vào hệ thống SVWS</h3>
+        <p>Mở <span class="path-str">dashboard.render.com</span> › <strong>svws-app</strong> › <strong>Environment</strong>, thêm hai biến rồi bấm <strong>Save changes</strong>:</p>
+        <div class="kv">
+          <div class="kv-head">Biến môi trường cần thêm</div>
+          <div class="kv-row"><div>CHAT_PROVIDER</div><div>WEBHOOK</div></div>
+          <div class="kv-row"><div>GCHAT_WEBHOOK_URL</div><div>Đường link vừa sao chép</div></div>
+        </div>
+      </li>
+    </ol>
+
+    <div class="note"><p>Sau này làm xong Cách A, chỉ cần đổi <code>CHAT_PROVIDER</code> thành <code>APP</code> và thêm <code>GCHAT_SERVICE_ACCOUNT</code>. <strong>Không phải sửa phần mềm.</strong></p></div>
+  </section>
+
+  <section id="kiem-tra">
+    <h2>Kiểm tra sau khi cài đặt</h2>
+    <p class="sub">Làm theo thứ tự này để biết chắc đã chạy thật.</p>
+
+    <ul class="check">
+      <li>Đăng nhập SVWS bằng tài khoản <strong>CEO</strong> hoặc <strong>Admin</strong></li>
+      <li>Vào <span class="path-str">Working time &amp; Report › tab Work Reminder</span></li>
+      <li>Kéo xuống panel <strong>⚙️ Kết nối Google Chat</strong> — chế độ phải đã đổi khỏi <code>DEMO</code></li>
+      <li>Bấm <strong>📨 Gửi tin thử cho tôi</strong>, rồi mở Google Chat kiểm tra</li>
+      <li>Bấm <strong>📰 Xem thử bản tin đầu ngày</strong> để xem trước nội dung bản tin tổng hợp</li>
+    </ul>
+
+    <div class="note">
+      <p><strong>Điều kiện bắt buộc để nhắn riêng:</strong> email nhân viên trong SVWS phải trùng email Google Workspace. Kiểm tra tại <span class="path-str">Nhân sự &amp; Lương › Hồ sơ lương › cột Email</span>.</p>
+    </div>
+  </section>
+
+  <section id="loi">
+    <h2>Khi gặp lỗi</h2>
+    <p class="sub">Hệ thống báo lỗi bằng tiếng Việt và chỉ rõ nguyên nhân. Đối chiếu bảng dưới để biết sửa ở đâu.</p>
+
+    <div class="tw">
+      <table>
+        <thead>
+          <tr><th>Thông báo nhận được</th><th>Nguyên nhân</th><th>Cách sửa</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="err">Chưa điền GCHAT_SERVICE_ACCOUNT</td>
+            <td>Chưa thêm biến môi trường trên Render</td>
+            <td>Làm lại bước 6 của Cách A</td>
+          </tr>
+          <tr>
+            <td class="err">…không phải JSON hợp lệ</td>
+            <td>Dán thiếu hoặc thừa ký tự khi copy file</td>
+            <td>Mở lại file <code>.json</code>, chọn toàn bộ nội dung, dán lại</td>
+          </tr>
+          <tr>
+            <td class="err">File JSON thiếu client_email hoặc private_key</td>
+            <td>Tải nhầm file, không phải khóa service account</td>
+            <td>Tải lại khóa ở bước 3, nhớ chọn định dạng JSON</td>
+          </tr>
+          <tr>
+            <td class="err">Không đọc được private_key…</td>
+            <td>Nội dung khóa bị mất xuống dòng khi dán</td>
+            <td>Dán lại nguyên văn, một lần, không chỉnh sửa</td>
+          </tr>
+          <tr>
+            <td class="err">Google từ chối quyền (HTTP&nbsp;403)</td>
+            <td>Chưa bật Chat API, hoặc chưa cài app cho công ty</td>
+            <td>Kiểm tra lại bước 2 và <strong>bước 5</strong></td>
+          </tr>
+          <tr>
+            <td class="err">Không tìm thấy người nhận (HTTP&nbsp;404)</td>
+            <td>Email nhân viên không khớp email Workspace, hoặc người đó chưa được cài Chat app</td>
+            <td>Đối chiếu email trong Hồ sơ lương; kiểm tra lại <strong>bước 5</strong></td>
+          </tr>
+          <tr>
+            <td class="err">Nhân viên chưa có email</td>
+            <td>Hồ sơ nhân viên trong SVWS bỏ trống ô email</td>
+            <td>Bổ sung email tại Nhân sự &amp; Lương › Hồ sơ lương</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="bien">
+    <h2>Biến cấu hình khác</h2>
+    <p class="sub">Tùy chọn — chỉ đổi khi cần. Đặt tại Render › svws-app › Environment.</p>
+
+    <div class="tw">
+      <table>
+        <thead>
+          <tr><th>Tên biến</th><th>Mặc định</th><th>Ý nghĩa</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>NHAC_VIEC_GUI_KHI_TAO</code></td><td><code>true</code></td><td>Gửi tin ngay khi vừa đặt lời nhắc</td></tr>
+          <tr><td><code>NHAC_VIEC_BAN_TIN</code></td><td><code>true</code></td><td>Bật bản tin tổng hợp đầu ngày</td></tr>
+          <tr><td><code>NHAC_VIEC_GIO_BAN_TIN</code></td><td><code>8</code></td><td>Giờ gửi bản tin, 0–23, <strong>giờ Việt Nam</strong></td></tr>
+          <tr><td><code>TZ_OFFSET_GIO</code></td><td><code>7</code></td><td>Múi giờ UTC+7. Chỉ đổi nếu ở múi giờ khác</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="note"><p>Hệ thống đã tự quy đổi múi giờ. Để <code>8</code> nghĩa là bản tin đến vào <strong>8 giờ sáng giờ Việt Nam</strong> — không cần cộng trừ gì thêm, dù máy chủ chạy theo giờ quốc tế.</p></div>
+  </section>
+
+  <footer>
+    <p>Tài liệu này đi kèm hệ thống SVWS. Bản gốc dạng văn bản nằm tại <code>C:\Claud\svws-deploy\HUONG_DAN_GOOGLE_CHAT.md</code> trong mã nguồn dự án.</p>
+  </footer>
+</div>
