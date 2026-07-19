@@ -17,7 +17,7 @@ from ..audit import ghi_audit
 from ..luong_service import tinh_luong
 from ..hach_toan import hach_toan_luong
 from ..models import (NguoiDung, NhanVien, ChamCong, NghiPhep, BangLuong, KyLuong, ThamSoLuong,
-                      NgayNghiOt, BaoCaoNgay, ButToan)
+                      NgayNghiOt, BaoCaoNgay, ButToan, NhacViec)
 from ..schemas import (NhanVienRa, ChamCongVao, NghiPhepVao, TinhLuongVao, BangLuongRa,
                         HoSoLuongVao, KyLuongVao, ChamCongLuongVao, ThamSoLuongVao, ChamCongImportVao,
                         NgayNghiOtVao, DangKyOtVao, TuChoiOtVao)
@@ -873,6 +873,197 @@ def xoa_bao_cao_ngay(bc_id: int, db: Session = Depends(get_db),
     if r.nhan_vien_id != nv_id and not la_qtv:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Chỉ được xóa báo cáo của chính mình")
     ghi_audit(db, nd.id, "XOA", "bao_cao_ngay", bc_id, cu={"ngay": str(r.ngay)})
+    db.delete(r); db.commit()
+    return {"da_xoa": True}
+
+
+@router.get("/danh-ba")
+def danh_ba_nhan_vien(db: Session = Depends(get_db),
+                      nd: NguoiDung = Depends(lay_nguoi_dung_hien_tai)):
+    """Danh bạ tối giản (id · mã · họ tên · chức danh) cho MỌI nhân viên đã đăng nhập —
+    phục vụ droplist “nhắc ai” / “người hỗ trợ”. KHÔNG chứa lương hay dữ liệu nhạy cảm."""
+    rows = (db.query(NhanVien).filter(NhanVien.trang_thai == "DANG_LAM")
+            .order_by(NhanVien.ho_ten).all())
+    return [{"id": nv.id, "ma": nv.ma, "ho_ten": nv.ho_ten, "chuc_danh": nv.chuc_danh}
+            for nv in rows]
+
+
+# ============ Work Reminder — nhắc việc cho mình / cho người khác ============
+_NV_MUC_DO = ("THAP", "BINH_THUONG", "CAO", "KHAN")
+_NV_TRANG_THAI = ("CHO_LAM", "DANG_LAM", "XONG", "HUY")
+
+
+class NhacViecVao(_NVBase):
+    nhan_vien_id: int | None = None          # nhắc ai (trống = nhắc chính mình)
+    tieu_de: str = ""
+    thoi_diem: str = ""                      # 'YYYY-MM-DDTHH:MM' giờ địa phương
+    ma_lien_quan: str | None = None
+    chuan_bi: str | None = None
+    nguoi_ho_tro_id: int | None = None
+    ho_tro_gi: str | None = None
+    muc_do: str = "BINH_THUONG"
+    ghi_chu: str | None = None
+    trang_thai: str | None = None            # chỉ dùng khi SỬA
+
+
+def _nv_doc_thoi_diem(s: str) -> datetime:
+    s = (s or "").strip().replace(" ", "T")
+    if not s:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Vui lòng chọn thời điểm nhắc")
+    try:
+        return datetime.fromisoformat(s[:16])
+    except ValueError:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Thời điểm không hợp lệ (định dạng YYYY-MM-DD HH:MM)")
+
+
+def _nv_ra(r: NhacViec, ten: dict) -> dict:
+    return {"id": r.id, "nguoi_tao": r.nguoi_tao, "nhan_vien_id": r.nhan_vien_id,
+            "tieu_de": r.tieu_de, "thoi_diem": r.thoi_diem.isoformat(timespec="minutes"),
+            "ma_lien_quan": r.ma_lien_quan, "chuan_bi": r.chuan_bi,
+            "nguoi_ho_tro_id": r.nguoi_ho_tro_id, "ho_tro_gi": r.ho_tro_gi,
+            "muc_do": r.muc_do, "trang_thai": r.trang_thai, "ghi_chu": r.ghi_chu,
+            "xong_luc": r.xong_luc.isoformat(timespec="minutes") if r.xong_luc else None,
+            "nguoi_tao_ten": ten.get(r.nguoi_tao), "nhan_vien_ten": ten.get(r.nhan_vien_id),
+            "ho_tro_ten": ten.get(r.nguoi_ho_tro_id)}
+
+
+def _nv_ten_map(db, rows) -> dict:
+    ids = set()
+    for r in rows:
+        ids.update([r.nguoi_tao, r.nhan_vien_id, r.nguoi_ho_tro_id])
+    ids.discard(None)
+    if not ids:
+        return {}
+    return {nv.id: nv.ho_ten for nv in db.query(NhanVien).filter(NhanVien.id.in_(ids)).all()}
+
+
+def _nv_sua_duoc(db, r: NhacViec, nd: NguoiDung) -> bool:
+    """Người tạo, người được nhắc, hoặc CEO/ADMIN."""
+    me = nhan_vien_id_cua(db, nd.id)
+    la_qtv = (nd.vai_tro.ma if nd.vai_tro else "").upper() in ("CEO", "ADMIN")
+    return la_qtv or (me is not None and me in (r.nguoi_tao, r.nhan_vien_id))
+
+
+@router.post("/nhac-viec", status_code=201)
+def tao_nhac_viec(data: NhacViecVao, db: Session = Depends(get_db),
+                  nd: NguoiDung = Depends(lay_nguoi_dung_hien_tai)):
+    """Mọi nhân viên đặt lời nhắc cho chính mình hoặc cho người khác."""
+    me = _wt_nv_cua_toi(db, nd)
+    tieu_de = (data.tieu_de or "").strip()
+    if not tieu_de:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Vui lòng nhập việc cần làm")
+    nguoi_nhan = data.nhan_vien_id or me
+    if db.get(NhanVien, nguoi_nhan) is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Không tìm thấy người được nhắc")
+    if data.nguoi_ho_tro_id and db.get(NhanVien, data.nguoi_ho_tro_id) is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Không tìm thấy người hỗ trợ")
+    r = NhacViec(nguoi_tao=me, nhan_vien_id=nguoi_nhan, tieu_de=tieu_de,
+                 thoi_diem=_nv_doc_thoi_diem(data.thoi_diem),
+                 ma_lien_quan=(data.ma_lien_quan or "").strip()[:120] or None,
+                 chuan_bi=(data.chuan_bi or "").strip() or None,
+                 nguoi_ho_tro_id=data.nguoi_ho_tro_id,
+                 ho_tro_gi=(data.ho_tro_gi or "").strip() or None,
+                 muc_do=(data.muc_do if data.muc_do in _NV_MUC_DO else "BINH_THUONG"),
+                 ghi_chu=(data.ghi_chu or "").strip() or None)
+    db.add(r); db.flush()
+    ghi_audit(db, nd.id, "TAO", "nhac_viec", r.id,
+              moi={"tieu_de": tieu_de, "nhac_ai": nguoi_nhan, "thoi_diem": data.thoi_diem})
+    db.commit()
+    return {"ok": True, "id": r.id}
+
+
+@router.get("/nhac-viec/cua-toi")
+def nhac_viec_cua_toi(db: Session = Depends(get_db),
+                      nd: NguoiDung = Depends(lay_nguoi_dung_hien_tai)):
+    """Việc người khác nhắc tôi + việc tôi nhắc người khác."""
+    me = _wt_nv_cua_toi(db, nd)
+    rows = db.query(NhacViec).filter(
+        (NhacViec.nhan_vien_id == me) | (NhacViec.nguoi_tao == me)
+    ).order_by(NhacViec.thoi_diem).all()
+    ten = _nv_ten_map(db, rows)
+    ra = [_nv_ra(r, ten) for r in rows]
+    return {"nhan_vien_id": me,
+            "nhac_toi": [x for x in ra if x["nhan_vien_id"] == me],
+            "toi_nhac": [x for x in ra if x["nguoi_tao"] == me and x["nhan_vien_id"] != me]}
+
+
+@router.get("/nhac-viec")
+def ds_nhac_viec(trang_thai: str | None = None, nhan_vien_id: int | None = None,
+                 db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
+    """Quản lý xem toàn bộ lời nhắc của công ty."""
+    q = db.query(NhacViec)
+    if trang_thai:
+        q = q.filter(NhacViec.trang_thai == trang_thai)
+    if nhan_vien_id:
+        q = q.filter(NhacViec.nhan_vien_id == nhan_vien_id)
+    rows = q.order_by(NhacViec.thoi_diem).limit(400).all()
+    ten = _nv_ten_map(db, rows)
+    return {"danh_sach": [_nv_ra(r, ten) for r in rows]}
+
+
+@router.put("/nhac-viec/{nv_id}")
+def sua_nhac_viec(nv_id: int, data: NhacViecVao, db: Session = Depends(get_db),
+                  nd: NguoiDung = Depends(lay_nguoi_dung_hien_tai)):
+    r = db.get(NhacViec, nv_id)
+    if r is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy lời nhắc")
+    if not _nv_sua_duoc(db, r, nd):
+        raise HTTPException(status.HTTP_403_FORBIDDEN,
+                            "Chỉ người tạo, người được nhắc hoặc CEO/Admin mới sửa được lời nhắc này")
+    if (data.tieu_de or "").strip():
+        r.tieu_de = data.tieu_de.strip()
+    if (data.thoi_diem or "").strip():
+        r.thoi_diem = _nv_doc_thoi_diem(data.thoi_diem)
+    if data.nhan_vien_id and db.get(NhanVien, data.nhan_vien_id) is not None:
+        r.nhan_vien_id = data.nhan_vien_id
+    r.ma_lien_quan = (data.ma_lien_quan or "").strip()[:120] or None
+    r.chuan_bi = (data.chuan_bi or "").strip() or None
+    r.nguoi_ho_tro_id = data.nguoi_ho_tro_id
+    r.ho_tro_gi = (data.ho_tro_gi or "").strip() or None
+    r.ghi_chu = (data.ghi_chu or "").strip() or None
+    if data.muc_do in _NV_MUC_DO:
+        r.muc_do = data.muc_do
+    if data.trang_thai in _NV_TRANG_THAI:
+        r.trang_thai = data.trang_thai
+        r.xong_luc = datetime.now() if data.trang_thai == "XONG" else None
+    ghi_audit(db, nd.id, "SUA", "nhac_viec", nv_id, moi={"tieu_de": r.tieu_de})
+    db.commit()
+    return {"ok": True}
+
+
+@router.post("/nhac-viec/{nv_id}/trang-thai")
+def doi_trang_thai_nhac_viec(nv_id: int, trang_thai: str, db: Session = Depends(get_db),
+                             nd: NguoiDung = Depends(lay_nguoi_dung_hien_tai)):
+    """Đánh dấu nhanh: đang làm / xong / hủy."""
+    if trang_thai not in _NV_TRANG_THAI:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Trạng thái không hợp lệ")
+    r = db.get(NhacViec, nv_id)
+    if r is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy lời nhắc")
+    if not _nv_sua_duoc(db, r, nd):
+        raise HTTPException(status.HTTP_403_FORBIDDEN,
+                            "Chỉ người tạo, người được nhắc hoặc CEO/Admin mới đổi được trạng thái")
+    r.trang_thai = trang_thai
+    r.xong_luc = datetime.now() if trang_thai == "XONG" else None
+    ghi_audit(db, nd.id, "SUA", "nhac_viec", nv_id, moi={"trang_thai": trang_thai})
+    db.commit()
+    return {"ok": True, "trang_thai": trang_thai}
+
+
+@router.delete("/nhac-viec/{nv_id}")
+def xoa_nhac_viec(nv_id: int, db: Session = Depends(get_db),
+                  nd: NguoiDung = Depends(lay_nguoi_dung_hien_tai)):
+    """Xóa lời nhắc — người TẠO hoặc CEO/ADMIN."""
+    r = db.get(NhacViec, nv_id)
+    if r is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy lời nhắc")
+    me = nhan_vien_id_cua(db, nd.id)
+    la_qtv = (nd.vai_tro.ma if nd.vai_tro else "").upper() in ("CEO", "ADMIN")
+    if r.nguoi_tao != me and not la_qtv:
+        raise HTTPException(status.HTTP_403_FORBIDDEN,
+                            "Chỉ người đặt lời nhắc hoặc CEO/Admin mới xóa được")
+    ghi_audit(db, nd.id, "XOA", "nhac_viec", nv_id, cu={"tieu_de": r.tieu_de})
     db.delete(r); db.commit()
     return {"da_xoa": True}
 

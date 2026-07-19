@@ -576,6 +576,24 @@ class BaoCaoNgay(Base):
     ma_lien_quan: Mapped[str | None] = mapped_column(String(120), nullable=True)
 
 
+class NhacViec(Base):
+    """Work Reminder — nhắc việc cho chính mình hoặc cho người khác."""
+    __tablename__ = "nhac_viec"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    nguoi_tao: Mapped[int] = mapped_column(ForeignKey("nhan_vien.id", ondelete="CASCADE"))
+    nhan_vien_id: Mapped[int] = mapped_column(ForeignKey("nhan_vien.id", ondelete="CASCADE"))
+    tieu_de: Mapped[str] = mapped_column(Text)
+    thoi_diem: Mapped[datetime] = mapped_column(DateTime)
+    ma_lien_quan: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    chuan_bi: Mapped[str | None] = mapped_column(Text, nullable=True)
+    nguoi_ho_tro_id: Mapped[int | None] = mapped_column(ForeignKey("nhan_vien.id"), nullable=True)
+    ho_tro_gi: Mapped[str | None] = mapped_column(Text, nullable=True)
+    muc_do: Mapped[str] = mapped_column(String(20), default="BINH_THUONG")
+    trang_thai: Mapped[str] = mapped_column(String(20), default="CHO_LAM")
+    ghi_chu: Mapped[str | None] = mapped_column(Text, nullable=True)
+    xong_luc: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
 class BangLuong(Base):
     __tablename__ = "bang_luong"
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
