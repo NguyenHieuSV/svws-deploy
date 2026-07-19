@@ -1,5 +1,5 @@
 import os
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from .routers import (auth, kho, ncc, du_an, ban_hang, ke_toan, tai_chinh,
@@ -61,6 +61,31 @@ def so_tay_quy_che():
             filename="So tay quy che cong ty - Song Viet.docx",
             headers=_NO_CACHE)
     return {"he_thong": "SVWS", "trang_thai": "chua co so tay quy che"}
+
+
+@app.post("/google-chat/events")
+async def google_chat_events(request: Request):
+    """Địa chỉ nhận sự kiện của Chat app “Nhắc việc SVWS”.
+
+    Bot chỉ GỬI lời nhắc, không xử lý hội thoại. Endpoint này tồn tại vì Google
+    Workspace Marketplace BẮT BUỘC Chat app phải khai báo một địa chỉ nhận sự kiện
+    (không khai thì không bật được “Standalone Chat App”).
+
+    Nó chỉ chào lại để người dùng biết bot đã sẵn sàng — không đọc, không lưu,
+    không hành động gì với nội dung tin nhắn.
+    """
+    try:
+        d = await request.json()
+    except Exception:
+        d = {}
+    loai = (d.get("type") or "").upper()
+    if loai in ("ADDED_TO_SPACE", "MESSAGE"):
+        return {"text": ("Xin chào! Đây là bot nhắc việc của hệ thống SVWS.\n"
+                         "Bot sẽ tự gửi lời nhắc công việc và bản tin đầu ngày cho bạn — "
+                         "bạn không cần trả lời tin này.\n"
+                         "Xem và đánh dấu hoàn thành trong app: "
+                         "Working time & Report → Work Reminder.")}
+    return {}
 
 
 @app.get("/health")
