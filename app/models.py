@@ -583,7 +583,9 @@ class NhacViec(Base):
     nguoi_tao: Mapped[int] = mapped_column(ForeignKey("nhan_vien.id", ondelete="CASCADE"))
     nhan_vien_id: Mapped[int] = mapped_column(ForeignKey("nhan_vien.id", ondelete="CASCADE"))
     tieu_de: Mapped[str] = mapped_column(Text)
-    thoi_diem: Mapped[datetime] = mapped_column(DateTime)
+    thoi_diem: Mapped[datetime] = mapped_column(DateTime)              # lúc NHẮC
+    han_hoan_thanh: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)  # hạn PHẢI XONG
+    nhom: Mapped[str | None] = mapped_column(String(60), nullable=True)  # mã lô khi "Nhắc tất cả"
     ma_lien_quan: Mapped[str | None] = mapped_column(String(120), nullable=True)
     chuan_bi: Mapped[str | None] = mapped_column(Text, nullable=True)
     nguoi_ho_tro_id: Mapped[int | None] = mapped_column(ForeignKey("nhan_vien.id"), nullable=True)

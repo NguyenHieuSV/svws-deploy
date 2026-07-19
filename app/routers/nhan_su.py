@@ -895,8 +895,10 @@ _NV_TRANG_THAI = ("CHO_LAM", "DANG_LAM", "XONG", "HUY")
 
 class NhacViecVao(_NVBase):
     nhan_vien_id: int | None = None          # nhắc ai (trống = nhắc chính mình)
+    nhac_tat_ca: bool = False                # True = nhắc TOÀN BỘ nhân viên đang làm
     tieu_de: str = ""
-    thoi_diem: str = ""                      # 'YYYY-MM-DDTHH:MM' giờ địa phương
+    thoi_diem: str = ""                      # 'YYYY-MM-DDTHH:MM' giờ địa phương — lúc NHẮC
+    han_hoan_thanh: str | None = None        # hạn PHẢI HOÀN THÀNH (tùy chọn)
     ma_lien_quan: str | None = None
     chuan_bi: str | None = None
     nguoi_ho_tro_id: int | None = None
@@ -920,6 +922,9 @@ def _nv_doc_thoi_diem(s: str) -> datetime:
 def _nv_ra(r: NhacViec, ten: dict) -> dict:
     return {"id": r.id, "nguoi_tao": r.nguoi_tao, "nhan_vien_id": r.nhan_vien_id,
             "tieu_de": r.tieu_de, "thoi_diem": r.thoi_diem.isoformat(timespec="minutes"),
+            "han_hoan_thanh": (r.han_hoan_thanh.isoformat(timespec="minutes")
+                               if r.han_hoan_thanh else None),
+            "nhom": r.nhom,
             "ma_lien_quan": r.ma_lien_quan, "chuan_bi": r.chuan_bi,
             "nguoi_ho_tro_id": r.nguoi_ho_tro_id, "ho_tro_gi": r.ho_tro_gi,
             "muc_do": r.muc_do, "trang_thai": r.trang_thai, "ghi_chu": r.ghi_chu,
@@ -953,24 +958,43 @@ def tao_nhac_viec(data: NhacViecVao, db: Session = Depends(get_db),
     tieu_de = (data.tieu_de or "").strip()
     if not tieu_de:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Vui lòng nhập việc cần làm")
-    nguoi_nhan = data.nhan_vien_id or me
-    if db.get(NhanVien, nguoi_nhan) is None:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Không tìm thấy người được nhắc")
     if data.nguoi_ho_tro_id and db.get(NhanVien, data.nguoi_ho_tro_id) is None:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Không tìm thấy người hỗ trợ")
-    r = NhacViec(nguoi_tao=me, nhan_vien_id=nguoi_nhan, tieu_de=tieu_de,
-                 thoi_diem=_nv_doc_thoi_diem(data.thoi_diem),
+    thoi_diem = _nv_doc_thoi_diem(data.thoi_diem)
+    han = _nv_doc_thoi_diem(data.han_hoan_thanh) if (data.han_hoan_thanh or "").strip() else None
+    if han is not None and han < thoi_diem:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Hạn hoàn thành phải sau thời điểm nhắc")
+    # Nhắc tất cả: mỗi nhân viên MỘT dòng riêng (để từng người tự đánh dấu xong),
+    # các dòng cùng lô chia sẻ cùng mã `nhom` để gom nhóm khi hiển thị.
+    if data.nhac_tat_ca:
+        nguoi_nhan_ids = [nv.id for nv in db.query(NhanVien)
+                          .filter(NhanVien.trang_thai == "DANG_LAM").all()]
+        if not nguoi_nhan_ids:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Không có nhân viên đang làm việc")
+        nhom = f"ALL-{me}-{datetime.now().strftime('%Y%m%d%H%M%S')}"
+    else:
+        nguoi_nhan = data.nhan_vien_id or me
+        if db.get(NhanVien, nguoi_nhan) is None:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Không tìm thấy người được nhắc")
+        nguoi_nhan_ids, nhom = [nguoi_nhan], None
+    chung = dict(nguoi_tao=me, tieu_de=tieu_de, thoi_diem=thoi_diem, han_hoan_thanh=han,
+                 nhom=nhom,
                  ma_lien_quan=(data.ma_lien_quan or "").strip()[:120] or None,
                  chuan_bi=(data.chuan_bi or "").strip() or None,
                  nguoi_ho_tro_id=data.nguoi_ho_tro_id,
                  ho_tro_gi=(data.ho_tro_gi or "").strip() or None,
                  muc_do=(data.muc_do if data.muc_do in _NV_MUC_DO else "BINH_THUONG"),
                  ghi_chu=(data.ghi_chu or "").strip() or None)
-    db.add(r); db.flush()
-    ghi_audit(db, nd.id, "TAO", "nhac_viec", r.id,
-              moi={"tieu_de": tieu_de, "nhac_ai": nguoi_nhan, "thoi_diem": data.thoi_diem})
+    tao = [NhacViec(nhan_vien_id=i, **chung) for i in nguoi_nhan_ids]
+    for r in tao:
+        db.add(r)
+    db.flush()
+    ghi_audit(db, nd.id, "TAO", "nhac_viec", tao[0].id,
+              moi={"tieu_de": tieu_de, "so_nguoi": len(tao), "nhom": nhom,
+                   "thoi_diem": data.thoi_diem, "han_hoan_thanh": data.han_hoan_thanh})
     db.commit()
-    return {"ok": True, "id": r.id}
+    return {"ok": True, "id": tao[0].id, "so_nguoi": len(tao), "nhom": nhom}
 
 
 @router.get("/nhac-viec/cua-toi")
@@ -1015,6 +1039,11 @@ def sua_nhac_viec(nv_id: int, data: NhacViecVao, db: Session = Depends(get_db),
         r.tieu_de = data.tieu_de.strip()
     if (data.thoi_diem or "").strip():
         r.thoi_diem = _nv_doc_thoi_diem(data.thoi_diem)
+    r.han_hoan_thanh = (_nv_doc_thoi_diem(data.han_hoan_thanh)
+                        if (data.han_hoan_thanh or "").strip() else None)
+    if r.han_hoan_thanh is not None and r.han_hoan_thanh < r.thoi_diem:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Hạn hoàn thành phải sau thời điểm nhắc")
     if data.nhan_vien_id and db.get(NhanVien, data.nhan_vien_id) is not None:
         r.nhan_vien_id = data.nhan_vien_id
     r.ma_lien_quan = (data.ma_lien_quan or "").strip()[:120] or None
@@ -1066,6 +1095,26 @@ def xoa_nhac_viec(nv_id: int, db: Session = Depends(get_db),
     ghi_audit(db, nd.id, "XOA", "nhac_viec", nv_id, cu={"tieu_de": r.tieu_de})
     db.delete(r); db.commit()
     return {"da_xoa": True}
+
+
+@router.delete("/nhac-viec/nhom/{nhom}")
+def xoa_nhom_nhac_viec(nhom: str, db: Session = Depends(get_db),
+                       nd: NguoiDung = Depends(lay_nguoi_dung_hien_tai)):
+    """Xóa CẢ LÔ lời nhắc “Nhắc tất cả” — người TẠO hoặc CEO/ADMIN."""
+    rows = db.query(NhacViec).filter(NhacViec.nhom == nhom).all()
+    if not rows:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy lô lời nhắc")
+    me = nhan_vien_id_cua(db, nd.id)
+    la_qtv = (nd.vai_tro.ma if nd.vai_tro else "").upper() in ("CEO", "ADMIN")
+    if rows[0].nguoi_tao != me and not la_qtv:
+        raise HTTPException(status.HTTP_403_FORBIDDEN,
+                            "Chỉ người đặt lời nhắc hoặc CEO/Admin mới xóa được")
+    ghi_audit(db, nd.id, "XOA", "nhac_viec", rows[0].id,
+              cu={"nhom": nhom, "tieu_de": rows[0].tieu_de, "so_dong": len(rows)})
+    for r in rows:
+        db.delete(r)
+    db.commit()
+    return {"da_xoa": True, "so_dong": len(rows)}
 
 
 # ----- Hồ sơ lương -----
