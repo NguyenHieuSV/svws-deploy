@@ -994,7 +994,15 @@ def tao_nhac_viec(data: NhacViecVao, db: Session = Depends(get_db),
               moi={"tieu_de": tieu_de, "so_nguoi": len(tao), "nhom": nhom,
                    "thoi_diem": data.thoi_diem, "han_hoan_thanh": data.han_hoan_thanh})
     db.commit()
-    return {"ok": True, "id": tao[0].id, "so_nguoi": len(tao), "nhom": nhom}
+    # Gửi Google Chat — best-effort, KHÔNG được làm hỏng việc tạo lời nhắc
+    chat = {"da_gui": 0}
+    try:
+        from ..nhac_viec_service import gui_khi_tao
+        chat = gui_khi_tao(db, tao)
+        db.commit()
+    except Exception as e:
+        chat = {"da_gui": 0, "loi": [f"{type(e).__name__}: {e}"]}
+    return {"ok": True, "id": tao[0].id, "so_nguoi": len(tao), "nhom": nhom, "chat": chat}
 
 
 @router.get("/nhac-viec/cua-toi")
@@ -1095,6 +1103,51 @@ def xoa_nhac_viec(nv_id: int, db: Session = Depends(get_db),
     ghi_audit(db, nd.id, "XOA", "nhac_viec", nv_id, cu={"tieu_de": r.tieu_de})
     db.delete(r); db.commit()
     return {"da_xoa": True}
+
+
+@router.get("/chat-trang-thai")
+def chat_trang_thai(nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
+    """Cấu hình Google Chat đang ở chế độ nào (không lộ khóa bí mật)."""
+    from ..config import settings as _st
+    sa = (_st.gchat_service_account or "").strip()
+    email_sa = ""
+    if sa:
+        try:
+            email_sa = _json.loads(sa).get("client_email", "")
+        except Exception:
+            email_sa = "(JSON không hợp lệ)"
+    return {"che_do": (_st.chat_provider or "DEMO").upper(),
+            "co_webhook": bool((_st.gchat_webhook_url or "").strip()),
+            "service_account": email_sa,
+            "gui_khi_tao": _st.nhac_viec_gui_khi_tao,
+            "ban_tin": _st.nhac_viec_ban_tin,
+            "gio_ban_tin": _st.nhac_viec_gio_ban_tin}
+
+
+@router.post("/chat-thu")
+def chat_gui_thu(email: str | None = None, db: Session = Depends(get_db),
+                 nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
+    """Gửi một tin THỬ để kiểm tra kết nối Google Chat.
+    Không truyền email thì gửi cho chính người đang đăng nhập."""
+    from ..chat_gateway import lay_chat_provider
+    if not email:
+        me = nhan_vien_id_cua(db, nd.id)
+        nv = db.get(NhanVien, me) if me else None
+        email = (nv.email if nv else "") or ""
+    if not email:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Tài khoản của bạn chưa có email — truyền ?email=... để thử.")
+    kq = lay_chat_provider().gui_ca_nhan(
+        email, "✅ *SVWS thử kết nối Google Chat*\nNếu bạn đọc được tin này thì cấu hình đã đúng.")
+    return {"toi": email, **kq}
+
+
+@router.post("/nhac-viec/ban-tin-thu")
+def ban_tin_thu(db: Session = Depends(get_db),
+                nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
+    """Gửi NGAY bản tin tổng hợp (bỏ qua chốt ngày) để xem thử nội dung."""
+    from ..nhac_viec_service import gui_ban_tin_ngay
+    return gui_ban_tin_ngay(db, ep=True)
 
 
 @router.delete("/nhac-viec/nhom/{nhom}")

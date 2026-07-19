@@ -46,5 +46,16 @@ class Settings(BaseSettings):
     auto_tra_loi: bool = False
     auto_tra_loi_ydinh: str = "QUAN_TAM,HOI_KY_THUAT,HEN_GAP"
 
+    # ---- Google Chat (Work Reminder) ----
+    # DEMO   : không gửi thật, chỉ ghi log (mặc định — an toàn)
+    # APP    : Chat app + Service Account -> NHẮN RIÊNG từng người (cần Workspace admin)
+    # WEBHOOK: đăng vào một Phòng chung qua Incoming Webhook (setup 5 phút)
+    chat_provider: str = "DEMO"
+    gchat_webhook_url: str = ""          # dùng cho chế độ WEBHOOK
+    gchat_service_account: str = ""      # dùng cho chế độ APP: DÁN NGUYÊN nội dung file JSON key
+    nhac_viec_gui_khi_tao: bool = True   # gửi ngay khi vừa đặt lời nhắc
+    nhac_viec_ban_tin: bool = True       # bản tin tổng hợp đầu ngày
+    nhac_viec_gio_ban_tin: int = 8       # giờ gửi bản tin (0-23, giờ máy chủ)
+
 
 settings = Settings()

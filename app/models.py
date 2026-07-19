@@ -594,6 +594,16 @@ class NhacViec(Base):
     trang_thai: Mapped[str] = mapped_column(String(20), default="CHO_LAM")
     ghi_chu: Mapped[str | None] = mapped_column(Text, nullable=True)
     xong_luc: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    da_gui_tao: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class NhacViecBanTin(Base):
+    """Chốt bản tin tổng hợp theo ngày — khoá chính là ngày nên không gửi trùng."""
+    __tablename__ = "nhac_viec_ban_tin"
+    ngay: Mapped[date] = mapped_column(Date, primary_key=True)
+    so_nguoi: Mapped[int] = mapped_column(Integer, default=0)
+    so_viec: Mapped[int] = mapped_column(Integer, default=0)
+    ket_qua: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class BangLuong(Base):

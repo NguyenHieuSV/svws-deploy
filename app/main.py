@@ -15,6 +15,16 @@ for r in (auth, kho, ncc, du_an, ban_hang, ke_toan, tai_chinh, nhan_su, cho_thue
     app.include_router(r.router)
 
 
+@app.on_event("startup")
+def _bat_scheduler():
+    """Bật luồng nền gửi bản tin nhắc việc. Lỗi ở đây KHÔNG được chặn app khởi động."""
+    try:
+        from .scheduler import khoi_dong
+        khoi_dong()
+    except Exception as e:
+        print(f"[SCHEDULER] Không bật được: {type(e).__name__}: {e}")
+
+
 _HTML = os.path.join(os.path.dirname(__file__), "..", "svws_app.html")
 _HUONG_DAN = os.path.join(os.path.dirname(__file__), "..", "huong_dan.html")
 _SO_TAY = os.path.join(os.path.dirname(__file__), "..", "so_tay_quy_che.docx")
