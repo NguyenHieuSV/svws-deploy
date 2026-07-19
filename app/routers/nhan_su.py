@@ -17,7 +17,7 @@ from ..audit import ghi_audit
 from ..luong_service import tinh_luong
 from ..hach_toan import hach_toan_luong
 from ..models import (NguoiDung, NhanVien, ChamCong, NghiPhep, BangLuong, KyLuong, ThamSoLuong,
-                      NgayNghiOt, BaoCaoNgay)
+                      NgayNghiOt, BaoCaoNgay, ButToan)
 from ..schemas import (NhanVienRa, ChamCongVao, NghiPhepVao, TinhLuongVao, BangLuongRa,
                         HoSoLuongVao, KyLuongVao, ChamCongLuongVao, ThamSoLuongVao, ChamCongImportVao,
                         NgayNghiOtVao, DangKyOtVao, TuChoiOtVao)
@@ -1199,7 +1199,8 @@ def cham_cong_phieu(bl_id: int, data: ChamCongLuongVao, db: Session = Depends(ge
     if bl is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy phiếu lương")
     if bl.trang_thai == "DA_DUYET":
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Kỳ đã chốt, không sửa được.")
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Kỳ lương đã chốt — hãy bấm “Mở lại kỳ” (CEO/Admin) để điều chỉnh, rồi chốt lại.")
     for k in ("cong_thuc_te", "gio_ot_thuong", "gio_ot_cuoi_tuan", "gio_ot_le", "tam_ung",
               "phu_cap_khac", "ngay_nghi_kpep", "so_phut_di_tre", "khau_tru_khac"):
         v = getattr(data, k)
@@ -1244,6 +1245,101 @@ def chot_ky_luong(thang: str, db: Session = Depends(get_db),
     db.commit()
     return {"thang": thang, "so_bang": len(rows), "so_but_toan_luong": so_bt,
             "tong_chi_phi_dn": _f(ky.tong_chi_phi_dn), "trang_thai": "DA_CHOT"}
+
+
+def _bt_luong_cua(db, bl_ids: list[int]):
+    """Bút toán lương đã hạch toán của các phiếu (nguon='LUONG', nguon_id=bang_luong.id)."""
+    if not bl_ids:
+        return []
+    return db.query(ButToan).filter(ButToan.nguon == "LUONG",
+                                    ButToan.nguon_id.in_(bl_ids)).all()
+
+
+# ----- MỞ LẠI kỳ đã chốt để điều chỉnh (gỡ bút toán lương) — CEO/ADMIN -----
+@router.post("/ky-luong/{thang}/mo-lai")
+def mo_lai_ky_luong(thang: str, db: Session = Depends(get_db),
+                    nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
+    """Mở khóa kỳ lương đã chốt: GỠ toàn bộ bút toán lương của kỳ rồi đưa kỳ về NHAP
+    để sửa/xóa. Chốt lại sẽ hạch toán mới hoàn toàn."""
+    ky = db.get(KyLuong, thang)
+    if ky is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Chưa tạo kỳ lương này")
+    if ky.trang_thai != "DA_CHOT":
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Kỳ lương chưa chốt — không cần mở lại.")
+    rows = db.query(BangLuong).filter_by(thang=thang).all()
+    bts = _bt_luong_cua(db, [b.id for b in rows])
+    for bt in bts:
+        db.delete(bt)
+    for bl in rows:
+        bl.trang_thai = "CHO_DUYET"
+        bl.nguoi_duyet_ktt = None
+        bl.nguoi_ky_ceo = None
+    ky.trang_thai = "NHAP"
+    ky.nguoi_chot = None
+    db.flush()
+    _cap_nhat_tong_ky(db, ky)
+    ghi_audit(db, nd.id, "SUA", "ky_luong", None,
+              moi={"thang": thang, "mo_lai_ky": True, "but_toan_da_go": len(bts),
+                   "so_bang": len(rows)})
+    db.commit()
+    return {"thang": thang, "trang_thai": "NHAP", "but_toan_da_go": len(bts),
+            "so_bang": len(rows)}
+
+
+# ----- XÓA 1 phiếu lương trong kỳ — CEO/ADMIN, giữ vết kế toán -----
+@router.delete("/phieu-luong/{bl_id}")
+def xoa_phieu_luong(bl_id: int, db: Session = Depends(get_db),
+                    nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
+    bl = db.get(BangLuong, bl_id)
+    if bl is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy phiếu lương")
+    ky = db.get(KyLuong, bl.thang)
+    if (ky is not None and ky.trang_thai == "DA_CHOT") or bl.trang_thai == "DA_DUYET":
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"Kỳ lương {bl.thang} đã chốt và đã hạch toán — hãy bấm “Mở lại kỳ” trước khi xóa phiếu.")
+    con_bt = len(_bt_luong_cua(db, [bl.id]))
+    if con_bt:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"Phiếu lương này còn {con_bt} bút toán lương đã ghi sổ — hãy “Mở lại kỳ” để gỡ bút toán trước.")
+    nv = db.get(NhanVien, bl.nhan_vien_id)
+    ghi_audit(db, nd.id, "XOA", "bang_luong", bl_id,
+              cu={"thang": bl.thang, "nhan_vien": (nv.ho_ten if nv else bl.nhan_vien_id),
+                  "thuc_linh": _f(bl.thuc_linh)})
+    db.delete(bl)
+    db.flush()
+    if ky is not None:
+        _cap_nhat_tong_ky(db, ky)
+    db.commit()
+    return {"da_xoa": True}
+
+
+# ----- XÓA CẢ KỲ lương (mọi phiếu trong tháng) — CEO/ADMIN -----
+@router.delete("/ky-luong/{thang}")
+def xoa_ky_luong(thang: str, db: Session = Depends(get_db),
+                 nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
+    ky = db.get(KyLuong, thang)
+    rows = db.query(BangLuong).filter_by(thang=thang).all()
+    if ky is None and not rows:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Chưa tạo kỳ lương này")
+    if ky is not None and ky.trang_thai == "DA_CHOT":
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Kỳ lương đã chốt và đã hạch toán — hãy bấm “Mở lại kỳ” trước khi xóa.")
+    con_bt = len(_bt_luong_cua(db, [b.id for b in rows]))
+    if con_bt:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"Kỳ còn {con_bt} bút toán lương đã ghi sổ — hãy “Mở lại kỳ” để gỡ bút toán trước.")
+    for bl in rows:
+        db.delete(bl)
+    if ky is not None:
+        db.delete(ky)
+    ghi_audit(db, nd.id, "XOA", "ky_luong", None,
+              cu={"thang": thang, "so_bang": len(rows)})
+    db.commit()
+    return {"da_xoa": True, "so_bang": len(rows)}
 
 
 # ----- GỬI EMAIL phiếu lương từng người (chậm nhất ngày 7) -----
