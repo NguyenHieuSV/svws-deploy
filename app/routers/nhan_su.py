@@ -1148,16 +1148,21 @@ def chat_gui_thu(email: str | None = None, db: Session = Depends(get_db),
     Không truyền email thì gửi cho chính người đang đăng nhập."""
     from ..chat_gateway import lay_chat_provider
     from ..nhac_viec_service import gui_toi_nguoi
+    prov = lay_chat_provider()
+    che_do = getattr(prov, "che_do", "DEMO")
+    noi_dung = "✅ *SVWS thử kết nối Google Chat*\nNếu bạn đọc được tin này thì cấu hình đã đúng."
     if not email:
         me = nhan_vien_id_cua(db, nd.id)
         nv = db.get(NhanVien, me) if me else None
         email = (nv.email if nv else "") or ""
+    # Webhook đăng vào Phòng chung -> KHÔNG cần email
+    if che_do == "WEBHOOK":
+        kq = prov.gui_phong(noi_dung)
+        return {"toi": "Phòng chung", **kq}
     if not email:
         raise HTTPException(status.HTTP_400_BAD_REQUEST,
-                            "Tài khoản của bạn chưa có email — truyền ?email=... để thử.")
-    kq = gui_toi_nguoi(
-        db, lay_chat_provider(), email,
-        "✅ *SVWS thử kết nối Google Chat*\nNếu bạn đọc được tin này thì cấu hình đã đúng.")
+                            "Tài khoản của bạn chưa có email — nhập email vào ô để thử.")
+    kq = gui_toi_nguoi(db, prov, email, noi_dung)
     return {"toi": email, **kq}
 
 
