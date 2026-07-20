@@ -1122,12 +1122,23 @@ def chat_trang_thai(nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
             email_sa = _json.loads(sa).get("client_email", "")
         except Exception:
             email_sa = "(JSON không hợp lệ)"
-    return {"che_do": (_st.chat_provider or "DEMO").upper(),
+    import os as _os
+    raw = _st.chat_provider or ""
+    # Chẩn đoán: máy chủ thực sự đọc được gì (không lộ khóa) — giúp tìm lỗi cấu hình
+    chan_doan = {
+        "chat_provider_raw": repr(raw),                      # thấy dấu cách/hoa-thường thừa
+        "env_CHAT_PROVIDER": repr(_os.environ.get("CHAT_PROVIDER")),
+        "co_GCHAT_SERVICE_ACCOUNT": bool(sa),
+        "do_dai_service_account": len(sa),
+        "env_co_GCHAT_SERVICE_ACCOUNT": bool(_os.environ.get("GCHAT_SERVICE_ACCOUNT")),
+    }
+    return {"che_do": (_st.chat_provider or "DEMO").strip().upper(),
             "co_webhook": bool((_st.gchat_webhook_url or "").strip()),
             "service_account": email_sa,
             "gui_khi_tao": _st.nhac_viec_gui_khi_tao,
             "ban_tin": _st.nhac_viec_ban_tin,
-            "gio_ban_tin": _st.nhac_viec_gio_ban_tin}
+            "gio_ban_tin": _st.nhac_viec_gio_ban_tin,
+            "chan_doan": chan_doan}
 
 
 @router.post("/chat-thu")

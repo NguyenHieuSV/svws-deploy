@@ -189,7 +189,7 @@ class AppChatProvider:
 
 
 def lay_chat_provider() -> ChatProvider:
-    ch = (settings.chat_provider or "DEMO").upper()
+    ch = (settings.chat_provider or "DEMO").strip().upper()
     if ch == "APP":
         return AppChatProvider()
     if ch == "WEBHOOK":
@@ -198,4 +198,4 @@ def lay_chat_provider() -> ChatProvider:
 
 
 def dang_bat() -> bool:
-    return (settings.chat_provider or "DEMO").upper() in ("APP", "WEBHOOK")
+    return (settings.chat_provider or "DEMO").strip().upper() in ("APP", "WEBHOOK")
