@@ -411,7 +411,8 @@ class DonHang(Base):
     khach_hang_id: Mapped[int] = mapped_column(ForeignKey("khach_hang.id"))
     bao_gia_id: Mapped[int | None] = mapped_column(ForeignKey("bao_gia.id"), nullable=True)
     ngay: Mapped[date] = mapped_column(Date, server_default=func.current_date())
-    tong_tien: Mapped[Decimal] = mapped_column(Numeric(18, 0), default=0)
+    tong_tien: Mapped[Decimal] = mapped_column(Numeric(18, 0), default=0)   # tiền hàng CHƯA VAT
+    tien_thue: Mapped[Decimal] = mapped_column(Numeric(18, 0), default=0)   # tổng VAT
     trang_thai: Mapped[str] = mapped_column(String(20), default="MOI")
     ty_le_dat_coc: Mapped[Decimal] = mapped_column(Numeric(5, 2), default=0)
     chi_tiet: Mapped[list["DonHangCt"]] = relationship(cascade="all, delete-orphan", lazy="selectin")
@@ -424,6 +425,7 @@ class DonHangCt(Base):
     hang_hoa_id: Mapped[int] = mapped_column(ForeignKey("hang_hoa.id"))
     so_luong: Mapped[Decimal] = mapped_column(Numeric(15, 3))
     don_gia: Mapped[Decimal] = mapped_column(Numeric(18, 0))
+    thue_suat: Mapped[Decimal] = mapped_column(Numeric(5, 2), default=0)   # VAT % của dòng
 
 
 class HoaDon(Base):

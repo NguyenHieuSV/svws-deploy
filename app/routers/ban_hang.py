@@ -1008,6 +1008,18 @@ class DonHangCtTrucTiepVao(_DHBase):
     don_vi: str | None = None
     so_luong: Decimal
     don_gia: Decimal
+    thue_suat: Decimal = Decimal(8)   # VAT % của dòng (mặc định 8%)
+
+
+def _tinh_don_hang(lines):
+    """lines: list (hang_hoa_id, so_luong, don_gia, thue_suat).
+    Trả (tien_hang, tien_thue). VAT làm tròn theo TỪNG DÒNG (chuẩn VAS)."""
+    th, tt = Decimal(0), Decimal(0)
+    for _id, sl, dg, ts in lines:
+        line = (Decimal(str(sl)) * Decimal(str(dg))).quantize(Decimal(1))
+        th += line
+        tt += (line * Decimal(str(ts or 0)) / Decimal(100)).quantize(Decimal(1))
+    return th, tt
 
 
 class DonHangTrucTiepVao(_DHBase):
@@ -1054,18 +1066,20 @@ def tao_don_hang_truc_tiep(data: DonHangTrucTiepVao, db: Session = Depends(get_d
             hang_moi.append(hh.ten)
         elif it.don_vi and not hh.don_vi:
             hh.don_vi = it.don_vi
-        lines.append((hh.id, it.so_luong, it.don_gia))
-    tong = sum(sl * dg for _, sl, dg in lines)
+        lines.append((hh.id, it.so_luong, it.don_gia, it.thue_suat))
+    tien_hang, tien_thue = _tinh_don_hang(lines)
     dh = DonHang(so=so, khach_hang_id=data.khach_hang_id,
-                 ngay=data.ngay or date.today(), tong_tien=tong, trang_thai="MOI")
+                 ngay=data.ngay or date.today(), tong_tien=tien_hang,
+                 tien_thue=tien_thue, trang_thai="MOI")
     db.add(dh)
     db.flush()
     if not dh.so:
         dh.so = f"DH-{date.today():%Y%m%d}-{dh.id}"
-    for hh_id, sl, dg in lines:
-        db.add(DonHangCt(don_hang_id=dh.id, hang_hoa_id=hh_id, so_luong=sl, don_gia=dg))
+    for hh_id, sl, dg, ts in lines:
+        db.add(DonHangCt(don_hang_id=dh.id, hang_hoa_id=hh_id, so_luong=sl, don_gia=dg, thue_suat=ts))
     ghi_audit(db, nd.id, "TAO", "don_hang", dh.id,
-              moi={"truc_tiep": True, "tong_tien": float(tong), "so_dong": len(lines),
+              moi={"truc_tiep": True, "tong_tien": float(tien_hang),
+                   "tien_thue": float(tien_thue), "so_dong": len(lines),
                    "hang_moi": hang_moi[:20]})
     db.commit(); db.refresh(dh)
     return dh
@@ -1118,10 +1132,12 @@ def chi_tiet_don_hang(dh_id: int, db: Session = Depends(get_db),
         hh = db.get(HangHoa, ct.hang_hoa_id)
         ct_out.append({"hang_hoa_id": ct.hang_hoa_id, "ten": hh.ten if hh else f"HH #{ct.hang_hoa_id}",
                        "don_vi": hh.don_vi if hh else None,
-                       "so_luong": float(ct.so_luong), "don_gia": float(ct.don_gia)})
+                       "so_luong": float(ct.so_luong), "don_gia": float(ct.don_gia),
+                       "thue_suat": float(ct.thue_suat or 0)})
     co_hd = db.query(HoaDon).filter_by(don_hang_id=dh_id).first() is not None
     return {"id": dh.id, "so": dh.so, "khach_hang_id": dh.khach_hang_id,
             "ngay": str(dh.ngay) if dh.ngay else None, "tong_tien": float(dh.tong_tien or 0),
+            "tien_thue": float(dh.tien_thue or 0),
             "trang_thai": dh.trang_thai, "co_hoa_don": co_hd,
             # khóa sửa nội dung đơn (vẫn đổi được TRẠNG THÁI) khi đã xuất kho / có hóa đơn
             "khoa_sua": bool(dh.trang_thai == "DA_XUAT" or co_hd),
@@ -1198,20 +1214,23 @@ def sua_don_hang(dh_id: int, data: DonHangTrucTiepVao, db: Session = Depends(get
             db.flush()
             if db.query(TonKho).filter_by(hang_hoa_id=hh.id).first() is None:
                 db.add(TonKho(hang_hoa_id=hh.id, so_luong=0))
-        lines.append((hh.id, it.so_luong, it.don_gia))
+        lines.append((hh.id, it.so_luong, it.don_gia, it.thue_suat))
     cu = {"so": dh.so, "khach_hang_id": dh.khach_hang_id,
           "tong_tien": float(dh.tong_tien or 0), "so_dong": len(dh.chi_tiet)}
-    tong = sum(sl * dg for _, sl, dg in lines)
-    dh.chi_tiet = [DonHangCt(hang_hoa_id=hid, so_luong=sl, don_gia=dg) for hid, sl, dg in lines]
+    tien_hang, tien_thue = _tinh_don_hang(lines)
+    dh.chi_tiet = [DonHangCt(hang_hoa_id=hid, so_luong=sl, don_gia=dg, thue_suat=ts)
+                   for hid, sl, dg, ts in lines]
     dh.khach_hang_id = data.khach_hang_id
     if so:
         dh.so = so
     if data.ngay:
         dh.ngay = data.ngay
-    dh.tong_tien = tong
+    dh.tong_tien = tien_hang
+    dh.tien_thue = tien_thue
     ghi_audit(db, nd.id, "CAP_NHAT", "don_hang", dh.id, cu=cu,
               moi={"so": dh.so, "khach_hang_id": dh.khach_hang_id,
-                   "tong_tien": float(tong), "so_dong": len(lines)})
+                   "tong_tien": float(tien_hang), "tien_thue": float(tien_thue),
+                   "so_dong": len(lines)})
     db.commit(); db.refresh(dh)
     return dh
 
@@ -1238,8 +1257,12 @@ def xuat_kho_don_hang(dh_id: int, db: Session = Depends(get_db),
             canh_bao_ton.append(ct.hang_hoa_id)
 
     # 2) Hóa đơn BAN (chừa sẵn chỗ nối HĐĐT) + 3) Công nợ phải thu (bàn giao Kế toán)
-    truoc_thue = dh.tong_tien
-    thue = (truoc_thue * THUE_SUAT).quantize(Decimal("1"))
+    # VAT theo từng dòng của đơn (dh.tien_thue). Đơn cũ chưa có VAT theo dòng thì
+    # tien_thue đã được backfill = 8% (migration 49), vẫn giữ đúng hành vi trước đây.
+    truoc_thue = Decimal(dh.tong_tien or 0)
+    thue = Decimal(dh.tien_thue or 0)
+    if thue == 0 and truoc_thue > 0:            # dữ liệu chưa có VAT → mặc định 8% như cũ
+        thue = (truoc_thue * THUE_SUAT).quantize(Decimal("1"))
     hd = HoaDon(loai="BAN", don_hang_id=dh.id, ngay=date.today(),
                 tien_truoc_thue=truoc_thue, tien_thue=thue, tong_tien=truoc_thue + thue,
                 hddt_provider=None, hddt_trang_thai="CHUA_PHAT_HANH")
