@@ -775,18 +775,17 @@ def xoa_de_xuat(ycm_id: int, db: Session = Depends(get_db),
 @router.get("/thanh-toan-mua")
 def ds_thanh_toan_mua(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
     """Danh sách PO kèm tình trạng thanh toán: tổng, đề nghị thanh toán lũy kế,
-    ngày thanh toán tiếp theo, số báo giá + mã đơn bán liên quan."""
-    from ..models import DonHang, BaoGia, ThanhToan as _TT
+    ngày thanh toán tiếp theo, số hóa đơn mua + mã đơn bán liên quan."""
+    from ..models import ThanhToan as _TT, HoaDon
     out = []
     for dm in db.query(DonMua).order_by(DonMua.id.desc()).limit(300).all():
         ncc = db.get(NhaCungCap, dm.nha_cung_cap_id)
-        so_bg = None
-        if dm.don_hang_id:
-            o = db.get(DonHang, dm.don_hang_id)
-            if o and o.bao_gia_id:
-                bg = db.get(BaoGia, o.bao_gia_id)
-                so_bg = bg.so if bg else None
         cn = db.query(CongNo).filter_by(don_mua_id=dm.id).first()
+        # Số hóa đơn = hóa đơn mua (HĐM) sinh khi nhận hàng, gắn với công nợ phải trả
+        so_hd = None
+        if cn and cn.hoa_don_id:
+            hd = db.get(HoaDon, cn.hoa_don_id)
+            so_hd = hd.so if hd else None
         da_tt = float(cn.da_thanh_toan or 0) if cn else 0.0
         ngay_tt = str(dm.ngay_tt) if dm.ngay_tt else None
         if cn:
@@ -795,7 +794,7 @@ def ds_thanh_toan_mua(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "
             if tt_cuoi and tt_cuoi.ngay:
                 ngay_tt = str(tt_cuoi.ngay)
         out.append({"id": dm.id, "so": dm.so, "ngay": str(dm.ngay or "")[:10],
-                    "so_bao_gia": so_bg, "ma_don_ban": _ma_ban_hang_po(db, dm),
+                    "so_hoa_don": so_hd, "ma_don_ban": _ma_ban_hang_po(db, dm),
                     "ncc_ten": ncc.ten if ncc else None,
                     "tong_tien": float(dm.tong_tien or 0),
                     "de_nghi_tt": float(dm.de_nghi_tt or 0),
