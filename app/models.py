@@ -186,7 +186,9 @@ class DonMua(Base):
     so: Mapped[str | None] = mapped_column(String(30), unique=True, nullable=True)
     nha_cung_cap_id: Mapped[int] = mapped_column(ForeignKey("nha_cung_cap.id"))
     ngay: Mapped[date] = mapped_column(Date, server_default=func.current_date())
-    tong_tien: Mapped[Decimal] = mapped_column(Numeric(18, 0), default=0)
+    tien_hang: Mapped[Decimal] = mapped_column(Numeric(18, 0), default=0)   # chưa thuế
+    tien_thue: Mapped[Decimal] = mapped_column(Numeric(18, 0), default=0)   # tổng VAT
+    tong_tien: Mapped[Decimal] = mapped_column(Numeric(18, 0), default=0)   # = tien_hang + tien_thue
     trang_thai: Mapped[str] = mapped_column(trang_thai_duyet_t, default="NHAP")
     nguoi_duyet: Mapped[int | None] = mapped_column(ForeignKey("nhan_vien.id"), nullable=True)
     don_hang_id: Mapped[int | None] = mapped_column(ForeignKey("don_hang.id", ondelete="SET NULL"), nullable=True)
@@ -249,6 +251,7 @@ class DonMuaCt(Base):
     hang_hoa_id: Mapped[int] = mapped_column(ForeignKey("hang_hoa.id"))
     so_luong: Mapped[Decimal] = mapped_column(Numeric(15, 3))
     don_gia: Mapped[Decimal] = mapped_column(Numeric(18, 0))
+    thue_suat: Mapped[Decimal] = mapped_column(Numeric(5, 2), default=0)   # VAT % của dòng
     so_luong_nhan: Mapped[Decimal] = mapped_column(Numeric(15, 3), default=0)
 
 

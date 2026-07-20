@@ -106,6 +106,7 @@ class DonMuaCtVao(BaseModel):
     hang_hoa_id: int
     so_luong: Decimal = Field(gt=0)
     don_gia: Decimal = Field(ge=0)
+    thue_suat: Decimal = Field(default=0, ge=0, le=100)   # VAT % của dòng
 
 
 class DonMuaVao(BaseModel):
@@ -692,6 +693,7 @@ class DonMuaCtRa(BaseModel):
     hang_hoa_id: int
     so_luong: Decimal
     don_gia: Decimal
+    thue_suat: Decimal = 0
     so_luong_nhan: Decimal
 
 
@@ -701,6 +703,8 @@ class DonMuaChiTietRa(BaseModel):
     so: str | None
     nha_cung_cap_id: int
     don_hang_id: int | None = None
+    tien_hang: Decimal = 0
+    tien_thue: Decimal = 0
     tong_tien: Decimal
     trang_thai: str
     trang_thai_nhan: str

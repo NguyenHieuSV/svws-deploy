@@ -307,8 +307,11 @@ def doc_bao_gia_file(data: bytes, content_type: str, filename: str) -> list[dict
            "CHỈ trả về đúng một mảng JSON, không thêm chữ nào khác, mỗi phần tử dạng: "
            '{"ten":"<tên sản phẩm>","ma_sp":"<mã SP hoặc null>","mo_ta":"<mô tả/quy cách hoặc null>",'
            '"nha_san_xuat":"<hãng sản xuất/xuất xứ hoặc null>","don_vi":"<đơn vị tính hoặc null>",'
-           '"don_gia":<đơn giá VND dạng số, hoặc null>,"so_luong":<số lượng trong báo giá dạng số, hoặc null>}. '
+           '"don_gia":<đơn giá VND dạng số, hoặc null>,"so_luong":<số lượng trong báo giá dạng số, hoặc null>,'
+           '"thue_suat":<% thuế VAT của dòng dạng số (ví dụ 8 hoặc 10), hoặc null>}. '
            "Đơn giá: bỏ dấu chấm/phẩy ngăn cách nghìn, quy về số VND; nếu giá bằng ngoại tệ thì để null. "
+           "Thuế suất VAT: lấy đúng % ghi trong báo giá cho từng dòng (thường 0/5/8/10). Nếu báo giá "
+           "chỉ ghi một mức VAT chung thì áp mức đó cho mọi dòng; nếu không thấy VAT thì để null. "
            "KHÔNG bịa thông tin không có trong file; thiếu trường nào để null trường đó.")
     body = {"model": settings.anthropic_model, "max_tokens": 8000, "system": sys,
             "messages": [{"role": "user", "content": [
@@ -345,12 +348,19 @@ def doc_bao_gia_file(data: bytes, content_type: str, filename: str) -> list[dict
             sl = float(sl) if sl is not None and float(sl) > 0 else None
         except (TypeError, ValueError):
             sl = None
+        ts = it.get("thue_suat")
+        try:
+            ts = float(ts) if ts is not None else None
+            if ts is not None and (ts < 0 or ts > 100):
+                ts = None
+        except (TypeError, ValueError):
+            ts = None
         out.append({"ten": ten[:250], "so_luong": sl,
                     "ma_sp": (str(it.get("ma_sp")).strip()[:60] if it.get("ma_sp") else None),
                     "mo_ta": (str(it.get("mo_ta")).strip() if it.get("mo_ta") else None),
                     "nha_san_xuat": (str(it.get("nha_san_xuat")).strip()[:150] if it.get("nha_san_xuat") else None),
                     "don_vi": (str(it.get("don_vi")).strip()[:30] if it.get("don_vi") else None),
-                    "don_gia": gia})
+                    "don_gia": gia, "thue_suat": ts})
     return out
 
 

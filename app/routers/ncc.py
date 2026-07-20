@@ -641,7 +641,7 @@ def tao_po_tu_bao_gia_file(tep_id: int, db: Session = Depends(get_db),
     dm = DonMua(nha_cung_cap_id=ncc.id, trang_thai="CHO_DUYET")
     db.add(dm); db.flush()
     dm.so = f"PO-{date.today():%Y%m%d}-{dm.id}"
-    tong = Decimal(0)
+    tien_hang, tien_thue = Decimal(0), Decimal(0)
     hh_moi = []
     for it in items:
         hh = None
@@ -663,16 +663,20 @@ def tao_po_tu_bao_gia_file(tep_id: int, db: Session = Depends(get_db),
             hh_moi.append(hh.ten)
         sl = Decimal(str(it.get("so_luong") or 1))
         gia = Decimal(it["don_gia"] or 0)
-        db.add(DonMuaCt(don_mua_id=dm.id, hang_hoa_id=hh.id, so_luong=sl, don_gia=gia))
-        tong += sl * gia
-    dm.tong_tien = tong
+        ts = Decimal(str(it.get("thue_suat") or 0))
+        db.add(DonMuaCt(don_mua_id=dm.id, hang_hoa_id=hh.id, so_luong=sl, don_gia=gia, thue_suat=ts))
+        line = (sl * gia).quantize(Decimal(1))
+        tien_hang += line
+        tien_thue += (line * ts / Decimal(100)).quantize(Decimal(1))
+    dm.tien_hang, dm.tien_thue, dm.tong_tien = tien_hang, tien_thue, tien_hang + tien_thue
     ghi_audit(db, nd.id, "AI_TAO_PO", "don_mua", dm.id,
               moi={"tu_file": t.ten_file, "ncc": ncc.ten, "so_dong": len(items),
-                   "tong_tien": float(tong), "hang_hoa_moi": len(hh_moi)})
+                   "tong_tien": float(dm.tong_tien), "tien_thue": float(tien_thue),
+                   "hang_hoa_moi": len(hh_moi)})
     db.commit()
     return {"ok": True, "don_mua_id": dm.id, "so": dm.so, "ncc": ncc.ten,
-            "so_dong": len(items), "tong_tien": float(tong),
-            "hang_hoa_moi": hh_moi[:10], "so_hang_moi": len(hh_moi)}
+            "so_dong": len(items), "tien_hang": float(tien_hang), "tien_thue": float(tien_thue),
+            "tong_tien": float(dm.tong_tien), "hang_hoa_moi": hh_moi[:10], "so_hang_moi": len(hh_moi)}
 
 
 @router.delete("/bao-gia-file/{tep_id}")
@@ -1160,6 +1164,20 @@ def da_mua_theo_ma(don_hang_id: int, db: Session = Depends(get_db),
     return out
 
 
+def _tinh_tien_po(dong):
+    """dong: iterable phần tử có .so_luong/.don_gia/.thue_suat (schema hoặc ORM).
+    Trả (tien_hang, tien_thue, tong). VAT làm tròn theo TỪNG DÒNG (chuẩn VAS)."""
+    th, tt = Decimal(0), Decimal(0)
+    for ct in dong:
+        sl = Decimal(str(getattr(ct, "so_luong", 0) or 0))
+        dg = Decimal(str(getattr(ct, "don_gia", 0) or 0))
+        ts = Decimal(str(getattr(ct, "thue_suat", 0) or 0))
+        line = (sl * dg).quantize(Decimal(1))
+        th += line
+        tt += (line * ts / Decimal(100)).quantize(Decimal(1))
+    return th, tt, th + tt
+
+
 # ----- THAO_TAC: tạo đơn mua (nháp -> chờ duyệt). NV_MUA tạo được, chưa tự duyệt. -----
 @router.post("/don-mua", response_model=DonMuaRa, status_code=201)
 def tao_don_mua(data: DonMuaVao, db: Session = Depends(get_db),
@@ -1173,20 +1191,21 @@ def tao_don_mua(data: DonMuaVao, db: Session = Depends(get_db),
     if data.don_hang_id:
         da_xac_nhan = _chan_mua_trung(db, nd, [ct.hang_hoa_id for ct in data.chi_tiet],
                                       don_hang_id=data.don_hang_id, xac_nhan=data.xac_nhan_trung)
-    tong = sum(ct.so_luong * ct.don_gia for ct in data.chi_tiet)
+    tien_hang, tien_thue, tong = _tinh_tien_po(data.chi_tiet)
     dm = DonMua(so=data.so, nha_cung_cap_id=data.nha_cung_cap_id,
                 don_hang_id=data.don_hang_id, ngay_hen_giao=data.ngay_hen_giao,
-                ngay=date.today(), tong_tien=tong, trang_thai="CHO_DUYET")
+                ngay=date.today(), tien_hang=tien_hang, tien_thue=tien_thue,
+                tong_tien=tong, trang_thai="CHO_DUYET")
     db.add(dm)
     db.flush()
     if not dm.so:
         dm.so = f"PO-{date.today():%Y%m%d}-{dm.id}"
     for ct in data.chi_tiet:
         db.add(DonMuaCt(don_mua_id=dm.id, hang_hoa_id=ct.hang_hoa_id,
-                        so_luong=ct.so_luong, don_gia=ct.don_gia))
+                        so_luong=ct.so_luong, don_gia=ct.don_gia, thue_suat=ct.thue_suat))
     ghi_audit(db, nd.id, "TAO", "don_mua", dm.id,
-              moi={"tong_tien": float(tong), "trang_thai": "CHO_DUYET",
-                   "mua_bo_sung_xac_nhan": da_xac_nhan})
+              moi={"tong_tien": float(tong), "tien_thue": float(tien_thue),
+                   "trang_thai": "CHO_DUYET", "mua_bo_sung_xac_nhan": da_xac_nhan})
     db.commit()
     db.refresh(dm)
     return dm
@@ -1223,12 +1242,15 @@ def sua_don_mua(dm_id: int, data: DonMuaVao, db: Session = Depends(get_db),
     cu = {"nha_cung_cap_id": dm.nha_cung_cap_id, "don_hang_id": dm.don_hang_id,
           "tong_tien": float(dm.tong_tien or 0), "trang_thai": dm.trang_thai,
           "so_dong": len(dm.chi_tiet)}
-    tong = sum(ct.so_luong * ct.don_gia for ct in data.chi_tiet)
-    dm.chi_tiet = [DonMuaCt(hang_hoa_id=ct.hang_hoa_id, so_luong=ct.so_luong, don_gia=ct.don_gia)
+    tien_hang, tien_thue, tong = _tinh_tien_po(data.chi_tiet)
+    dm.chi_tiet = [DonMuaCt(hang_hoa_id=ct.hang_hoa_id, so_luong=ct.so_luong,
+                            don_gia=ct.don_gia, thue_suat=ct.thue_suat)
                    for ct in data.chi_tiet]  # delete-orphan tự xóa dòng cũ
     dm.nha_cung_cap_id = data.nha_cung_cap_id
     dm.don_hang_id = data.don_hang_id
     dm.ngay_hen_giao = data.ngay_hen_giao
+    dm.tien_hang = tien_hang
+    dm.tien_thue = tien_thue
     dm.tong_tien = tong
     if dm.trang_thai == "TU_CHOI":  # sửa lại sau khi bị từ chối → duyệt lại từ đầu
         dm.trang_thai = "CHO_DUYET"
@@ -1323,7 +1345,8 @@ def nhan_hang(dm_id: int, data: NhanHangVao, db: Session = Depends(get_db),
         raise HTTPException(status.HTTP_400_BAD_REQUEST,
                             f"PO chưa được duyệt (đang {dm.trang_thai}) — không thể nhận hàng.")
     cts = {ct.id: ct for ct in db.query(DonMuaCt).filter_by(don_mua_id=dm_id).all()}
-    gia_tri_nhan = Decimal(0)
+    gia_tri_nhan = Decimal(0)   # tiền hàng chưa thuế của phần nhận lần này
+    thue_nhan = Decimal(0)      # VAT tương ứng phần nhận
     pk = PhieuKho(loai="NHAP", don_mua_id=dm.id, nguoi_tao=nhan_vien_id_cua(db, nd.id))
     db.add(pk); db.flush()
     pk.so = f"PN-{date.today():%Y%m%d}-{pk.id}"
@@ -1340,7 +1363,9 @@ def nhan_hang(dm_id: int, data: NhanHangVao, db: Session = Depends(get_db),
         _bao_dam_ton(db, ct.hang_hoa_id)
         nhap_ton(db, ct.hang_hoa_id, dong.so_luong)
         db.add(PhieuKhoCt(phieu_kho_id=pk.id, hang_hoa_id=ct.hang_hoa_id, so_luong=dong.so_luong))
-        gia_tri_nhan += dong.so_luong * ct.don_gia
+        line = (Decimal(str(dong.so_luong)) * Decimal(str(ct.don_gia))).quantize(Decimal(1))
+        gia_tri_nhan += line
+        thue_nhan += (line * Decimal(str(ct.thue_suat or 0)) / Decimal(100)).quantize(Decimal(1))
     # cập nhật trạng thái nhận của PO
     da_du = all(c.so_luong_nhan >= c.so_luong for c in cts.values())
     co_nhan = any(c.so_luong_nhan > 0 for c in cts.values())
@@ -1351,15 +1376,17 @@ def nhan_hang(dm_id: int, data: NhanHangVao, db: Session = Depends(get_db),
     cn_id = None; hd_mua_id = None
     if data.tao_cong_no and gia_tri_nhan > 0:
         from ..models import HoaDon
+        tong_hd = gia_tri_nhan + thue_nhan   # công nợ phải trả = tiền hàng + VAT
         hd = HoaDon(loai="MUA", nha_cung_cap_id=dm.nha_cung_cap_id, don_hang_id=dm.don_hang_id,
-                    ngay=date.today(), tien_truoc_thue=gia_tri_nhan, tien_thue=0,
-                    tong_tien=gia_tri_nhan, tk_chi_phi="632",  # giá vốn; kế toán đổi 642 nếu là chi phí
-                    dien_giai=f"Nhận hàng PO {dm.so or dm.id} (phiếu {pk.so}) — đối chiếu VAT theo HĐ NCC",
+                    ngay=date.today(), tien_truoc_thue=gia_tri_nhan, tien_thue=thue_nhan,
+                    tong_tien=tong_hd, tk_chi_phi="632",  # giá vốn; kế toán đổi 642 nếu là chi phí
+                    dien_giai=f"Nhận hàng PO {dm.so or dm.id} (phiếu {pk.so})"
+                              + (f" — VAT {float(thue_nhan):,.0f}đ" if thue_nhan else " — không VAT"),
                     da_hach_toan=False, trang_thai="GHI_NHAN")
         db.add(hd); db.flush()
         hd.so = f"HDM-{date.today():%Y%m%d}-{hd.id}"; hd_mua_id = hd.id
         cn = CongNo(loai="PHAI_TRA", hoa_don_id=hd.id, nha_cung_cap_id=dm.nha_cung_cap_id,
-                    so_tien=gia_tri_nhan, da_thanh_toan=0, han=data.han_thanh_toan,
+                    so_tien=tong_hd, da_thanh_toan=0, han=data.han_thanh_toan,
                     trang_thai="CHUA_TRA")
         db.add(cn); db.flush(); cn_id = cn.id
     # TỰ CHẤM ĐIỂM NCC khi đã nhận ĐỦ (đúng hạn + đủ lượng + QC)
