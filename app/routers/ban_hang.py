@@ -1085,6 +1085,93 @@ def tao_don_hang_truc_tiep(data: DonHangTrucTiepVao, db: Session = Depends(get_d
     return dh
 
 
+@router.post("/don-hang/ai-tu-po")
+async def tao_don_hang_tu_po_ai(file: UploadFile = File(...), db: Session = Depends(get_db),
+                                nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    """AI đọc file PO/đơn đặt hàng KHÁCH gửi → tạo đơn hàng bán + đính kèm file PO
+    (đơn tự vào bảng 'Danh sách đơn hàng bán đã có PO/HĐ'). Khớp khách theo MST rồi
+    tên (chưa có → tạo mới 'cần kiểm chứng'); hàng chưa có tự thêm vào kho."""
+    from ..ai_gateway import doc_po_khach_file
+    from ..models import TepDinhKem
+    from ..luu_tru import luu as _luu
+    raw = await file.read()
+    if not raw:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "File PO rỗng")
+    try:
+        info = doc_po_khach_file(raw, file.content_type or "", file.filename or "po")
+    except ValueError as e:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e))
+    kh_info = info.get("khach_hang") or {}
+    ten_kh = (kh_info.get("ten") or "").strip()
+    mst = (kh_info.get("ma_so_thue") or "").strip() or None
+    # khớp khách: MST trước, rồi tên
+    kh = None
+    if mst:
+        kh = db.query(KhachHang).filter(KhachHang.ma_so_thue == mst).first()
+    if kh is None and ten_kh:
+        kh = db.query(KhachHang).filter(KhachHang.ten.ilike(ten_kh)).first()
+    kh_moi = False
+    if kh is None:
+        if not ten_kh:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                "AI không đọc được tên khách hàng trong PO — hãy tạo đơn thủ công.")
+        kh = KhachHang(ten=ten_kh, ma_so_thue=mst,
+                       dien_thoai=kh_info.get("dien_thoai"), email=kh_info.get("email"))
+        db.add(kh); db.flush(); kh_moi = True
+    # số PO của khách (trùng trong hệ thống → để tự tạo mã)
+    so = (info.get("so_po") or "").strip() or None
+    if so and db.query(DonHang).filter_by(so=so).first() is not None:
+        so = None
+    # ngày PO
+    ngay_dh = date.today()
+    try:
+        if info.get("ngay"):
+            ngay_dh = date.fromisoformat(str(info["ngay"])[:10])
+    except ValueError:
+        ngay_dh = date.today()
+    # dòng hàng (khớp/tạo hàng hóa; VAT mặc định 8% nếu PO không ghi)
+    lines, hang_moi = [], []
+    for it in info["chi_tiet"]:
+        ten = (it.get("ten") or "").strip()
+        hh = db.query(HangHoa).filter(HangHoa.ten.ilike(ten)).first() if ten else None
+        if hh is None:
+            hh = HangHoa(ten=ten, loai="SAN_PHAM", don_vi=(it.get("don_vi") or None),
+                         gia_ban=it.get("don_gia") or 0)
+            db.add(hh); db.flush()
+            if db.query(TonKho).filter_by(hang_hoa_id=hh.id).first() is None:
+                db.add(TonKho(hang_hoa_id=hh.id, so_luong=0))
+            hang_moi.append(hh.ten)
+        elif it.get("don_vi") and not hh.don_vi:
+            hh.don_vi = it["don_vi"]
+        sl = Decimal(str(it.get("so_luong") or 1))
+        dg = Decimal(str(it.get("don_gia") or 0))
+        ts = Decimal(str(it["thue_suat"] if it.get("thue_suat") is not None else 8))
+        lines.append((hh.id, sl, dg, ts))
+    tien_hang, tien_thue = _tinh_don_hang(lines)
+    dh = DonHang(so=so, khach_hang_id=kh.id, ngay=ngay_dh, tong_tien=tien_hang,
+                 tien_thue=tien_thue, trang_thai="MOI")
+    db.add(dh); db.flush()
+    if not dh.so:
+        dh.so = f"DH-{date.today():%Y%m%d}-{dh.id}"
+    for hh_id, sl, dg, ts in lines:
+        db.add(DonHangCt(don_hang_id=dh.id, hang_hoa_id=hh_id, so_luong=sl, don_gia=dg, thue_suat=ts))
+    # đính kèm chính file PO (loai=PO → đơn vào bảng "đã có PO/HĐ")
+    duong_dan = _luu(raw, "don_hang", dh.id, file.filename or "PO", file.content_type)
+    db.add(TepDinhKem(doi_tuong="DON_HANG", doi_tuong_id=dh.id, loai="PO",
+                      ten_file=file.filename or f"PO-{dh.so}", duong_dan=duong_dan,
+                      kich_thuoc=len(raw), content_type=file.content_type,
+                      nguoi_tai_len=nhan_vien_id_cua(db, nd.id)))
+    ghi_audit(db, nd.id, "AI_DOC_PO", "don_hang", dh.id,
+              moi={"tu_file": file.filename, "khach": kh.ten, "khach_moi": kh_moi,
+                   "so_dong": len(lines), "tong_tien": float(tien_hang), "tien_thue": float(tien_thue),
+                   "hang_moi": len(hang_moi)})
+    db.commit(); db.refresh(dh)
+    return {"ok": True, "don_hang_id": dh.id, "so": dh.so, "khach": kh.ten, "khach_moi": kh_moi,
+            "so_dong": len(lines), "tien_hang": float(tien_hang), "tien_thue": float(tien_thue),
+            "tong_da_vat": float(tien_hang + tien_thue), "so_hang_moi": len(hang_moi),
+            "hang_moi": hang_moi[:10]}
+
+
 # ----- DUYET: xóa báo giá nội bộ (chặn khi đã sinh đơn hàng) -----
 @router.delete("/bao-gia/{bg_id}")
 def xoa_bao_gia(bg_id: int, db: Session = Depends(get_db),

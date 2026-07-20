@@ -364,6 +364,75 @@ def doc_bao_gia_file(data: bytes, content_type: str, filename: str) -> list[dict
     return out
 
 
+def doc_po_khach_file(data: bytes, content_type: str, filename: str) -> dict:
+    """Đọc file PO / đơn đặt hàng do KHÁCH HÀNG gửi tới SVWS. Trả 1 dict:
+    {khach_hang:{ten,ma_so_thue,dien_thoai,email,dia_chi}, so_po, ngay,
+     chi_tiet:[{ten,ma_sp,don_vi,so_luong,don_gia,thue_suat}]}.
+    Ném ValueError nếu chưa bật AI / đọc thất bại / không có dòng hàng."""
+    if settings.ai_provider.upper() != "ANTHROPIC" or not settings.anthropic_api_key:
+        raise ValueError("Chưa bật AI — cần AI_PROVIDER=ANTHROPIC và ANTHROPIC_API_KEY trên máy chủ.")
+    khoi = _khoi_noi_dung_file(data, content_type, filename)
+    sys = ("Bạn là trợ lý bán hàng của công ty xử lý nước SVWS. Người dùng gửi một ĐƠN ĐẶT HÀNG (PO) "
+           "do KHÁCH HÀNG phát hành gửi cho SVWS. Bên MUA / bên đặt hàng chính là KHÁCH HÀNG "
+           "(công ty phát hành PO). SVWS là bên BÁN / bên nhận PO — TUYỆT ĐỐI không lấy SVWS hay "
+           "'Công ty TNHH Giải pháp Kỹ thuật Sóng Việt' làm khách hàng. "
+           "CHỈ trả về đúng MỘT object JSON, không thêm chữ nào khác, dạng: "
+           '{"khach_hang":{"ten":"<tên công ty khách>","ma_so_thue":"<MST hoặc null>",'
+           '"dien_thoai":"<SĐT hoặc null>","email":"<email hoặc null>","dia_chi":"<địa chỉ hoặc null>"},'
+           '"so_po":"<số PO/đơn hàng của khách hoặc null>","ngay":"<ngày PO dạng YYYY-MM-DD hoặc null>",'
+           '"chi_tiet":[{"ten":"<tên hàng>","ma_sp":"<mã hoặc null>","don_vi":"<đvt hoặc null>",'
+           '"so_luong":<số>,"don_gia":<đơn giá VND dạng số hoặc null>,"thue_suat":<% VAT dạng số hoặc null>}]}. '
+           "Đơn giá: bỏ dấu chấm/phẩy ngăn cách nghìn, quy về số VND; ngoại tệ để null. "
+           "Thuế VAT: lấy % ghi trong PO cho từng dòng (hoặc mức chung nếu chỉ ghi 1 lần); không thấy để null. "
+           "KHÔNG bịa thông tin không có trong file; thiếu trường nào để null.")
+    txt = _goi_claude_json(khoi, sys, "Trích đơn đặt hàng của khách trong file này thành object JSON.",
+                           8000, 180)
+    import re as _re
+    m = _re.search(r"\{[\s\S]*\}", txt)
+    try:
+        d = json.loads(m.group(0) if m else txt)
+    except Exception:
+        raise ValueError("AI không đọc được cấu trúc PO — thử file rõ nét hơn hoặc PDF gốc.")
+    if not isinstance(d, dict):
+        raise ValueError("AI trả về sai định dạng — thử lại với file rõ hơn.")
+
+    def s(v, n):
+        return (str(v).strip()[:n] if v else None)
+
+    kh = d.get("khach_hang") or {}
+    chi_tiet = []
+    for it in (d.get("chi_tiet") or []):
+        if not isinstance(it, dict):
+            continue
+        ten = str(it.get("ten") or "").strip()
+        if not ten:
+            continue
+        gia = it.get("don_gia")
+        try:
+            gia = round(float(gia)) if gia is not None else None
+        except (TypeError, ValueError):
+            gia = None
+        sl = it.get("so_luong")
+        try:
+            sl = float(sl) if sl is not None and float(sl) > 0 else None
+        except (TypeError, ValueError):
+            sl = None
+        ts = it.get("thue_suat")
+        try:
+            ts = float(ts) if ts is not None and 0 <= float(ts) <= 100 else None
+        except (TypeError, ValueError):
+            ts = None
+        chi_tiet.append({"ten": ten[:250], "ma_sp": s(it.get("ma_sp"), 60),
+                         "don_vi": s(it.get("don_vi"), 30),
+                         "so_luong": sl, "don_gia": gia, "thue_suat": ts})
+    if not chi_tiet:
+        raise ValueError("AI không tìm thấy dòng sản phẩm nào trong PO — kiểm tra file có bảng hàng rõ ràng.")
+    return {"khach_hang": {"ten": s(kh.get("ten"), 200), "ma_so_thue": s(kh.get("ma_so_thue"), 20),
+                           "dien_thoai": s(kh.get("dien_thoai"), 30), "email": s(kh.get("email"), 120),
+                           "dia_chi": s(kh.get("dia_chi"), 300)},
+            "so_po": s(d.get("so_po"), 60), "ngay": s(d.get("ngay"), 10), "chi_tiet": chi_tiet}
+
+
 # ============ AI SOURCING AGENT — tự tìm/khuyến nghị NCC cho 1 đề xuất ============
 def _ung_vien_nganh(ten: str):
     t = (ten or "").lower()
