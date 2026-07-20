@@ -1,0 +1,262 @@
+<title>Nguyên lý liên kết Bán hàng · Mua hàng · Kế toán — SVWS</title>
+<style>
+  :root{
+    --accent:#0E7C86; --accent-ink:#0A5C64; --accent-soft:#E3F0F1;
+    --ink:#132E34; --ink-2:#33484E; --muted:#5E7178;
+    --ground:#F5F8F8; --surface:#FFFFFF; --surface-2:#EEF4F4;
+    --line:#D8E3E3; --line-2:#C3D3D3;
+    --manual:#B45613; --manual-soft:#FBECDE;      /* bấm tay */
+    --auto:#0F766E; --auto-soft:#DCF0EC;           /* tự động */
+    --no:#B91C1C;
+    --mono:ui-monospace,SFMono-Regular,Consolas,"Liberation Mono",Menlo,monospace;
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;
+    --serif:Georgia,"Times New Roman",serif;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{
+      --accent:#3DA9B4; --accent-ink:#7ECAD2; --accent-soft:#15302F;
+      --ink:#E5EEEF; --ink-2:#C3D3D6; --muted:#8CA3A9;
+      --ground:#0D1719; --surface:#152427; --surface-2:#1C3034;
+      --line:#26393D; --line-2:#33494E;
+      --manual:#E0965A; --manual-soft:#2E1F13;
+      --auto:#5FBFA6; --auto-soft:#14302B; --no:#E9736F;
+    }
+  }
+  :root[data-theme="dark"]{
+    --accent:#3DA9B4; --accent-ink:#7ECAD2; --accent-soft:#15302F;
+    --ink:#E5EEEF; --ink-2:#C3D3D6; --muted:#8CA3A9;
+    --ground:#0D1719; --surface:#152427; --surface-2:#1C3034;
+    --line:#26393D; --line-2:#33494E;
+    --manual:#E0965A; --manual-soft:#2E1F13;
+    --auto:#5FBFA6; --auto-soft:#14302B; --no:#E9736F;
+  }
+  :root[data-theme="light"]{
+    --accent:#0E7C86; --accent-ink:#0A5C64; --accent-soft:#E3F0F1;
+    --ink:#132E34; --ink-2:#33484E; --muted:#5E7178;
+    --ground:#F5F8F8; --surface:#FFFFFF; --surface-2:#EEF4F4;
+    --line:#D8E3E3; --line-2:#C3D3D3;
+    --manual:#B45613; --manual-soft:#FBECDE;
+    --auto:#0F766E; --auto-soft:#DCF0EC; --no:#B91C1C;
+  }
+
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--ground);color:var(--ink);font-family:var(--sans);
+    font-size:15px;line-height:1.6;-webkit-font-smoothing:antialiased}
+  .page{max-width:840px;margin:0 auto;padding:0 22px 72px}
+
+  header{padding:34px 0 18px;border-bottom:3px solid var(--accent)}
+  .kicker{font-family:var(--mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;
+    color:var(--accent-ink);margin:0 0 10px}
+  h1{font-family:var(--serif);font-weight:400;font-size:27px;line-height:1.2;margin:0 0 8px;color:var(--ink)}
+  header p{margin:0;color:var(--ink-2);font-size:14.5px;max-width:64ch}
+  .meta{margin-top:12px;font-size:12.5px;color:var(--muted);display:flex;gap:20px;flex-wrap:wrap}
+  .meta b{color:var(--ink-2);font-weight:600}
+
+  h2{font-family:var(--serif);font-weight:400;font-size:20px;margin:32px 0 4px;color:var(--ink)}
+  h2 .n{font-family:var(--mono);font-size:13px;color:var(--accent);margin-right:8px}
+  .lead{color:var(--muted);font-size:13.5px;margin:0 0 16px}
+  p{max-width:70ch}
+  code,.ac{font-family:var(--mono);font-size:.9em;background:var(--surface-2);
+    padding:1px 5px;border-radius:4px;border:1px solid var(--line)}
+
+  .principle{background:var(--accent-soft);border:1px solid var(--line);border-radius:12px;
+    padding:16px 20px;margin:8px 0 4px}
+  .principle b{color:var(--accent-ink)}
+  .principle p{margin:0;font-size:15.5px}
+
+  /* flow tiers */
+  .flow{display:flex;flex-direction:column;gap:8px;margin:14px 0 4px}
+  .tier{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .tier.one{grid-template-columns:1fr}
+  .cell{border:1px solid var(--line);border-radius:10px;padding:11px 14px;background:var(--surface)}
+  .cell .tt{font-weight:600;font-size:14px}
+  .cell .st{font-size:12px;color:var(--muted);margin-top:2px}
+  .cell.sell{border-color:var(--accent);background:var(--accent-soft)}
+  .cell.buy{border-color:var(--line-2)}
+  .cell.acct{background:var(--surface-2)}
+  .down{text-align:center;color:var(--muted);font-size:13px;line-height:1;margin:-2px 0}
+
+  /* T-accounts */
+  .tgrid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:14px 0 6px}
+  .tacc{border:1px solid var(--line-2);border-radius:10px;overflow:hidden;background:var(--surface)}
+  .tacc h3{margin:0;font-size:13.5px;font-weight:600;padding:9px 12px;background:var(--surface-2);
+    border-bottom:1px solid var(--line);color:var(--ink)}
+  .tacc h3 .c{font-family:var(--mono);color:var(--accent-ink)}
+  .tbody{display:grid;grid-template-columns:1fr 1fr;min-height:64px}
+  .tbody .col{padding:8px 12px}
+  .tbody .col:first-child{border-right:1px solid var(--line)}
+  .col-h{display:block;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px}
+  .amt{font-variant-numeric:tabular-nums;font-size:15px;display:flex;align-items:center;gap:7px}
+  .tacc .foot{font-size:11.5px;color:var(--muted);padding:5px 12px;border-top:1px dashed var(--line)}
+  .dot{width:9px;height:9px;border-radius:50%;flex:none;display:inline-block}
+  .dot.m{background:var(--manual)} .dot.a{background:var(--auto)}
+
+  .ex{font-size:12.5px;color:var(--muted);margin:2px 0 0}
+
+  /* tables */
+  .tw{overflow-x:auto;margin:12px 0 4px;border:1px solid var(--line);border-radius:10px}
+  table{border-collapse:collapse;width:100%;font-size:13.5px;background:var(--surface)}
+  th,td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);
+    background:var(--surface-2);font-weight:600;white-space:nowrap}
+  tr:last-child td{border-bottom:0}
+  td b{font-weight:600}
+  .step{font-family:var(--mono);color:var(--accent);font-weight:600}
+
+  .tag{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;
+    padding:2px 9px;border-radius:20px;white-space:nowrap}
+  .tag.m{background:var(--manual-soft);color:var(--manual)}
+  .tag.a{background:var(--auto-soft);color:var(--auto)}
+
+  .legend{display:flex;gap:20px;flex-wrap:wrap;font-size:13px;margin:10px 0 0}
+  .legend span{display:inline-flex;align-items:center;gap:8px;color:var(--ink-2)}
+
+  .callout{border-left:3px solid var(--manual);background:var(--manual-soft);
+    padding:12px 16px;border-radius:0 8px 8px 0;margin:16px 0;font-size:14px}
+  .callout b{color:var(--manual)}
+  .callout.info{border-left-color:var(--accent);background:var(--accent-soft)}
+  .callout.info b{color:var(--accent-ink)}
+  .callout p{margin:0}
+  .callout p+p{margin-top:8px}
+
+  footer{margin-top:34px;border-top:1px solid var(--line);padding-top:16px;
+    color:var(--muted);font-size:12px}
+
+  @media (max-width:600px){ .tier,.tgrid{grid-template-columns:1fr} }
+
+  @media print{
+    :root{--ground:#fff;--surface:#fff;--surface-2:#f4f4f4}
+    body{background:#fff;font-size:11.5pt;color:#111}
+    .page{max-width:none;padding:0}
+    h2{margin-top:20px}
+    .tgrid,.flow,.tacc,.tw,table,.callout{page-break-inside:avoid}
+    header{border-bottom-color:#0E7C86}
+  }
+</style>
+
+<div class="page">
+  <header>
+    <p class="kicker">SVWS · Tài liệu kế toán</p>
+    <h1>Liên kết dữ liệu Bán hàng · Mua hàng · Kế toán</h1>
+    <p>Cách hệ thống tự sinh hóa đơn, công nợ và bút toán từ nghiệp vụ — và chỗ nào cần kế toán bấm tay.</p>
+    <div class="meta"><span><b>Áp dụng:</b> Công ty TNHH GPKT Sóng Việt</span><span><b>Chuẩn:</b> Kế toán Việt Nam (VAS)</span><span><b>Cập nhật:</b> 07/2026</span></div>
+  </header>
+
+  <h2><span class="n">01</span>Nguyên lý cốt lõi</h2>
+  <div class="principle">
+    <p><b>Nghiệp vụ sinh chứng từ — chứng từ sinh công nợ — dòng tiền sinh bút toán. Kế toán <i>đọc lại</i> số thật, không <i>nhập lại</i>.</b></p>
+  </div>
+  <p style="margin-top:14px">Mỗi sự kiện vật chất (giao hàng cho khách, nhận hàng từ nhà cung cấp) tự động tạo hóa đơn và công nợ tương ứng. Mọi báo cáo và dashboard đọc thẳng từ dữ liệu này — không gõ tay lại con số nào.</p>
+
+  <div class="flow">
+    <div class="tier">
+      <div class="cell sell"><div class="tt">Bán hàng</div><div class="st">Đơn hàng · xuất kho</div></div>
+      <div class="cell buy"><div class="tt">Mua hàng (NCC)</div><div class="st">PO · nhận hàng</div></div>
+    </div>
+    <div class="down">↓ tự sinh</div>
+    <div class="tier">
+      <div class="cell sell"><div class="tt">Hóa đơn bán + phải thu</div><div class="st">Tài khoản 131 · khi xuất kho</div></div>
+      <div class="cell buy"><div class="tt">Hóa đơn mua + phải trả</div><div class="st">Tài khoản 331 · khi nhận hàng</div></div>
+    </div>
+    <div class="down">↓</div>
+    <div class="tier">
+      <div class="cell sell"><div class="tt">Thu tiền khách</div><div class="st">Nợ 112 / Có 131</div></div>
+      <div class="cell buy"><div class="tt">Trả tiền NCC</div><div class="st">Nợ 331 / Có 112</div></div>
+    </div>
+    <div class="down">↓</div>
+    <div class="tier one">
+      <div class="cell acct"><div class="tt">Kế toán — sổ sách &amp; tổng hợp</div><div class="st">Sổ cái kép (VAS) · Dashboard đọc số thật</div></div>
+    </div>
+  </div>
+
+  <div class="legend">
+    <span><span class="dot m"></span> Bấm tay</span>
+    <span><span class="dot a"></span> Tự động</span>
+  </div>
+
+  <h2><span class="n">02</span>Luồng bán hàng</h2>
+  <p class="lead">Ví dụ: bán hàng 5.000.000₫ + VAT 8% (400.000₫) = tổng 5.400.000₫.</p>
+  <div class="tgrid">
+    <div class="tacc"><h3><span class="c">131</span> — Phải thu khách hàng</h3>
+      <div class="tbody">
+        <div class="col"><span class="col-h">Nợ</span><div class="amt"><span class="dot m"></span>5.400.000</div></div>
+        <div class="col"><span class="col-h">Có</span><div class="amt"><span class="dot a"></span>5.400.000</div></div>
+      </div><div class="foot">Dư cuối: 0</div></div>
+    <div class="tacc"><h3><span class="c">511</span> — Doanh thu bán hàng</h3>
+      <div class="tbody">
+        <div class="col"><span class="col-h">Nợ</span><div class="amt">—</div></div>
+        <div class="col"><span class="col-h">Có</span><div class="amt"><span class="dot m"></span>5.000.000</div></div>
+      </div><div class="foot">Doanh thu (chưa VAT)</div></div>
+    <div class="tacc"><h3><span class="c">3331</span> — Thuế GTGT phải nộp</h3>
+      <div class="tbody">
+        <div class="col"><span class="col-h">Nợ</span><div class="amt">—</div></div>
+        <div class="col"><span class="col-h">Có</span><div class="amt"><span class="dot m"></span>400.000</div></div>
+      </div><div class="foot">VAT đầu ra</div></div>
+    <div class="tacc"><h3><span class="c">112</span> — Tiền gửi ngân hàng</h3>
+      <div class="tbody">
+        <div class="col"><span class="col-h">Nợ</span><div class="amt"><span class="dot a"></span>5.400.000</div></div>
+        <div class="col"><span class="col-h">Có</span><div class="amt">—</div></div>
+      </div><div class="foot">Thu tiền về</div></div>
+  </div>
+
+  <div class="tw"><table>
+    <thead><tr><th>Bước</th><th>Vào đâu trong app</th><th>Nút bấm</th><th>Loại</th></tr></thead>
+    <tbody>
+      <tr><td><span class="step">1</span> Báo giá → đơn hàng</td><td><b>Bán hàng</b> → tab Báo giá, rồi Đơn hàng &amp; PO/Hợp đồng</td><td>Soạn báo giá → Duyệt → tạo đơn</td><td><span class="tag m">Bấm tay</span></td></tr>
+      <tr><td><span class="step">2</span> Xuất kho <span class="ex">tự sinh HĐ bán nháp + phải thu 131</span></td><td><b>Kho hàng</b> → Lập phiếu nhập / xuất kho</td><td>chọn <b>Xuất kho</b></td><td><span class="tag a">Tự động sinh</span></td></tr>
+      <tr><td><span class="step">3</span> Hạch toán HĐ bán <span class="ex">Nợ 131 / Có 511 + 3331</span></td><td><b>Kế toán</b> → tab Hóa đơn</td><td>nút <b>Hạch toán</b> (dòng "Chưa hạch toán")</td><td><span class="tag m">Bấm tay</span></td></tr>
+      <tr><td><span class="step">4</span> Thu tiền khách <span class="ex">Nợ 112 / Có 131</span></td><td><b>Bán hàng</b> → tab Công nợ</td><td>nút <b>✏️</b> ghi đợt thu, hoặc <b>+ Tạo công nợ / Thu đợt</b></td><td><span class="tag a">Tự động lên bút toán</span></td></tr>
+    </tbody>
+  </table></div>
+  <p class="ex">Công ty làm dự án/dịch vụ (không xuất kho): phải thu 131 mở bằng nút <b>+ Tạo công nợ / Thu đợt</b> ở bước 2 — cũng tự kèm hóa đơn bán nháp.</p>
+
+  <h2><span class="n">03</span>Luồng mua hàng</h2>
+  <p class="lead">Ví dụ: mua hàng 2.000.000₫ + VAT 10% (200.000₫) = tổng 2.200.000₫.</p>
+  <div class="tgrid">
+    <div class="tacc"><h3><span class="c">632</span> — Giá vốn / chi phí</h3>
+      <div class="tbody">
+        <div class="col"><span class="col-h">Nợ</span><div class="amt"><span class="dot m"></span>2.000.000</div></div>
+        <div class="col"><span class="col-h">Có</span><div class="amt">—</div></div>
+      </div><div class="foot">Tiền hàng (chưa VAT)</div></div>
+    <div class="tacc"><h3><span class="c">1331</span> — Thuế GTGT được khấu trừ</h3>
+      <div class="tbody">
+        <div class="col"><span class="col-h">Nợ</span><div class="amt"><span class="dot m"></span>200.000</div></div>
+        <div class="col"><span class="col-h">Có</span><div class="amt">—</div></div>
+      </div><div class="foot">VAT đầu vào</div></div>
+    <div class="tacc"><h3><span class="c">331</span> — Phải trả người bán</h3>
+      <div class="tbody">
+        <div class="col"><span class="col-h">Nợ</span><div class="amt"><span class="dot a"></span>2.200.000</div></div>
+        <div class="col"><span class="col-h">Có</span><div class="amt"><span class="dot m"></span>2.200.000</div></div>
+      </div><div class="foot">Dư cuối: 0</div></div>
+    <div class="tacc"><h3><span class="c">112</span> — Tiền gửi ngân hàng</h3>
+      <div class="tbody">
+        <div class="col"><span class="col-h">Nợ</span><div class="amt">—</div></div>
+        <div class="col"><span class="col-h">Có</span><div class="amt"><span class="dot a"></span>2.200.000</div></div>
+      </div><div class="foot">Chi tiền trả NCC</div></div>
+  </div>
+
+  <div class="tw"><table>
+    <thead><tr><th>Bước</th><th>Vào đâu trong app</th><th>Nút bấm</th><th>Loại</th></tr></thead>
+    <tbody>
+      <tr><td><span class="step">1</span> Tạo PO → duyệt</td><td><b>Nhà cung cấp</b> → tab Đơn mua (PO)</td><td><b>+ Tạo PO</b> (hoặc AI từ báo giá) → <b>Duyệt</b></td><td><span class="tag m">Bấm tay</span></td></tr>
+      <tr><td><span class="step">2</span> Nhận hàng <span class="ex">tự sinh HĐ mua nháp + phải trả 331</span></td><td><b>Nhà cung cấp</b> → tab Đơn mua (PO)</td><td>nút <b>Nhận hàng</b> <span class="ex">(hoặc Kho → Chờ nhập kho → Tạo phiếu nhập)</span></td><td><span class="tag a">Tự động sinh</span></td></tr>
+      <tr><td><span class="step">3</span> Hạch toán HĐ mua <span class="ex">Nợ 632 + 1331 / Có 331</span></td><td><b>Kế toán</b> → tab Hóa đơn</td><td>nút <b>Hạch toán</b></td><td><span class="tag m">Bấm tay</span></td></tr>
+      <tr><td><span class="step">4</span> Trả tiền NCC <span class="ex">Nợ 331 / Có 112</span></td><td><b>Nhà cung cấp</b> → tab Thanh toán mua hàng</td><td>ghi đợt trả <span class="ex">(số hóa đơn hiện tại đây)</span></td><td><span class="tag a">Tự động lên bút toán</span></td></tr>
+    </tbody>
+  </table></div>
+
+  <h2><span class="n">04</span>Hai điều phải nhớ</h2>
+  <div class="callout">
+    <p><b>Bước 3 dễ bị quên.</b> Hóa đơn tự tạo (khi xuất/nhận hàng) nằm ở trạng thái <b>"Chưa hạch toán"</b>. Doanh thu (511) và giá vốn (632) <b>chưa vào báo cáo lãi/lỗ</b> cho tới khi bấm <b>Hạch toán</b> ở Kế toán → tab Hóa đơn.</p>
+    <p>App có nhắc: <b>Kế toán → Tổng quan</b>, thẻ <b>"Hóa đơn chưa hạch toán"</b> (màu cam) đếm số hóa đơn đang chờ — bấm vào là tới đúng chỗ xử lý. Trước khi hạch toán, đối chiếu số VAT theo hóa đơn thật của NCC.</p>
+  </div>
+  <div class="callout info">
+    <p><b>Hai lớp "ghi sổ" khác nhau — đừng nhầm.</b></p>
+    <p><b>1. Công nợ</b> (bảng phải thu / phải trả) sinh tự động ngay khi xuất/nhận hàng, luôn khớp thực tế. <b>2. Sổ cái kép</b> (bút toán 632/1331/331/511…) chỉ lên khi bấm Hạch toán. Vì vậy công nợ có thể đã đúng trong khi giá vốn/doanh thu chưa vào báo cáo tài chính.</p>
+  </div>
+  <div class="callout info">
+    <p><b>Giữ vết kế toán.</b> Dữ liệu đã sinh chứng từ không xóa thẳng được. Muốn điều chỉnh phải qua bút toán điều chỉnh (thu/trả theo đợt) hoặc mở lại kỳ (bảng lương) — để sổ sách luôn truy được nguồn gốc.</p>
+  </div>
+
+  <footer>Tài liệu nội bộ hệ thống quản trị SVWS · svws-app-iit7.onrender.com — dùng cho bộ phận Kế toán. Số tài khoản theo hệ thống tài khoản kế toán doanh nghiệp Việt Nam.</footer>
+</div>
