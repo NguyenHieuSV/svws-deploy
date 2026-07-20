@@ -180,6 +180,17 @@ class AppChatProvider:
         except Exception as e:
             return {"da_gui": False, "che_do": self.che_do, "loi": _loi_ro_rang(e)}
 
+    def gui_space(self, space_name, noi_dung) -> dict:
+        """Gửi thẳng vào một phòng (space) đã biết — không cần tra cứu người dùng."""
+        if not space_name:
+            return {"da_gui": False, "che_do": self.che_do, "loi": "Thiếu space."}
+        try:
+            token = self._lay_token()
+            _http_json(f"{_CHAT_API}/{space_name}/messages", {"text": noi_dung}, token)
+            return {"da_gui": True, "che_do": self.che_do, "space": space_name}
+        except Exception as e:
+            return {"da_gui": False, "che_do": self.che_do, "loi": _loi_ro_rang(e)}
+
     def gui_phong(self, noi_dung) -> dict:
         # Chế độ APP vẫn dùng webhook nếu có, để gửi thông báo chung.
         if (settings.gchat_webhook_url or "").strip():

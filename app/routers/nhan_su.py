@@ -1147,6 +1147,7 @@ def chat_gui_thu(email: str | None = None, db: Session = Depends(get_db),
     """Gửi một tin THỬ để kiểm tra kết nối Google Chat.
     Không truyền email thì gửi cho chính người đang đăng nhập."""
     from ..chat_gateway import lay_chat_provider
+    from ..nhac_viec_service import gui_toi_nguoi
     if not email:
         me = nhan_vien_id_cua(db, nd.id)
         nv = db.get(NhanVien, me) if me else None
@@ -1154,9 +1155,21 @@ def chat_gui_thu(email: str | None = None, db: Session = Depends(get_db),
     if not email:
         raise HTTPException(status.HTTP_400_BAD_REQUEST,
                             "Tài khoản của bạn chưa có email — truyền ?email=... để thử.")
-    kq = lay_chat_provider().gui_ca_nhan(
-        email, "✅ *SVWS thử kết nối Google Chat*\nNếu bạn đọc được tin này thì cấu hình đã đúng.")
+    kq = gui_toi_nguoi(
+        db, lay_chat_provider(), email,
+        "✅ *SVWS thử kết nối Google Chat*\nNếu bạn đọc được tin này thì cấu hình đã đúng.")
     return {"toi": email, **kq}
+
+
+@router.get("/chat-dm")
+def chat_dm_ds(db: Session = Depends(get_db),
+               nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
+    """Danh sách người đã nhắn bot (đã ghi nhớ phòng nhắn riêng) — để kiểm tra."""
+    from ..models import ChatDM
+    rows = db.query(ChatDM).order_by(ChatDM.cap_nhat.desc()).limit(200).all()
+    return {"danh_sach": [{"email": r.google_email, "ten": r.ten_hthi,
+                           "co_space": bool(r.space_name), "user_id": r.user_id}
+                          for r in rows]}
 
 
 @router.post("/nhac-viec/ban-tin-thu")

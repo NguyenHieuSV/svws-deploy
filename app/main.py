@@ -63,28 +63,59 @@ def so_tay_quy_che():
     return {"he_thong": "SVWS", "trang_thai": "chua co so tay quy che"}
 
 
+def _luu_chat_dm(d: dict):
+    """Ghi nhớ phòng nhắn riêng (DM) của người vừa nhắn bot, để LẦN SAU gửi thẳng
+    vào phòng đó — né được giới hạn Service Account không tra người dùng qua email."""
+    u = d.get("user") or (d.get("message") or {}).get("sender") or {}
+    sp = d.get("space") or (d.get("message") or {}).get("space") or {}
+    uid = u.get("name")                      # "users/1234567890"
+    space = sp.get("name")                   # "spaces/AAAA..."
+    if not uid:
+        return
+    from .database import SessionLocal
+    from .models import ChatDM
+    db = SessionLocal()
+    try:
+        r = db.get(ChatDM, uid)
+        if r is None:
+            r = ChatDM(user_id=uid)
+            db.add(r)
+        if u.get("email"):
+            r.google_email = u.get("email")
+        if u.get("displayName"):
+            r.ten_hthi = u.get("displayName")
+        # chỉ lưu space của phòng nhắn riêng 1-1 (DM), bỏ qua phòng nhóm
+        if space and (sp.get("type") in (None, "DM", "DIRECT_MESSAGE") or sp.get("singleUserBotDm")):
+            r.space_name = space
+        db.commit()
+    finally:
+        db.close()
+
+
 @app.post("/google-chat/events")
 async def google_chat_events(request: Request):
     """Địa chỉ nhận sự kiện của Chat app “Nhắc việc SVWS”.
 
     Bot chỉ GỬI lời nhắc, không xử lý hội thoại. Endpoint này tồn tại vì Google
-    Workspace Marketplace BẮT BUỘC Chat app phải khai báo một địa chỉ nhận sự kiện
-    (không khai thì không bật được “Standalone Chat App”).
+    Workspace Marketplace BẮT BUỘC Chat app phải khai báo một địa chỉ nhận sự kiện.
 
-    Nó chỉ chào lại để người dùng biết bot đã sẵn sàng — không đọc, không lưu,
-    không hành động gì với nội dung tin nhắn.
+    Khi ai đó nhắn bot lần đầu, ta LƯU LẠI phòng nhắn riêng của họ (không đọc nội
+    dung tin) rồi chào lại. Nhờ vậy về sau bot gửi lời nhắc thẳng vào phòng đó.
     """
     try:
         d = await request.json()
     except Exception:
         d = {}
     loai = (d.get("type") or "").upper()
+    try:
+        _luu_chat_dm(d)
+    except Exception as e:
+        print(f"[CHAT-EVENT] Không lưu được DM: {type(e).__name__}: {e}")
     if loai in ("ADDED_TO_SPACE", "MESSAGE"):
-        return {"text": ("Xin chào! Đây là bot nhắc việc của hệ thống SVWS.\n"
-                         "Bot sẽ tự gửi lời nhắc công việc và bản tin đầu ngày cho bạn — "
-                         "bạn không cần trả lời tin này.\n"
-                         "Xem và đánh dấu hoàn thành trong app: "
-                         "Working time & Report → Work Reminder.")}
+        return {"text": ("Xin chào! Đây là bot nhắc việc của hệ thống SVWS. ✅\n"
+                         "Từ giờ bot có thể gửi lời nhắc công việc riêng cho bạn.\n"
+                         "Bạn không cần trả lời tin này — xem và đánh dấu hoàn thành "
+                         "trong app: Working time & Report → Work Reminder.")}
     return {}
 
 

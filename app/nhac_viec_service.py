@@ -13,7 +13,20 @@ from sqlalchemy.orm import Session
 
 from .chat_gateway import lay_chat_provider, dang_bat
 from .config import settings
-from .models import NhacViec, NhacViecBanTin, NhanVien
+from .models import NhacViec, NhacViecBanTin, NhanVien, ChatDM
+
+
+def gui_toi_nguoi(db: Session, prov, email: str, noi_dung: str) -> dict:
+    """Gửi tin cho một người: ưu tiên phòng nhắn riêng ĐÃ LƯU (khi họ từng nhắn bot)
+    -> gửi thẳng, né lỗi 'không tra được người dùng qua email'. Không có thì mới tra email."""
+    email = (email or "").strip()
+    if email and hasattr(prov, "gui_space"):
+        dm = (db.query(ChatDM)
+              .filter(ChatDM.google_email.ilike(email), ChatDM.space_name.isnot(None))
+              .first())
+        if dm:
+            return prov.gui_space(dm.space_name, noi_dung)
+    return prov.gui_ca_nhan(email, noi_dung)
 
 _MUC_DO_NHAN = {"THAP": "Thấp", "BINH_THUONG": "Bình thường", "CAO": "Cao", "KHAN": "🔴 KHẨN"}
 
@@ -76,7 +89,7 @@ def gui_khi_tao(db: Session, rows: list[NhacViec]) -> dict:
             continue
         tu = "Bạn tự đặt lời nhắc này" if r.nguoi_tao == r.nhan_vien_id else f"{nguoi_dat} nhắc bạn"
         noi_dung = f"🔔 *Nhắc việc SVWS* — {tu}:\n\n{_mo_ta(r, ten)}"
-        kq = prov.gui_ca_nhan(nv.email or "", noi_dung)
+        kq = gui_toi_nguoi(db, prov, nv.email or "", noi_dung)
         if kq.get("da_gui"):
             r.da_gui_tao = True
             da_gui += 1
@@ -132,7 +145,7 @@ def gui_ban_tin_ngay(db: Session, ep: bool = False) -> dict:
         for i, r in enumerate(ds, 1):
             dong.append(f"\n*{i}.* {_mo_ta(r, ten)}")
         dong.append("\n_Mở app SVWS → Working time & Report → Work Reminder để đánh dấu hoàn thành._")
-        kq = prov.gui_ca_nhan(nv.email or "", "\n".join(dong))
+        kq = gui_toi_nguoi(db, prov, nv.email or "", "\n".join(dong))
         if kq.get("da_gui"):
             da_gui += 1
             tong_viec += len(ds)

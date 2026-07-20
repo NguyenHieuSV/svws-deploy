@@ -606,6 +606,15 @@ class NhacViecBanTin(Base):
     ket_qua: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
+class ChatDM(Base):
+    """Phòng nhắn riêng giữa bot Google Chat và một người — ghi khi họ nhắn bot lần đầu."""
+    __tablename__ = "chat_dm"
+    user_id: Mapped[str] = mapped_column(String(80), primary_key=True)
+    google_email: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    ten_hthi: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    space_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
+
+
 class BangLuong(Base):
     __tablename__ = "bang_luong"
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
