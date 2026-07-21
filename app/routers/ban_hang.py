@@ -568,7 +568,83 @@ def sua_bao_gia_form(bgf_id: int, data: BaoGiaFormVao, db: Session = Depends(get
     bgf.noi_dung = data.noi_dung
     if data.trang_thai:
         bgf.trang_thai = data.trang_thai
+    # Sửa lại nội dung (lưu về nháp/xuất PDF) => HỦY phê duyệt cũ, phải trình duyệt lại
+    if (data.trang_thai or "") in ("NHAP", "DA_XUAT", ""):
+        bgf.nguoi_duyet = None
+        bgf.ly_do_tu_choi = None
+        if bgf.trang_thai in ("DA_DUYET", "CHO_DUYET"):
+            bgf.trang_thai = "NHAP"
     ghi_audit(db, nd.id, "SUA", "bao_gia_form", bgf.id, moi={"so": data.so})
+    db.commit(); db.refresh(bgf)
+    return bgf
+
+
+def _bgf_tong(bgf: "BaoGiaForm") -> Decimal:
+    from ..bao_gia_pdf import tinh_bao_gia
+    try:
+        _s, _v, tong = tinh_bao_gia(bgf.noi_dung or {})
+        return Decimal(str(round(tong)))
+    except Exception:
+        return Decimal(0)
+
+
+@router.post("/bao-gia-form/{bgf_id}/trinh-duyet", response_model=BaoGiaFormRa)
+def trinh_duyet_bao_gia_form(bgf_id: int, db: Session = Depends(get_db),
+                             nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    """Người soạn TRÌNH DUYỆT báo giá gửi khách — vào hàng chờ duyệt."""
+    bgf = db.get(BaoGiaForm, bgf_id)
+    if bgf is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy báo giá")
+    if bgf.trang_thai not in ("NHAP", "DA_XUAT", "TU_CHOI"):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            f"Báo giá đang ở trạng thái {bgf.trang_thai} — không trình duyệt được.")
+    bgf.trang_thai = "CHO_DUYET"
+    bgf.ly_do_tu_choi = None
+    ghi_audit(db, nd.id, "TRINH_DUYET", "bao_gia_form", bgf.id, moi={"trang_thai": "CHO_DUYET"})
+    db.commit(); db.refresh(bgf)
+    return bgf
+
+
+@router.post("/bao-gia-form/{bgf_id}/duyet", response_model=BaoGiaFormRa)
+def duyet_bao_gia_form(bgf_id: int, db: Session = Depends(get_db),
+                       nd: NguoiDung = Depends(yeu_cau(MODULE, "XEM"))):
+    """DUYỆT báo giá gửi khách — thẩm quyền theo hạn mức (như báo giá nội bộ)."""
+    bgf = db.get(BaoGiaForm, bgf_id)
+    if bgf is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy báo giá")
+    if bgf.trang_thai != "CHO_DUYET":
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            f"Báo giá đang ở {bgf.trang_thai} — chỉ duyệt được khi đang chờ duyệt.")
+    kiem_han_muc(db, nd, LOAI_DUYET, _bgf_tong(bgf))
+    bgf.trang_thai = "DA_DUYET"
+    bgf.nguoi_duyet = nhan_vien_id_cua(db, nd.id)
+    bgf.ly_do_tu_choi = None
+    ghi_audit(db, nd.id, "DUYET", "bao_gia_form", bgf.id, moi={"trang_thai": "DA_DUYET"})
+    db.commit(); db.refresh(bgf)
+    return bgf
+
+
+class TuChoiBgfVao(_BM):
+    ly_do: str | None = None
+
+
+@router.post("/bao-gia-form/{bgf_id}/tu-choi", response_model=BaoGiaFormRa)
+def tu_choi_bao_gia_form(bgf_id: int, data: TuChoiBgfVao = TuChoiBgfVao(),
+                         db: Session = Depends(get_db),
+                         nd: NguoiDung = Depends(yeu_cau(MODULE, "XEM"))):
+    """TỪ CHỐI báo giá gửi khách — quay lại để người soạn sửa & trình lại."""
+    bgf = db.get(BaoGiaForm, bgf_id)
+    if bgf is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy báo giá")
+    if bgf.trang_thai != "CHO_DUYET":
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            f"Báo giá đang ở {bgf.trang_thai} — chỉ từ chối được khi đang chờ duyệt.")
+    # người từ chối cũng cần thẩm quyền duyệt loại báo giá
+    kiem_han_muc(db, nd, LOAI_DUYET, _bgf_tong(bgf))
+    bgf.trang_thai = "TU_CHOI"
+    bgf.nguoi_duyet = nhan_vien_id_cua(db, nd.id)
+    bgf.ly_do_tu_choi = (data.ly_do or "").strip()[:300] or None
+    ghi_audit(db, nd.id, "TU_CHOI", "bao_gia_form", bgf.id, moi={"ly_do": bgf.ly_do_tu_choi})
     db.commit(); db.refresh(bgf)
     return bgf
 
@@ -641,6 +717,10 @@ def gui_bao_gia_email(bgf_id: int, data: GuiBaoGiaVao, db: Session = Depends(get
     bgf = db.get(BaoGiaForm, bgf_id)
     if bgf is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy báo giá")
+    if bgf.trang_thai not in ("DA_DUYET", "DA_GUI"):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Báo giá chưa được DUYỆT — hãy bấm “Trình duyệt” và chờ duyệt "
+                            "trước khi gửi cho khách.")
     if "@" not in (data.den or ""):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Email người nhận không hợp lệ")
     d = bgf.noi_dung or {}

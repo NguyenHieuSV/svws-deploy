@@ -302,6 +302,7 @@ class BaoGiaFormRa(BaseModel):
     khach_hang_id: int | None
     noi_dung: dict
     trang_thai: str
+    ly_do_tu_choi: str | None = None
 
 
 class BaoGiaCtVao(BaseModel):

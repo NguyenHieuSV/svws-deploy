@@ -380,6 +380,8 @@ class BaoGiaForm(Base):
     noi_dung: Mapped[dict] = mapped_column(JSONB)
     trang_thai: Mapped[str] = mapped_column(String(20), default="NHAP")
     nguoi_tao: Mapped[int | None] = mapped_column(ForeignKey("nhan_vien.id"), nullable=True)
+    nguoi_duyet: Mapped[int | None] = mapped_column(ForeignKey("nhan_vien.id"), nullable=True)
+    ly_do_tu_choi: Mapped[str | None] = mapped_column(String(300), nullable=True)
 
 
 class BaoGia(Base):
