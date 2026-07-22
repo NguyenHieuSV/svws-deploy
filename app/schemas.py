@@ -768,6 +768,29 @@ class DoanNhomVao(BaseModel):
     so_tien: Decimal | None = None
 
 
+class DichVuKTVao(BaseModel):
+    loai_dv: str
+    chi_tiet_dv: str | None = None
+    ten: str | None = None
+    khach_hang_id: int | None = None
+    du_an_id: int | None = None
+    dia_diem: str | None = None
+    thiet_bi: str | None = None
+    nguoi_phu_trach: str | None = None
+    ngay_hen: date | None = None
+    ngay_bat_dau: date | None = None
+    ngay_ket_thuc: date | None = None
+    gia_tri: Decimal = Decimal(0)
+    trang_thai: str | None = None
+    du_lieu_ky_thuat: dict | None = None
+    bao_cao: str | None = None
+    ghi_chu: str | None = None
+
+
+class DichVuKTTrangThai(BaseModel):
+    trang_thai: str
+
+
 class DatCocVao(BaseModel):
     ty_le: Decimal = Field(ge=0, le=100)
 

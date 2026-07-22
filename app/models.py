@@ -1173,3 +1173,26 @@ class TieuHaoThucTe(Base):
     nguon: Mapped[str] = mapped_column(String(16), default="THU_CONG")
     da_ghi_chi_phi: Mapped[bool] = mapped_column(Boolean, default=False)
     ghi_chu: Mapped[str | None] = mapped_column(String(200), nullable=True)
+
+
+class DichVuKT(Base):
+    __tablename__ = "dich_vu_kt"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    ma: Mapped[str | None] = mapped_column(String(40), unique=True, nullable=True)
+    loai_dv: Mapped[str] = mapped_column(String(30))
+    chi_tiet_dv: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    ten: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    khach_hang_id: Mapped[int | None] = mapped_column(ForeignKey("khach_hang.id"), nullable=True)
+    du_an_id: Mapped[int | None] = mapped_column(ForeignKey("du_an.id"), nullable=True)
+    dia_diem: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    thiet_bi: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    nguoi_phu_trach: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    ngay_hen: Mapped[date | None] = mapped_column(Date, nullable=True)
+    ngay_bat_dau: Mapped[date | None] = mapped_column(Date, nullable=True)
+    ngay_ket_thuc: Mapped[date | None] = mapped_column(Date, nullable=True)
+    gia_tri: Mapped[Decimal] = mapped_column(Numeric(18, 0), default=0)
+    trang_thai: Mapped[str] = mapped_column(String(20), default="KHAO_SAT")
+    du_lieu_ky_thuat: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    bao_cao: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ghi_chu: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

@@ -4,14 +4,14 @@ from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from .routers import (auth, kho, ncc, du_an, ban_hang, ke_toan, tai_chinh,
                       nhan_su, cho_thue, crm, ban_hang_ext, ke_toan_quy, vay, quy_trich_lap,
-                      cau_hinh, nhan_su_kpi, cho_thue_ops)
+                      cau_hinh, nhan_su_kpi, cho_thue_ops, dich_vu_kt)
 
 app = FastAPI(title="SVWS — Backend hợp nhất (9 module nghiệp vụ)")
 app.add_middleware(
     CORSMiddleware, allow_origins=["*"], allow_credentials=False,
     allow_methods=["*"], allow_headers=["*"],
 )
-for r in (auth, kho, ncc, du_an, ban_hang, ke_toan, tai_chinh, nhan_su, cho_thue, crm, ban_hang_ext, ke_toan_quy, vay, quy_trich_lap, cau_hinh, nhan_su_kpi, cho_thue_ops):
+for r in (auth, kho, ncc, du_an, ban_hang, ke_toan, tai_chinh, nhan_su, cho_thue, crm, ban_hang_ext, ke_toan_quy, vay, quy_trich_lap, cau_hinh, nhan_su_kpi, cho_thue_ops, dich_vu_kt):
     app.include_router(r.router)
 
 
