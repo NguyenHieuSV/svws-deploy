@@ -16,7 +16,7 @@ from ..audit import ghi_audit
 from ..deps import nhan_vien_id_cua
 from ..models import (NguoiDung, TaiKhoanQuy, PhieuThuChi, ButToan, CongNo,
                       DonHang, DonMua, KhachHang, NhaCungCap, HoaDon)
-from ..schemas import QuyVao, PhieuVao, DuyetPhieuVao, HoaDonVao, DatCocVao
+from ..schemas import QuyVao, PhieuVao, DuyetPhieuVao, HoaDonVao, DatCocVao, DoanNhomVao
 from ..hach_toan import hach_toan_hoa_don_ban, hach_toan_hoa_don_mua
 
 router = APIRouter(prefix="/ke-toan", tags=["ke_toan_quy"])
@@ -506,9 +506,17 @@ def _hd_dict(db, hd: HoaDon):
             "don_hang_id": hd.don_hang_id, "ma_ban": _ma_ban(db, hd.don_hang_id),
             "tien_truoc_thue": _f(hd.tien_truoc_thue), "tien_thue": _f(hd.tien_thue),
             "tong_tien": _f(hd.tong_tien), "tk_chi_phi": hd.tk_chi_phi,
+            "nhom_chi_phi": hd.nhom_chi_phi,
             "dien_giai": hd.dien_giai, "da_hach_toan": bool(hd.da_hach_toan),
             "trang_thai": hd.trang_thai, "hddt_trang_thai": hd.hddt_trang_thai,
             "hddt_ma_tra_cuu": hd.hddt_ma_tra_cuu, "cong_no": _cong_no_cua_hd(db, hd.id)}
+
+
+@router.post("/chi-phi/doan-nhom")
+def doan_nhom_chi_phi_hd(data: DoanNhomVao, _=Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    """AI đoán 1 trong 12 nhóm chi phí từ diễn giải + đối tác + số tiền (cho hóa đơn mua)."""
+    from ..ai_gateway import doan_nhom_chi_phi
+    return doan_nhom_chi_phi(data.dien_giai, data.ten_doi_tac, data.so_tien)
 
 
 @router.get("/hoa-don")
@@ -537,7 +545,9 @@ def tao_hoa_don(data: HoaDonVao, db: Session = Depends(get_db),
     hd = HoaDon(loai=data.loai, don_hang_id=data.don_hang_id, ngay=data.ngay or date.today(),
                 tien_truoc_thue=truoc, tien_thue=thue, tong_tien=tong,
                 khach_hang_id=kh_id, nha_cung_cap_id=data.nha_cung_cap_id,
-                tk_chi_phi=data.tk_chi_phi, dien_giai=data.dien_giai,
+                tk_chi_phi=data.tk_chi_phi,
+                nhom_chi_phi=(data.nhom_chi_phi if data.loai == "MUA" else None),
+                dien_giai=data.dien_giai,
                 hddt_trang_thai="CHUA_PHAT_HANH" if data.loai == "BAN" else None,
                 trang_thai="GHI_NHAN")
     db.add(hd); db.flush()

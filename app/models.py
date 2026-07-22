@@ -447,6 +447,7 @@ class HoaDon(Base):
     khach_hang_id: Mapped[int | None] = mapped_column(ForeignKey("khach_hang.id"), nullable=True)
     nha_cung_cap_id: Mapped[int | None] = mapped_column(ForeignKey("nha_cung_cap.id"), nullable=True)
     tk_chi_phi: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    nhom_chi_phi: Mapped[str | None] = mapped_column(String(20), nullable=True)
     dien_giai: Mapped[str | None] = mapped_column(String(200), nullable=True)
     da_hach_toan: Mapped[bool] = mapped_column(Boolean, default=False)
     trang_thai: Mapped[str] = mapped_column(String(20), default="GHI_NHAN")

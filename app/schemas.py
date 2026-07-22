@@ -755,10 +755,17 @@ class HoaDonVao(BaseModel):
     tien_truoc_thue: Decimal = Field(ge=0)
     thue_suat: Decimal = Decimal(8)        # % VAT
     tk_chi_phi: str | None = None          # cho HĐ mua: 632/642/641/627
+    nhom_chi_phi: str | None = None        # 12 nhóm chi phí (LUONG/CONGTAC/...)
     dien_giai: str | None = None
     tao_cong_no: bool = True
     hach_toan_luon: bool = True
     han_ngay: int = 30
+
+
+class DoanNhomVao(BaseModel):
+    dien_giai: str | None = None
+    ten_doi_tac: str | None = None
+    so_tien: Decimal | None = None
 
 
 class DatCocVao(BaseModel):

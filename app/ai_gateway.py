@@ -433,6 +433,50 @@ def doc_po_khach_file(data: bytes, content_type: str, filename: str) -> dict:
             "so_po": s(d.get("so_po"), 60), "ngay": s(d.get("ngay"), 10), "chi_tiet": chi_tiet}
 
 
+# ============ AI PHÂN LOẠI NHÓM CHI PHÍ (cho phiếu hóa đơn kế toán) ============
+def _doan_nhom_heuristic(dien_giai: str, ten_doi_tac: str) -> dict:
+    """Đoán nhóm theo từ khóa khi CHƯA bật AI — không bịa, độ tin cậy thấp."""
+    from app.chi_phi_mapping import TU_KHOA, ten as _ten
+    t = f"{dien_giai or ''} {ten_doi_tac or ''}".lower()
+    for ma, kws in TU_KHOA:
+        if any(k in t for k in kws):
+            return {"ma": ma, "ten": _ten(ma), "do_tin_cay": 50,
+                    "ly_do": "khớp từ khóa trong diễn giải (chưa bật AI)"}
+    return {"ma": "MUAHANG", "ten": _ten("MUAHANG"), "do_tin_cay": 25,
+            "ly_do": "mặc định — diễn giải chưa đủ rõ để đoán, hãy chọn tay"}
+
+
+def doan_nhom_chi_phi(dien_giai: str, ten_doi_tac: str, so_tien) -> dict:
+    """Đoán 1 trong 12 nhóm chi phí từ diễn giải + đối tác + số tiền.
+    Trả {ma, ten, do_tin_cay, ly_do}. Không có file — phân loại theo text."""
+    from app.chi_phi_mapping import MA_HOP_LE, danh_sach_prompt, ten as _ten
+    if settings.ai_provider.upper() != "ANTHROPIC" or not settings.anthropic_api_key:
+        return _doan_nhom_heuristic(dien_giai, ten_doi_tac)
+    khoi = {"type": "text", "text": (
+        f"Diễn giải hóa đơn: {dien_giai or '(trống)'}\n"
+        f"Đối tác: {ten_doi_tac or '(trống)'}\n"
+        f"Số tiền trước thuế: {so_tien}")}
+    sys = ("Bạn là kế toán trưởng Việt Nam. Phân loại hóa đơn CHI PHÍ đầu vào vào "
+           "đúng MỘT nhóm trong danh sách. Chỉ chọn mã có sẵn, không bịa mã mới.")
+    cau_hoi = ("Danh sách nhóm chi phí:\n" + danh_sach_prompt() +
+               "\n\nChọn nhóm phù hợp nhất và trả về DUY NHẤT một JSON object phẳng: "
+               '{"ma":"<MÃ>","do_tin_cay":<0-100>,"ly_do":"<ngắn gọn, tiếng Việt>"}')
+    try:
+        txt = _goi_claude_json(khoi, sys, cau_hoi, max_tokens=300, timeout=60)
+        d = (_vot_json_mang(txt) or [{}])[0]
+    except Exception:
+        return _doan_nhom_heuristic(dien_giai, ten_doi_tac)
+    ma = str(d.get("ma", "")).strip().upper()
+    if ma not in MA_HOP_LE:
+        return _doan_nhom_heuristic(dien_giai, ten_doi_tac)
+    try:
+        tc = int(d.get("do_tin_cay", 70))
+    except Exception:
+        tc = 70
+    return {"ma": ma, "ten": _ten(ma), "do_tin_cay": max(0, min(100, tc)),
+            "ly_do": str(d.get("ly_do", ""))[:200]}
+
+
 # ============ AI SOURCING AGENT — tự tìm/khuyến nghị NCC cho 1 đề xuất ============
 def _ung_vien_nganh(ten: str):
     t = (ten or "").lower()
