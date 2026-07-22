@@ -15,9 +15,11 @@ router = APIRouter(prefix="/dich-vu-kt", tags=["dich_vu_kt"])
 MODULE = "dich_vu_kt"
 
 TRANG_THAI = {"KHAO_SAT", "BAO_GIA", "DA_DUYET", "DANG_THUC_HIEN", "HOAN_THANH", "HUY"}
-LOAI = {"SITE_SURVEY", "CIP", "CLEANING", "MEMBRANE", "MATERIAL", "AUDIT"}
+LOAI = {"SITE_SURVEY", "CIP", "CLEANING", "MEMBRANE", "MATERIAL", "AUDIT",
+        "OPERATION", "GAS", "CONSULT"}
 PREFIX = {"SITE_SURVEY": "SS", "CIP": "CIP", "CLEANING": "CL",
-          "MEMBRANE": "MB", "MATERIAL": "MT", "AUDIT": "AD"}
+          "MEMBRANE": "MB", "MATERIAL": "MT", "AUDIT": "AD",
+          "OPERATION": "VH", "GAS": "KT", "CONSULT": "TV"}
 
 
 def _f(x):
@@ -32,6 +34,8 @@ def _dict(db: Session, d: DichVuKT) -> dict:
         "chi_tiet_dv": d.chi_tiet_dv, "ten": d.ten,
         "khach_hang_id": d.khach_hang_id, "ten_khach_hang": kh.ten if kh else None,
         "du_an_id": d.du_an_id, "ten_du_an": (da.ten if da else None),
+        "khach_ten": d.khach_ten, "cong_ty": d.cong_ty,
+        "dien_thoai": d.dien_thoai, "email": d.email,
         "dia_diem": d.dia_diem, "thiet_bi": d.thiet_bi,
         "nguoi_phu_trach": d.nguoi_phu_trach,
         "ngay_hen": str(d.ngay_hen) if d.ngay_hen else None,
@@ -64,6 +68,8 @@ def tao_dich_vu(data: DichVuKTVao, db: Session = Depends(get_db),
     d = DichVuKT(
         loai_dv=data.loai_dv, chi_tiet_dv=data.chi_tiet_dv, ten=data.ten,
         khach_hang_id=data.khach_hang_id, du_an_id=data.du_an_id,
+        khach_ten=data.khach_ten, cong_ty=data.cong_ty,
+        dien_thoai=data.dien_thoai, email=data.email,
         dia_diem=data.dia_diem, thiet_bi=data.thiet_bi,
         nguoi_phu_trach=data.nguoi_phu_trach, ngay_hen=data.ngay_hen,
         ngay_bat_dau=data.ngay_bat_dau, ngay_ket_thuc=data.ngay_ket_thuc,
@@ -90,6 +96,10 @@ def sua_dich_vu(dv_id: int, data: DichVuKTVao, db: Session = Depends(get_db),
     d.ten = data.ten
     d.khach_hang_id = data.khach_hang_id
     d.du_an_id = data.du_an_id
+    d.khach_ten = data.khach_ten
+    d.cong_ty = data.cong_ty
+    d.dien_thoai = data.dien_thoai
+    d.email = data.email
     d.dia_diem = data.dia_diem
     d.thiet_bi = data.thiet_bi
     d.nguoi_phu_trach = data.nguoi_phu_trach

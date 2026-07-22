@@ -774,6 +774,10 @@ class DichVuKTVao(BaseModel):
     ten: str | None = None
     khach_hang_id: int | None = None
     du_an_id: int | None = None
+    khach_ten: str | None = None
+    cong_ty: str | None = None
+    dien_thoai: str | None = None
+    email: str | None = None
     dia_diem: str | None = None
     thiet_bi: str | None = None
     nguoi_phu_trach: str | None = None
