@@ -468,6 +468,8 @@ class CongNo(Base):
     ngay_tt_tiep: Mapped[date | None] = mapped_column(Date, nullable=True)   # Sales theo dõi công nợ
     ghi_chu: Mapped[str | None] = mapped_column(String(300), nullable=True)
     don_hang_id: Mapped[int | None] = mapped_column(ForeignKey("don_hang.id", ondelete="SET NULL"), nullable=True)
+    ngay_ct: Mapped[date | None] = mapped_column(Date, nullable=True)         # ngày chứng từ (công nợ nhập ngoài)
+    ma_ban_ngoai: Mapped[str | None] = mapped_column(String(60), nullable=True)  # mã hàng bán (nhập ngoài)
 
 
 # ---------- Module Kế toán: thanh toán & sổ cái ----------

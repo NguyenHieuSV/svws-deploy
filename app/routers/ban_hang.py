@@ -174,8 +174,10 @@ def ds_cong_no_khach(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "X
         con_ngay = (moc - hom_nay).days if moc else None
         out.append({
             "id": cn.id,
-            "ngay": str(hd.ngay) if (hd and hd.ngay) else (str(dh.ngay) if (dh and dh.ngay) else None),
-            "ma_ban": (dh.so if dh else None) or (f"DH-{dh.id}" if dh else None),
+            "ngay": (str(hd.ngay) if (hd and hd.ngay)
+                     else (str(dh.ngay) if (dh and dh.ngay)
+                           else (str(cn.ngay_ct) if cn.ngay_ct else None))),
+            "ma_ban": (dh.so if dh else None) or (f"DH-{dh.id}" if dh else None) or cn.ma_ban_ngoai,
             "don_hang_id": dh.id if dh else None,
             "khach_ten": kh.ten if kh else None,
             "dien_giai": (hd.dien_giai if hd else None) or cn.ghi_chu,
@@ -335,13 +337,10 @@ def ai_nhap_cong_no(data: AiNhapCongNoVao, db: Session = Depends(get_db),
         dtt = Decimal(str(_int0(r.get("da_thanh_toan"))))
         if dtt > st:
             dtt = st
-        han = None
-        h = str(r.get("han") or "").strip()
-        if h:
-            try:
-                han = date.fromisoformat(h)
-            except Exception:
-                han = None
+        han = _pdate_iso(r.get("han"))
+        ngay_ct = _pdate_iso(r.get("ngay"))
+        ngay_tt = _pdate_iso(r.get("ngay_tt_tiep"))
+        ma_ban = str(r.get("ma_ban") or "").strip()[:60] or None
         gc = []
         if r.get("so_hoa_don"):
             gc.append("HĐ " + str(r["so_hoa_don"]).strip())
@@ -350,7 +349,8 @@ def ai_nhap_cong_no(data: AiNhapCongNoVao, db: Session = Depends(get_db),
         ghi_chu = (" · ".join(gc))[:300] or None
         tt = "THU_DU" if dtt >= st else ("THU_MOT_PHAN" if dtt > 0 else "CHUA_THU")
         db.add(CongNo(loai="PHAI_THU", khach_hang_id=kh_id, so_tien=st, da_thanh_toan=dtt,
-                      han=han, trang_thai=tt, ghi_chu=ghi_chu))
+                      han=han, ngay_ct=ngay_ct, ngay_tt_tiep=ngay_tt, ma_ban_ngoai=ma_ban,
+                      trang_thai=tt, ghi_chu=ghi_chu))
         tao += 1
     ghi_audit(db, nd.id, "TAO", "cong_no", 0, moi={"ai_upload_so_dong": tao})
     db.commit()
@@ -362,6 +362,16 @@ def _int0(x) -> int:
         return int(round(float(x)))
     except Exception:
         return 0
+
+
+def _pdate_iso(v):
+    v = str(v or "").strip()
+    if not v:
+        return None
+    try:
+        return date.fromisoformat(v[:10])
+    except Exception:
+        return None
 
 
 class TheoDoiCongNoVao(_CNBase):

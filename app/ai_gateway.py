@@ -476,11 +476,15 @@ def doc_cong_no_file(data: bytes, content_type: str, filename: str) -> list[dict
            "Tên cột trong file có thể khác nhau, nhiều hơn hoặc ít hơn — hãy TỰ HIỂU ý nghĩa từng cột "
            "và ánh xạ đúng. Tuyệt đối không bịa số; cột nào không có thì để trống/0.")
     cau_hoi = ("Trích MỖI DÒNG công nợ thành một phần tử JSON trong một mảng, dạng:\n"
-               '{"khach_hang":"tên khách hàng","so_hoa_don":"số hóa đơn/chứng từ nếu có",'
+               '{"khach_hang":"tên khách hàng","ma_ban":"mã hàng bán/mã đơn hàng/mã hợp đồng nếu có",'
+               '"so_hoa_don":"số hóa đơn/chứng từ nếu có","ngay":"YYYY-MM-DD ngày chứng từ/ghi nhận nếu có",'
                '"so_tien":<TỔNG phải thu - số nguyên>,"da_thanh_toan":<đã trả - số nguyên, 0 nếu không có>,'
                '"con_lai":<còn lại nếu file có ghi - số nguyên hoặc null>,'
-               '"han":"YYYY-MM-DD hạn thanh toán nếu có","ngay":"YYYY-MM-DD ngày hóa đơn nếu có",'
-               '"dien_giai":"nội dung/ghi chú"}.\n'
+               '"han":"YYYY-MM-DD hạn thanh toán nếu có",'
+               '"ngay_tt_tiep":"YYYY-MM-DD ngày thanh toán tiếp theo nếu có",'
+               '"dien_giai":"nội dung/diễn giải/ghi chú"}.\n'
+               "PHÂN BIỆT 3 loại ngày (mỗi cột riêng nếu file có): 'ngay' = ngày chứng từ/ghi nhận công nợ; "
+               "'han' = hạn thanh toán; 'ngay_tt_tiep' = ngày thanh toán tiếp theo (theo dõi thu hồi).\n"
                "QUY TẮC: (1) Nếu file chỉ có cột 'còn lại/còn nợ' mà không có tổng, đặt so_tien = còn lại, "
                "da_thanh_toan = 0. (2) Số tiền bỏ dấu phân cách nghìn, trả số nguyên. "
                "(3) BỎ dòng tiêu đề và dòng 'Tổng cộng'. (4) Chỉ trả JSON array, không giải thích.")
@@ -500,11 +504,13 @@ def doc_cong_no_file(data: bytes, content_type: str, filename: str) -> list[dict
             continue
         out.append({
             "khach_hang": ten[:200],
+            "ma_ban": str(r.get("ma_ban") or "").strip()[:60],
             "so_hoa_don": str(r.get("so_hoa_don") or "").strip()[:60],
             "so_tien": st,
             "da_thanh_toan": min(dtt, st) if st else dtt,
             "han": _ngay_iso(r.get("han")),
             "ngay": _ngay_iso(r.get("ngay")),
+            "ngay_tt_tiep": _ngay_iso(r.get("ngay_tt_tiep")),
             "dien_giai": str(r.get("dien_giai") or "").strip()[:280],
         })
     if not out:
