@@ -378,6 +378,44 @@ def ai_nhap_cong_no(data: AiNhapCongNoVao, db: Session = Depends(get_db),
     return {"da_tao": tao}
 
 
+class DepTrungVao(_CNBase):
+    xac_nhan: bool = False
+
+
+@router.post("/cong-no/dep-trung")
+def dep_trung_cong_no(data: DepTrungVao, db: Session = Depends(get_db),
+                      nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
+    """Dọn công nợ PHẢI THU trùng (nhập từ file): giữ bản đầu, xóa bản thừa.
+    AN TOÀN: chỉ xét bản NHẬP NGOÀI (không gắn hóa đơn & đơn hàng) và CHƯA THU (đã TT = 0).
+    Nhóm theo số hóa đơn (so_ct); thiếu số HĐ thì theo (khách + số tiền + mã bán + ngày CT)."""
+    q = (db.query(CongNo)
+         .filter(CongNo.loai == "PHAI_THU",
+                 CongNo.hoa_don_id.is_(None),
+                 CongNo.don_hang_id.is_(None),
+                 CongNo.da_thanh_toan == 0)
+         .order_by(CongNo.id.asc()).all())
+    giu = {}
+    du = []
+    for cn in q:
+        if cn.so_ct and str(cn.so_ct).strip():
+            fp = "hd:" + str(cn.so_ct).strip().lower()
+        else:
+            fp = f"kh:{cn.khach_hang_id}|st:{cn.so_tien}|mb:{cn.ma_ban_ngoai or ''}|ng:{cn.ngay_ct or ''}"
+        if fp in giu:
+            du.append(cn)
+        else:
+            giu[fp] = cn.id
+    if not data.xac_nhan:
+        return {"se_xoa": len(du), "so_giu": len(giu),
+                "xem_truoc": [{"id": c.id, "so_ct": c.so_ct, "so_tien": float(c.so_tien or 0)}
+                              for c in du[:15]]}
+    for cn in du:
+        db.delete(cn)
+    ghi_audit(db, nd.id, "XOA", "cong_no", 0, moi={"dep_trung_da_xoa": len(du)})
+    db.commit()
+    return {"da_xoa": len(du)}
+
+
 def _int0(x) -> int:
     try:
         return int(round(float(x)))
