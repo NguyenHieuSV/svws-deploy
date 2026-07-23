@@ -178,8 +178,13 @@ def ds_cong_no_khach(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "X
             "ma_ban": (dh.so if dh else None) or (f"DH-{dh.id}" if dh else None),
             "don_hang_id": dh.id if dh else None,
             "khach_ten": kh.ten if kh else None,
+            "dien_giai": (hd.dien_giai if hd else None) or cn.ghi_chu,
             # Giá trị đơn hàng: lấy từ tab Đơn hàng & PO/Hợp đồng (thiếu đơn thì dùng công nợ)
             "gia_tri_don": float(dh.tong_tien or 0) if dh else None,
+            # Tách VAT theo hóa đơn của khoản công nợ (chưa VAT / VAT / tổng)
+            "tien_truoc_thue": float(hd.tien_truoc_thue or 0) if hd else float(cn.so_tien or 0),
+            "tien_thue": float(hd.tien_thue or 0) if hd else 0,
+            "tong": float(hd.tong_tien or 0) if hd else float(cn.so_tien or 0),
             "so_tien": float(cn.so_tien or 0),
             "da_thanh_toan": float(cn.da_thanh_toan or 0),
             "con_lai": con_lai,
