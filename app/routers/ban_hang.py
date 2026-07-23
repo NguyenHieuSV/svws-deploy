@@ -416,6 +416,26 @@ def dep_trung_cong_no(data: DepTrungVao, db: Session = Depends(get_db),
     return {"da_xoa": len(du)}
 
 
+@router.post("/cong-no/xoa-nhap")
+def xoa_cong_no_nhap(data: DepTrungVao, db: Session = Depends(get_db),
+                     nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
+    """Xóa TẤT CẢ công nợ PHẢI THU nhập từ file (không gắn hóa đơn & đơn hàng, chưa thu)
+    để làm lại từ đầu. Công nợ thật (từ đơn hàng / đã thu) KHÔNG bị đụng."""
+    q = (db.query(CongNo)
+         .filter(CongNo.loai == "PHAI_THU",
+                 CongNo.hoa_don_id.is_(None),
+                 CongNo.don_hang_id.is_(None),
+                 CongNo.da_thanh_toan == 0))
+    n = q.count()
+    if not data.xac_nhan:
+        return {"se_xoa": n}
+    for cn in q.all():
+        db.delete(cn)
+    ghi_audit(db, nd.id, "XOA", "cong_no", 0, moi={"xoa_nhap_da_xoa": n})
+    db.commit()
+    return {"da_xoa": n}
+
+
 def _int0(x) -> int:
     try:
         return int(round(float(x)))
