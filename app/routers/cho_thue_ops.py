@@ -34,6 +34,7 @@ def _ten_kh(db, kid):
 
 def _ts_ra(db, t: TaiSanChoThue) -> dict:
     return {"id": t.id, "ma": t.ma, "ten_du_an": t.ten_du_an or t.ma, "ten": t.ten, "loai": t.loai,
+            "loai_he_thong": t.loai_he_thong,
             "nguyen_gia": float(t.nguyen_gia or 0), "gia_thue_thang": float(t.gia_thue_thang or 0),
             "khau_hao_thang": float(t.khau_hao_thang or 0),
             "ngay_mua": str(t.ngay_mua) if t.ngay_mua else None,
@@ -47,6 +48,7 @@ class TaiSanVaoCT(BaseModel):
     ten_du_an: str | None = None
     ten: str
     loai: str = Field(default="THIET_BI", pattern="^(THIET_BI|HE_THONG|XE|KHAC)$")
+    loai_he_thong: str | None = None
     nguyen_gia: Decimal = 0
     gia_thue_thang: Decimal = 0
     khau_hao_thang: Decimal = 0
@@ -59,6 +61,7 @@ class TaiSanSuaCT(BaseModel):
     ten_du_an: str | None = None
     ten: str | None = None
     loai: str | None = None
+    loai_he_thong: str | None = None
     nguyen_gia: Decimal | None = None
     gia_thue_thang: Decimal | None = None
     khau_hao_thang: Decimal | None = None
@@ -97,8 +100,8 @@ def sua_tai_san(ts_id: int, data: TaiSanSuaCT, db: Session = Depends(get_db),
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy tài sản")
     if data.tinh_trang is not None and data.tinh_trang not in TINH_TRANG:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Tình trạng không hợp lệ")
-    for f in ("ten_du_an", "ten", "loai", "nguyen_gia", "gia_thue_thang", "khau_hao_thang",
-              "tinh_trang", "vi_tri", "ghi_chu"):
+    for f in ("ten_du_an", "ten", "loai", "loai_he_thong", "nguyen_gia", "gia_thue_thang",
+              "khau_hao_thang", "tinh_trang", "vi_tri", "ghi_chu"):
         v = getattr(data, f)
         if v is not None:
             setattr(t, f, v)

@@ -1114,6 +1114,7 @@ class TaiSanChoThue(Base):
     ten_du_an: Mapped[str | None] = mapped_column(String(120), nullable=True)
     ten: Mapped[str] = mapped_column(String(200))
     loai: Mapped[str] = mapped_column(String(20), default="THIET_BI")
+    loai_he_thong: Mapped[str | None] = mapped_column(String(30), nullable=True)
     nguyen_gia: Mapped[Decimal] = mapped_column(Numeric(18, 0), default=0)
     gia_thue_thang: Mapped[Decimal] = mapped_column(Numeric(18, 0), default=0)
     khau_hao_thang: Mapped[Decimal] = mapped_column(Numeric(18, 0), default=0)
