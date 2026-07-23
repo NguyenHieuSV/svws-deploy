@@ -181,6 +181,7 @@ def ds_cong_no_khach(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "X
             "don_hang_id": dh.id if dh else None,
             "khach_ten": kh.ten if kh else None,
             "dien_giai": (hd.dien_giai if hd else None) or cn.ghi_chu,
+            "so_hd": (hd.so if hd else None) or cn.so_ct,
             # Giá trị đơn hàng: lấy từ tab Đơn hàng & PO/Hợp đồng (thiếu đơn thì dùng công nợ)
             "gia_tri_don": float(dh.tong_tien or 0) if dh else None,
             # Tách VAT theo hóa đơn của khoản công nợ (chưa VAT / VAT / tổng)
@@ -207,6 +208,7 @@ from pydantic import BaseModel as _CNBase
 
 class TaoCongNoVao(_CNBase):
     don_hang_id: int
+    so_hoa_don: str | None = None         # bắt buộc khi mở công nợ mới
     tien_truoc_thue: Decimal
     thue_suat: Decimal = Decimal(8)
     ngay_thanh_toan: date | None = None   # ngày của đợt thanh toán này
@@ -239,19 +241,23 @@ def tao_cong_no_khach(data: TaoCongNoVao, db: Session = Depends(get_db),
     cn = _cong_no_cua_don(db, dh.id)
     hd_id = cn.hoa_don_id if cn else None
     if cn is None:                       # lần đầu: mở công nợ + hóa đơn bán nháp
+        so_hd = (data.so_hoa_don or "").strip()
+        if not so_hd:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                "Chưa có số hóa đơn — nhập Số HĐ trước khi mở công nợ")
         if data.tien_truoc_thue <= 0:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "Giá trị chưa VAT phải lớn hơn 0")
         truoc = Decimal(data.tien_truoc_thue)
         thue = (truoc * Decimal(data.thue_suat or 0) / 100).quantize(Decimal("1"))
         tong = truoc + thue
-        hd = HoaDon(loai="BAN", don_hang_id=dh.id, khach_hang_id=dh.khach_hang_id,
+        hd = HoaDon(loai="BAN", don_hang_id=dh.id, khach_hang_id=dh.khach_hang_id, so=so_hd[:40],
                     ngay=date.today(), tien_truoc_thue=truoc, tien_thue=thue, tong_tien=tong,
                     hddt_trang_thai="CHUA_PHAT_HANH", da_hach_toan=False, trang_thai="GHI_NHAN",
                     dien_giai=f"Công nợ đơn {dh.so or dh.id}")
         db.add(hd); db.flush()
-        hd.so = f"HDB-{date.today():%Y%m%d}-{hd.id}"; hd_id = hd.id
+        hd_id = hd.id
         cn = CongNo(loai="PHAI_THU", hoa_don_id=hd.id, khach_hang_id=dh.khach_hang_id,
-                    don_hang_id=dh.id, so_tien=tong, da_thanh_toan=0,
+                    don_hang_id=dh.id, so_tien=tong, da_thanh_toan=0, so_ct=so_hd[:60],
                     han=data.ngay_tt_tiep or (date.today() + timedelta(days=30)),
                     trang_thai="CHUA_THU")
         db.add(cn); db.flush()
@@ -342,7 +348,12 @@ def ai_nhap_cong_no(data: AiNhapCongNoVao, db: Session = Depends(get_db),
                     nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
     """Nhập các dòng công nợ đã xác nhận thành CongNo PHẢI THU (khớp/tạo khách hàng)."""
     tao = 0
+    bo_qua = 0
     for r in data.rows:
+        so_ct = str(r.get("so_hoa_don") or "").strip()[:60] or None
+        if not so_ct:                     # BẮT BUỘC có số hóa đơn mới đưa vào công nợ
+            bo_qua += 1
+            continue
         ten = str(r.get("khach_hang") or "").strip()
         st = Decimal(str(_int0(r.get("so_tien"))))
         if st <= 0:
@@ -361,7 +372,6 @@ def ai_nhap_cong_no(data: AiNhapCongNoVao, db: Session = Depends(get_db),
         ngay_ct = _pdate_iso(r.get("ngay"))
         ngay_tt = _pdate_iso(r.get("ngay_tt_tiep"))
         ma_ban = str(r.get("ma_ban") or "").strip()[:60] or None
-        so_ct = str(r.get("so_hoa_don") or "").strip()[:60] or None
         gc = []
         if so_ct:
             gc.append("HĐ " + so_ct)
@@ -375,7 +385,7 @@ def ai_nhap_cong_no(data: AiNhapCongNoVao, db: Session = Depends(get_db),
         tao += 1
     ghi_audit(db, nd.id, "TAO", "cong_no", 0, moi={"ai_upload_so_dong": tao})
     db.commit()
-    return {"da_tao": tao}
+    return {"da_tao": tao, "bo_qua_thieu_hd": bo_qua}
 
 
 class DepTrungVao(_CNBase):
