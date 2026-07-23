@@ -1201,3 +1201,16 @@ class DichVuKT(Base):
     bao_cao: Mapped[str | None] = mapped_column(Text, nullable=True)
     ghi_chu: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class DichVuKtTaiLieu(Base):
+    __tablename__ = "dich_vu_kt_tai_lieu"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    loai_dv: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    ten: Mapped[str] = mapped_column(String(255))
+    duong_dan: Mapped[str | None] = mapped_column(Text, nullable=True)
+    url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    kich_thuoc: Mapped[int] = mapped_column(BigInteger, default=0)
+    ghi_chu: Mapped[str | None] = mapped_column(Text, nullable=True)
+    nguoi_tao: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
