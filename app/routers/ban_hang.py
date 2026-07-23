@@ -290,14 +290,19 @@ def _match_khach(db: Session, ten: str):
 
 
 @router.post("/cong-no/ai-doc")
-async def ai_doc_cong_no(file: UploadFile = File(...), db: Session = Depends(get_db),
-                         nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
-    """AI đọc file Excel/CSV/Sheet công nợ, tự dò cột, trả về BẢN XEM TRƯỚC (chưa lưu)."""
+def ai_doc_cong_no(file: UploadFile = File(...), db: Session = Depends(get_db),
+                   nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
+    """AI đọc file Excel/CSV/Sheet công nợ, tự dò cột, trả về BẢN XEM TRƯỚC (chưa lưu).
+    Dùng def (KHÔNG async) để FastAPI chạy trong threadpool — cuộc gọi AI dài không
+    chặn event loop (tránh 502 do health-check nghẽn khi 1 worker bị khóa)."""
     from ..ai_gateway import doc_cong_no_file
-    data = await file.read()
+    data = file.file.read()
     if not data:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "File trống")
-    rows = doc_cong_no_file(data, file.content_type, file.filename)
+    try:
+        rows = doc_cong_no_file(data, file.content_type, file.filename)
+    except ValueError as e:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e))
     for r in rows:
         kh = _match_khach(db, r.get("khach_hang"))
         r["khach_hang_id"] = kh.id if kh else None
