@@ -433,6 +433,85 @@ def doc_po_khach_file(data: bytes, content_type: str, filename: str) -> dict:
             "so_po": s(d.get("so_po"), 60), "ngay": s(d.get("ngay"), 10), "chi_tiet": chi_tiet}
 
 
+# ============ AI ĐỌC FILE CÔNG NỢ (Excel/CSV/Google Sheet) — tự dò cột ============
+def _so_nguyen(x) -> int:
+    """Ép về số nguyên VND: bỏ mọi ký tự không phải số (dấu ., , , đ, khoảng trắng)."""
+    import re as _re
+    s = str(x if x is not None else "").strip()
+    neg = s.startswith("-")
+    s = _re.sub(r"[^\d]", "", s)
+    if not s:
+        return 0
+    n = int(s)
+    return -n if neg else n
+
+
+def _ngay_iso(x):
+    """Chuẩn hóa ngày về 'YYYY-MM-DD'; trả None nếu không nhận ra."""
+    import re as _re
+    s = str(x if x is not None else "").strip()
+    if not s:
+        return None
+    s = s.split(" ")[0].split("T")[0]
+    if _re.match(r"^\d{4}-\d{1,2}-\d{1,2}$", s):
+        p = s.split("-")
+        return f"{int(p[0]):04d}-{int(p[1]):02d}-{int(p[2]):02d}"
+    m = _re.match(r"^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{2,4})$", s)   # dd/mm/yyyy
+    if m:
+        d, mo, y = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        if y < 100:
+            y += 2000
+        if 1 <= mo <= 12 and 1 <= d <= 31:
+            return f"{y:04d}-{mo:02d}-{d:02d}"
+    return None
+
+
+def doc_cong_no_file(data: bytes, content_type: str, filename: str) -> list[dict]:
+    """Đọc file công nợ PHẢI THU (Excel/CSV/Sheet). Tên cột có thể khác/nhiều/ít hơn —
+    AI tự ánh xạ. Trả list dict {khach_hang, so_hoa_don, so_tien, da_thanh_toan, han, ngay, dien_giai}."""
+    if settings.ai_provider.upper() != "ANTHROPIC" or not settings.anthropic_api_key:
+        raise ValueError("Chưa bật AI — cần AI_PROVIDER=ANTHROPIC và ANTHROPIC_API_KEY trên máy chủ.")
+    khoi = _khoi_noi_dung_file(data, content_type, filename)
+    sys = ("Bạn là kế toán công nợ. Đọc bảng dữ liệu CÔNG NỢ PHẢI THU (khách hàng còn nợ công ty). "
+           "Tên cột trong file có thể khác nhau, nhiều hơn hoặc ít hơn — hãy TỰ HIỂU ý nghĩa từng cột "
+           "và ánh xạ đúng. Tuyệt đối không bịa số; cột nào không có thì để trống/0.")
+    cau_hoi = ("Trích MỖI DÒNG công nợ thành một phần tử JSON trong một mảng, dạng:\n"
+               '{"khach_hang":"tên khách hàng","so_hoa_don":"số hóa đơn/chứng từ nếu có",'
+               '"so_tien":<TỔNG phải thu - số nguyên>,"da_thanh_toan":<đã trả - số nguyên, 0 nếu không có>,'
+               '"con_lai":<còn lại nếu file có ghi - số nguyên hoặc null>,'
+               '"han":"YYYY-MM-DD hạn thanh toán nếu có","ngay":"YYYY-MM-DD ngày hóa đơn nếu có",'
+               '"dien_giai":"nội dung/ghi chú"}.\n'
+               "QUY TẮC: (1) Nếu file chỉ có cột 'còn lại/còn nợ' mà không có tổng, đặt so_tien = còn lại, "
+               "da_thanh_toan = 0. (2) Số tiền bỏ dấu phân cách nghìn, trả số nguyên. "
+               "(3) BỎ dòng tiêu đề và dòng 'Tổng cộng'. (4) Chỉ trả JSON array, không giải thích.")
+    txt = _goi_claude_json(khoi, sys, cau_hoi, max_tokens=8000, timeout=180)
+    ds = _vot_json_mang(txt)
+    out = []
+    for r in ds:
+        if not isinstance(r, dict):
+            continue
+        ten = str(r.get("khach_hang") or "").strip()
+        st = _so_nguyen(r.get("so_tien"))
+        cl = _so_nguyen(r.get("con_lai"))
+        dtt = _so_nguyen(r.get("da_thanh_toan"))
+        if st == 0 and cl:                     # file chỉ có "còn lại"
+            st = cl
+        if not ten and st == 0:
+            continue
+        out.append({
+            "khach_hang": ten[:200],
+            "so_hoa_don": str(r.get("so_hoa_don") or "").strip()[:60],
+            "so_tien": st,
+            "da_thanh_toan": min(dtt, st) if st else dtt,
+            "han": _ngay_iso(r.get("han")),
+            "ngay": _ngay_iso(r.get("ngay")),
+            "dien_giai": str(r.get("dien_giai") or "").strip()[:280],
+        })
+    if not out:
+        raise ValueError("AI không tìm thấy dòng công nợ nào — kiểm tra file có bảng dữ liệu rõ ràng.")
+    return out
+
+
 # ============ AI PHÂN LOẠI NHÓM CHI PHÍ (cho phiếu hóa đơn kế toán) ============
 def _doan_nhom_heuristic(dien_giai: str, ten_doi_tac: str) -> dict:
     """Đoán nhóm theo từ khóa khi CHƯA bật AI — không bịa, độ tin cậy thấp."""

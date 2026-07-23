@@ -274,6 +274,86 @@ def tao_cong_no_khach(data: TaoCongNoVao, db: Session = Depends(get_db),
             "trang_thai": cn.trang_thai}
 
 
+# ===================== AI UPLOAD CÔNG NỢ (chỉ CEO/ADMIN) =====================
+def _match_khach(db: Session, ten: str):
+    """Khớp khách hàng theo tên (không phân biệt hoa thường, đã trim)."""
+    t = (ten or "").strip()
+    if not t:
+        return None
+    from sqlalchemy import func as _f
+    return db.query(KhachHang).filter(_f.lower(KhachHang.ten) == t.lower()).first()
+
+
+@router.post("/cong-no/ai-doc")
+async def ai_doc_cong_no(file: UploadFile = File(...), db: Session = Depends(get_db),
+                         nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
+    """AI đọc file Excel/CSV/Sheet công nợ, tự dò cột, trả về BẢN XEM TRƯỚC (chưa lưu)."""
+    from ..ai_gateway import doc_cong_no_file
+    data = await file.read()
+    if not data:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "File trống")
+    rows = doc_cong_no_file(data, file.content_type, file.filename)
+    for r in rows:
+        kh = _match_khach(db, r.get("khach_hang"))
+        r["khach_hang_id"] = kh.id if kh else None
+        r["khop_kh"] = bool(kh)
+    return {"so_dong": len(rows), "rows": rows,
+            "so_khop": sum(1 for r in rows if r["khop_kh"])}
+
+
+class AiNhapCongNoVao(_CNBase):
+    rows: list[dict]
+
+
+@router.post("/cong-no/ai-nhap")
+def ai_nhap_cong_no(data: AiNhapCongNoVao, db: Session = Depends(get_db),
+                    nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
+    """Nhập các dòng công nợ đã xác nhận thành CongNo PHẢI THU (khớp/tạo khách hàng)."""
+    tao = 0
+    for r in data.rows:
+        ten = str(r.get("khach_hang") or "").strip()
+        st = Decimal(str(_int0(r.get("so_tien"))))
+        if st <= 0:
+            continue
+        kh_id = r.get("khach_hang_id")
+        if not kh_id and ten:
+            kh = _match_khach(db, ten)
+            if kh is None:
+                kh = KhachHang(ten=ten[:200])
+                db.add(kh); db.flush()
+            kh_id = kh.id
+        dtt = Decimal(str(_int0(r.get("da_thanh_toan"))))
+        if dtt > st:
+            dtt = st
+        han = None
+        h = str(r.get("han") or "").strip()
+        if h:
+            try:
+                han = date.fromisoformat(h)
+            except Exception:
+                han = None
+        gc = []
+        if r.get("so_hoa_don"):
+            gc.append("HĐ " + str(r["so_hoa_don"]).strip())
+        if r.get("dien_giai"):
+            gc.append(str(r["dien_giai"]).strip())
+        ghi_chu = (" · ".join(gc))[:300] or None
+        tt = "THU_DU" if dtt >= st else ("THU_MOT_PHAN" if dtt > 0 else "CHUA_THU")
+        db.add(CongNo(loai="PHAI_THU", khach_hang_id=kh_id, so_tien=st, da_thanh_toan=dtt,
+                      han=han, trang_thai=tt, ghi_chu=ghi_chu))
+        tao += 1
+    ghi_audit(db, nd.id, "TAO", "cong_no", 0, moi={"ai_upload_so_dong": tao})
+    db.commit()
+    return {"da_tao": tao}
+
+
+def _int0(x) -> int:
+    try:
+        return int(round(float(x)))
+    except Exception:
+        return 0
+
+
 class TheoDoiCongNoVao(_CNBase):
     ngay_tt_tiep: date | None = None
     ghi_chu: str | None = None
