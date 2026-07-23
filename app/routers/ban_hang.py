@@ -305,12 +305,32 @@ def ai_doc_cong_no(file: UploadFile = File(...), db: Session = Depends(get_db),
         rows = doc_cong_no_file(data, file.content_type, file.filename)
     except ValueError as e:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e))
+    # số hóa đơn đã có trong hệ thống (phát hiện trùng)
+    da_co = set()
+    for (v,) in (db.query(CongNo.so_ct)
+                 .filter(CongNo.loai == "PHAI_THU", CongNo.so_ct.isnot(None)).all()):
+        if v and str(v).strip():
+            da_co.add(str(v).strip().lower())
+    trong_file = {}
     for r in rows:
         kh = _match_khach(db, r.get("khach_hang"))
         r["khach_hang_id"] = kh.id if kh else None
         r["khop_kh"] = bool(kh)
+        sh = str(r.get("so_hoa_don") or "").strip()
+        r["trung"] = False
+        r["trung_ly_do"] = ""
+        if sh:
+            k = sh.lower()
+            if k in da_co:
+                r["trung"] = True
+                r["trung_ly_do"] = "đã có trong hệ thống"
+            elif trong_file.get(k, 0) > 0:
+                r["trung"] = True
+                r["trung_ly_do"] = "trùng trong file"
+            trong_file[k] = trong_file.get(k, 0) + 1
     return {"so_dong": len(rows), "rows": rows,
-            "so_khop": sum(1 for r in rows if r["khop_kh"])}
+            "so_khop": sum(1 for r in rows if r["khop_kh"]),
+            "so_trung": sum(1 for r in rows if r["trung"])}
 
 
 class AiNhapCongNoVao(_CNBase):
@@ -341,16 +361,17 @@ def ai_nhap_cong_no(data: AiNhapCongNoVao, db: Session = Depends(get_db),
         ngay_ct = _pdate_iso(r.get("ngay"))
         ngay_tt = _pdate_iso(r.get("ngay_tt_tiep"))
         ma_ban = str(r.get("ma_ban") or "").strip()[:60] or None
+        so_ct = str(r.get("so_hoa_don") or "").strip()[:60] or None
         gc = []
-        if r.get("so_hoa_don"):
-            gc.append("HĐ " + str(r["so_hoa_don"]).strip())
+        if so_ct:
+            gc.append("HĐ " + so_ct)
         if r.get("dien_giai"):
             gc.append(str(r["dien_giai"]).strip())
         ghi_chu = (" · ".join(gc))[:300] or None
         tt = "THU_DU" if dtt >= st else ("THU_MOT_PHAN" if dtt > 0 else "CHUA_THU")
         db.add(CongNo(loai="PHAI_THU", khach_hang_id=kh_id, so_tien=st, da_thanh_toan=dtt,
                       han=han, ngay_ct=ngay_ct, ngay_tt_tiep=ngay_tt, ma_ban_ngoai=ma_ban,
-                      trang_thai=tt, ghi_chu=ghi_chu))
+                      so_ct=so_ct, trang_thai=tt, ghi_chu=ghi_chu))
         tao += 1
     ghi_audit(db, nd.id, "TAO", "cong_no", 0, moi={"ai_upload_so_dong": tao})
     db.commit()

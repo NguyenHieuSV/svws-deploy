@@ -470,6 +470,7 @@ class CongNo(Base):
     don_hang_id: Mapped[int | None] = mapped_column(ForeignKey("don_hang.id", ondelete="SET NULL"), nullable=True)
     ngay_ct: Mapped[date | None] = mapped_column(Date, nullable=True)         # ngày chứng từ (công nợ nhập ngoài)
     ma_ban_ngoai: Mapped[str | None] = mapped_column(String(60), nullable=True)  # mã hàng bán (nhập ngoài)
+    so_ct: Mapped[str | None] = mapped_column(String(60), nullable=True)      # số hóa đơn/chứng từ (phát hiện trùng)
 
 
 # ---------- Module Kế toán: thanh toán & sổ cái ----------
