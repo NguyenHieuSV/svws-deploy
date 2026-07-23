@@ -419,17 +419,21 @@ def dep_trung_cong_no(data: DepTrungVao, db: Session = Depends(get_db),
 @router.post("/cong-no/xoa-nhap")
 def xoa_cong_no_nhap(data: DepTrungVao, db: Session = Depends(get_db),
                      nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
-    """Xóa TẤT CẢ công nợ PHẢI THU nhập từ file (không gắn hóa đơn & đơn hàng, chưa thu)
-    để làm lại từ đầu. Công nợ thật (từ đơn hàng / đã thu) KHÔNG bị đụng."""
-    q = (db.query(CongNo)
-         .filter(CongNo.loai == "PHAI_THU",
-                 CongNo.hoa_don_id.is_(None),
-                 CongNo.don_hang_id.is_(None),
-                 CongNo.da_thanh_toan == 0))
-    n = q.count()
+    """Xóa TẤT CẢ công nợ PHẢI THU nhập từ file (không gắn hóa đơn & đơn hàng),
+    KỂ CẢ dòng đã thu (số 'đã thanh toán' của bản nhập chỉ là dữ liệu, không có
+    phiếu thu/bút toán thật). Công nợ thật từ ĐƠN HÀNG KHÔNG bị đụng."""
+    from ..models import ThanhToan
+    rows = (db.query(CongNo)
+            .filter(CongNo.loai == "PHAI_THU",
+                    CongNo.hoa_don_id.is_(None),
+                    CongNo.don_hang_id.is_(None)).all())
+    n = len(rows)
     if not data.xac_nhan:
         return {"se_xoa": n}
-    for cn in q.all():
+    ids = [c.id for c in rows]
+    if ids:
+        db.query(ThanhToan).filter(ThanhToan.cong_no_id.in_(ids)).delete(synchronize_session=False)
+    for cn in rows:
         db.delete(cn)
     ghi_audit(db, nd.id, "XOA", "cong_no", 0, moi={"xoa_nhap_da_xoa": n})
     db.commit()
