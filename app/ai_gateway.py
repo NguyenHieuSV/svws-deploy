@@ -752,7 +752,8 @@ def doc_cong_no_ncc_file(data: bytes, content_type: str, filename: str) -> list[
             st = cl
         if not ten and st == 0:
             continue
-        han = _ngay_iso(r.get("han"))
+        # "Ngày thanh toán" của file NCC thường là cột ngày duy nhất → dùng làm hạn (han)
+        han = _ngay_iso(r.get("han")) or _ngay_iso(r.get("ngay"))
         ngay_tt = _ngay_iso(r.get("ngay_tt_tiep")) or han
         vat = _so_nguyen(r.get("tien_thue"))
         if vat > st:
