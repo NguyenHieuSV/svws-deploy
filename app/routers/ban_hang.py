@@ -1504,7 +1504,7 @@ def chi_tiet_don_hang(dh_id: int, db: Session = Depends(get_db),
             "chi_tiet": ct_out}
 
 
-_DH_TT_TAY = ("MOI", "DANG_THUC_HIEN", "HOAN_THANH")
+_DH_TT_TAY = ("MOI", "DANG_THUC_HIEN", "DA_XUAT_HD", "HOAN_THANH")
 
 
 class TrangThaiDonVao(_CNBase):
@@ -1514,7 +1514,7 @@ class TrangThaiDonVao(_CNBase):
 @router.put("/don-hang/{dh_id}/trang-thai")
 def doi_trang_thai_don_hang(dh_id: int, data: TrangThaiDonVao, db: Session = Depends(get_db),
                             nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
-    """Đổi trạng thái theo dõi của đơn hàng (Mới / Đang thực hiện / Hoàn thành).
+    """Đổi trạng thái theo dõi của đơn hàng (Mới / Đang thực hiện / Đã xuất hóa đơn / Hoàn thành).
     Cho phép cả khi đơn đã xuất kho hoặc đã có hóa đơn — đây là cờ theo dõi bán hàng,
     không phải số liệu kế toán. Không cho đặt tay 'DA_XUAT' (do luồng xuất kho quyết định)."""
     dh = db.get(DonHang, dh_id)
@@ -1523,7 +1523,7 @@ def doi_trang_thai_don_hang(dh_id: int, data: TrangThaiDonVao, db: Session = Dep
     tt = (data.trang_thai or "").strip().upper()
     if tt not in _DH_TT_TAY:
         raise HTTPException(status.HTTP_400_BAD_REQUEST,
-                            "Trạng thái phải là Mới / Đang thực hiện / Hoàn thành. "
+                            "Trạng thái phải là Mới / Đang thực hiện / Đã xuất hóa đơn / Hoàn thành. "
                             "Trạng thái 'Đã xuất kho' do luồng xuất kho tự đặt.")
     cu = dh.trang_thai
     dh.trang_thai = tt
