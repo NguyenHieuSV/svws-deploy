@@ -1425,6 +1425,13 @@ def ds_cong_no(nha_cung_cap_id: int | None = None, chua_tra: bool = False,
         q = q.filter(CongNo.nha_cung_cap_id == nha_cung_cap_id)
     rows = q.order_by(CongNo.id.desc()).limit(300).all()
     hom_nay = date.today()
+    # ngày thanh toán thực tế: lần trả gần nhất của mỗi khoản
+    ids = [r.id for r in rows]
+    lan_tra = {}
+    if ids:
+        for cid, ng in (db.query(ThanhToan.cong_no_id, func.max(ThanhToan.ngay))
+                        .filter(ThanhToan.cong_no_id.in_(ids)).group_by(ThanhToan.cong_no_id).all()):
+            lan_tra[cid] = ng
     out = []
     for r in rows:
         con_lai = float((r.so_tien or 0) - (r.da_thanh_toan or 0))
@@ -1437,10 +1444,12 @@ def ds_cong_no(nha_cung_cap_id: int | None = None, chua_tra: bool = False,
             dm = db.get(DonMua, r.don_mua_id)
             ma = dm.so if dm else None
         con_ngay = (r.han - hom_nay).days if r.han else None
+        ngay_tt = lan_tra.get(r.id)
         out.append({"id": r.id, "nha_cung_cap_id": r.nha_cung_cap_id,
                     "ma": ma, "so_hd": r.so_ct, "tien_thue": float(r.tien_thue or 0),
                     "so_tien": float(r.so_tien or 0), "da_thanh_toan": float(r.da_thanh_toan or 0),
                     "con_lai": con_lai, "han": str(r.han) if r.han else None,
+                    "ngay_thanh_toan": str(ngay_tt) if ngay_tt else None,
                     "con_ngay": con_ngay, "trang_thai": r.trang_thai, "qua_han": qh})
     return out
 
@@ -2252,8 +2261,14 @@ def tim_ncc_web_ep(ycm_id: int, khu_vuc: str = "Việt Nam", db: Session = Depen
     return {"yeu_cau_mua_id": ycm.id, "ten_hang": ten, **tim_ncc_web(ten, khu_vuc)}
 
 
+class NccTraVao(_NccCnBase):
+    so_tien: Decimal
+    hinh_thuc: str = "CK"
+    ngay_thanh_toan: date | None = None       # ngày trả thực tế (mặc định hôm nay)
+
+
 @router.post("/cong-no/{cn_id}/thanh-toan")
-def thanh_toan_ncc(cn_id: int, data: ThuTienVao, db: Session = Depends(get_db),
+def thanh_toan_ncc(cn_id: int, data: NccTraVao, db: Session = Depends(get_db),
                    nd: NguoiDung = Depends(yeu_cau("ke_toan", "THAO_TAC"))):
     """Ghi nhận THANH TOÁN cho NCC (giảm công nợ phải trả). Quyền: kế toán THAO_TAC."""
     cn = db.query(CongNo).filter_by(id=cn_id).with_for_update().first()
@@ -2261,11 +2276,14 @@ def thanh_toan_ncc(cn_id: int, data: ThuTienVao, db: Session = Depends(get_db),
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy công nợ")
     if cn.loai != "PHAI_TRA":
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Công nợ này không phải khoản phải trả")
+    if data.so_tien <= 0:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Số tiền thanh toán phải lớn hơn 0")
     con_lai = cn.so_tien - cn.da_thanh_toan
     if data.so_tien > con_lai:
         raise HTTPException(status.HTTP_400_BAD_REQUEST,
                             f"Thanh toán {data.so_tien:,.0f} vượt còn lại {con_lai:,.0f}")
-    db.add(ThanhToan(cong_no_id=cn.id, so_tien=data.so_tien, ngay=date.today(), hinh_thuc=data.hinh_thuc))
+    ngay_tra = data.ngay_thanh_toan or date.today()
+    db.add(ThanhToan(cong_no_id=cn.id, so_tien=data.so_tien, ngay=ngay_tra, hinh_thuc=data.hinh_thuc))
     cn.da_thanh_toan = cn.da_thanh_toan + data.so_tien
     cn.trang_thai = "DA_TRA" if cn.da_thanh_toan >= cn.so_tien else "TRA_MOT_PHAN"
     # Bút toán sổ cái: Nợ 331 / Có 111/112 (đối xứng với thu tiền khách)
