@@ -1438,7 +1438,7 @@ def ds_cong_no(nha_cung_cap_id: int | None = None, chua_tra: bool = False,
             ma = dm.so if dm else None
         con_ngay = (r.han - hom_nay).days if r.han else None
         out.append({"id": r.id, "nha_cung_cap_id": r.nha_cung_cap_id,
-                    "ma": ma, "tien_thue": float(r.tien_thue or 0),
+                    "ma": ma, "so_hd": r.so_ct, "tien_thue": float(r.tien_thue or 0),
                     "so_tien": float(r.so_tien or 0), "da_thanh_toan": float(r.da_thanh_toan or 0),
                     "con_lai": con_lai, "han": str(r.han) if r.han else None,
                     "con_ngay": con_ngay, "trang_thai": r.trang_thai, "qua_han": qh})
