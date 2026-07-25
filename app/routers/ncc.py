@@ -1424,16 +1424,24 @@ def ds_cong_no(nha_cung_cap_id: int | None = None, chua_tra: bool = False,
     if nha_cung_cap_id:
         q = q.filter(CongNo.nha_cung_cap_id == nha_cung_cap_id)
     rows = q.order_by(CongNo.id.desc()).limit(300).all()
+    hom_nay = date.today()
     out = []
     for r in rows:
         con_lai = float((r.so_tien or 0) - (r.da_thanh_toan or 0))
         if chua_tra and con_lai <= 0:
             continue
-        qh = bool(r.han and con_lai > 0 and r.han < date.today())
+        qh = bool(r.han and con_lai > 0 and r.han < hom_nay)
+        # Mã đơn hàng: mã nhập ngoài, hoặc số đơn mua nếu công nợ sinh từ PO
+        ma = r.ma_ban_ngoai
+        if not ma and r.don_mua_id:
+            dm = db.get(DonMua, r.don_mua_id)
+            ma = dm.so if dm else None
+        con_ngay = (r.han - hom_nay).days if r.han else None
         out.append({"id": r.id, "nha_cung_cap_id": r.nha_cung_cap_id,
+                    "ma": ma, "tien_thue": float(r.tien_thue or 0),
                     "so_tien": float(r.so_tien or 0), "da_thanh_toan": float(r.da_thanh_toan or 0),
                     "con_lai": con_lai, "han": str(r.han) if r.han else None,
-                    "trang_thai": r.trang_thai, "qua_han": qh})
+                    "con_ngay": con_ngay, "trang_thai": r.trang_thai, "qua_han": qh})
     return out
 
 
@@ -1575,10 +1583,13 @@ def ai_nhap_cong_no_ncc(data: AiNhapNccVao, db: Session = Depends(get_db),
         if r.get("dien_giai"):
             gc.append(str(r["dien_giai"]).strip())
         ghi_chu = (" · ".join(gc))[:300] or None
+        vat = Decimal(str(_int0(r.get("tien_thue"))))
+        if vat > st:
+            vat = Decimal(0)
         tt = "DA_TRA" if dtt >= st else ("TRA_MOT_PHAN" if dtt > 0 else "CHUA_TRA")
-        db.add(CongNo(loai="PHAI_TRA", nha_cung_cap_id=ncc_id, so_tien=st, da_thanh_toan=dtt,
-                      han=han, ngay_ct=ngay_ct, ngay_tt_tiep=ngay_tt, ma_ban_ngoai=ma,
-                      so_ct=so_ct, trang_thai=tt, ghi_chu=ghi_chu))
+        db.add(CongNo(loai="PHAI_TRA", nha_cung_cap_id=ncc_id, so_tien=st, tien_thue=vat,
+                      da_thanh_toan=dtt, han=han, ngay_ct=ngay_ct, ngay_tt_tiep=ngay_tt,
+                      ma_ban_ngoai=ma, so_ct=so_ct, trang_thai=tt, ghi_chu=ghi_chu))
         tao += 1
     ghi_audit(db, nd.id, "TAO", "cong_no", 0, moi={"ai_upload_ncc_so_dong": tao})
     db.commit()

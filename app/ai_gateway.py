@@ -713,15 +713,17 @@ def doc_cong_no_ncc_file(data: bytes, content_type: str, filename: str) -> list[
     cau_hoi = ("Trích MỖI DÒNG dữ liệu thành một phần tử JSON trong một mảng, dạng:\n"
                '{"nha_cung_cap":"tên nhà cung cấp","ma":"mã đơn hàng/đơn mua/PO nếu có",'
                '"so_hoa_don":"số hóa đơn/chứng từ nếu có","ngay":"YYYY-MM-DD ngày hạch toán/chứng từ nếu có",'
-               '"so_tien":<TỔNG phải trả - số nguyên>,"da_thanh_toan":<đã trả/cọc - số nguyên, 0 nếu không có>,'
+               '"so_tien":<TỔNG phải trả GỒM VAT - số nguyên>,"tien_thue":<tiền VAT/thuế GTGT - số nguyên, 0 nếu không có>,'
+               '"da_thanh_toan":<đã trả/cọc - số nguyên, 0 nếu không có>,'
                '"con_lai":<công nợ còn lại - số nguyên hoặc null>,'
-               '"han":"YYYY-MM-DD hạn thanh toán nếu có",'
+               '"han":"YYYY-MM-DD hạn/ngày thanh toán nếu có",'
                '"ngay_tt_tiep":"YYYY-MM-DD ngày thanh toán tiếp theo nếu có",'
                '"dien_giai":"nội dung/diễn giải/ghi chú"}.\n'
                "GỢI Ý ÁNH XẠ CỘT (tên có thể viết tắt/khác): 'nha_cung_cap'←'Tên nhà cung cấp'; "
                "'ma'←'Mã ĐH/Mã đơn hàng/PO'; 'so_hoa_don'←'Số hóa đơn'; 'ngay'←'Ngày hạch toán'; "
-               "'so_tien'←'Tổng/Tổng hóa đơn/Thành tiền'; 'con_lai'←'Công nợ còn lại/Còn lại'; "
-               "'da_thanh_toan'←'Cọc' hoặc (Tổng − Công nợ còn lại); 'han'←'Hạn thanh toán'.\n"
+               "'so_tien'←'Tổng/Tổng hóa đơn' (GỒM VAT); 'tien_thue'←'VAT/Tiền thuế GTGT'; "
+               "'con_lai'←'Công nợ còn lại/Còn lại'; "
+               "'da_thanh_toan'←'Cọc' hoặc (Tổng − Công nợ còn lại); 'han'←'Hạn thanh toán/Ngày thanh toán'.\n"
                "LƯU Ý: TIÊU ĐỀ CỘT có thể nằm trên 2 DÒNG đầu (một phần cột ở dòng trên, phần còn lại ở "
                "dòng dưới) — hãy GỘP cả hai dòng để hiểu đủ tên cột.\n"
                "QUY TẮC: (1) Nếu có CẢ 'Tổng' và 'Công nợ còn lại': so_tien='Tổng', con_lai='Công nợ còn lại', "
@@ -752,11 +754,15 @@ def doc_cong_no_ncc_file(data: bytes, content_type: str, filename: str) -> list[
             continue
         han = _ngay_iso(r.get("han"))
         ngay_tt = _ngay_iso(r.get("ngay_tt_tiep")) or han
+        vat = _so_nguyen(r.get("tien_thue"))
+        if vat > st:
+            vat = 0
         out.append({
             "nha_cung_cap": ten[:200],
             "ma": str(r.get("ma") or "").strip()[:60],
             "so_hoa_don": str(r.get("so_hoa_don") or "").strip()[:60],
             "so_tien": st,
+            "tien_thue": vat,
             "da_thanh_toan": min(dtt, st) if st else dtt,
             "con_lai": cl,
             "han": han,

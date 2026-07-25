@@ -462,6 +462,7 @@ class CongNo(Base):
     khach_hang_id: Mapped[int | None] = mapped_column(ForeignKey("khach_hang.id"), nullable=True)
     nha_cung_cap_id: Mapped[int | None] = mapped_column(ForeignKey("nha_cung_cap.id"), nullable=True)
     so_tien: Mapped[Decimal] = mapped_column(Numeric(18, 0))
+    tien_thue: Mapped[Decimal] = mapped_column(Numeric(18, 0), default=0)   # VAT trong so_tien (nếu có)
     da_thanh_toan: Mapped[Decimal] = mapped_column(Numeric(18, 0), default=0)
     han: Mapped[date | None] = mapped_column(Date, nullable=True)
     trang_thai: Mapped[str] = mapped_column(String(20), default="CHUA_THU")
