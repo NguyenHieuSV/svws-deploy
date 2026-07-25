@@ -625,15 +625,19 @@ def doc_cong_no_file(data: bytes, content_type: str, filename: str) -> list[dict
             st = cl
         if not ten and st == 0:
             continue
+        han = _ngay_iso(r.get("han"))
+        ngay_tt = _ngay_iso(r.get("ngay_tt_tiep"))
+        if not ngay_tt:                        # file không có cột "ngày TT tiếp" riêng → dùng hạn thanh toán
+            ngay_tt = han
         out.append({
             "khach_hang": ten[:200],
             "ma_ban": str(r.get("ma_ban") or "").strip()[:60],
             "so_hoa_don": str(r.get("so_hoa_don") or "").strip()[:60],
             "so_tien": st,
             "da_thanh_toan": min(dtt, st) if st else dtt,
-            "han": _ngay_iso(r.get("han")),
+            "han": han,
             "ngay": _ngay_iso(r.get("ngay")),
-            "ngay_tt_tiep": _ngay_iso(r.get("ngay_tt_tiep")),
+            "ngay_tt_tiep": ngay_tt,
             "dien_giai": str(r.get("dien_giai") or "").strip()[:280],
         })
     if not out:
