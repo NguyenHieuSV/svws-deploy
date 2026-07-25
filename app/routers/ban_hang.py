@@ -173,6 +173,7 @@ def ds_cong_no_khach(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "X
         kh = db.get(KhachHang, kh_id) if kh_id else None
         moc = cn.ngay_tt_tiep or cn.han   # mốc nhắc: ưu tiên ngày TT tiếp theo
         con_ngay = (moc - hom_nay).days if moc else None
+        xong = (cn.nhac_trang_thai == "XONG")   # đã đánh dấu Hoàn thành → ngừng nhắc
         out.append({
             "id": cn.id,
             "ngay": (str(hd.ngay) if (hd and hd.ngay)
@@ -196,9 +197,10 @@ def ds_cong_no_khach(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "X
             "ngay_tt_tiep": str(cn.ngay_tt_tiep) if cn.ngay_tt_tiep else None,
             "ghi_chu": cn.ghi_chu,
             "trang_thai": cn.trang_thai,
+            "nhac_trang_thai": cn.nhac_trang_thai or "CHO",
             "con_ngay": con_ngay,
-            "qua_han": bool(moc and con_ngay is not None and con_ngay < 0),
-            "sap_den_han": bool(moc and con_ngay is not None and 0 <= con_ngay <= 7),
+            "qua_han": bool(not xong and moc and con_ngay is not None and con_ngay < 0),
+            "sap_den_han": bool(not xong and moc and con_ngay is not None and 0 <= con_ngay <= 7),
         })
     out.sort(key=lambda x: (x["ngay_tt_tiep"] or x["han"] or "9999-12-31"))
     return out
@@ -473,6 +475,7 @@ class TheoDoiCongNoVao(_CNBase):
     ghi_chu: str | None = None
     don_hang_id: int | None = None
     doi_don_hang: bool = False          # True = áp dụng don_hang_id (kể cả gỡ về None)
+    nhac_trang_thai: str | None = None  # CHO | XONG (chỉ cập nhật khi gửi kèm)
 
 
 @router.put("/cong-no/{cn_id}/theo-doi")
@@ -489,6 +492,8 @@ def cap_nhat_theo_doi_cong_no(cn_id: int, data: TheoDoiCongNoVao, db: Session = 
           "ghi_chu": cn.ghi_chu, "don_hang_id": cn.don_hang_id}
     cn.ngay_tt_tiep = data.ngay_tt_tiep
     cn.ghi_chu = (data.ghi_chu or "").strip() or None
+    if data.nhac_trang_thai in ("CHO", "XONG"):
+        cn.nhac_trang_thai = data.nhac_trang_thai
     if data.doi_don_hang:
         if data.don_hang_id and db.get(DonHang, data.don_hang_id) is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đơn hàng bán")
@@ -498,7 +503,8 @@ def cap_nhat_theo_doi_cong_no(cn_id: int, data: TheoDoiCongNoVao, db: Session = 
                    "ghi_chu": cn.ghi_chu, "don_hang_id": cn.don_hang_id})
     db.commit()
     return {"id": cn.id, "ngay_tt_tiep": str(cn.ngay_tt_tiep) if cn.ngay_tt_tiep else None,
-            "ghi_chu": cn.ghi_chu, "don_hang_id": cn.don_hang_id}
+            "ghi_chu": cn.ghi_chu, "don_hang_id": cn.don_hang_id,
+            "nhac_trang_thai": cn.nhac_trang_thai}
 
 
 @router.get("/cong-no/{cn_id}/dot-thanh-toan")
