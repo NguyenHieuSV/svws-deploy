@@ -1467,6 +1467,183 @@ def xoa_cong_no_ncc(cn_id: int, db: Session = Depends(get_db),
     return {"da_xoa": True}
 
 
+# ============ AI UPLOAD CÔNG NỢ PHẢI TRẢ (Excel/CSV → CongNo PHAI_TRA) ============
+from pydantic import BaseModel as _NccCnBase
+
+
+def _int0(x) -> int:
+    try:
+        return int(round(float(x)))
+    except Exception:
+        return 0
+
+
+def _pdate_iso(v):
+    v = str(v or "").strip()
+    if not v:
+        return None
+    try:
+        return date.fromisoformat(v[:10])
+    except Exception:
+        return None
+
+
+def _match_ncc(db: Session, ten: str):
+    """Khớp nhà cung cấp theo tên (không phân biệt hoa thường, đã trim)."""
+    t = (ten or "").strip()
+    if not t:
+        return None
+    return db.query(NhaCungCap).filter(func.lower(NhaCungCap.ten) == t.lower()).first()
+
+
+@router.post("/cong-no/ai-doc")
+def ai_doc_cong_no_ncc(file: UploadFile = File(...), db: Session = Depends(get_db),
+                       nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
+    """AI đọc file Excel/CSV công nợ PHẢI TRẢ nhà cung cấp, tự dò cột, trả BẢN XEM TRƯỚC.
+    def (không async) → chạy trong threadpool, tránh 502 khi cuộc gọi AI dài."""
+    from ..ai_gateway import doc_cong_no_ncc_file
+    data = file.file.read()
+    if not data:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "File trống")
+    try:
+        rows = doc_cong_no_ncc_file(data, file.content_type, file.filename)
+    except ValueError as e:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e))
+    da_co = set()
+    for (v,) in (db.query(CongNo.so_ct)
+                 .filter(CongNo.loai == "PHAI_TRA", CongNo.so_ct.isnot(None)).all()):
+        if v and str(v).strip():
+            da_co.add(str(v).strip().lower())
+    trong_file = {}
+    for r in rows:
+        ncc = _match_ncc(db, r.get("nha_cung_cap"))
+        r["nha_cung_cap_id"] = ncc.id if ncc else None
+        r["khop_ncc"] = bool(ncc)
+        sh = str(r.get("so_hoa_don") or "").strip()
+        r["trung"] = False
+        r["trung_ly_do"] = ""
+        if sh:
+            k = sh.lower()
+            if k in da_co:
+                r["trung"] = True
+                r["trung_ly_do"] = "đã có trong hệ thống"
+            elif trong_file.get(k, 0) > 0:
+                r["trung"] = True
+                r["trung_ly_do"] = "trùng trong file"
+            trong_file[k] = trong_file.get(k, 0) + 1
+    return {"so_dong": len(rows), "rows": rows,
+            "so_khop": sum(1 for r in rows if r["khop_ncc"]),
+            "so_trung": sum(1 for r in rows if r["trung"])}
+
+
+class AiNhapNccVao(_NccCnBase):
+    rows: list[dict]
+
+
+@router.post("/cong-no/ai-nhap")
+def ai_nhap_cong_no_ncc(data: AiNhapNccVao, db: Session = Depends(get_db),
+                        nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
+    """Nhập các dòng đã chọn thành CongNo PHẢI TRẢ (khớp/tạo nhà cung cấp)."""
+    tao = 0
+    bo_qua = 0
+    for r in data.rows:
+        so_ct = str(r.get("so_hoa_don") or "").strip()[:60] or None
+        if not so_ct:                          # bắt buộc có số hóa đơn mới đưa vào công nợ
+            bo_qua += 1
+            continue
+        ten = str(r.get("nha_cung_cap") or "").strip()
+        st = Decimal(str(_int0(r.get("so_tien"))))
+        if st <= 0:
+            continue
+        ncc_id = r.get("nha_cung_cap_id")
+        if not ncc_id and ten:
+            ncc = _match_ncc(db, ten)
+            if ncc is None:
+                ncc = NhaCungCap(ten=ten[:200])
+                db.add(ncc); db.flush()
+            ncc_id = ncc.id
+        dtt = Decimal(str(_int0(r.get("da_thanh_toan"))))
+        if dtt > st:
+            dtt = st
+        han = _pdate_iso(r.get("han"))
+        ngay_ct = _pdate_iso(r.get("ngay"))
+        ngay_tt = _pdate_iso(r.get("ngay_tt_tiep"))
+        ma = str(r.get("ma") or "").strip()[:60] or None
+        gc = []
+        if so_ct:
+            gc.append("HĐ " + so_ct)
+        if r.get("dien_giai"):
+            gc.append(str(r["dien_giai"]).strip())
+        ghi_chu = (" · ".join(gc))[:300] or None
+        tt = "DA_TRA" if dtt >= st else ("TRA_MOT_PHAN" if dtt > 0 else "CHUA_TRA")
+        db.add(CongNo(loai="PHAI_TRA", nha_cung_cap_id=ncc_id, so_tien=st, da_thanh_toan=dtt,
+                      han=han, ngay_ct=ngay_ct, ngay_tt_tiep=ngay_tt, ma_ban_ngoai=ma,
+                      so_ct=so_ct, trang_thai=tt, ghi_chu=ghi_chu))
+        tao += 1
+    ghi_audit(db, nd.id, "TAO", "cong_no", 0, moi={"ai_upload_ncc_so_dong": tao})
+    db.commit()
+    return {"da_tao": tao, "bo_qua_thieu_hd": bo_qua}
+
+
+class DepTrungNccVao(_NccCnBase):
+    xac_nhan: bool = False
+
+
+@router.post("/cong-no/dep-trung")
+def dep_trung_cong_no_ncc(data: DepTrungNccVao, db: Session = Depends(get_db),
+                          nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
+    """Dọn công nợ PHẢI TRẢ trùng (nhập từ file): giữ bản đầu, xóa bản thừa.
+    Chỉ xét bản NHẬP NGOÀI (không gắn hóa đơn & đơn mua) và CHƯA trả (đã TT = 0)."""
+    q = (db.query(CongNo)
+         .filter(CongNo.loai == "PHAI_TRA",
+                 CongNo.hoa_don_id.is_(None),
+                 CongNo.don_mua_id.is_(None),
+                 CongNo.da_thanh_toan == 0)
+         .order_by(CongNo.id.asc()).all())
+    giu = {}
+    du = []
+    for cn in q:
+        if cn.so_ct and str(cn.so_ct).strip():
+            fp = "hd:" + str(cn.so_ct).strip().lower()
+        else:
+            fp = f"ncc:{cn.nha_cung_cap_id}|st:{cn.so_tien}|mb:{cn.ma_ban_ngoai or ''}|ng:{cn.ngay_ct or ''}"
+        if fp in giu:
+            du.append(cn)
+        else:
+            giu[fp] = cn.id
+    if not data.xac_nhan:
+        return {"se_xoa": len(du), "so_giu": len(giu),
+                "xem_truoc": [{"id": c.id, "so_ct": c.so_ct, "so_tien": float(c.so_tien or 0)}
+                              for c in du[:15]]}
+    for cn in du:
+        db.delete(cn)
+    ghi_audit(db, nd.id, "XOA", "cong_no", 0, moi={"dep_trung_ncc_da_xoa": len(du)})
+    db.commit()
+    return {"da_xoa": len(du)}
+
+
+@router.post("/cong-no/xoa-nhap")
+def xoa_cong_no_nhap_ncc(data: DepTrungNccVao, db: Session = Depends(get_db),
+                         nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
+    """Xóa TẤT CẢ công nợ PHẢI TRẢ nhập từ file (không gắn hóa đơn & đơn mua).
+    Công nợ thật từ ĐƠN MUA / hóa đơn KHÔNG bị đụng."""
+    rows = (db.query(CongNo)
+            .filter(CongNo.loai == "PHAI_TRA",
+                    CongNo.hoa_don_id.is_(None),
+                    CongNo.don_mua_id.is_(None)).all())
+    n = len(rows)
+    if not data.xac_nhan:
+        return {"se_xoa": n}
+    ids = [c.id for c in rows]
+    if ids:
+        db.query(ThanhToan).filter(ThanhToan.cong_no_id.in_(ids)).delete(synchronize_session=False)
+    for cn in rows:
+        db.delete(cn)
+    ghi_audit(db, nd.id, "XOA", "cong_no", 0, moi={"xoa_nhap_ncc_da_xoa": n})
+    db.commit()
+    return {"da_xoa": n}
+
+
 class SuaCongNoVao(_SPBase):
     so_tien: Decimal | None = None   # None = giữ nguyên
     han: date | None = None          # gửi None = xóa hạn

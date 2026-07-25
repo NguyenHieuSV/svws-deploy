@@ -531,9 +531,9 @@ def _bang_van_ban(data: bytes, content_type: str, filename: str) -> str | None:
     return None
 
 
-def _cong_no_tu_bang(txt: str, sys: str, cau_hoi: str, lo: int = 20) -> list:
+def _cong_no_tu_bang(txt: str, sys: str, cau_hoi: str, lo: int = 20, header_lines: int = 2) -> list:
     """Đọc bảng công nợ THEO LÔ ~lo dòng để KHÔNG bị cắt cụt khi file nhiều dòng.
-    Tiêu đề cột (2 dòng đầu mỗi sheet) được gửi kèm mọi lô để AI ánh xạ đúng cột.
+    Tiêu đề cột (header_lines dòng đầu mỗi sheet) gửi kèm mọi lô để AI ánh xạ đúng cột.
     Gọi các lô song song rồi gộp kết quả."""
     import re as _re
     from concurrent.futures import ThreadPoolExecutor
@@ -548,7 +548,7 @@ def _cong_no_tu_bang(txt: str, sys: str, cau_hoi: str, lo: int = 20) -> list:
             lines = lines[1:]
         if not lines:
             continue
-        header_ctx = "\n".join(lines[:2])          # dòng tổng + dòng tên cột
+        header_ctx = "\n".join(lines[:header_lines])   # dòng tổng + (các) dòng tên cột
         for i in range(0, len(lines), lo):
             batch = "\n".join(lines[i:i + lo])
             khoi_txt_list.append(
@@ -635,6 +635,130 @@ def doc_cong_no_file(data: bytes, content_type: str, filename: str) -> list[dict
             "so_hoa_don": str(r.get("so_hoa_don") or "").strip()[:60],
             "so_tien": st,
             "da_thanh_toan": min(dtt, st) if st else dtt,
+            "han": han,
+            "ngay": _ngay_iso(r.get("ngay")),
+            "ngay_tt_tiep": ngay_tt,
+            "dien_giai": str(r.get("dien_giai") or "").strip()[:280],
+        })
+    if not out:
+        raise ValueError("AI không tìm thấy dòng công nợ nào — kiểm tra file có bảng dữ liệu rõ ràng.")
+    return out
+
+
+def _excel_text_ncc(data: bytes) -> str:
+    """Chỉ lấy sheet CÔNG NỢ PHẢI TRẢ nhà cung cấp (Nợ NCC) — bỏ sheet 'Phải thu KH'
+    để tránh nhập nhầm công nợ khách hàng thành nợ nhà cung cấp."""
+    import io, unicodedata
+    from openpyxl import load_workbook
+    try:
+        wb = load_workbook(io.BytesIO(data), read_only=True, data_only=True)
+    except Exception:
+        raise ValueError("Không mở được file Excel — kiểm tra file .xlsx không hỏng "
+                         "và không đặt mật khẩu.")
+
+    def bo_dau(s: str) -> str:
+        s = (s or "").replace("đ", "d").replace("Đ", "D")
+        return "".join(c for c in unicodedata.normalize("NFD", s)
+                       if unicodedata.category(c) != "Mn").lower()
+
+    def doc(ws) -> list:
+        d = []
+        for row in ws.iter_rows(values_only=True):
+            o = [("" if v is None else str(v)).strip() for v in row]
+            if any(o):
+                d.append(" | ".join(o).rstrip(" |"))
+            if len(d) >= 1500:
+                break
+        return d
+
+    sheets = list(wb.worksheets)
+    ncc = [ws for ws in sheets
+           if any(k in bo_dau(ws.title) for k in ("ncc", "nha cung cap", "phai tra", "no ncc"))]
+    if ncc:
+        chon = ncc
+    else:
+        khac = [ws for ws in sheets if "thu" not in bo_dau(ws.title)]   # tránh sheet phải thu
+        chon = [khac[0]] if khac else [sheets[0]]
+    phan = []
+    for ws in chon:
+        d = doc(ws)
+        if d:
+            phan.append(f"### Sheet: {ws.title}\n" + "\n".join(d))
+    wb.close()
+    txt = "\n\n".join(phan)
+    if not txt.strip():
+        raise ValueError("File Excel không có dữ liệu để đọc.")
+    return txt[:60000]
+
+
+def _bang_van_ban_ncc(data: bytes, content_type: str, filename: str) -> str | None:
+    ct = (content_type or "").lower()
+    fn = (filename or "").lower()
+    if ct == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" or \
+            fn.endswith((".xlsx", ".xlsm")):
+        return _excel_text_ncc(data)
+    if ct.startswith("text/") or fn.endswith((".txt", ".csv", ".tsv")):
+        return "### Sheet: data\n" + data.decode("utf-8", errors="replace")[:60000]
+    return None
+
+
+def doc_cong_no_ncc_file(data: bytes, content_type: str, filename: str) -> list[dict]:
+    """Đọc file CÔNG NỢ PHẢI TRẢ nhà cung cấp (Excel/CSV/Sheet). Trả list dict
+    {nha_cung_cap, ma, so_hoa_don, so_tien, da_thanh_toan, con_lai, han, ngay, ngay_tt_tiep, dien_giai}."""
+    if settings.ai_provider.upper() != "ANTHROPIC" or not settings.anthropic_api_key:
+        raise ValueError("Chưa bật AI — cần AI_PROVIDER=ANTHROPIC và ANTHROPIC_API_KEY trên máy chủ.")
+    sys = ("Bạn là kế toán công nợ. Đọc bảng dữ liệu CÔNG NỢ PHẢI TRẢ (công ty còn nợ nhà cung cấp). "
+           "Tên cột có thể khác nhau, nhiều hơn hoặc ít hơn — hãy TỰ HIỂU ý nghĩa từng cột và ánh xạ đúng. "
+           "Tuyệt đối không bịa số; cột nào không có thì để trống/0.")
+    cau_hoi = ("Trích MỖI DÒNG dữ liệu thành một phần tử JSON trong một mảng, dạng:\n"
+               '{"nha_cung_cap":"tên nhà cung cấp","ma":"mã đơn hàng/đơn mua/PO nếu có",'
+               '"so_hoa_don":"số hóa đơn/chứng từ nếu có","ngay":"YYYY-MM-DD ngày hạch toán/chứng từ nếu có",'
+               '"so_tien":<TỔNG phải trả - số nguyên>,"da_thanh_toan":<đã trả/cọc - số nguyên, 0 nếu không có>,'
+               '"con_lai":<công nợ còn lại - số nguyên hoặc null>,'
+               '"han":"YYYY-MM-DD hạn thanh toán nếu có",'
+               '"ngay_tt_tiep":"YYYY-MM-DD ngày thanh toán tiếp theo nếu có",'
+               '"dien_giai":"nội dung/diễn giải/ghi chú"}.\n'
+               "GỢI Ý ÁNH XẠ CỘT (tên có thể viết tắt/khác): 'nha_cung_cap'←'Tên nhà cung cấp'; "
+               "'ma'←'Mã ĐH/Mã đơn hàng/PO'; 'so_hoa_don'←'Số hóa đơn'; 'ngay'←'Ngày hạch toán'; "
+               "'so_tien'←'Tổng/Tổng hóa đơn/Thành tiền'; 'con_lai'←'Công nợ còn lại/Còn lại'; "
+               "'da_thanh_toan'←'Cọc' hoặc (Tổng − Công nợ còn lại); 'han'←'Hạn thanh toán'.\n"
+               "LƯU Ý: TIÊU ĐỀ CỘT có thể nằm trên 2 DÒNG đầu (một phần cột ở dòng trên, phần còn lại ở "
+               "dòng dưới) — hãy GỘP cả hai dòng để hiểu đủ tên cột.\n"
+               "QUY TẮC: (1) Nếu có CẢ 'Tổng' và 'Công nợ còn lại': so_tien='Tổng', con_lai='Công nợ còn lại', "
+               "da_thanh_toan = Tổng − Công nợ còn lại (≥0). "
+               "(2) Nếu CHỈ có 'còn lại/còn nợ': so_tien = còn lại, da_thanh_toan = 0. "
+               "(3) Số tiền bỏ dấu phân cách nghìn, trả số nguyên. "
+               "(4) BỎ dòng tiêu đề và dòng 'Tổng cộng'. "
+               "(5) ĐỌC HẾT MỌI DÒNG dữ liệu, KHÔNG bỏ sót dòng nào. "
+               "(6) Chỉ trả JSON array, không giải thích.")
+    bang = _bang_van_ban_ncc(data, content_type, filename)
+    if bang:                                   # Excel/CSV → đọc THEO LÔ (tiêu đề 2 dòng → header_lines=3)
+        ds = _cong_no_tu_bang(bang, sys, cau_hoi, header_lines=3)
+    else:
+        khoi = _khoi_noi_dung_file(data, content_type, filename)
+        txt = _goi_claude_json(khoi, sys, cau_hoi, max_tokens=8000, timeout=180)
+        ds = _vot_json_mang(txt)
+    out = []
+    for r in ds:
+        if not isinstance(r, dict):
+            continue
+        ten = str(r.get("nha_cung_cap") or "").strip()
+        st = _so_nguyen(r.get("so_tien"))
+        cl = _so_nguyen(r.get("con_lai"))
+        dtt = _so_nguyen(r.get("da_thanh_toan"))
+        if st == 0 and cl:
+            st = cl
+        if not ten and st == 0:
+            continue
+        han = _ngay_iso(r.get("han"))
+        ngay_tt = _ngay_iso(r.get("ngay_tt_tiep")) or han
+        out.append({
+            "nha_cung_cap": ten[:200],
+            "ma": str(r.get("ma") or "").strip()[:60],
+            "so_hoa_don": str(r.get("so_hoa_don") or "").strip()[:60],
+            "so_tien": st,
+            "da_thanh_toan": min(dtt, st) if st else dtt,
+            "con_lai": cl,
             "han": han,
             "ngay": _ngay_iso(r.get("ngay")),
             "ngay_tt_tiep": ngay_tt,
