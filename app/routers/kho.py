@@ -41,10 +41,13 @@ def ds_cho_nhap(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))
     """Danh sách đơn đặt hàng (PO) đã xác nhận với NCC nhưng chưa nhận đủ hàng —
     thủ kho bấm Tạo phiếu nhập, dữ liệu PO tự điền vào phiếu nhập kho."""
     from ..models import DonMua, DonMuaCt, NhaCungCap
+    from sqlalchemy import or_ as _or
     out = []
+    # PO đã DUYỆT + chưa nhận đủ, VÀ (đã xác nhận đặt hàng HOẶC đã có số hóa đơn — đủ thông tin)
     q = (db.query(DonMua)
-         .filter(DonMua.da_dat_hang.is_(True), DonMua.trang_thai == "DA_DUYET",
-                 DonMua.trang_thai_nhan != "DU")
+         .filter(DonMua.trang_thai == "DA_DUYET",
+                 DonMua.trang_thai_nhan != "DU",
+                 _or(DonMua.da_dat_hang.is_(True), DonMua.so_hoa_don.isnot(None)))
          .order_by(DonMua.id.desc()))
     for dm in q.all():
         ncc = db.get(NhaCungCap, dm.nha_cung_cap_id)
@@ -61,7 +64,7 @@ def ds_cho_nhap(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))
                        "da_nhan": float(c.so_luong_nhan or 0),
                        "con_lai": con, "don_gia": float(c.don_gia or 0)})
         out.append({"id": dm.id, "so": dm.so or f"PO-{dm.id}",
-                    "ncc": ncc.ten if ncc else None,
+                    "ncc": ncc.ten if ncc else None, "so_hoa_don": dm.so_hoa_don,
                     "ngay_dat_hang": str(dm.ngay_dat_hang or dm.ngay or "")[:10],
                     "ngay_hen_giao": str(dm.ngay_hen_giao) if dm.ngay_hen_giao else None,
                     "tong_tien": float(dm.tong_tien or 0), "chi_tiet": ct})
@@ -199,6 +202,7 @@ def lap_phieu(
     nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC")),
 ):
     phieu = PhieuKho(loai=data.loai, so=data.so, ngay=date.today(),
+                     don_hang_id=data.don_hang_id,
                      nguoi_tao=nhan_vien_id_cua(db, nd.id))
     db.add(phieu)
     db.flush()

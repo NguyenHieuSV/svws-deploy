@@ -55,6 +55,7 @@ class PhieuCtVao(BaseModel):
 class PhieuKhoVao(BaseModel):
     loai: str = Field(pattern="^(NHAP|XUAT)$")
     so: str | None = None
+    don_hang_id: int | None = None       # mã hàng bán (đơn hàng) gắn cho phiếu nhập/xuất
     chi_tiet: list[PhieuCtVao] = Field(min_length=1)
 
 
