@@ -417,6 +417,7 @@ class DonHang(Base):
     tien_thue: Mapped[Decimal] = mapped_column(Numeric(18, 0), default=0)   # tổng VAT
     trang_thai: Mapped[str] = mapped_column(String(20), default="MOI")
     ty_le_dat_coc: Mapped[Decimal] = mapped_column(Numeric(5, 2), default=0)
+    thanh_toan_coc: Mapped[Decimal] = mapped_column(Numeric(18, 0), default=0)   # tiền cọc khách đã trả
     chi_tiet: Mapped[list["DonHangCt"]] = relationship(cascade="all, delete-orphan", lazy="selectin")
 
 

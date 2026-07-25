@@ -147,7 +147,8 @@ def ds_don_hang_co_po(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "
         out.append({"id": o.id, "so": o.so or f"DH-{o.id}",
                     "khach_ten": kh.ten if kh else None,
                     "ngay": str(o.ngay) if o.ngay else None,
-                    "tong_tien": float(o.tong_tien or 0)})
+                    "tong_tien": float(o.tong_tien or 0),
+                    "thanh_toan_coc": float(o.thanh_toan_coc or 0)})
     return out
 
 
@@ -1299,6 +1300,7 @@ class DonHangTrucTiepVao(_DHBase):
     khach_hang_id: int
     so: str | None = None            # bỏ trống → tự tạo DH-YYYYMMDD-id
     ngay: date | None = None
+    thanh_toan_coc: Decimal = Decimal(0)   # tiền cọc khách đã trả (VND)
     chi_tiet: list[DonHangCtTrucTiepVao]
 
 
@@ -1341,9 +1343,12 @@ def tao_don_hang_truc_tiep(data: DonHangTrucTiepVao, db: Session = Depends(get_d
             hh.don_vi = it.don_vi
         lines.append((hh.id, it.so_luong, it.don_gia, it.thue_suat))
     tien_hang, tien_thue = _tinh_don_hang(lines)
+    coc = Decimal(str(data.thanh_toan_coc or 0))
+    if coc < 0:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Thanh toán cọc không được âm")
     dh = DonHang(so=so, khach_hang_id=data.khach_hang_id,
                  ngay=data.ngay or date.today(), tong_tien=tien_hang,
-                 tien_thue=tien_thue, trang_thai="MOI")
+                 tien_thue=tien_thue, trang_thai="MOI", thanh_toan_coc=coc)
     db.add(dh)
     db.flush()
     if not dh.so:
@@ -1499,7 +1504,8 @@ def chi_tiet_don_hang(dh_id: int, db: Session = Depends(get_db),
             "ngay": str(dh.ngay) if dh.ngay else None, "tong_tien": float(dh.tong_tien or 0),
             "tien_thue": float(dh.tien_thue or 0),
             "trang_thai": dh.trang_thai, "co_hoa_don": co_hd,
-            # khóa sửa nội dung đơn (vẫn đổi được TRẠNG THÁI) khi đã xuất kho / có hóa đơn
+            "thanh_toan_coc": float(dh.thanh_toan_coc or 0),
+            # khóa sửa nội dung đơn (vẫn đổi được TRẠNG THÁI + CỌC) khi đã xuất kho / có hóa đơn
             "khoa_sua": bool(dh.trang_thai == "DA_XUAT" or co_hd),
             "chi_tiet": ct_out}
 
@@ -1531,6 +1537,29 @@ def doi_trang_thai_don_hang(dh_id: int, data: TrangThaiDonVao, db: Session = Dep
               cu={"trang_thai": cu}, moi={"trang_thai": tt})
     db.commit()
     return {"id": dh.id, "trang_thai": dh.trang_thai}
+
+
+class TtCocVao(_CNBase):
+    thanh_toan_coc: Decimal = Decimal(0)
+
+
+@router.put("/don-hang/{dh_id}/coc")
+def dat_thanh_toan_coc(dh_id: int, data: TtCocVao, db: Session = Depends(get_db),
+                       nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    """Ghi/sửa số tiền 'Thanh toán cọc' của đơn hàng — cờ theo dõi thu tiền,
+    cho phép cả khi đơn đã xuất kho / đã có hóa đơn (như đổi trạng thái)."""
+    dh = db.get(DonHang, dh_id)
+    if dh is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đơn hàng")
+    coc = Decimal(str(data.thanh_toan_coc or 0))
+    if coc < 0:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Thanh toán cọc không được âm")
+    cu = float(dh.thanh_toan_coc or 0)
+    dh.thanh_toan_coc = coc
+    ghi_audit(db, nd.id, "CAP_NHAT", "don_hang", dh.id,
+              cu={"thanh_toan_coc": cu}, moi={"thanh_toan_coc": float(coc)})
+    db.commit()
+    return {"id": dh.id, "thanh_toan_coc": float(dh.thanh_toan_coc or 0)}
 
 
 @router.put("/don-hang/{dh_id}", response_model=DonHangRa)

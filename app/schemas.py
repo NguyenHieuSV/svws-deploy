@@ -412,6 +412,7 @@ class DonHangRa(BaseModel):
     ngay: date | None = None
     tong_tien: Decimal
     trang_thai: str
+    thanh_toan_coc: Decimal = Decimal(0)
 
 
 # ---------- Kế toán & Tài chính ----------
