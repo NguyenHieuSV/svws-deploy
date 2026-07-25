@@ -794,7 +794,7 @@ def ds_thanh_toan_mua(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "
             if tt_cuoi and tt_cuoi.ngay:
                 ngay_tt = str(tt_cuoi.ngay)
         out.append({"id": dm.id, "so": dm.so, "ngay": str(dm.ngay or "")[:10],
-                    "so_hoa_don": so_hd, "ma_don_ban": _ma_ban_hang_po(db, dm),
+                    "so_hoa_don": dm.so_hoa_don or so_hd, "ma_don_ban": _ma_ban_hang_po(db, dm),
                     "ncc_ten": ncc.ten if ncc else None,
                     "tong_tien": float(dm.tong_tien or 0),
                     "de_nghi_tt": float(dm.de_nghi_tt or 0),
@@ -812,6 +812,7 @@ class ThanhToanMuaVao(_SPBase):
     ngay_tt_tiep: date | None = None
     so_tien_dot: Decimal | None = None   # ghi nhận THÊM một đợt → cộng dồn vào lũy kế
     ngay_thanh_toan: date | None = None  # ngày của đợt thanh toán này
+    so_hoa_don: str | None = None        # số hóa đơn mua (gắn sang công nợ phải trả)
 
 
 def _ap_dung_tt_mua(db: Session, dm: DonMua, dn: Decimal) -> bool:
@@ -840,6 +841,8 @@ def _ap_dung_tt_mua(db: Session, dm: DonMua, dn: Decimal) -> bool:
             if dm.ngay_tt_tiep:
                 cn.han = dm.ngay_tt_tiep
             cn.trang_thai = "TRA_MOT_PHAN" if dn > 0 else "CHUA_TRA"
+    if cn is not None and dm.so_hoa_don:      # gắn số hóa đơn của PO sang công nợ phải trả
+        cn.so_ct = dm.so_hoa_don[:60]
     return da_tt_100
 
 
@@ -928,6 +931,8 @@ def cap_nhat_thanh_toan_mua(dm_id: int, data: ThanhToanMuaVao, db: Session = Dep
     dm = db.get(DonMua, dm_id)
     if dm is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đơn mua")
+    if data.so_hoa_don is not None:
+        dm.so_hoa_don = (data.so_hoa_don or "").strip()[:60] or None
     tong = Decimal(dm.tong_tien or 0)
     da_cu = Decimal(dm.de_nghi_tt or 0)
     if data.so_tien_dot is not None:      # ghi nhận THÊM một đợt → cộng dồn

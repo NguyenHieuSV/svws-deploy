@@ -186,6 +186,7 @@ class DonMua(Base):
     so: Mapped[str | None] = mapped_column(String(30), unique=True, nullable=True)
     nha_cung_cap_id: Mapped[int] = mapped_column(ForeignKey("nha_cung_cap.id"))
     ngay: Mapped[date] = mapped_column(Date, server_default=func.current_date())
+    so_hoa_don: Mapped[str | None] = mapped_column(String(60), nullable=True)   # số HĐ mua (nhập ở form thanh toán)
     tien_hang: Mapped[Decimal] = mapped_column(Numeric(18, 0), default=0)   # chưa thuế
     tien_thue: Mapped[Decimal] = mapped_column(Numeric(18, 0), default=0)   # tổng VAT
     tong_tien: Mapped[Decimal] = mapped_column(Numeric(18, 0), default=0)   # = tien_hang + tien_thue
