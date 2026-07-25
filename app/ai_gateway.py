@@ -466,30 +466,153 @@ def _ngay_iso(x):
     return None
 
 
+def _excel_text_phai_thu(data: bytes) -> str:
+    """Như _excel_sang_text nhưng CHỈ lấy sheet CÔNG NỢ PHẢI THU (khách hàng) —
+    BỎ sheet 'Nợ NCC' (phải trả nhà cung cấp), 'Đề xuất/đề nghị TT' (không phải công nợ).
+    Tránh nhập nhầm nợ nhà cung cấp thành công nợ khách hàng."""
+    import io, unicodedata
+    from openpyxl import load_workbook
+    try:
+        wb = load_workbook(io.BytesIO(data), read_only=True, data_only=True)
+    except Exception:
+        raise ValueError("Không mở được file Excel — kiểm tra file .xlsx không hỏng "
+                         "và không đặt mật khẩu.")
+
+    def bo_dau(s: str) -> str:
+        s = (s or "").replace("đ", "d").replace("Đ", "D")
+        return "".join(c for c in unicodedata.normalize("NFD", s)
+                       if unicodedata.category(c) != "Mn").lower()
+
+    def doc(ws) -> list:
+        d = []
+        for row in ws.iter_rows(values_only=True):
+            o = [("" if v is None else str(v)).strip() for v in row]
+            if any(o):
+                d.append(" | ".join(o).rstrip(" |"))
+            if len(d) >= 1500:
+                break
+        return d
+
+    sheets = list(wb.worksheets)
+
+    def la_sheet_khac(nm: str) -> bool:      # KHÔNG phải công nợ phải thu khách hàng
+        return any(k in nm for k in ("ncc", "nha cung cap", "phai tra",
+                                     "de xuat", "de nghi", "proposal"))
+
+    thu = [ws for ws in sheets
+           if "thu" in bo_dau(ws.title) and not la_sheet_khac(bo_dau(ws.title))]
+    if thu:
+        chon = thu
+    else:
+        khac = [ws for ws in sheets if not la_sheet_khac(bo_dau(ws.title))]
+        chon = [khac[0]] if khac else [sheets[0]]
+    phan = []
+    for ws in chon:
+        d = doc(ws)
+        if d:
+            phan.append(f"### Sheet: {ws.title}\n" + "\n".join(d))
+    wb.close()
+    txt = "\n\n".join(phan)
+    if not txt.strip():
+        raise ValueError("File Excel không có dữ liệu để đọc.")
+    return txt[:60000]
+
+
+def _bang_van_ban(data: bytes, content_type: str, filename: str) -> str | None:
+    """Trả về bảng dạng văn bản (từng dòng) cho file Excel/CSV/TXT — để đọc THEO LÔ.
+    Trả None nếu là PDF/ảnh (không tách dòng được → đọc một lần)."""
+    ct = (content_type or "").lower()
+    fn = (filename or "").lower()
+    if ct == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" or \
+            fn.endswith((".xlsx", ".xlsm")):
+        return _excel_text_phai_thu(data)
+    if ct.startswith("text/") or fn.endswith((".txt", ".csv", ".tsv")):
+        return "### Sheet: data\n" + data.decode("utf-8", errors="replace")[:60000]
+    return None
+
+
+def _cong_no_tu_bang(txt: str, sys: str, cau_hoi: str, lo: int = 20) -> list:
+    """Đọc bảng công nợ THEO LÔ ~lo dòng để KHÔNG bị cắt cụt khi file nhiều dòng.
+    Tiêu đề cột (2 dòng đầu mỗi sheet) được gửi kèm mọi lô để AI ánh xạ đúng cột.
+    Gọi các lô song song rồi gộp kết quả."""
+    import re as _re
+    from concurrent.futures import ThreadPoolExecutor
+    khoi_txt_list: list[str] = []
+    for kh in _re.split(r"(?=### Sheet: )", txt):
+        lines = [l for l in kh.split("\n") if l.strip()]
+        if not lines:
+            continue
+        marker = ""
+        if lines[0].startswith("### Sheet: "):
+            marker = lines[0]
+            lines = lines[1:]
+        if not lines:
+            continue
+        header_ctx = "\n".join(lines[:2])          # dòng tổng + dòng tên cột
+        for i in range(0, len(lines), lo):
+            batch = "\n".join(lines[i:i + lo])
+            khoi_txt_list.append(
+                (marker + "\n" if marker else "") +
+                "[TIÊU ĐỀ CỘT — chỉ để hiểu tên cột, KHÔNG trích thành công nợ]\n" +
+                header_ctx +
+                "\n[DỮ LIỆU CẦN TRÍCH — mỗi DÒNG bên dưới là MỘT công nợ, đọc HẾT không bỏ sót]\n" +
+                batch)
+
+    def _chay(bt: str) -> list:
+        try:
+            return _vot_json_mang(
+                _goi_claude_json({"type": "text", "text": bt}, sys, cau_hoi,
+                                 max_tokens=8000, timeout=150))
+        except Exception:
+            return []
+
+    out: list = []
+    if not khoi_txt_list:
+        return out
+    with ThreadPoolExecutor(max_workers=min(5, len(khoi_txt_list))) as ex:
+        for res in ex.map(_chay, khoi_txt_list):
+            out.extend(res)
+    return out
+
+
 def doc_cong_no_file(data: bytes, content_type: str, filename: str) -> list[dict]:
     """Đọc file công nợ PHẢI THU (Excel/CSV/Sheet). Tên cột có thể khác/nhiều/ít hơn —
     AI tự ánh xạ. Trả list dict {khach_hang, so_hoa_don, so_tien, da_thanh_toan, han, ngay, dien_giai}."""
     if settings.ai_provider.upper() != "ANTHROPIC" or not settings.anthropic_api_key:
         raise ValueError("Chưa bật AI — cần AI_PROVIDER=ANTHROPIC và ANTHROPIC_API_KEY trên máy chủ.")
-    khoi = _khoi_noi_dung_file(data, content_type, filename)
     sys = ("Bạn là kế toán công nợ. Đọc bảng dữ liệu CÔNG NỢ PHẢI THU (khách hàng còn nợ công ty). "
            "Tên cột trong file có thể khác nhau, nhiều hơn hoặc ít hơn — hãy TỰ HIỂU ý nghĩa từng cột "
            "và ánh xạ đúng. Tuyệt đối không bịa số; cột nào không có thì để trống/0.")
-    cau_hoi = ("Trích MỖI DÒNG công nợ thành một phần tử JSON trong một mảng, dạng:\n"
+    cau_hoi = ("Trích MỖI DÒNG dữ liệu thành một phần tử JSON trong một mảng, dạng:\n"
                '{"khach_hang":"tên khách hàng","ma_ban":"mã hàng bán/mã đơn hàng/mã hợp đồng nếu có",'
                '"so_hoa_don":"số hóa đơn/chứng từ nếu có","ngay":"YYYY-MM-DD ngày chứng từ/ghi nhận nếu có",'
                '"so_tien":<TỔNG phải thu - số nguyên>,"da_thanh_toan":<đã trả - số nguyên, 0 nếu không có>,'
-               '"con_lai":<còn lại nếu file có ghi - số nguyên hoặc null>,'
+               '"con_lai":<còn lại/còn nợ - số nguyên hoặc null>,'
                '"han":"YYYY-MM-DD hạn thanh toán nếu có",'
                '"ngay_tt_tiep":"YYYY-MM-DD ngày thanh toán tiếp theo nếu có",'
                '"dien_giai":"nội dung/diễn giải/ghi chú"}.\n'
-               "PHÂN BIỆT 3 loại ngày (mỗi cột riêng nếu file có): 'ngay' = ngày chứng từ/ghi nhận công nợ; "
-               "'han' = hạn thanh toán; 'ngay_tt_tiep' = ngày thanh toán tiếp theo (theo dõi thu hồi).\n"
-               "QUY TẮC: (1) Nếu file chỉ có cột 'còn lại/còn nợ' mà không có tổng, đặt so_tien = còn lại, "
-               "da_thanh_toan = 0. (2) Số tiền bỏ dấu phân cách nghìn, trả số nguyên. "
-               "(3) BỎ dòng tiêu đề và dòng 'Tổng cộng'. (4) Chỉ trả JSON array, không giải thích.")
-    txt = _goi_claude_json(khoi, sys, cau_hoi, max_tokens=8000, timeout=180)
-    ds = _vot_json_mang(txt)
+               "GỢI Ý ÁNH XẠ CỘT (tên trong file có thể viết tắt/khác): "
+               "'khach_hang'←'Khách hàng'; 'ma_ban'←'Mã đơn hàng/Mã hàng bán'; 'so_hoa_don'←'Số hóa đơn'; "
+               "'ngay'←'Ngày hạch toán/Ngày'; 'han'←'Hạn thanh toán'; "
+               "'ngay_tt_tiep'←'Ngày TT tiếp theo/NGÀY TT Kế/Ngày thu tiếp'; "
+               "'so_tien'←'Tổng tiền/Tổng cộng/Thành tiền'; 'con_lai'←'Tổng nợ/Còn nợ/Còn lại'; "
+               "'da_thanh_toan'←cộng các cột 'Thanh toán đợt 1/2...'.\n"
+               "PHÂN BIỆT 3 loại ngày (mỗi cột riêng nếu file có): 'ngay' = ngày chứng từ/ghi nhận; "
+               "'han' = hạn thanh toán; 'ngay_tt_tiep' = ngày thanh toán tiếp theo.\n"
+               "QUY TẮC: (1) Nếu có CẢ 'Tổng tiền' và 'Tổng nợ/Còn lại': so_tien='Tổng tiền', "
+               "con_lai='Tổng nợ', da_thanh_toan = Tổng tiền − Tổng nợ (≥0). "
+               "(2) Nếu file CHỈ có 'còn lại/còn nợ' mà không có tổng: so_tien = còn lại, da_thanh_toan = 0. "
+               "(3) Số tiền bỏ dấu phân cách nghìn, trả số nguyên. "
+               "(4) BỎ dòng tiêu đề và dòng 'Tổng cộng/tổng'. "
+               "(5) ĐỌC HẾT MỌI DÒNG dữ liệu, KHÔNG bỏ sót dòng nào. "
+               "(6) Chỉ trả JSON array, không giải thích.")
+    bang = _bang_van_ban(data, content_type, filename)
+    if bang:                                   # Excel/CSV/TXT → đọc THEO LÔ, không cắt cụt
+        ds = _cong_no_tu_bang(bang, sys, cau_hoi)
+    else:                                       # PDF/ảnh (hoặc .xls/định dạng khác → raise ở đây)
+        khoi = _khoi_noi_dung_file(data, content_type, filename)
+        txt = _goi_claude_json(khoi, sys, cau_hoi, max_tokens=8000, timeout=180)
+        ds = _vot_json_mang(txt)
     out = []
     for r in ds:
         if not isinstance(r, dict):
