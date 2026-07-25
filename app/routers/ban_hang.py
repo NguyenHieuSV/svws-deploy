@@ -1521,6 +1521,38 @@ _DH_TT_TAY = ("MOI", "DANG_THUC_HIEN", "DA_XUAT_HD", "HOAN_THANH")
 
 class TrangThaiDonVao(_CNBase):
     trang_thai: str
+    so_hoa_don: str | None = None       # dùng khi chuyển sang "Đã xuất hóa đơn" (tạo công nợ)
+
+
+def _dam_bao_cong_no_don(db: Session, dh: DonHang, so_hoa_don, nd: NguoiDung, xong: bool):
+    """Đảm bảo đơn hàng có khoản CÔNG NỢ phải thu (tạo nếu chưa có, từ tổng đơn gồm VAT,
+    trừ tiền cọc đã trả), rồi đặt trạng thái nhắc: xong=True → Hoàn thành, False → Chờ thanh toán."""
+    cn = _cong_no_cua_don(db, dh.id)
+    if cn is None:
+        truoc = Decimal(dh.tong_tien or 0)      # tiền hàng chưa VAT
+        thue = Decimal(dh.tien_thue or 0)
+        tong = truoc + thue
+        if tong <= 0:
+            return None                          # đơn chưa có giá trị → không tạo công nợ rỗng
+        so_hd = (str(so_hoa_don or "").strip() or dh.so or f"DH-{dh.id}")[:60]
+        coc = Decimal(dh.thanh_toan_coc or 0)
+        if coc > tong:
+            coc = tong
+        hd = HoaDon(loai="BAN", don_hang_id=dh.id, khach_hang_id=dh.khach_hang_id, so=so_hd[:40],
+                    ngay=date.today(), tien_truoc_thue=truoc, tien_thue=thue, tong_tien=tong,
+                    hddt_trang_thai="CHUA_PHAT_HANH", da_hach_toan=False, trang_thai="GHI_NHAN",
+                    dien_giai=f"Công nợ đơn {dh.so or dh.id}")
+        db.add(hd); db.flush()
+        cn = CongNo(loai="PHAI_THU", hoa_don_id=hd.id, khach_hang_id=dh.khach_hang_id,
+                    don_hang_id=dh.id, so_tien=tong, da_thanh_toan=coc, so_ct=so_hd,
+                    han=date.today() + timedelta(days=30),
+                    ngay_tt_tiep=date.today() + timedelta(days=30),
+                    trang_thai=("THU_DU" if coc >= tong else ("THU_MOT_PHAN" if coc > 0 else "CHUA_THU")))
+        db.add(cn); db.flush()
+        ghi_audit(db, nd.id, "TAO", "cong_no", cn.id,
+                  moi={"tu_don_hang": dh.id, "so_tien": float(tong), "da_thanh_toan": float(coc)})
+    cn.nhac_trang_thai = "XONG" if xong else "CHO"
+    return cn
 
 
 @router.put("/don-hang/{dh_id}/trang-thai")
@@ -1539,10 +1571,15 @@ def doi_trang_thai_don_hang(dh_id: int, data: TrangThaiDonVao, db: Session = Dep
                             "Trạng thái 'Đã xuất kho' do luồng xuất kho tự đặt.")
     cu = dh.trang_thai
     dh.trang_thai = tt
+    cn = None
+    if tt == "DA_XUAT_HD":                       # Đã xuất hóa đơn → mở công nợ (Chờ thanh toán)
+        cn = _dam_bao_cong_no_don(db, dh, data.so_hoa_don, nd, xong=False)
+    elif tt == "HOAN_THANH":                     # Hoàn thành → công nợ chuyển sang Đã hoàn thành
+        cn = _dam_bao_cong_no_don(db, dh, data.so_hoa_don, nd, xong=True)
     ghi_audit(db, nd.id, "CAP_NHAT", "don_hang", dh.id,
               cu={"trang_thai": cu}, moi={"trang_thai": tt})
     db.commit()
-    return {"id": dh.id, "trang_thai": dh.trang_thai}
+    return {"id": dh.id, "trang_thai": dh.trang_thai, "cong_no_id": cn.id if cn else None}
 
 
 class TtCocVao(_CNBase):
