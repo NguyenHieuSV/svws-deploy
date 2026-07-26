@@ -179,58 +179,61 @@ def reset_kho_toan_bo(db: Session = Depends(get_db),
     (báo giá, đơn hàng, đơn mua, báo giá NCC, định mức, tài sản cho thuê) sẽ được
     GIỮ LẠI (tồn về 0) để không phá vỡ vết chứng từ. Không đụng tới đơn hàng/PO."""
     from sqlalchemy import text as _sql
-    # 1) Xóa toàn bộ phiếu kho (dòng chi tiết xóa theo cascade) + đề xuất mua
-    so_phieu = db.query(PhieuKho).count()
-    db.query(PhieuKhoCt).delete(synchronize_session=False)
-    db.query(PhieuKho).delete(synchronize_session=False)
-    so_ycm = db.query(YeuCauMua).count()
-    db.query(YeuCauMua).delete(synchronize_session=False)
-    db.flush()
-    # 2) Duyệt từng hàng hóa: xóa nếu không còn tham chiếu, ngược lại đưa tồn về 0
-    refs = ["bao_gia_ct", "don_hang_ct", "don_mua_ct", "yeu_cau_mua_ct",
-            "bao_gia_ncc", "dinh_muc_tieu_hao", "tai_san_cho_thue"]
-    da_xoa, giu_lai = 0, 0
-    giu_ma = []
-    for hh in db.query(HangHoa).all():
-        ton = db.query(TonKho).filter_by(hang_hoa_id=hh.id).first()
-        con_ref = False
-        for bang in refs:
-            try:
-                if db.execute(_sql(f"SELECT 1 FROM {bang} WHERE hang_hoa_id=:i LIMIT 1"),
-                              {"i": hh.id}).first():
-                    con_ref = True
-                    break
-            except Exception:
-                pass  # bảng không tồn tại → bỏ qua tham chiếu đó
-        if con_ref:
-            if ton:
-                ton.so_luong = 0
-            giu_lai += 1
-            if len(giu_ma) < 40:
-                giu_ma.append(hh.ma or hh.ten)
-            continue
-        sp = db.begin_nested()
-        try:
-            if ton:
-                db.delete(ton)
-            db.delete(hh)
-            db.flush()
-            sp.commit()
-            da_xoa += 1
-        except Exception:
-            sp.rollback()
-            if ton:
-                ton.so_luong = 0
-            giu_lai += 1
-            if len(giu_ma) < 40:
-                giu_ma.append(hh.ma or hh.ten)
-    ghi_audit(db, nd.id, "XOA", "kho", None,
-              cu={"so_phieu": so_phieu, "so_de_xuat_mua": so_ycm,
-                  "hang_hoa_da_xoa": da_xoa, "hang_hoa_giu_lai": giu_lai})
-    db.commit()
-    return {"ok": True, "so_phieu_xoa": so_phieu, "so_de_xuat_mua_xoa": so_ycm,
-            "hang_hoa_da_xoa": da_xoa, "hang_hoa_giu_lai": giu_lai,
-            "ma_giu_lai_mau": giu_ma}
+    try:
+        # 1) Xóa toàn bộ phiếu kho (dòng chi tiết xóa theo cascade) + đề xuất mua
+        so_phieu = db.query(PhieuKho).count()
+        db.query(PhieuKhoCt).delete(synchronize_session=False)
+        db.query(PhieuKho).delete(synchronize_session=False)
+        so_ycm = db.query(YeuCauMua).count()
+        db.query(YeuCauMua).delete(synchronize_session=False)
+        db.flush()
+        # 2) Tự dò MỌI bảng có khóa ngoại trỏ tới hang_hoa (trừ ton_kho, phieu_kho_ct
+        #    đã xử lý) → tập id đang bị chứng từ tham chiếu. Dùng information_schema để
+        #    lấy đúng tên bảng/cột, tránh đoán sai cột gây abort transaction.
+        fk = db.execute(_sql(
+            "SELECT tc.table_name AS t, kcu.column_name AS c "
+            "FROM information_schema.table_constraints tc "
+            "JOIN information_schema.key_column_usage kcu "
+            "  ON tc.constraint_name=kcu.constraint_name AND tc.table_schema=kcu.table_schema "
+            "JOIN information_schema.constraint_column_usage ccu "
+            "  ON tc.constraint_name=ccu.constraint_name AND tc.table_schema=ccu.table_schema "
+            "WHERE tc.constraint_type='FOREIGN KEY' AND ccu.table_name='hang_hoa'"
+        )).all()
+        ref_ids = set()
+        for row in fk:
+            t, c = row[0], row[1]
+            if t in ("ton_kho", "phieu_kho_ct"):
+                continue
+            for r in db.execute(_sql(f'SELECT DISTINCT "{c}" AS i FROM "{t}" WHERE "{c}" IS NOT NULL')).all():
+                ref_ids.add(r[0])
+        # 3) Xóa hàng hóa KHÔNG bị tham chiếu (kèm tồn); hàng còn tham chiếu → tồn về 0
+        da_xoa, giu_lai = 0, 0
+        giu_ma = []
+        for hh in db.query(HangHoa).all():
+            ton = db.query(TonKho).filter_by(hang_hoa_id=hh.id).first()
+            if hh.id in ref_ids:
+                if ton:
+                    ton.so_luong = 0
+                giu_lai += 1
+                if len(giu_ma) < 40:
+                    giu_ma.append(hh.ma or hh.ten)
+            else:
+                if ton:
+                    db.delete(ton)
+                db.delete(hh)
+                da_xoa += 1
+        db.flush()
+        ghi_audit(db, nd.id, "XOA", "kho", None,
+                  cu={"so_phieu": so_phieu, "so_de_xuat_mua": so_ycm,
+                      "hang_hoa_da_xoa": da_xoa, "hang_hoa_giu_lai": giu_lai})
+        db.commit()
+        return {"ok": True, "so_phieu_xoa": so_phieu, "so_de_xuat_mua_xoa": so_ycm,
+                "hang_hoa_da_xoa": da_xoa, "hang_hoa_giu_lai": giu_lai,
+                "ma_giu_lai_mau": giu_ma}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            f"Reset kho lỗi: {type(e).__name__}: {str(e)[:400]}")
 
 
 # ----- XEM: phiếu kho -----
