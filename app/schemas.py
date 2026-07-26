@@ -40,8 +40,9 @@ class HangHoaRa(BaseModel):
 
 
 class HangHoaSua(BaseModel):
+    ma: str | None = None            # sửa mã hàng (kiểm tra trùng ở endpoint)
     ten: str | None = None
-    loai: str | None = Field(default=None, pattern="^(SAN_PHAM|VAT_TU|THIET_BI)$")
+    loai: str | None = Field(default=None, pattern="^(SAN_PHAM|VAT_TU|THIET_BI|HOA_CHAT)$")
     don_vi: str | None = None
     gia_ban: Decimal | None = None
     ton_min: Decimal | None = None

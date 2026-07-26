@@ -118,6 +118,14 @@ def sua_hang_hoa(
     hh = db.get(HangHoa, hh_id)
     if hh is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy hàng hóa")
+    if data.ma is not None:
+        ma_moi = data.ma.strip()[:40] or None
+        if ma_moi and ma_moi != hh.ma:
+            trung = db.query(HangHoa).filter(HangHoa.ma == ma_moi, HangHoa.id != hh_id).first()
+            if trung:
+                raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                    f"Mã '{ma_moi}' đã dùng cho '{trung.ten}' — chọn mã khác.")
+        hh.ma = ma_moi
     if data.ten is not None:
         hh.ten = data.ten
     if data.loai is not None:
