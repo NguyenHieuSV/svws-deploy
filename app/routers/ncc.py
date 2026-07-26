@@ -5,6 +5,7 @@ Khuôn phân quyền vẫn dùng lại y nguyên: yeu_cau("ncc", "<mức>").
 """
 from decimal import Decimal
 from datetime import date
+from pydantic import BaseModel as _NccCnBase
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form
 from sqlalchemy.orm import Session
 from sqlalchemy import func
