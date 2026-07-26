@@ -353,9 +353,21 @@ def ton_theo_don(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM")
     (don_hang_id — ô "Mã hàng bán" khi lập phiếu) hoặc gián tiếp qua PO
     (don_mua.don_hang_id). Mỗi đơn: các mặt hàng đã nhập/xuất cho đơn và
     số còn giữ trong kho cho đơn đó. Phiếu chưa gắn đơn gom vào nhóm cuối."""
-    from ..models import DonMua, DonHang, KhachHang
+    from ..models import DonMua, DonMuaCt, DonHang, DonHangCt, KhachHang
     dm_dh = {d.id: d.don_hang_id
              for d in db.query(DonMua).filter(DonMua.don_hang_id.isnot(None)).all()}
+    # SL cần cho đơn: từ dòng đơn bán; mặt hàng chỉ có trong PO thì lấy tổng SL PO
+    can_ban, can_po = {}, {}
+    for dh_id, hh_id, sl in (db.query(DonHangCt.don_hang_id, DonHangCt.hang_hoa_id,
+                                      func.sum(DonHangCt.so_luong))
+                             .group_by(DonHangCt.don_hang_id, DonHangCt.hang_hoa_id).all()):
+        can_ban[(dh_id, hh_id)] = float(sl or 0)
+    for dh_id, hh_id, sl in (db.query(DonMua.don_hang_id, DonMuaCt.hang_hoa_id,
+                                      func.sum(DonMuaCt.so_luong))
+                             .join(DonMuaCt, DonMuaCt.don_mua_id == DonMua.id)
+                             .filter(DonMua.don_hang_id.isnot(None))
+                             .group_by(DonMua.don_hang_id, DonMuaCt.hang_hoa_id).all()):
+        can_po[(dh_id, hh_id)] = float(sl or 0)
     gom = {}   # (dh_id|0, hang_hoa_id) -> [nhap, xuat]
     for p in db.query(PhieuKho).all():
         dh_id = p.don_hang_id or (dm_dh.get(p.don_mua_id) if p.don_mua_id else None) or 0
@@ -365,13 +377,17 @@ def ton_theo_don(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM")
                 e[0] += float(ct.so_luong or 0)
             else:
                 e[1] += float(ct.so_luong or 0)
+    # hợp nhất: mọi mặt hàng gắn đơn (dòng đơn bán / PO — khớp với Danh mục) + mọi phiếu đã ghi
     nhom = {}
-    for (dh_id, hh_id), (nhap, xuat) in gom.items():
+    for k in (set(gom) | set(can_ban) | set(can_po)):
+        dh_id, hh_id = k
+        nhap, xuat = gom.get(k, [0.0, 0.0])
         hh = db.get(HangHoa, hh_id)
         nhom.setdefault(dh_id, []).append({
             "hang_hoa_id": hh_id, "ma": hh.ma if hh else None,
             "ten": hh.ten if hh else f"HH #{hh_id}",
             "don_vi": hh.don_vi if hh else None,
+            "can": can_ban.get(k) or can_po.get(k) or 0.0,
             "nhap": nhap, "xuat": xuat, "con": nhap - xuat})
     out = []
     for dh_id, items in nhom.items():
