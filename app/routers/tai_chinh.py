@@ -149,18 +149,26 @@ def daily_remind(db: Session = Depends(get_db), _=Depends(yeu_cau("dashboard", "
         th.append({"id": p.id, "so": p.so or f"PT-{p.id}",
                    "so_tien": float(p.so_tien or 0), "trang_thai": p.trang_thai})
 
-    # 5) Work remind — công nợ phải thu đến hạn / quá hạn (còn phải thu)
+    # 5) Work remind — công nợ ĐẾN HẠN / quá hạn: cả PHẢI THU (khách) và PHẢI TRẢ (NCC)
     wr = []
-    for cn in (db.query(CongNo).filter(CongNo.loai == "PHAI_THU")
-               .order_by(CongNo.id.desc()).limit(300).all()):
+    for cn in (db.query(CongNo).filter(CongNo.loai.in_(["PHAI_THU", "PHAI_TRA"]))
+               .order_by(CongNo.id.desc()).limit(600).all()):
         con_lai = float((cn.so_tien or 0) - (cn.da_thanh_toan or 0))
         if con_lai <= 0:
             continue
         moc = cn.ngay_tt_tiep or cn.han
-        if moc and moc <= hom_nay:
-            wr.append({"id": cn.id, "khach": ten_kh(cn.khach_hang_id),
-                       "con_lai": con_lai, "han": str(moc), "qua_han": moc < hom_nay})
-    wr.sort(key=lambda x: x["han"])
+        if not (moc and moc <= hom_nay):
+            continue
+        if cn.loai == "PHAI_THU":
+            doi_tac = ten_kh(cn.khach_hang_id)
+            huong = "Phải thu"
+        else:
+            ncc = db.get(NhaCungCap, cn.nha_cung_cap_id) if cn.nha_cung_cap_id else None
+            doi_tac = ncc.ten if ncc else None
+            huong = "Phải trả"
+        wr.append({"id": cn.id, "doi_tac": doi_tac, "huong": huong,
+                   "con_lai": con_lai, "han": str(moc), "qua_han": moc < hom_nay})
+    wr.sort(key=lambda x: (x["han"], x["huong"]))
 
     muc = [
         {"key": "bao_gia", "ten": "Báo giá mới", "icon": "📝", "di_toi": "ban_hang",
@@ -173,8 +181,8 @@ def daily_remind(db: Session = Depends(get_db), _=Depends(yeu_cau("dashboard", "
          "so": len(dc), "items": dc[:30]},
         {"key": "thu", "ten": "Phát sinh thu", "icon": "💰", "di_toi": "ke_toan",
          "so": len(th), "items": th[:30]},
-        {"key": "work_remind", "ten": "Work remind (công nợ đến hạn)", "icon": "🔔",
-         "di_toi": "ban_hang", "so": len(wr), "items": wr[:30]},
+        {"key": "work_remind", "ten": "Work remind (nợ khách & NCC đến hạn)", "icon": "🔔",
+         "di_toi": None, "so": len(wr), "items": wr[:40]},
     ]
     return {"ngay": str(hom_nay), "muc": muc}
 
