@@ -263,6 +263,7 @@ class DonMuaDotTt(Base):
     don_mua_id: Mapped[int] = mapped_column(ForeignKey("don_mua.id", ondelete="CASCADE"))
     ngay: Mapped[date] = mapped_column(Date, server_default=func.current_date())
     so_tien: Mapped[Decimal] = mapped_column(Numeric(18, 0))
+    hinh_thuc: Mapped[str | None] = mapped_column(String(30), nullable=True)   # ngân hàng / tiền mặt
     ghi_chu: Mapped[str | None] = mapped_column(String(300), nullable=True)
     nguoi_tao: Mapped[int | None] = mapped_column(ForeignKey("nhan_vien.id"), nullable=True)
 

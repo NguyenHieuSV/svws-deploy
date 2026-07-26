@@ -813,6 +813,7 @@ class ThanhToanMuaVao(_SPBase):
     so_tien_dot: Decimal | None = None   # ghi nhận THÊM một đợt → cộng dồn vào lũy kế
     ngay_thanh_toan: date | None = None  # ngày của đợt thanh toán này
     so_hoa_don: str | None = None        # số hóa đơn mua (gắn sang công nợ phải trả)
+    hinh_thuc: str | None = None         # ngân hàng / tiền mặt của đợt trả
 
 
 def _ap_dung_tt_mua(db: Session, dm: DonMua, dn: Decimal) -> bool:
@@ -854,7 +855,8 @@ def ds_dot_thanh_toan(dm_id: int, db: Session = Depends(get_db),
     rows = (db.query(DonMuaDotTt).filter_by(don_mua_id=dm_id)
               .order_by(DonMuaDotTt.ngay, DonMuaDotTt.id).all())
     return [{"id": r.id, "ngay": str(r.ngay) if r.ngay else None,
-             "so_tien": float(r.so_tien or 0), "ghi_chu": r.ghi_chu} for r in rows]
+             "so_tien": float(r.so_tien or 0), "hinh_thuc": r.hinh_thuc,
+             "ghi_chu": r.ghi_chu} for r in rows]
 
 
 class SuaDotTtVao(_SPBase):
@@ -959,6 +961,7 @@ def cap_nhat_thanh_toan_mua(dm_id: int, data: ThanhToanMuaVao, db: Session = Dep
         from ..models import DonMuaDotTt
         db.add(DonMuaDotTt(don_mua_id=dm.id, ngay=data.ngay_thanh_toan or date.today(),
                            so_tien=Decimal(data.so_tien_dot),
+                           hinh_thuc=(data.hinh_thuc or "").strip()[:30] or None,
                            nguoi_tao=nhan_vien_id_cua(db, nd.id)))
     da_tt_100 = _ap_dung_tt_mua(db, dm, dn)
     ghi_audit(db, nd.id, "THANH_TOAN_MUA", "don_mua", dm.id,
