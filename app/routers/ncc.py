@@ -359,6 +359,34 @@ def tao_de_xuat(data: YeuCauMuaVao, db: Session = Depends(get_db),
     return ycm
 
 
+# ----- THAO_TAC: gắn / đổi Mã đơn hàng cho từng đề xuất mua -----
+class DxDonHangVao(_NccCnBase):
+    don_hang_id: int | None = None
+
+
+@router.put("/yeu-cau-mua/{ycm_id}/don-hang")
+def gan_don_hang_de_xuat(ycm_id: int, data: DxDonHangVao, db: Session = Depends(get_db),
+                         nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    """Gắn/đổi Mã đơn hàng bán cho một đề xuất mua (kể cả đề xuất tự sinh khi tồn thấp).
+    Đề xuất đã tạo PO thì không đổi được — mã đã chuyển sang PO (giữ vết giá vốn)."""
+    y = db.get(YeuCauMua, ycm_id)
+    if y is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đề xuất")
+    if y.trang_thai == "DA_TAO_PO":
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Đề xuất đã tạo PO — mã đơn hàng đã chuyển sang PO, không đổi ở đây.")
+    if data.don_hang_id:
+        from ..models import DonHang
+        if db.get(DonHang, data.don_hang_id) is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đơn hàng")
+    cu = y.don_hang_id
+    y.don_hang_id = data.don_hang_id
+    ghi_audit(db, nd.id, "SUA", "yeu_cau_mua", y.id,
+              cu={"don_hang_id": cu}, moi={"don_hang_id": data.don_hang_id})
+    db.commit()
+    return {"ok": True, "don_hang_id": y.don_hang_id}
+
+
 @router.post("/yeu-cau-mua/{ycm_id}/duyet", response_model=YeuCauMuaRa)
 def duyet_de_xuat(ycm_id: int, db: Session = Depends(get_db),
                   nd: NguoiDung = Depends(yeu_cau(MODULE, "DUYET"))):
