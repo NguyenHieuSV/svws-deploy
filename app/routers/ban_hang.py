@@ -158,12 +158,15 @@ def ds_cong_no_khach(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "X
     đã thanh toán, còn lại, ngày TT tiếp theo, ghi chú. Kèm cờ nhắc khi còn ≤7 ngày."""
     hom_nay = date.today()
     rows = (db.query(CongNo).filter(CongNo.loai == "PHAI_THU")
-              .order_by(CongNo.id.desc()).limit(300).all())
+              .order_by(CongNo.id.desc()).limit(500).all())
     out = []
     for cn in rows:
         con_lai = float((cn.so_tien or 0) - (cn.da_thanh_toan or 0))
-        if con_lai <= 0:
-            continue                      # đã thu đủ thì không cần theo dõi
+        da_tt = float(cn.da_thanh_toan or 0)
+        # bỏ khoản RỖNG (không còn nợ & chưa thu đồng nào); GIỮ khoản đã thu đủ
+        # (còn lại = 0 nhưng đã thanh toán > 0) để hiện ở bảng "Đã hoàn thành"
+        if con_lai <= 0 and da_tt <= 0:
+            continue
         hd = db.get(HoaDon, cn.hoa_don_id) if cn.hoa_don_id else None
         # Mã đơn hàng: ưu tiên đơn hàng sales đã gắn, nếu trống thì theo hóa đơn gốc
         dh_id = cn.don_hang_id or (hd.don_hang_id if hd else None)
