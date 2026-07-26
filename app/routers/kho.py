@@ -40,7 +40,7 @@ def ds_hang_hoa(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))
 def ds_cho_nhap(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
     """Danh sách đơn đặt hàng (PO) đã xác nhận với NCC nhưng chưa nhận đủ hàng —
     thủ kho bấm Tạo phiếu nhập, dữ liệu PO tự điền vào phiếu nhập kho."""
-    from ..models import DonMua, DonMuaCt, NhaCungCap
+    from ..models import DonMua, DonMuaCt, NhaCungCap, DonHang
     from sqlalchemy import or_ as _or
     out = []
     # PO đã DUYỆT + chưa nhận đủ, VÀ (đã xác nhận đặt hàng HOẶC đã có số hóa đơn — đủ thông tin)
@@ -63,8 +63,10 @@ def ds_cho_nhap(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))
                        "so_luong": float(c.so_luong or 0),
                        "da_nhan": float(c.so_luong_nhan or 0),
                        "con_lai": con, "don_gia": float(c.don_gia or 0)})
+        dh = db.get(DonHang, dm.don_hang_id) if dm.don_hang_id else None
         out.append({"id": dm.id, "so": dm.so or f"PO-{dm.id}",
                     "ncc": ncc.ten if ncc else None, "so_hoa_don": dm.so_hoa_don,
+                    "ma_don_hang": (dh.so or f"DH-{dh.id}") if dh else None,
                     "ngay_dat_hang": str(dm.ngay_dat_hang or dm.ngay or "")[:10],
                     "ngay_hen_giao": str(dm.ngay_hen_giao) if dm.ngay_hen_giao else None,
                     "tong_tien": float(dm.tong_tien or 0), "chi_tiet": ct})
@@ -306,6 +308,53 @@ def dieu_chinh_ton(
               cu={"so_luong": cu}, moi={"so_luong": float(data.so_luong_moi), "ly_do": data.ly_do})
     db.commit()
     return {"hang_hoa_id": data.hang_hoa_id, "so_luong_cu": cu, "so_luong_moi": float(data.so_luong_moi)}
+
+
+# ----- XEM: tồn kho theo MÃ ĐƠN HÀNG (kiểm soát hàng nhập/xuất phục vụ đơn nào) -----
+@router.get("/ton-theo-don")
+def ton_theo_don(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
+    """Gom nhập/xuất kho theo mã đơn hàng bán. Phiếu kho gắn đơn trực tiếp
+    (don_hang_id — ô "Mã hàng bán" khi lập phiếu) hoặc gián tiếp qua PO
+    (don_mua.don_hang_id). Mỗi đơn: các mặt hàng đã nhập/xuất cho đơn và
+    số còn giữ trong kho cho đơn đó. Phiếu chưa gắn đơn gom vào nhóm cuối."""
+    from ..models import DonMua, DonHang, KhachHang
+    dm_dh = {d.id: d.don_hang_id
+             for d in db.query(DonMua).filter(DonMua.don_hang_id.isnot(None)).all()}
+    gom = {}   # (dh_id|0, hang_hoa_id) -> [nhap, xuat]
+    for p in db.query(PhieuKho).all():
+        dh_id = p.don_hang_id or (dm_dh.get(p.don_mua_id) if p.don_mua_id else None) or 0
+        for ct in p.chi_tiet:
+            e = gom.setdefault((dh_id, ct.hang_hoa_id), [0.0, 0.0])
+            if p.loai == "NHAP":
+                e[0] += float(ct.so_luong or 0)
+            else:
+                e[1] += float(ct.so_luong or 0)
+    nhom = {}
+    for (dh_id, hh_id), (nhap, xuat) in gom.items():
+        hh = db.get(HangHoa, hh_id)
+        nhom.setdefault(dh_id, []).append({
+            "hang_hoa_id": hh_id, "ma": hh.ma if hh else None,
+            "ten": hh.ten if hh else f"HH #{hh_id}",
+            "don_vi": hh.don_vi if hh else None,
+            "nhap": nhap, "xuat": xuat, "con": nhap - xuat})
+    out = []
+    for dh_id, items in nhom.items():
+        so, khach = None, None
+        if dh_id:
+            dh = db.get(DonHang, dh_id)
+            if dh:
+                so = dh.so or f"DH-{dh.id}"
+                kh = db.get(KhachHang, dh.khach_hang_id)
+                khach = kh.ten if kh else None
+        items.sort(key=lambda x: (x["ma"] or x["ten"] or ""))
+        out.append({"don_hang_id": dh_id or None, "so": so, "khach": khach,
+                    "chi_tiet": items,
+                    "tong_nhap": sum(i["nhap"] for i in items),
+                    "tong_xuat": sum(i["xuat"] for i in items),
+                    "tong_con": sum(i["con"] for i in items)})
+    # đơn mới nhất trước; nhóm "chưa gắn đơn" xuống cuối
+    out.sort(key=lambda x: (x["don_hang_id"] is None, -(x["don_hang_id"] or 0)))
+    return out
 
 
 # ----- XEM: tổng quan kho (KPI) -----

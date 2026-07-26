@@ -1381,7 +1381,8 @@ def nhan_hang(dm_id: int, data: NhanHangVao, db: Session = Depends(get_db),
     cts = {ct.id: ct for ct in db.query(DonMuaCt).filter_by(don_mua_id=dm_id).all()}
     gia_tri_nhan = Decimal(0)   # tiền hàng chưa thuế của phần nhận lần này
     thue_nhan = Decimal(0)      # VAT tương ứng phần nhận
-    pk = PhieuKho(loai="NHAP", don_mua_id=dm.id, nguoi_tao=nhan_vien_id_cua(db, nd.id))
+    pk = PhieuKho(loai="NHAP", don_mua_id=dm.id, don_hang_id=dm.don_hang_id,
+                  nguoi_tao=nhan_vien_id_cua(db, nd.id))
     db.add(pk); db.flush()
     pk.so = f"PN-{date.today():%Y%m%d}-{pk.id}"
     for dong in data.chi_tiet:
