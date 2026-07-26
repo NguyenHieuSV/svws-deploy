@@ -83,6 +83,7 @@ class HangHoa(Base):
     loai: Mapped[str] = mapped_column(loai_hang_t)
     don_vi: Mapped[str | None] = mapped_column(String(20), nullable=True)
     gia_ban: Mapped[Decimal] = mapped_column(Numeric(18, 0), default=0)
+    ngay_nhap: Mapped[date | None] = mapped_column(Date, nullable=True)   # ngày nhập kho (mig 64)
     ton: Mapped["TonKho"] = relationship(back_populates="hang_hoa", uselist=False, lazy="joined")
 
 

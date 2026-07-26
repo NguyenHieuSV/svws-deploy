@@ -23,6 +23,7 @@ class HangHoaVao(BaseModel):
     gia_ban: Decimal = 0
     ton_min: Decimal = 0
     ton_max: Decimal | None = None
+    ngay_nhap: date | None = None   # ngày nhập hàng vào kho
 
 
 class HangHoaRa(BaseModel):
@@ -37,6 +38,7 @@ class HangHoaRa(BaseModel):
     gia_ban: Decimal = 0
     ton_max: Decimal | None = None
     ma_don_hang: str | None = None   # mã đơn hàng bán đang gắn (qua dòng đơn hàng / PO)
+    ngay_nhap: date | None = None    # ngày nhập kho (phiếu NHẬP mới nhất, fallback nhập tay)
 
 
 class HangHoaSua(BaseModel):
@@ -47,6 +49,7 @@ class HangHoaSua(BaseModel):
     gia_ban: Decimal | None = None
     ton_min: Decimal | None = None
     ton_max: Decimal | None = None
+    ngay_nhap: date | None = None    # sửa ngày nhập kho (nhập tay)
 
 
 class PhieuCtVao(BaseModel):

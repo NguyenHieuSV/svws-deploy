@@ -26,6 +26,7 @@ def _ra(hh: HangHoa) -> HangHoaRa:
         so_luong=hh.ton.so_luong if hh.ton else Decimal(0),
         ton_min=hh.ton.ton_min if hh.ton else Decimal(0),
         ton_max=hh.ton.ton_max if hh.ton else None,
+        ngay_nhap=hh.ngay_nhap,
     )
 
 
@@ -42,9 +43,16 @@ def ds_hang_hoa(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))
                            .join(DonMua, DonMuaCt.don_mua_id == DonMua.id)
                            .join(DonHang, DonMua.don_hang_id == DonHang.id).all()):
         map_dh.setdefault(hh_id, []).append(so or f"DH-{did}")
+    # ngày nhập kho thực tế = ngày phiếu NHẬP mới nhất chứa mặt hàng
+    map_ngay = {hh_id: ng for hh_id, ng in
+                (db.query(PhieuKhoCt.hang_hoa_id, func.max(PhieuKho.ngay))
+                 .join(PhieuKho, PhieuKhoCt.phieu_kho_id == PhieuKho.id)
+                 .filter(PhieuKho.loai == "NHAP")
+                 .group_by(PhieuKhoCt.hang_hoa_id).all())}
     out = []
     for hh in db.query(HangHoa).order_by(HangHoa.id).all():
         r = _ra(hh)
+        r.ngay_nhap = map_ngay.get(hh.id) or hh.ngay_nhap   # phiếu thật ưu tiên, fallback nhập tay
         ds = list(dict.fromkeys(map_dh.get(hh.id, [])))   # khử trùng, giữ thứ tự
         if ds:
             r.ma_don_hang = ", ".join(ds[:3]) + (f" +{len(ds) - 3}" if len(ds) > 3 else "")
@@ -97,7 +105,8 @@ def tao_hang_hoa(
     db: Session = Depends(get_db),
     nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC")),
 ):
-    hh = HangHoa(ma=data.ma, ten=data.ten, loai=data.loai, don_vi=data.don_vi, gia_ban=data.gia_ban)
+    hh = HangHoa(ma=data.ma, ten=data.ten, loai=data.loai, don_vi=data.don_vi,
+                 gia_ban=data.gia_ban, ngay_nhap=data.ngay_nhap)
     db.add(hh)
     db.flush()  # lấy hh.id
     db.add(TonKho(hang_hoa_id=hh.id, so_luong=0, ton_min=data.ton_min, ton_max=data.ton_max))
@@ -134,6 +143,8 @@ def sua_hang_hoa(
         hh.don_vi = data.don_vi
     if data.gia_ban is not None:
         hh.gia_ban = data.gia_ban
+    if data.ngay_nhap is not None:
+        hh.ngay_nhap = data.ngay_nhap
     ton = hh.ton or db.query(TonKho).filter_by(hang_hoa_id=hh_id).first()
     if ton is None:
         ton = TonKho(hang_hoa_id=hh_id, so_luong=0, ton_min=0)
