@@ -92,7 +92,7 @@ def dashboard(db: Session = Depends(get_db), _=Depends(yeu_cau("dashboard", "XEM
 def daily_remind(db: Session = Depends(get_db), _=Depends(yeu_cau("dashboard", "XEM"))):
     """Nhắc việc trong ngày: báo giá mới · mua hàng mới · phiếu chi chờ duyệt ·
     phiếu thu hôm nay · nhắc thu công nợ đến hạn/quá hạn."""
-    from ..models import (AuditLog, DonMua, PhieuThuChi, BaoGiaForm, KhachHang, NhaCungCap)
+    from ..models import (AuditLog, DonMua, DonHang, PhieuThuChi, BaoGiaForm, KhachHang, NhaCungCap)
     hom_nay = date.today()
 
     def ten_kh(kid):
@@ -110,6 +110,21 @@ def daily_remind(db: Session = Depends(get_db), _=Depends(yeu_cau("dashboard", "
         for b in db.query(BaoGiaForm).filter(BaoGiaForm.id.in_(ids_bg)).all():
             bg.append({"id": b.id, "so": b.so or f"BG-{b.id}",
                        "khach": ten_kh(b.khach_hang_id), "trang_thai": b.trang_thai})
+
+    # 1b) Đơn hàng / PO-HĐ mới hôm nay (đơn hàng bán tạo hôm nay)
+    dh = []
+    ids_dh = [lg.ban_ghi_id for lg in
+              db.query(AuditLog).filter(AuditLog.bang == "don_hang",
+                                        AuditLog.hanh_dong == "TAO",
+                                        func.date(AuditLog.thoi_gian) == hom_nay).all()
+              if lg.ban_ghi_id]
+    if ids_dh:
+        for o in db.query(DonHang).filter(DonHang.id.in_(ids_dh)).all():
+            kh = db.get(KhachHang, o.khach_hang_id)
+            dh.append({"id": o.id, "so": o.so or f"DH-{o.id}",
+                       "khach": kh.ten if kh else None,
+                       "tong_tien": float((o.tong_tien or 0) + (o.tien_thue or 0)),
+                       "trang_thai": o.trang_thai})
 
     # 2) Mua hàng mới hôm nay (đơn mua có ngày = hôm nay)
     mh = []
@@ -150,6 +165,8 @@ def daily_remind(db: Session = Depends(get_db), _=Depends(yeu_cau("dashboard", "
     muc = [
         {"key": "bao_gia", "ten": "Báo giá mới", "icon": "📝", "di_toi": "ban_hang",
          "so": len(bg), "items": bg[:30]},
+        {"key": "don_hang", "ten": "Đơn hàng / PO-HĐ mới", "icon": "🧾", "di_toi": "ban_hang",
+         "so": len(dh), "items": dh[:30]},
         {"key": "mua_hang", "ten": "Mua hàng mới", "icon": "🛒", "di_toi": "ncc",
          "so": len(mh), "items": mh[:30]},
         {"key": "duyet_chi", "ten": "Phát sinh duyệt chi", "icon": "✅", "di_toi": "ke_toan",
