@@ -88,6 +88,80 @@ def dashboard(db: Session = Depends(get_db), _=Depends(yeu_cau("dashboard", "XEM
     }
 
 
+@router.get("/daily-remind")
+def daily_remind(db: Session = Depends(get_db), _=Depends(yeu_cau("dashboard", "XEM"))):
+    """Nhắc việc trong ngày: báo giá mới · mua hàng mới · phiếu chi chờ duyệt ·
+    phiếu thu hôm nay · nhắc thu công nợ đến hạn/quá hạn."""
+    from ..models import (AuditLog, DonMua, PhieuThuChi, BaoGiaForm, KhachHang, NhaCungCap)
+    hom_nay = date.today()
+
+    def ten_kh(kid):
+        k = db.get(KhachHang, kid) if kid else None
+        return k.ten if k else None
+
+    # 1) Báo giá mới hôm nay (theo audit TAO bao_gia_form)
+    bg = []
+    ids_bg = [lg.ban_ghi_id for lg in
+              db.query(AuditLog).filter(AuditLog.bang == "bao_gia_form",
+                                        AuditLog.hanh_dong == "TAO",
+                                        func.date(AuditLog.thoi_gian) == hom_nay).all()
+              if lg.ban_ghi_id]
+    if ids_bg:
+        for b in db.query(BaoGiaForm).filter(BaoGiaForm.id.in_(ids_bg)).all():
+            bg.append({"id": b.id, "so": b.so or f"BG-{b.id}",
+                       "khach": ten_kh(b.khach_hang_id), "trang_thai": b.trang_thai})
+
+    # 2) Mua hàng mới hôm nay (đơn mua có ngày = hôm nay)
+    mh = []
+    for dm in db.query(DonMua).filter(DonMua.ngay == hom_nay).order_by(DonMua.id.desc()).all():
+        ncc = db.get(NhaCungCap, dm.nha_cung_cap_id)
+        mh.append({"id": dm.id, "so": dm.so or f"PO-{dm.id}",
+                   "ncc": ncc.ten if ncc else None,
+                   "tong_tien": float(dm.tong_tien or 0), "trang_thai": dm.trang_thai})
+
+    # 3) Phát sinh duyệt chi — phiếu chi đang chờ duyệt
+    dc = []
+    for p in (db.query(PhieuThuChi).filter(PhieuThuChi.loai == "CHI",
+                                           PhieuThuChi.trang_thai == "CHO_DUYET")
+              .order_by(PhieuThuChi.id.desc()).limit(50).all()):
+        dc.append({"id": p.id, "so": p.so or f"PC-{p.id}",
+                   "so_tien": float(p.so_tien or 0), "ngay": str(p.ngay) if p.ngay else None})
+
+    # 4) Phát sinh thu — phiếu thu hôm nay
+    th = []
+    for p in (db.query(PhieuThuChi).filter(PhieuThuChi.loai == "THU", PhieuThuChi.ngay == hom_nay)
+              .order_by(PhieuThuChi.id.desc()).all()):
+        th.append({"id": p.id, "so": p.so or f"PT-{p.id}",
+                   "so_tien": float(p.so_tien or 0), "trang_thai": p.trang_thai})
+
+    # 5) Work remind — công nợ phải thu đến hạn / quá hạn (còn phải thu)
+    wr = []
+    for cn in (db.query(CongNo).filter(CongNo.loai == "PHAI_THU")
+               .order_by(CongNo.id.desc()).limit(300).all()):
+        con_lai = float((cn.so_tien or 0) - (cn.da_thanh_toan or 0))
+        if con_lai <= 0:
+            continue
+        moc = cn.ngay_tt_tiep or cn.han
+        if moc and moc <= hom_nay:
+            wr.append({"id": cn.id, "khach": ten_kh(cn.khach_hang_id),
+                       "con_lai": con_lai, "han": str(moc), "qua_han": moc < hom_nay})
+    wr.sort(key=lambda x: x["han"])
+
+    muc = [
+        {"key": "bao_gia", "ten": "Báo giá mới", "icon": "📝", "di_toi": "ban_hang",
+         "so": len(bg), "items": bg[:30]},
+        {"key": "mua_hang", "ten": "Mua hàng mới", "icon": "🛒", "di_toi": "ncc",
+         "so": len(mh), "items": mh[:30]},
+        {"key": "duyet_chi", "ten": "Phát sinh duyệt chi", "icon": "✅", "di_toi": "ke_toan",
+         "so": len(dc), "items": dc[:30]},
+        {"key": "thu", "ten": "Phát sinh thu", "icon": "💰", "di_toi": "ke_toan",
+         "so": len(th), "items": th[:30]},
+        {"key": "work_remind", "ten": "Work remind (công nợ đến hạn)", "icon": "🔔",
+         "di_toi": "ban_hang", "so": len(wr), "items": wr[:30]},
+    ]
+    return {"ngay": str(hom_nay), "muc": muc}
+
+
 @router.get("/cong-no-qua-han")
 def cong_no_qua_han(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
     hom_nay = date.today()
