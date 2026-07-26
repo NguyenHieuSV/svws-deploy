@@ -620,13 +620,20 @@ def hach_toan_hd(hd_id: int, db: Session = Depends(get_db),
 # ---------- TRUY VẾT THEO MÃ HÀNG BÁN ----------
 def _lai_lo_1(db, dh: DonHang):
     doanh_thu = _f(dh.tong_tien)
-    gia_von = _f(db.query(func.coalesce(func.sum(DonMua.tong_tien), 0))
+    # ĐỒNG BỘ với bảng "Chi phí theo Mã Đơn hàng" (NCC → Kiểm soát):
+    #   Giá vốn (Thanh toán mua) = đề nghị TT của các PO gắn mã đơn bán
+    #   Chi phí khác (Công nợ phải trả) = công nợ phải trả CÒN LẠI của PO đó + khoản nhập ngoài khớp mã
+    po_ids = [i for (i,) in db.query(DonMua.id).filter(DonMua.don_hang_id == dh.id).all()]
+    gia_von = _f(db.query(func.coalesce(func.sum(DonMua.de_nghi_tt), 0))
                  .filter(DonMua.don_hang_id == dh.id).scalar())
-    chi_phi = _f(db.query(func.coalesce(func.sum(PhieuThuChi.so_tien), 0))
-                 .filter(PhieuThuChi.don_hang_id == dh.id, PhieuThuChi.loai == "CHI",
-                         PhieuThuChi.trang_thai == "DA_DUYET",
-                         PhieuThuChi.la_tam_ung.is_(False),
-                         func.coalesce(PhieuThuChi.tk_doi_ung, "") != "331").scalar())
+    _con = func.coalesce(func.sum(CongNo.so_tien - CongNo.da_thanh_toan), 0)
+    cn_po = _f(db.query(_con).filter(CongNo.loai == "PHAI_TRA",
+                                     CongNo.don_mua_id.in_(po_ids)).scalar()) if po_ids else 0.0
+    cn_ngoai = 0.0
+    if dh.so:
+        cn_ngoai = _f(db.query(_con).filter(CongNo.loai == "PHAI_TRA", CongNo.don_mua_id.is_(None),
+                                            func.lower(CongNo.ma_ban_ngoai) == dh.so.lower()).scalar())
+    chi_phi = max(cn_po, 0.0) + max(cn_ngoai, 0.0)
     da_thu = _f(db.query(func.coalesce(func.sum(PhieuThuChi.so_tien), 0))
                 .filter(PhieuThuChi.don_hang_id == dh.id, PhieuThuChi.loai == "THU",
                         PhieuThuChi.trang_thai == "DA_DUYET").scalar())
@@ -663,7 +670,8 @@ def _lai_lo_1(db, dh: DonHang):
         coc_tt = "DU"
     return {"don_hang_id": dh.id, "ma_ban": dh.so or f"DH-{dh.id}",
             "doanh_thu": doanh_thu, "gia_von": gia_von, "chi_phi_khac": chi_phi,
-            "loi_nhuan": loi_nhuan,
+            "thanh_toan_mua": gia_von, "cong_no_phai_tra": chi_phi,
+            "tong_chi_phi": gia_von + chi_phi, "loi_nhuan": loi_nhuan,
             "ty_suat": round(loi_nhuan / doanh_thu * 100, 1) if doanh_thu else None,
             "da_thu": da_thu, "con_phai_thu": max(doanh_thu - da_thu, 0),
             "tam_ung_thu": tu_thu, "tam_ung_thu_con_lai": tu_thu_clt,
