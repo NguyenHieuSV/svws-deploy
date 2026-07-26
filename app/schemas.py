@@ -36,6 +36,7 @@ class HangHoaRa(BaseModel):
     ton_min: Decimal = 0
     gia_ban: Decimal = 0
     ton_max: Decimal | None = None
+    ma_don_hang: str | None = None   # mã đơn hàng bán đang gắn (qua dòng đơn hàng / PO)
 
 
 class HangHoaSua(BaseModel):

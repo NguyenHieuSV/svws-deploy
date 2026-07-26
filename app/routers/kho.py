@@ -29,10 +29,27 @@ def _ra(hh: HangHoa) -> HangHoaRa:
     )
 
 
-# ----- XEM: danh sách hàng hóa kèm tồn -----
+# ----- XEM: danh sách hàng hóa kèm tồn + mã đơn hàng đang gắn -----
 @router.get("/hang-hoa", response_model=list[HangHoaRa])
 def ds_hang_hoa(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
-    return [_ra(hh) for hh in db.query(HangHoa).order_by(HangHoa.id).all()]
+    from ..models import DonHangCt, DonHang, DonMuaCt, DonMua
+    # hàng hóa → các mã đơn hàng bán liên quan (dòng đơn hàng trực tiếp + PO gắn đơn)
+    map_dh: dict[int, list[str]] = {}
+    for hh_id, so, did in (db.query(DonHangCt.hang_hoa_id, DonHang.so, DonHang.id)
+                           .join(DonHang, DonHangCt.don_hang_id == DonHang.id).all()):
+        map_dh.setdefault(hh_id, []).append(so or f"DH-{did}")
+    for hh_id, so, did in (db.query(DonMuaCt.hang_hoa_id, DonHang.so, DonHang.id)
+                           .join(DonMua, DonMuaCt.don_mua_id == DonMua.id)
+                           .join(DonHang, DonMua.don_hang_id == DonHang.id).all()):
+        map_dh.setdefault(hh_id, []).append(so or f"DH-{did}")
+    out = []
+    for hh in db.query(HangHoa).order_by(HangHoa.id).all():
+        r = _ra(hh)
+        ds = list(dict.fromkeys(map_dh.get(hh.id, [])))   # khử trùng, giữ thứ tự
+        if ds:
+            r.ma_don_hang = ", ".join(ds[:3]) + (f" +{len(ds) - 3}" if len(ds) > 3 else "")
+        out.append(r)
+    return out
 
 
 # ----- XEM: PO đã xác nhận đặt hàng đang CHỜ NHẬP KHO -----
