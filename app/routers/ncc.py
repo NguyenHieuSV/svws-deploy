@@ -1019,6 +1019,32 @@ def xoa_bao_gia_ncc(bg_id: int, db: Session = Depends(get_db),
 
 
 # ----- DUYET: xóa đơn mua PO (chỉ PO chưa nhận hàng, chưa có hóa đơn) -----
+class ChoNhapSuaVao(_NccCnBase):
+    so_hoa_don: str | None = None
+    ngay_dat_hang: date | None = None
+    ngay_hen_giao: date | None = None
+
+
+@router.put("/don-mua/{dm_id}/cho-nhap")
+def sua_cho_nhap(dm_id: int, data: ChoNhapSuaVao, db: Session = Depends(get_db),
+                 nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
+    """CEO/ADMIN sửa thông tin nhận hàng của PO ở 'Chờ nhập kho' (số hóa đơn,
+    ngày đặt, hẹn giao) — KHÔNG đụng nội dung/giá trị PO, giữ vết duyệt."""
+    dm = db.get(DonMua, dm_id)
+    if dm is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đơn mua")
+    dm.so_hoa_don = (str(data.so_hoa_don or "").strip()[:60]) or None
+    dm.ngay_dat_hang = data.ngay_dat_hang
+    dm.ngay_hen_giao = data.ngay_hen_giao
+    ghi_audit(db, nd.id, "CAP_NHAT", "don_mua", dm.id,
+              moi={"so_hoa_don": dm.so_hoa_don,
+                   "ngay_hen_giao": str(dm.ngay_hen_giao) if dm.ngay_hen_giao else None})
+    db.commit()
+    return {"id": dm.id, "so_hoa_don": dm.so_hoa_don,
+            "ngay_dat_hang": str(dm.ngay_dat_hang) if dm.ngay_dat_hang else None,
+            "ngay_hen_giao": str(dm.ngay_hen_giao) if dm.ngay_hen_giao else None}
+
+
 @router.delete("/don-mua/{dm_id}")
 def xoa_don_mua(dm_id: int, db: Session = Depends(get_db),
                 nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
