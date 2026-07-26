@@ -170,6 +170,69 @@ def xoa_hang_hoa(hh_id: int, db: Session = Depends(get_db),
     return {"ok": True, "ten": ten_cu}
 
 
+# ----- QUẢN TRỊ: làm sạch toàn bộ dữ liệu kho (CEO/ADMIN) -----
+@router.post("/reset-toan-bo")
+def reset_kho_toan_bo(db: Session = Depends(get_db),
+                      nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
+    """Xóa sạch dữ liệu kho: mọi phiếu nhập/xuất + đề xuất mua, đưa tồn kho về 0,
+    và xóa hàng hóa khỏi danh mục. Mã đang gắn với chứng từ ở phân hệ khác
+    (báo giá, đơn hàng, đơn mua, báo giá NCC, định mức, tài sản cho thuê) sẽ được
+    GIỮ LẠI (tồn về 0) để không phá vỡ vết chứng từ. Không đụng tới đơn hàng/PO."""
+    from sqlalchemy import text as _sql
+    # 1) Xóa toàn bộ phiếu kho (dòng chi tiết xóa theo cascade) + đề xuất mua
+    so_phieu = db.query(PhieuKho).count()
+    db.query(PhieuKhoCt).delete(synchronize_session=False)
+    db.query(PhieuKho).delete(synchronize_session=False)
+    so_ycm = db.query(YeuCauMua).count()
+    db.query(YeuCauMua).delete(synchronize_session=False)
+    db.flush()
+    # 2) Duyệt từng hàng hóa: xóa nếu không còn tham chiếu, ngược lại đưa tồn về 0
+    refs = ["bao_gia_ct", "don_hang_ct", "don_mua_ct", "yeu_cau_mua_ct",
+            "bao_gia_ncc", "dinh_muc_tieu_hao", "tai_san_cho_thue"]
+    da_xoa, giu_lai = 0, 0
+    giu_ma = []
+    for hh in db.query(HangHoa).all():
+        ton = db.query(TonKho).filter_by(hang_hoa_id=hh.id).first()
+        con_ref = False
+        for bang in refs:
+            try:
+                if db.execute(_sql(f"SELECT 1 FROM {bang} WHERE hang_hoa_id=:i LIMIT 1"),
+                              {"i": hh.id}).first():
+                    con_ref = True
+                    break
+            except Exception:
+                pass  # bảng không tồn tại → bỏ qua tham chiếu đó
+        if con_ref:
+            if ton:
+                ton.so_luong = 0
+            giu_lai += 1
+            if len(giu_ma) < 40:
+                giu_ma.append(hh.ma or hh.ten)
+            continue
+        sp = db.begin_nested()
+        try:
+            if ton:
+                db.delete(ton)
+            db.delete(hh)
+            db.flush()
+            sp.commit()
+            da_xoa += 1
+        except Exception:
+            sp.rollback()
+            if ton:
+                ton.so_luong = 0
+            giu_lai += 1
+            if len(giu_ma) < 40:
+                giu_ma.append(hh.ma or hh.ten)
+    ghi_audit(db, nd.id, "XOA", "kho", None,
+              cu={"so_phieu": so_phieu, "so_de_xuat_mua": so_ycm,
+                  "hang_hoa_da_xoa": da_xoa, "hang_hoa_giu_lai": giu_lai})
+    db.commit()
+    return {"ok": True, "so_phieu_xoa": so_phieu, "so_de_xuat_mua_xoa": so_ycm,
+            "hang_hoa_da_xoa": da_xoa, "hang_hoa_giu_lai": giu_lai,
+            "ma_giu_lai_mau": giu_ma}
+
+
 # ----- XEM: phiếu kho -----
 @router.get("/phieu", response_model=list[PhieuKhoRa])
 def ds_phieu(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
