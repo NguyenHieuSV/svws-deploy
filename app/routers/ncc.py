@@ -1461,25 +1461,36 @@ def ds_cong_no(nha_cung_cap_id: int | None = None, chua_tra: bool = False,
 
 @router.get("/chi-phi-theo-don")
 def chi_phi_theo_don(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
-    """Tổng hợp theo TỪNG MÃ ĐƠN HÀNG BÁN: doanh thu, tổng chi phí (giá vốn mua +
-    chi phí khác đã duyệt), lợi nhuận = doanh thu − tổng chi phí."""
-    from ..models import DonHang, PhieuThuChi
+    """Tổng hợp theo TỪNG MÃ ĐƠN HÀNG BÁN. Tổng chi phí = THANH TOÁN MUA HÀNG
+    (đề nghị TT của các PO gắn mã đơn bán) + CÔNG NỢ PHẢI TRẢ còn lại (của các PO đó
+    + khoản nhập ngoài có mã khớp mã đơn bán). Lợi nhuận = doanh thu − tổng chi phí."""
+    from ..models import DonHang
+    con_lai_expr = func.coalesce(func.sum(CongNo.so_tien - CongNo.da_thanh_toan), 0)
     out = []
     for dh in db.query(DonHang).order_by(DonHang.id.desc()).all():
         doanh_thu = float(dh.tong_tien or 0)
-        gia_von = float(db.query(func.coalesce(func.sum(DonMua.tong_tien), 0))
-                        .filter(DonMua.don_hang_id == dh.id).scalar() or 0)
-        chi_phi_khac = float(db.query(func.coalesce(func.sum(PhieuThuChi.so_tien), 0))
-                             .filter(PhieuThuChi.don_hang_id == dh.id, PhieuThuChi.loai == "CHI",
-                                     PhieuThuChi.trang_thai == "DA_DUYET",
-                                     PhieuThuChi.la_tam_ung.is_(False),
-                                     func.coalesce(PhieuThuChi.tk_doi_ung, "") != "331").scalar() or 0)
-        tong_chi_phi = gia_von + chi_phi_khac
+        po_ids = [i for (i,) in db.query(DonMua.id).filter(DonMua.don_hang_id == dh.id).all()]
+        # 1) Thanh toán mua hàng = tổng đề nghị thanh toán của các PO gắn mã đơn bán
+        thanh_toan_mua = float(db.query(func.coalesce(func.sum(DonMua.de_nghi_tt), 0))
+                               .filter(DonMua.don_hang_id == dh.id).scalar() or 0)
+        # 2) Công nợ phải trả còn lại — của PO thuộc đơn + khoản nhập ngoài khớp mã đơn bán
+        cn_po = 0.0
+        if po_ids:
+            cn_po = float(db.query(con_lai_expr)
+                          .filter(CongNo.loai == "PHAI_TRA", CongNo.don_mua_id.in_(po_ids)).scalar() or 0)
+        cn_ngoai = 0.0
+        if dh.so:
+            cn_ngoai = float(db.query(con_lai_expr)
+                             .filter(CongNo.loai == "PHAI_TRA", CongNo.don_mua_id.is_(None),
+                                     func.lower(CongNo.ma_ban_ngoai) == dh.so.lower()).scalar() or 0)
+        cong_no_pt = max(cn_po, 0.0) + max(cn_ngoai, 0.0)
+        tong_chi_phi = thanh_toan_mua + cong_no_pt
         if doanh_thu == 0 and tong_chi_phi == 0:
             continue                      # bỏ đơn rỗng (chưa có doanh thu lẫn chi phí)
         loi_nhuan = doanh_thu - tong_chi_phi
         out.append({"don_hang_id": dh.id, "ma_ban": dh.so or f"DH-{dh.id}",
-                    "doanh_thu": doanh_thu, "gia_von": gia_von, "chi_phi_khac": chi_phi_khac,
+                    "doanh_thu": doanh_thu,
+                    "thanh_toan_mua": thanh_toan_mua, "cong_no_phai_tra": cong_no_pt,
                     "tong_chi_phi": tong_chi_phi, "loi_nhuan": loi_nhuan,
                     "ty_suat": round(loi_nhuan / doanh_thu * 100, 1) if doanh_thu else None})
     return out
