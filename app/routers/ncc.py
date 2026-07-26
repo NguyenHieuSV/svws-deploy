@@ -1459,6 +1459,32 @@ def ds_cong_no(nha_cung_cap_id: int | None = None, chua_tra: bool = False,
     return out
 
 
+@router.get("/chi-phi-theo-don")
+def chi_phi_theo_don(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
+    """Tổng hợp theo TỪNG MÃ ĐƠN HÀNG BÁN: doanh thu, tổng chi phí (giá vốn mua +
+    chi phí khác đã duyệt), lợi nhuận = doanh thu − tổng chi phí."""
+    from ..models import DonHang, PhieuThuChi
+    out = []
+    for dh in db.query(DonHang).order_by(DonHang.id.desc()).all():
+        doanh_thu = float(dh.tong_tien or 0)
+        gia_von = float(db.query(func.coalesce(func.sum(DonMua.tong_tien), 0))
+                        .filter(DonMua.don_hang_id == dh.id).scalar() or 0)
+        chi_phi_khac = float(db.query(func.coalesce(func.sum(PhieuThuChi.so_tien), 0))
+                             .filter(PhieuThuChi.don_hang_id == dh.id, PhieuThuChi.loai == "CHI",
+                                     PhieuThuChi.trang_thai == "DA_DUYET",
+                                     PhieuThuChi.la_tam_ung.is_(False),
+                                     func.coalesce(PhieuThuChi.tk_doi_ung, "") != "331").scalar() or 0)
+        tong_chi_phi = gia_von + chi_phi_khac
+        if doanh_thu == 0 and tong_chi_phi == 0:
+            continue                      # bỏ đơn rỗng (chưa có doanh thu lẫn chi phí)
+        loi_nhuan = doanh_thu - tong_chi_phi
+        out.append({"don_hang_id": dh.id, "ma_ban": dh.so or f"DH-{dh.id}",
+                    "doanh_thu": doanh_thu, "gia_von": gia_von, "chi_phi_khac": chi_phi_khac,
+                    "tong_chi_phi": tong_chi_phi, "loi_nhuan": loi_nhuan,
+                    "ty_suat": round(loi_nhuan / doanh_thu * 100, 1) if doanh_thu else None})
+    return out
+
+
 @router.delete("/cong-no/{cn_id}")
 def xoa_cong_no_ncc(cn_id: int, db: Session = Depends(get_db),
                     nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
