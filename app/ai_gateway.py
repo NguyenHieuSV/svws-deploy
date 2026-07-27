@@ -202,6 +202,10 @@ def _loi_ai_ro_rang(e: Exception) -> str:
         if e.code == 401:
             return ("Khóa API không hợp lệ hoặc đã bị thu hồi (lỗi 401). "
                     "Vào Render → Environment → ANTHROPIC_API_KEY, dán khóa mới rồi Save.")
+        if e.code == 400 and "usage limit" in chi_tiet.lower():
+            return ("Tài khoản AI đã chạm TRẦN CHI TIÊU của tháng — các nút AI tạm khóa, "
+                    "tự mở lại ngày 01 tháng sau (7:00 sáng giờ VN). Muốn dùng ngay: vào "
+                    "console.anthropic.com → Settings → Limits → nâng 'Monthly spend limit'.")
         if e.code == 400 and "credit" in chi_tiet.lower():
             return ("Tài khoản Anthropic hết credit (lỗi 400). "
                     "Vào console.anthropic.com → Billing để nạp thêm credit API.")
