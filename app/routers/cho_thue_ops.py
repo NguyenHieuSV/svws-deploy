@@ -128,11 +128,16 @@ def xoa_tai_san(ts_id: int, db: Session = Depends(get_db),
     if t.tinh_trang == "DANG_THUE" or t.khach_hang_id:
         raise HTTPException(status.HTTP_400_BAD_REQUEST,
                             f"Tài sản '{t.ten}' đang cho thuê/gắn khách hàng — kết thúc cho thuê trước khi xóa.")
+    # kiểm tra dòng hợp đồng thuê (bảng có thể không tồn tại ở schema hiện tại —
+    # dùng savepoint để câu SQL hỏng không làm treo transaction)
+    n = 0
+    sp = db.begin_nested()
     try:
         n = db.execute(_sql("SELECT COUNT(*) FROM hop_dong_thue_ct WHERE tai_san_id = :i"),
                        {"i": ts_id}).scalar() or 0
+        sp.commit()
     except Exception:
-        n = 0
+        sp.rollback()
     if n:
         raise HTTPException(status.HTTP_400_BAD_REQUEST,
                             f"Tài sản '{t.ten}' đang gắn {n} dòng hợp đồng thuê — không thể xóa để giữ vết.")
