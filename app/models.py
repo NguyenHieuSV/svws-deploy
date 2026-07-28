@@ -1127,6 +1127,7 @@ class TaiSanChoThue(Base):
     loai_he_thong: Mapped[str | None] = mapped_column(String(30), nullable=True)
     nguyen_gia: Mapped[Decimal] = mapped_column(Numeric(18, 0), default=0)
     gia_thue_thang: Mapped[Decimal] = mapped_column(Numeric(18, 0), default=0)
+    don_vi_gia: Mapped[str | None] = mapped_column(String(20), default="VND/THANG")   # VND/THANG | VND/M3 (mig 66)
     khau_hao_thang: Mapped[Decimal] = mapped_column(Numeric(18, 0), default=0)
     ngay_mua: Mapped[date | None] = mapped_column(Date, nullable=True)
     tinh_trang: Mapped[str] = mapped_column(String(16), default="SAN_SANG")

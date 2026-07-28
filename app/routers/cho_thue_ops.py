@@ -36,6 +36,7 @@ def _ts_ra(db, t: TaiSanChoThue) -> dict:
     return {"id": t.id, "ma": t.ma, "ten_du_an": t.ten_du_an or t.ma, "ten": t.ten, "loai": t.loai,
             "loai_he_thong": t.loai_he_thong,
             "nguyen_gia": float(t.nguyen_gia or 0), "gia_thue_thang": float(t.gia_thue_thang or 0),
+            "don_vi_gia": t.don_vi_gia or "VND/THANG",
             "khau_hao_thang": float(t.khau_hao_thang or 0),
             "ngay_mua": str(t.ngay_mua) if t.ngay_mua else None,
             "tinh_trang": t.tinh_trang, "khach_hang_id": t.khach_hang_id,
@@ -51,6 +52,7 @@ class TaiSanVaoCT(BaseModel):
     loai_he_thong: str | None = None
     nguyen_gia: Decimal = 0
     gia_thue_thang: Decimal = 0
+    don_vi_gia: str = Field(default="VND/THANG", pattern="^(VND/THANG|VND/M3)$")
     khau_hao_thang: Decimal = 0
     ngay_mua: date | None = None
     vi_tri: str | None = None
@@ -64,6 +66,7 @@ class TaiSanSuaCT(BaseModel):
     loai_he_thong: str | None = None
     nguyen_gia: Decimal | None = None
     gia_thue_thang: Decimal | None = None
+    don_vi_gia: str | None = Field(default=None, pattern="^(VND/THANG|VND/M3)$")
     khau_hao_thang: Decimal | None = None
     tinh_trang: str | None = None
     khach_hang_id: int | None = None
@@ -101,7 +104,7 @@ def sua_tai_san(ts_id: int, data: TaiSanSuaCT, db: Session = Depends(get_db),
     if data.tinh_trang is not None and data.tinh_trang not in TINH_TRANG:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Tình trạng không hợp lệ")
     for f in ("ten_du_an", "ten", "loai", "loai_he_thong", "nguyen_gia", "gia_thue_thang",
-              "khau_hao_thang", "tinh_trang", "vi_tri", "ghi_chu"):
+              "don_vi_gia", "khau_hao_thang", "tinh_trang", "vi_tri", "ghi_chu"):
         v = getattr(data, f)
         if v is not None:
             setattr(t, f, v)
