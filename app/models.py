@@ -864,7 +864,8 @@ class KhoanVay(Base):
     tk_tien: Mapped[str] = mapped_column(String(10), default="112")
     con_lai_goc: Mapped[Decimal] = mapped_column(Numeric(18, 0), default=0)
     trang_thai: Mapped[str] = mapped_column(String(16), default="DANG_VAY")
-    ghi_chu: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ghi_chu: Mapped[str | None] = mapped_column(Text, nullable=True)   # diễn giải khoản vay
+    du_an_id: Mapped[int | None] = mapped_column(ForeignKey("du_an.id", ondelete="SET NULL"), nullable=True)   # mig 65
 
 
 class LichTraNo(Base):

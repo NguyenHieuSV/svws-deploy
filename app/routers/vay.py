@@ -13,7 +13,7 @@ from ..database import get_db
 from ..rbac import yeu_cau, chi_vai_tro
 from ..deps import nhan_vien_id_cua
 from ..audit import ghi_audit
-from ..models import NguoiDung, KhoanVay, LichTraNo, ButToan, TaiKhoanQuy
+from ..models import NguoiDung, KhoanVay, LichTraNo, ButToan, TaiKhoanQuy, DuAn
 from ..schemas import KhoanVayVao
 from ..vay_service import sinh_lich, them_thang
 
@@ -50,6 +50,9 @@ def _vay_dict(db, v: KhoanVay):
                         "tong": _f(sap.tong_phai_tra),
                         "qua_han": sap.ngay_den_han < today} if sap else None),
         "ghi_chu": v.ghi_chu,
+        "du_an_id": v.du_an_id,
+        "ma_du_an": ((lambda da: (da.ma or da.ten) if da else None)(db.get(DuAn, v.du_an_id))
+                     if v.du_an_id else None),
     }
 
 
@@ -59,11 +62,14 @@ def tao_khoan_vay(data: KhoanVayVao, db: Session = Depends(get_db),
     rows = sinh_lich(data.so_tien_goc, data.lai_suat_nam, data.so_ky,
                      data.chu_ky_thang, data.ngay_nhan, data.phuong_thuc)
     dao_han = rows[-1]["ngay_den_han"] if rows else them_thang(data.ngay_nhan, data.so_ky * data.chu_ky_thang)
+    if data.du_an_id and db.get(DuAn, data.du_an_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy dự án")
     v = KhoanVay(so=data.so, ben_cho_vay=data.ben_cho_vay, loai=data.loai,
                  so_tien_goc=Decimal(data.so_tien_goc), lai_suat_nam=Decimal(data.lai_suat_nam),
                  phuong_thuc=data.phuong_thuc, ngay_nhan=data.ngay_nhan, so_ky=data.so_ky,
                  chu_ky_thang=data.chu_ky_thang, ngay_dao_han=dao_han, tk_tien=data.tk_tien,
-                 con_lai_goc=Decimal(data.so_tien_goc), trang_thai="DANG_VAY", ghi_chu=data.ghi_chu)
+                 con_lai_goc=Decimal(data.so_tien_goc), trang_thai="DANG_VAY", ghi_chu=data.ghi_chu,
+                 du_an_id=data.du_an_id)
     db.add(v); db.flush()
     for r in rows:
         db.add(LichTraNo(khoan_vay_id=v.id, **r))
