@@ -57,6 +57,7 @@ class TaiSanVaoCT(BaseModel):
     ngay_mua: date | None = None
     vi_tri: str | None = None
     ghi_chu: str | None = None
+    khach_hang_id: int | None = None   # khách thuê gắn ngay khi tạo dự án
 
 
 class TaiSanSuaCT(BaseModel):
@@ -85,6 +86,8 @@ def them_tai_san(data: TaiSanVaoCT, db: Session = Depends(get_db),
                  nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
     if db.query(TaiSanChoThue).filter_by(ma=data.ma).first():
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Mã tài sản đã tồn tại")
+    if data.khach_hang_id and db.get(KhachHang, data.khach_hang_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy khách hàng")
     d = data.model_dump()
     if not d.get("ten_du_an"):
         d["ten_du_an"] = d["ma"]
