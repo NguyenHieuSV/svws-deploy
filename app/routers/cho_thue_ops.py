@@ -18,7 +18,7 @@ from ..deps import nhan_vien_id_cua
 from ..audit import ghi_audit
 from ..models import (NguoiDung, KhachHang, YeuCauMua, HangHoa, HoaDon,
                       TaiSanChoThue, ChiPhiVanHanh, KeHoachBaoTri,
-                      DinhMucTieuHao, TieuHaoThucTe, TepDinhKem)
+                      DinhMucTieuHao, TieuHaoThucTe, TepDinhKem, CtThietBi)
 
 router = APIRouter(prefix="/cho-thue", tags=["cho_thue_ops"])
 MODULE = "cho_thue"
@@ -118,6 +118,75 @@ def sua_tai_san(ts_id: int, data: TaiSanSuaCT, db: Session = Depends(get_db),
     ghi_audit(db, nd.id, "SUA", "tai_san_cho_thue", t.id)
     db.commit()
     return _ts_ra(db, t)
+
+
+# ===================== THIẾT BỊ / VẬT TƯ CỦA DỰ ÁN CHO THUÊ =====================
+class CtTbVao(BaseModel):
+    ten: str
+    thong_so: str | None = None
+    so_luong: Decimal = 1
+    don_gia: Decimal = 0
+    ghi_chu: str | None = None
+
+
+class CtTbSua(BaseModel):
+    ten: str | None = None
+    thong_so: str | None = None
+    so_luong: Decimal | None = None
+    don_gia: Decimal | None = None
+    ghi_chu: str | None = None
+
+
+@router.get("/tai-san/{ts_id}/thiet-bi")
+def ds_thiet_bi(ts_id: int, db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
+    if db.get(TaiSanChoThue, ts_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy dự án cho thuê")
+    rows = db.query(CtThietBi).filter_by(tai_san_id=ts_id).order_by(CtThietBi.id).all()
+    ds = [{"id": r.id, "ten": r.ten, "thong_so": r.thong_so,
+           "so_luong": float(r.so_luong or 0), "don_gia": float(r.don_gia or 0),
+           "thanh_tien": float((r.so_luong or 0) * (r.don_gia or 0)),
+           "ghi_chu": r.ghi_chu} for r in rows]
+    return {"danh_sach": ds, "tong": sum(x["thanh_tien"] for x in ds)}
+
+
+@router.post("/tai-san/{ts_id}/thiet-bi", status_code=201)
+def them_thiet_bi(ts_id: int, data: CtTbVao, db: Session = Depends(get_db),
+                  nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    if db.get(TaiSanChoThue, ts_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy dự án cho thuê")
+    tb = CtThietBi(tai_san_id=ts_id, ten=data.ten.strip()[:250], thong_so=data.thong_so,
+                   so_luong=data.so_luong, don_gia=data.don_gia, ghi_chu=data.ghi_chu)
+    db.add(tb); db.flush()
+    ghi_audit(db, nd.id, "TAO", "ct_thiet_bi", tb.id, moi={"tai_san_id": ts_id, "ten": tb.ten})
+    db.commit()
+    return {"id": tb.id, "ok": True}
+
+
+@router.put("/thiet-bi/{tb_id}")
+def sua_thiet_bi(tb_id: int, data: CtTbSua, db: Session = Depends(get_db),
+                 nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    tb = db.get(CtThietBi, tb_id)
+    if tb is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy thiết bị/vật tư")
+    for f in ("ten", "thong_so", "so_luong", "don_gia", "ghi_chu"):
+        v = getattr(data, f)
+        if v is not None:
+            setattr(tb, f, v)
+    ghi_audit(db, nd.id, "SUA", "ct_thiet_bi", tb.id, moi=data.model_dump(exclude_none=True, mode="json"))
+    db.commit()
+    return {"ok": True}
+
+
+@router.delete("/thiet-bi/{tb_id}")
+def xoa_thiet_bi(tb_id: int, db: Session = Depends(get_db),
+                 nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    tb = db.get(CtThietBi, tb_id)
+    if tb is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy thiết bị/vật tư")
+    ghi_audit(db, nd.id, "XOA", "ct_thiet_bi", tb_id, cu={"ten": tb.ten, "tai_san_id": tb.tai_san_id})
+    db.delete(tb)
+    db.commit()
+    return {"ok": True}
 
 
 # ----- DUYET: xóa tài sản cho thuê -----

@@ -1137,6 +1137,18 @@ class TaiSanChoThue(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class CtThietBi(Base):
+    """Thiết bị / vật tư cấu thành của một dự án cho thuê (mig 67)."""
+    __tablename__ = "ct_thiet_bi"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    tai_san_id: Mapped[int] = mapped_column(ForeignKey("tai_san_cho_thue.id", ondelete="CASCADE"))
+    ten: Mapped[str] = mapped_column(String(250))
+    thong_so: Mapped[str | None] = mapped_column(Text, nullable=True)
+    so_luong: Mapped[Decimal] = mapped_column(Numeric(15, 3), default=1)
+    don_gia: Mapped[Decimal] = mapped_column(Numeric(18, 0), default=0)
+    ghi_chu: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
 class ChiPhiVanHanh(Base):
     __tablename__ = "chi_phi_van_hanh"
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
