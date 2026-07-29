@@ -316,6 +316,87 @@ def luu_bao_cao_kt(ts_id: int, data: BcKtBatch, db: Session = Depends(get_db),
     return {"so_dong": n, "ngay": str(ng)}
 
 
+# --- TỔNG HỢP BCVH THEO THÁNG: chất lượng nước · hóa chất · tổng lượng nước ---
+def _so_tu_text(v):
+    """Rút số đầu tiên từ chuỗi kết quả test ('7.2', '45 ppm', 'pH 6,8')."""
+    import re
+    if v is None:
+        return None
+    m = re.search(r"-?\d+(?:[.,]\d+)?", str(v))
+    return float(m.group(0).replace(",", ".")) if m else None
+
+
+@router.get("/tai-san/{ts_id}/tong-hop-thang")
+def tong_hop_thang(ts_id: int, thang: str | None = None, db: Session = Depends(get_db),
+                   _=Depends(yeu_cau(MODULE, "XEM"))):
+    """Tổng hợp báo cáo vận hành theo tháng của dự án: chất lượng nước (BC kỹ thuật),
+    hóa chất (SL dùng/nhập), tổng lượng nước (chỉ số cuối − mốc trước tháng)."""
+    import calendar
+    if db.get(TaiSanChoThue, ts_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy dự án cho thuê")
+    try:
+        y, m = (thang or date.today().strftime("%Y-%m")).split("-")
+        d1 = date(int(y), int(m), 1)
+        d2 = date(int(y), int(m), calendar.monthrange(int(y), int(m))[1])
+    except Exception:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Tháng không hợp lệ (YYYY-MM)")
+    rows = (db.query(CtBaoCaoVh)
+            .filter(CtBaoCaoVh.tai_san_id == ts_id,
+                    CtBaoCaoVh.ngay >= d1, CtBaoCaoVh.ngay <= d2)
+            .order_by(CtBaoCaoVh.ngay, CtBaoCaoVh.id).all())
+    # 1) Chất lượng nước — nhóm theo (vị trí, chỉ tiêu)
+    kt = {}
+    for r in (x for x in rows if x.loai == "KY_THUAT"):
+        e = kt.setdefault((r.vi_tri or "", r.noi_dung),
+                          {"vi_tri": r.vi_tri, "chi_tieu": r.noi_dung, "series": []})
+        e["series"].append({"ngay": str(r.ngay), "kq": r.thong_so, "gia_tri": _so_tu_text(r.thong_so)})
+    for e in kt.values():
+        nums = [p["gia_tri"] for p in e["series"] if p["gia_tri"] is not None]
+        e["so_lan"] = len(e["series"])
+        e["min"] = min(nums) if nums else None
+        e["max"] = max(nums) if nums else None
+        e["tb"] = round(sum(nums) / len(nums), 2) if nums else None
+        e["gan_nhat"] = e["series"][-1]["kq"] if e["series"] else None
+    # 2) Hóa chất - vật tư — nhóm theo tên
+    hc = {}
+    for r in (x for x in rows if x.loai == "HOA_CHAT_VT"):
+        e = hc.setdefault(r.noi_dung, {"ten": r.noi_dung, "don_vi": r.don_vi,
+                                       "tong_dung": 0.0, "tong_nhap": 0.0, "series": []})
+        if r.don_vi:
+            e["don_vi"] = r.don_vi
+        if r.so_luong is not None:
+            e["tong_dung"] += float(r.so_luong)
+        if r.luong_nhap is not None:
+            e["tong_nhap"] += float(r.luong_nhap)
+        e["series"].append({"ngay": str(r.ngay),
+                            "sl_dung": float(r.so_luong) if r.so_luong is not None else None,
+                            "ton": float(r.luong_ton) if r.luong_ton is not None else None})
+    for e in hc.values():
+        e["tong_dung"] = round(e["tong_dung"], 3)
+        e["tong_nhap"] = round(e["tong_nhap"], 3)
+    # 3) Tổng lượng nước — nhóm theo hệ thống, mốc = chỉ số cuối cùng TRƯỚC tháng
+    kl = {}
+    for r in (x for x in rows if x.loai == "KHOI_LUONG" and x.luong_ton is not None):
+        e = kl.setdefault(r.noi_dung, {"he_thong": r.noi_dung, "don_vi": r.don_vi, "series": []})
+        if r.don_vi:
+            e["don_vi"] = r.don_vi
+        e["series"].append({"ngay": str(r.ngay), "chi_so": float(r.luong_ton)})
+    for ten, e in kl.items():
+        moc = (db.query(CtBaoCaoVh)
+               .filter(CtBaoCaoVh.tai_san_id == ts_id, CtBaoCaoVh.loai == "KHOI_LUONG",
+                       CtBaoCaoVh.noi_dung == ten, CtBaoCaoVh.luong_ton.isnot(None),
+                       CtBaoCaoVh.ngay < d1)
+               .order_by(CtBaoCaoVh.ngay.desc(), CtBaoCaoVh.id.desc()).first())
+        dau = float(moc.luong_ton) if moc else (e["series"][0]["chi_so"] if e["series"] else None)
+        cuoi = e["series"][-1]["chi_so"] if e["series"] else None
+        e["chi_so_dau"] = dau
+        e["chi_so_cuoi"] = cuoi
+        e["tong"] = round(cuoi - dau, 3) if (dau is not None and cuoi is not None) else None
+    return {"thang": f"{int(y):04d}-{int(m):02d}",
+            "chat_luong": list(kt.values()), "hoa_chat": list(hc.values()),
+            "luong_nuoc": list(kl.values())}
+
+
 # --- Lưu báo cáo Hóa chất - Vật tư theo LƯỢNG TỒN (SL dùng tự tính) ---
 def _ton_lien_truoc(db, ts_id: int, ten: str, ngay, exclude_id: int | None = None):
     """Bản ghi tồn gần nhất TRƯỚC ngày đã cho của cùng mặt hàng (để tính SL dùng)."""
