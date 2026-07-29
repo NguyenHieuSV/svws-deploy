@@ -1156,12 +1156,23 @@ class CtBaoCaoVh(Base):
     tai_san_id: Mapped[int] = mapped_column(ForeignKey("tai_san_cho_thue.id", ondelete="CASCADE"))
     loai: Mapped[str] = mapped_column(String(20), default="KY_THUAT")
     ngay: Mapped[date | None] = mapped_column(Date, server_default=func.current_date())
-    noi_dung: Mapped[str] = mapped_column(Text)
-    thong_so: Mapped[str | None] = mapped_column(Text, nullable=True)
+    vi_tri: Mapped[str | None] = mapped_column(String(150), nullable=True)   # mig 69
+    noi_dung: Mapped[str] = mapped_column(Text)          # chỉ tiêu (KT) / tên hóa chất-vật tư
+    thong_so: Mapped[str | None] = mapped_column(Text, nullable=True)   # kết quả test (KT)
     so_luong: Mapped[Decimal | None] = mapped_column(Numeric(15, 3), nullable=True)
     don_vi: Mapped[str | None] = mapped_column(String(20), nullable=True)
     ghi_chu: Mapped[str | None] = mapped_column(Text, nullable=True)
     nguoi_tao: Mapped[int | None] = mapped_column(ForeignKey("nhan_vien.id"), nullable=True)
+
+
+class CtBcvhChiTieu(Base):
+    """Bộ chỉ tiêu MẪU của báo cáo kỹ thuật — lưu theo dự án, dùng lại mỗi ngày (mig 69)."""
+    __tablename__ = "ct_bcvh_chi_tieu"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    tai_san_id: Mapped[int] = mapped_column(ForeignKey("tai_san_cho_thue.id", ondelete="CASCADE"))
+    vi_tri: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    chi_tieu: Mapped[str] = mapped_column(String(250))
+    thu_tu: Mapped[int] = mapped_column(Integer, default=0)
 
 
 class ChiPhiVanHanh(Base):

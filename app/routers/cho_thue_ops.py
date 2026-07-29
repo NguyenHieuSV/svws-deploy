@@ -18,7 +18,8 @@ from ..deps import nhan_vien_id_cua
 from ..audit import ghi_audit
 from ..models import (NguoiDung, KhachHang, YeuCauMua, HangHoa, HoaDon,
                       TaiSanChoThue, ChiPhiVanHanh, KeHoachBaoTri,
-                      DinhMucTieuHao, TieuHaoThucTe, TepDinhKem, CtThietBi, CtBaoCaoVh, NhanVien)
+                      DinhMucTieuHao, TieuHaoThucTe, TepDinhKem, CtThietBi, CtBaoCaoVh,
+                      CtBcvhChiTieu, NhanVien)
 
 router = APIRouter(prefix="/cho-thue", tags=["cho_thue_ops"])
 MODULE = "cho_thue"
@@ -212,7 +213,7 @@ def ds_bao_cao_vh(ts_id: int, loai: str | None = None, db: Session = Depends(get
     for r in q.order_by(CtBaoCaoVh.ngay.desc(), CtBaoCaoVh.id.desc()).limit(300).all():
         nv = db.get(NhanVien, r.nguoi_tao) if r.nguoi_tao else None
         out.append({"id": r.id, "loai": r.loai, "ngay": str(r.ngay) if r.ngay else None,
-                    "noi_dung": r.noi_dung, "thong_so": r.thong_so,
+                    "vi_tri": r.vi_tri, "noi_dung": r.noi_dung, "thong_so": r.thong_so,
                     "so_luong": float(r.so_luong) if r.so_luong is not None else None,
                     "don_vi": r.don_vi, "ghi_chu": r.ghi_chu,
                     "nguoi_bc": nv.ho_ten if nv else None})
@@ -232,6 +233,104 @@ def them_bao_cao_vh(ts_id: int, data: BcvhVao, db: Session = Depends(get_db),
     ghi_audit(db, nd.id, "TAO", "ct_bao_cao_vh", r.id, moi={"tai_san_id": ts_id, "loai": data.loai})
     db.commit()
     return {"id": r.id, "ok": True}
+
+
+# --- Bộ CHỈ TIÊU MẪU báo cáo kỹ thuật (lưu theo dự án, dùng lại mỗi ngày) ---
+class CtChiTieuVao(BaseModel):
+    vi_tri: str | None = None
+    chi_tieu: str
+
+
+@router.get("/tai-san/{ts_id}/chi-tieu")
+def ds_chi_tieu(ts_id: int, db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
+    return [{"id": c.id, "vi_tri": c.vi_tri, "chi_tieu": c.chi_tieu}
+            for c in db.query(CtBcvhChiTieu).filter_by(tai_san_id=ts_id)
+                       .order_by(CtBcvhChiTieu.thu_tu, CtBcvhChiTieu.id).all()]
+
+
+@router.post("/tai-san/{ts_id}/chi-tieu", status_code=201)
+def them_chi_tieu(ts_id: int, data: CtChiTieuVao, db: Session = Depends(get_db),
+                  nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    if db.get(TaiSanChoThue, ts_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy dự án cho thuê")
+    c = CtBcvhChiTieu(tai_san_id=ts_id, vi_tri=(data.vi_tri or "").strip()[:150] or None,
+                      chi_tieu=data.chi_tieu.strip()[:250])
+    db.add(c); db.flush()
+    ghi_audit(db, nd.id, "TAO", "ct_bcvh_chi_tieu", c.id, moi={"tai_san_id": ts_id, "chi_tieu": c.chi_tieu})
+    db.commit()
+    return {"id": c.id, "vi_tri": c.vi_tri, "chi_tieu": c.chi_tieu}
+
+
+@router.delete("/chi-tieu/{ct_id}")
+def xoa_chi_tieu(ct_id: int, db: Session = Depends(get_db),
+                 nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    c = db.get(CtBcvhChiTieu, ct_id)
+    if c is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy chỉ tiêu")
+    ghi_audit(db, nd.id, "XOA", "ct_bcvh_chi_tieu", ct_id, cu={"chi_tieu": c.chi_tieu})
+    db.delete(c)
+    db.commit()
+    return {"ok": True}
+
+
+# --- Lưu báo cáo kỹ thuật NGÀY (nhiều chỉ tiêu 1 lần) ---
+class BcKtDong(BaseModel):
+    vi_tri: str | None = None
+    chi_tieu: str
+    ket_qua: str | None = None
+    ghi_chu: str | None = None
+
+
+class BcKtBatch(BaseModel):
+    ngay: date | None = None
+    dong: list[BcKtDong]
+
+
+@router.post("/tai-san/{ts_id}/bao-cao-kt", status_code=201)
+def luu_bao_cao_kt(ts_id: int, data: BcKtBatch, db: Session = Depends(get_db),
+                   nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    if db.get(TaiSanChoThue, ts_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy dự án cho thuê")
+    ng = data.ngay or date.today()
+    nv_id = nhan_vien_id_cua(db, nd.id)
+    n = 0
+    for d in data.dong:
+        if not (d.ket_qua or "").strip():
+            continue
+        db.add(CtBaoCaoVh(tai_san_id=ts_id, loai="KY_THUAT", ngay=ng, vi_tri=d.vi_tri,
+                          noi_dung=d.chi_tieu, thong_so=d.ket_qua.strip(),
+                          ghi_chu=d.ghi_chu, nguoi_tao=nv_id))
+        n += 1
+    if not n:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Chưa nhập kết quả cho chỉ tiêu nào")
+    ghi_audit(db, nd.id, "TAO", "ct_bao_cao_vh", None, moi={"tai_san_id": ts_id, "ngay": str(ng), "so_dong": n})
+    db.commit()
+    return {"so_dong": n, "ngay": str(ng)}
+
+
+class BcvhSua(BaseModel):
+    ngay: date | None = None
+    vi_tri: str | None = None
+    noi_dung: str | None = None
+    thong_so: str | None = None
+    so_luong: Decimal | None = None
+    don_vi: str | None = None
+    ghi_chu: str | None = None
+
+
+@router.put("/bao-cao-vh/{bc_id}")
+def sua_bao_cao_vh(bc_id: int, data: BcvhSua, db: Session = Depends(get_db),
+                   nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    r = db.get(CtBaoCaoVh, bc_id)
+    if r is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy báo cáo")
+    for f in ("ngay", "vi_tri", "noi_dung", "thong_so", "so_luong", "don_vi", "ghi_chu"):
+        v = getattr(data, f)
+        if v is not None:
+            setattr(r, f, v)
+    ghi_audit(db, nd.id, "SUA", "ct_bao_cao_vh", r.id, moi=data.model_dump(exclude_none=True, mode="json"))
+    db.commit()
+    return {"ok": True}
 
 
 @router.delete("/bao-cao-vh/{bc_id}")
