@@ -1161,6 +1161,7 @@ class CtBaoCaoVh(Base):
     thong_so: Mapped[str | None] = mapped_column(Text, nullable=True)   # kết quả test (KT)
     so_luong: Mapped[Decimal | None] = mapped_column(Numeric(15, 3), nullable=True)   # SL dùng (HC: tự tính)
     luong_ton: Mapped[Decimal | None] = mapped_column(Numeric(15, 3), nullable=True)  # lượng tồn (HC, mig 70)
+    luong_nhap: Mapped[Decimal | None] = mapped_column(Numeric(15, 3), nullable=True) # lượng nhập trong ngày (mig 71)
     don_vi: Mapped[str | None] = mapped_column(String(20), nullable=True)
     ghi_chu: Mapped[str | None] = mapped_column(Text, nullable=True)
     nguoi_tao: Mapped[int | None] = mapped_column(ForeignKey("nhan_vien.id"), nullable=True)

@@ -216,6 +216,7 @@ def ds_bao_cao_vh(ts_id: int, loai: str | None = None, db: Session = Depends(get
                     "vi_tri": r.vi_tri, "noi_dung": r.noi_dung, "thong_so": r.thong_so,
                     "so_luong": float(r.so_luong) if r.so_luong is not None else None,
                     "luong_ton": float(r.luong_ton) if r.luong_ton is not None else None,
+                    "luong_nhap": float(r.luong_nhap) if r.luong_nhap is not None else None,
                     "don_vi": r.don_vi, "ghi_chu": r.ghi_chu,
                     "nguoi_bc": nv.ho_ten if nv else None})
     return out
@@ -330,7 +331,8 @@ def _ton_lien_truoc(db, ts_id: int, ten: str, ngay, exclude_id: int | None = Non
 
 class BcHcDong(BaseModel):
     ten: str
-    luong_ton: Decimal | None = None
+    luong_nhap: Decimal | None = None   # lượng nhập trong ngày (0/bỏ trống nếu không nhập)
+    luong_ton: Decimal | None = None    # tồn thực tế CUỐI NGÀY (đã gồm hàng nhập trong ngày)
     don_vi: str | None = None
     ghi_chu: str | None = None
 
@@ -354,9 +356,11 @@ def luu_bao_cao_hc(ts_id: int, data: BcHcBatch, db: Session = Depends(get_db),
         if d.luong_ton is None:
             continue
         truoc = _ton_lien_truoc(db, ts_id, d.ten, ng)
-        sl_dung = (truoc.luong_ton - d.luong_ton) if truoc else None
+        # SL dùng = tồn liền trước + lượng nhập hôm nay − tồn cuối ngày hôm nay
+        sl_dung = (truoc.luong_ton + (d.luong_nhap or 0) - d.luong_ton) if truoc else None
         db.add(CtBaoCaoVh(tai_san_id=ts_id, loai="HOA_CHAT_VT", ngay=ng,
-                          noi_dung=d.ten, luong_ton=d.luong_ton, so_luong=sl_dung,
+                          noi_dung=d.ten, luong_ton=d.luong_ton, luong_nhap=d.luong_nhap,
+                          so_luong=sl_dung,
                           don_vi=d.don_vi, ghi_chu=d.ghi_chu, nguoi_tao=nv_id))
         db.flush()
         n += 1
@@ -412,6 +416,7 @@ class BcvhSua(BaseModel):
     thong_so: str | None = None
     so_luong: Decimal | None = None
     luong_ton: Decimal | None = None
+    luong_nhap: Decimal | None = None
     don_vi: str | None = None
     ghi_chu: str | None = None
 
@@ -422,15 +427,16 @@ def sua_bao_cao_vh(bc_id: int, data: BcvhSua, db: Session = Depends(get_db),
     r = db.get(CtBaoCaoVh, bc_id)
     if r is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy báo cáo")
-    for f in ("ngay", "vi_tri", "noi_dung", "thong_so", "so_luong", "luong_ton", "don_vi", "ghi_chu"):
+    for f in ("ngay", "vi_tri", "noi_dung", "thong_so", "so_luong", "luong_ton", "luong_nhap", "don_vi", "ghi_chu"):
         v = getattr(data, f)
         if v is not None:
             setattr(r, f, v)
-    # sửa lượng tồn (hoặc ngày/tên) của dòng HC → tính lại SL dùng theo tồn liền trước
+    # sửa lượng tồn/nhập (hoặc ngày/tên) của dòng HC → tính lại SL dùng
     if r.loai == "HOA_CHAT_VT" and r.luong_ton is not None and \
-       (data.luong_ton is not None or data.ngay is not None or data.noi_dung is not None):
+       (data.luong_ton is not None or data.luong_nhap is not None or
+            data.ngay is not None or data.noi_dung is not None):
         truoc = _ton_lien_truoc(db, r.tai_san_id, r.noi_dung, r.ngay, exclude_id=r.id)
-        r.so_luong = (truoc.luong_ton - r.luong_ton) if truoc else None
+        r.so_luong = (truoc.luong_ton + (r.luong_nhap or 0) - r.luong_ton) if truoc else None
     ghi_audit(db, nd.id, "SUA", "ct_bao_cao_vh", r.id, moi=data.model_dump(exclude_none=True, mode="json"))
     db.commit()
     return {"ok": True, "so_luong": float(r.so_luong) if r.so_luong is not None else None}
