@@ -215,6 +215,7 @@ def ds_bao_cao_vh(ts_id: int, loai: str | None = None, db: Session = Depends(get
         out.append({"id": r.id, "loai": r.loai, "ngay": str(r.ngay) if r.ngay else None,
                     "vi_tri": r.vi_tri, "noi_dung": r.noi_dung, "thong_so": r.thong_so,
                     "so_luong": float(r.so_luong) if r.so_luong is not None else None,
+                    "luong_ton": float(r.luong_ton) if r.luong_ton is not None else None,
                     "don_vi": r.don_vi, "ghi_chu": r.ghi_chu,
                     "nguoi_bc": nv.ho_ten if nv else None})
     return out
@@ -237,15 +238,21 @@ def them_bao_cao_vh(ts_id: int, data: BcvhVao, db: Session = Depends(get_db),
 
 # --- Bộ CHỈ TIÊU MẪU báo cáo kỹ thuật (lưu theo dự án, dùng lại mỗi ngày) ---
 class CtChiTieuVao(BaseModel):
+    loai: str = Field(default="KY_THUAT", pattern="^(KY_THUAT|HOA_CHAT_VT)$")
     vi_tri: str | None = None
     chi_tieu: str
+    don_vi: str | None = None
 
 
 @router.get("/tai-san/{ts_id}/chi-tieu")
-def ds_chi_tieu(ts_id: int, db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
-    return [{"id": c.id, "vi_tri": c.vi_tri, "chi_tieu": c.chi_tieu}
-            for c in db.query(CtBcvhChiTieu).filter_by(tai_san_id=ts_id)
-                       .order_by(CtBcvhChiTieu.thu_tu, CtBcvhChiTieu.id).all()]
+def ds_chi_tieu(ts_id: int, loai: str | None = None, db: Session = Depends(get_db),
+                _=Depends(yeu_cau(MODULE, "XEM"))):
+    q = db.query(CtBcvhChiTieu).filter_by(tai_san_id=ts_id)
+    if loai:
+        q = q.filter(CtBcvhChiTieu.loai == loai)
+    return [{"id": c.id, "loai": c.loai or "KY_THUAT", "vi_tri": c.vi_tri,
+             "chi_tieu": c.chi_tieu, "don_vi": c.don_vi}
+            for c in q.order_by(CtBcvhChiTieu.thu_tu, CtBcvhChiTieu.id).all()]
 
 
 @router.post("/tai-san/{ts_id}/chi-tieu", status_code=201)
@@ -253,12 +260,12 @@ def them_chi_tieu(ts_id: int, data: CtChiTieuVao, db: Session = Depends(get_db),
                   nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
     if db.get(TaiSanChoThue, ts_id) is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy dự án cho thuê")
-    c = CtBcvhChiTieu(tai_san_id=ts_id, vi_tri=(data.vi_tri or "").strip()[:150] or None,
-                      chi_tieu=data.chi_tieu.strip()[:250])
+    c = CtBcvhChiTieu(tai_san_id=ts_id, loai=data.loai, vi_tri=(data.vi_tri or "").strip()[:150] or None,
+                      chi_tieu=data.chi_tieu.strip()[:250], don_vi=(data.don_vi or "").strip()[:20] or None)
     db.add(c); db.flush()
-    ghi_audit(db, nd.id, "TAO", "ct_bcvh_chi_tieu", c.id, moi={"tai_san_id": ts_id, "chi_tieu": c.chi_tieu})
+    ghi_audit(db, nd.id, "TAO", "ct_bcvh_chi_tieu", c.id, moi={"tai_san_id": ts_id, "loai": data.loai, "chi_tieu": c.chi_tieu})
     db.commit()
-    return {"id": c.id, "vi_tri": c.vi_tri, "chi_tieu": c.chi_tieu}
+    return {"id": c.id, "loai": c.loai, "vi_tri": c.vi_tri, "chi_tieu": c.chi_tieu, "don_vi": c.don_vi}
 
 
 @router.delete("/chi-tieu/{ct_id}")
@@ -308,12 +315,66 @@ def luu_bao_cao_kt(ts_id: int, data: BcKtBatch, db: Session = Depends(get_db),
     return {"so_dong": n, "ngay": str(ng)}
 
 
+# --- Lưu báo cáo Hóa chất - Vật tư theo LƯỢNG TỒN (SL dùng tự tính) ---
+def _ton_lien_truoc(db, ts_id: int, ten: str, ngay, exclude_id: int | None = None):
+    """Bản ghi tồn gần nhất TRƯỚC ngày đã cho của cùng mặt hàng (để tính SL dùng)."""
+    q = db.query(CtBaoCaoVh).filter(CtBaoCaoVh.tai_san_id == ts_id,
+                                    CtBaoCaoVh.loai == "HOA_CHAT_VT",
+                                    CtBaoCaoVh.noi_dung == ten,
+                                    CtBaoCaoVh.luong_ton.isnot(None),
+                                    CtBaoCaoVh.ngay <= ngay)
+    if exclude_id:
+        q = q.filter(CtBaoCaoVh.id != exclude_id)
+    return q.order_by(CtBaoCaoVh.ngay.desc(), CtBaoCaoVh.id.desc()).first()
+
+
+class BcHcDong(BaseModel):
+    ten: str
+    luong_ton: Decimal | None = None
+    don_vi: str | None = None
+    ghi_chu: str | None = None
+
+
+class BcHcBatch(BaseModel):
+    ngay: date | None = None
+    dong: list[BcHcDong]
+
+
+@router.post("/tai-san/{ts_id}/bao-cao-hc", status_code=201)
+def luu_bao_cao_hc(ts_id: int, data: BcHcBatch, db: Session = Depends(get_db),
+                   nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    """Lưu báo cáo hóa chất - vật tư theo ngày: nhập LƯỢNG TỒN, SL dùng tự tính
+    = tồn liền trước − tồn cùng dòng (âm nghĩa là vừa nạp/bổ sung thêm)."""
+    if db.get(TaiSanChoThue, ts_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy dự án cho thuê")
+    ng = data.ngay or date.today()
+    nv_id = nhan_vien_id_cua(db, nd.id)
+    n = 0
+    for d in data.dong:
+        if d.luong_ton is None:
+            continue
+        truoc = _ton_lien_truoc(db, ts_id, d.ten, ng)
+        sl_dung = (truoc.luong_ton - d.luong_ton) if truoc else None
+        db.add(CtBaoCaoVh(tai_san_id=ts_id, loai="HOA_CHAT_VT", ngay=ng,
+                          noi_dung=d.ten, luong_ton=d.luong_ton, so_luong=sl_dung,
+                          don_vi=d.don_vi, ghi_chu=d.ghi_chu, nguoi_tao=nv_id))
+        db.flush()
+        n += 1
+    if not n:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Chưa nhập lượng tồn cho mặt hàng nào")
+    ghi_audit(db, nd.id, "TAO", "ct_bao_cao_vh", None,
+              moi={"tai_san_id": ts_id, "loai": "HOA_CHAT_VT", "ngay": str(ng), "so_dong": n})
+    db.commit()
+    return {"so_dong": n, "ngay": str(ng)}
+
+
 class BcvhSua(BaseModel):
     ngay: date | None = None
     vi_tri: str | None = None
     noi_dung: str | None = None
     thong_so: str | None = None
     so_luong: Decimal | None = None
+    luong_ton: Decimal | None = None
     don_vi: str | None = None
     ghi_chu: str | None = None
 
@@ -324,13 +385,18 @@ def sua_bao_cao_vh(bc_id: int, data: BcvhSua, db: Session = Depends(get_db),
     r = db.get(CtBaoCaoVh, bc_id)
     if r is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy báo cáo")
-    for f in ("ngay", "vi_tri", "noi_dung", "thong_so", "so_luong", "don_vi", "ghi_chu"):
+    for f in ("ngay", "vi_tri", "noi_dung", "thong_so", "so_luong", "luong_ton", "don_vi", "ghi_chu"):
         v = getattr(data, f)
         if v is not None:
             setattr(r, f, v)
+    # sửa lượng tồn (hoặc ngày/tên) của dòng HC → tính lại SL dùng theo tồn liền trước
+    if r.loai == "HOA_CHAT_VT" and r.luong_ton is not None and \
+       (data.luong_ton is not None or data.ngay is not None or data.noi_dung is not None):
+        truoc = _ton_lien_truoc(db, r.tai_san_id, r.noi_dung, r.ngay, exclude_id=r.id)
+        r.so_luong = (truoc.luong_ton - r.luong_ton) if truoc else None
     ghi_audit(db, nd.id, "SUA", "ct_bao_cao_vh", r.id, moi=data.model_dump(exclude_none=True, mode="json"))
     db.commit()
-    return {"ok": True}
+    return {"ok": True, "so_luong": float(r.so_luong) if r.so_luong is not None else None}
 
 
 @router.delete("/bao-cao-vh/{bc_id}")
