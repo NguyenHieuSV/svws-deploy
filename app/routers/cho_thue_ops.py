@@ -18,7 +18,7 @@ from ..deps import nhan_vien_id_cua
 from ..audit import ghi_audit
 from ..models import (NguoiDung, KhachHang, YeuCauMua, HangHoa, HoaDon,
                       TaiSanChoThue, ChiPhiVanHanh, KeHoachBaoTri,
-                      DinhMucTieuHao, TieuHaoThucTe, TepDinhKem, CtThietBi)
+                      DinhMucTieuHao, TieuHaoThucTe, TepDinhKem, CtThietBi, CtBaoCaoVh, NhanVien)
 
 router = APIRouter(prefix="/cho-thue", tags=["cho_thue_ops"])
 MODULE = "cho_thue"
@@ -185,6 +185,64 @@ def xoa_thiet_bi(tb_id: int, db: Session = Depends(get_db),
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy thiết bị/vật tư")
     ghi_audit(db, nd.id, "XOA", "ct_thiet_bi", tb_id, cu={"ten": tb.ten, "tai_san_id": tb.tai_san_id})
     db.delete(tb)
+    db.commit()
+    return {"ok": True}
+
+
+# ===================== BÁO CÁO VẬN HÀNH (KY_THUAT | HOA_CHAT_VT) =====================
+class BcvhVao(BaseModel):
+    loai: str = Field(default="KY_THUAT", pattern="^(KY_THUAT|HOA_CHAT_VT)$")
+    ngay: date | None = None
+    noi_dung: str
+    thong_so: str | None = None
+    so_luong: Decimal | None = None
+    don_vi: str | None = None
+    ghi_chu: str | None = None
+
+
+@router.get("/tai-san/{ts_id}/bao-cao")
+def ds_bao_cao_vh(ts_id: int, loai: str | None = None, db: Session = Depends(get_db),
+                  _=Depends(yeu_cau(MODULE, "XEM"))):
+    if db.get(TaiSanChoThue, ts_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy dự án cho thuê")
+    q = db.query(CtBaoCaoVh).filter_by(tai_san_id=ts_id)
+    if loai:
+        q = q.filter(CtBaoCaoVh.loai == loai)
+    out = []
+    for r in q.order_by(CtBaoCaoVh.ngay.desc(), CtBaoCaoVh.id.desc()).limit(300).all():
+        nv = db.get(NhanVien, r.nguoi_tao) if r.nguoi_tao else None
+        out.append({"id": r.id, "loai": r.loai, "ngay": str(r.ngay) if r.ngay else None,
+                    "noi_dung": r.noi_dung, "thong_so": r.thong_so,
+                    "so_luong": float(r.so_luong) if r.so_luong is not None else None,
+                    "don_vi": r.don_vi, "ghi_chu": r.ghi_chu,
+                    "nguoi_bc": nv.ho_ten if nv else None})
+    return out
+
+
+@router.post("/tai-san/{ts_id}/bao-cao", status_code=201)
+def them_bao_cao_vh(ts_id: int, data: BcvhVao, db: Session = Depends(get_db),
+                    nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    if db.get(TaiSanChoThue, ts_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy dự án cho thuê")
+    r = CtBaoCaoVh(tai_san_id=ts_id, loai=data.loai, ngay=data.ngay or date.today(),
+                   noi_dung=data.noi_dung.strip(), thong_so=data.thong_so,
+                   so_luong=data.so_luong, don_vi=data.don_vi, ghi_chu=data.ghi_chu,
+                   nguoi_tao=nhan_vien_id_cua(db, nd.id))
+    db.add(r); db.flush()
+    ghi_audit(db, nd.id, "TAO", "ct_bao_cao_vh", r.id, moi={"tai_san_id": ts_id, "loai": data.loai})
+    db.commit()
+    return {"id": r.id, "ok": True}
+
+
+@router.delete("/bao-cao-vh/{bc_id}")
+def xoa_bao_cao_vh(bc_id: int, db: Session = Depends(get_db),
+                   nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    r = db.get(CtBaoCaoVh, bc_id)
+    if r is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy báo cáo")
+    ghi_audit(db, nd.id, "XOA", "ct_bao_cao_vh", bc_id,
+              cu={"loai": r.loai, "ngay": str(r.ngay), "noi_dung": (r.noi_dung or "")[:150]})
+    db.delete(r)
     db.commit()
     return {"ok": True}
 

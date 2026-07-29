@@ -1149,6 +1149,21 @@ class CtThietBi(Base):
     ghi_chu: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
+class CtBaoCaoVh(Base):
+    """Báo cáo vận hành dự án cho thuê: KY_THUAT | HOA_CHAT_VT (mig 68)."""
+    __tablename__ = "ct_bao_cao_vh"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    tai_san_id: Mapped[int] = mapped_column(ForeignKey("tai_san_cho_thue.id", ondelete="CASCADE"))
+    loai: Mapped[str] = mapped_column(String(20), default="KY_THUAT")
+    ngay: Mapped[date | None] = mapped_column(Date, server_default=func.current_date())
+    noi_dung: Mapped[str] = mapped_column(Text)
+    thong_so: Mapped[str | None] = mapped_column(Text, nullable=True)
+    so_luong: Mapped[Decimal | None] = mapped_column(Numeric(15, 3), nullable=True)
+    don_vi: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    ghi_chu: Mapped[str | None] = mapped_column(Text, nullable=True)
+    nguoi_tao: Mapped[int | None] = mapped_column(ForeignKey("nhan_vien.id"), nullable=True)
+
+
 class ChiPhiVanHanh(Base):
     __tablename__ = "chi_phi_van_hanh"
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
