@@ -238,9 +238,9 @@ def them_bao_cao_vh(ts_id: int, data: BcvhVao, db: Session = Depends(get_db),
 
 # --- Bộ CHỈ TIÊU MẪU báo cáo kỹ thuật (lưu theo dự án, dùng lại mỗi ngày) ---
 class CtChiTieuVao(BaseModel):
-    loai: str = Field(default="KY_THUAT", pattern="^(KY_THUAT|HOA_CHAT_VT)$")
+    loai: str = Field(default="KY_THUAT", pattern="^(KY_THUAT|HOA_CHAT_VT|KHOI_LUONG)$")
     vi_tri: str | None = None
-    chi_tieu: str
+    chi_tieu: str          # tên chỉ tiêu / hóa chất-vật tư / hệ thống
     don_vi: str | None = None
 
 
@@ -364,6 +364,43 @@ def luu_bao_cao_hc(ts_id: int, data: BcHcBatch, db: Session = Depends(get_db),
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Chưa nhập lượng tồn cho mặt hàng nào")
     ghi_audit(db, nd.id, "TAO", "ct_bao_cao_vh", None,
               moi={"tai_san_id": ts_id, "loai": "HOA_CHAT_VT", "ngay": str(ng), "so_dong": n})
+    db.commit()
+    return {"so_dong": n, "ngay": str(ng)}
+
+
+# --- Lưu báo cáo KHỐI LƯỢNG theo ngày (chỉ số nước theo hệ thống) ---
+class BcKlDong(BaseModel):
+    he_thong: str
+    chi_so: Decimal | None = None
+    don_vi: str | None = None
+    ghi_chu: str | None = None
+
+
+class BcKlBatch(BaseModel):
+    ngay: date | None = None
+    dong: list[BcKlDong]
+
+
+@router.post("/tai-san/{ts_id}/bao-cao-kl", status_code=201)
+def luu_bao_cao_kl(ts_id: int, data: BcKlBatch, db: Session = Depends(get_db),
+                   nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    """Báo cáo khối lượng: ghi CHỈ SỐ NƯỚC theo từng hệ thống của dự án."""
+    if db.get(TaiSanChoThue, ts_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy dự án cho thuê")
+    ng = data.ngay or date.today()
+    nv_id = nhan_vien_id_cua(db, nd.id)
+    n = 0
+    for d in data.dong:
+        if d.chi_so is None:
+            continue
+        db.add(CtBaoCaoVh(tai_san_id=ts_id, loai="KHOI_LUONG", ngay=ng,
+                          noi_dung=d.he_thong, luong_ton=d.chi_so,
+                          don_vi=d.don_vi, ghi_chu=d.ghi_chu, nguoi_tao=nv_id))
+        n += 1
+    if not n:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Chưa nhập chỉ số cho hệ thống nào")
+    ghi_audit(db, nd.id, "TAO", "ct_bao_cao_vh", None,
+              moi={"tai_san_id": ts_id, "loai": "KHOI_LUONG", "ngay": str(ng), "so_dong": n})
     db.commit()
     return {"so_dong": n, "ngay": str(ng)}
 
