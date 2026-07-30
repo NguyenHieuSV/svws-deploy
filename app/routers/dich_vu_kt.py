@@ -4,6 +4,7 @@ Mỗi phiếu lưu dữ liệu kỹ thuật theo loại (JSON) + báo cáo, theo
 from decimal import Decimal
 from datetime import date
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from ..database import get_db
 from ..rbac import yeu_cau, chi_vai_tro
@@ -146,8 +147,11 @@ def xoa_dich_vu(dv_id: int, db: Session = Depends(get_db),
 
 
 # ===================== TÀI LIỆU HƯỚNG DẪN KỸ THUẬT (theo loại) =====================
+NHOM_TL = {"NUOC_CAP_SS", "NUOC_THAI", "KHI_THAI"}
+
+
 def _tl_ra(t: DichVuKtTaiLieu) -> dict:
-    return {"id": t.id, "loai_dv": t.loai_dv, "ten": t.ten,
+    return {"id": t.id, "loai_dv": t.loai_dv, "nhom": t.nhom or "NUOC_CAP_SS", "ten": t.ten,
             "co_file": bool(t.duong_dan), "url": t.url,
             "kich_thuoc": int(t.kich_thuoc or 0), "ghi_chu": t.ghi_chu,
             "nguoi_tao": t.nguoi_tao,
@@ -164,26 +168,52 @@ def ds_tai_lieu(loai: str | None = None, db: Session = Depends(get_db),
 
 
 @router.post("/tai-lieu", status_code=201)
-async def them_tai_lieu(loai_dv: str = Form(...), ten: str = Form(...),
+async def them_tai_lieu(loai_dv: str = Form(None), ten: str = Form(...),
+                        nhom: str = Form(None),
                         url: str = Form(None), ghi_chu: str = Form(None),
                         file: UploadFile = File(None), db: Session = Depends(get_db),
                         nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
-    if loai_dv not in LOAI:
+    if loai_dv and loai_dv not in LOAI:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Loại dịch vụ không hợp lệ")
+    if nhom and nhom not in NHOM_TL:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Nhóm tài liệu không hợp lệ")
+    if not loai_dv and not nhom:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Cần loại dịch vụ hoặc nhóm tài liệu")
     duong_dan, kt = None, 0
     if file is not None and file.filename:
         data = await file.read()
-        duong_dan = luu(data, "dich_vu_kt", loai_dv, file.filename, file.content_type)
+        duong_dan = luu(data, "dich_vu_kt", loai_dv or nhom, file.filename, file.content_type)
         kt = len(data)
     if not duong_dan and not (url and url.strip()):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Cần tải lên một tệp hoặc nhập link tài liệu")
-    t = DichVuKtTaiLieu(loai_dv=loai_dv, ten=ten, duong_dan=duong_dan,
+    t = DichVuKtTaiLieu(loai_dv=loai_dv, nhom=nhom or "NUOC_CAP_SS", ten=ten, duong_dan=duong_dan,
                         url=(url.strip() if url else None), kich_thuoc=kt,
                         ghi_chu=ghi_chu, nguoi_tao=nd.email)
     db.add(t); db.flush()
-    ghi_audit(db, nd.id, "TAO", "dich_vu_kt_tai_lieu", t.id, moi={"ten": ten, "loai_dv": loai_dv})
+    ghi_audit(db, nd.id, "TAO", "dich_vu_kt_tai_lieu", t.id,
+              moi={"ten": ten, "loai_dv": loai_dv, "nhom": t.nhom})
     db.commit()
     return _tl_ra(t)
+
+
+class TlNhomVao(BaseModel):
+    nhom: str
+
+
+@router.put("/tai-lieu/{tl_id}/nhom")
+def doi_nhom_tai_lieu(tl_id: int, data: TlNhomVao, db: Session = Depends(get_db),
+                      nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    """Chuyển tài liệu sang nhóm khác (Nước cấp - Siêu sạch / Nước thải / Khí thải)."""
+    if data.nhom not in NHOM_TL:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Nhóm tài liệu không hợp lệ")
+    t = db.get(DichVuKtTaiLieu, tl_id)
+    if t is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy tài liệu")
+    cu = t.nhom
+    t.nhom = data.nhom
+    ghi_audit(db, nd.id, "SUA", "dich_vu_kt_tai_lieu", t.id, cu={"nhom": cu}, moi={"nhom": data.nhom})
+    db.commit()
+    return {"ok": True, "nhom": t.nhom}
 
 
 @router.get("/tai-lieu/{tl_id}/tai-ve")

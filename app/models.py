@@ -1260,6 +1260,7 @@ class DichVuKtTaiLieu(Base):
     __tablename__ = "dich_vu_kt_tai_lieu"
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     loai_dv: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    nhom: Mapped[str | None] = mapped_column(String(20), nullable=True)   # NUOC_CAP_SS | NUOC_THAI | KHI_THAI (mig 72)
     ten: Mapped[str] = mapped_column(String(255))
     duong_dan: Mapped[str | None] = mapped_column(Text, nullable=True)
     url: Mapped[str | None] = mapped_column(Text, nullable=True)
