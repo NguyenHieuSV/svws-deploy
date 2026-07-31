@@ -2,7 +2,7 @@
 - GOC_DEU : trả gốc đều mỗi kỳ, lãi tính trên dư nợ giảm dần.
 - TRA_DEU : niên kim — tổng trả mỗi kỳ bằng nhau (gốc tăng dần, lãi giảm dần).
 - GOC_CUOI: trả lãi mỗi kỳ, gốc trả 1 lần khi đáo hạn.
-Lãi suất kỳ = lãi suất năm × số tháng mỗi kỳ / 12.
+Chu kỳ tính theo NGÀY: lãi suất kỳ = lãi suất năm × số ngày mỗi kỳ / 365.
 """
 from datetime import date
 from decimal import Decimal, ROUND_HALF_UP
@@ -26,16 +26,17 @@ def them_thang(d: date, n: int) -> date:
     return date(y, m, min(d.day, _cuoi_thang(y, m)))
 
 
-def sinh_lich(so_tien_goc, lai_suat_nam, so_ky, chu_ky_thang, ngay_nhan, phuong_thuc) -> list:
+def sinh_lich(so_tien_goc, lai_suat_nam, so_ky, chu_ky_ngay, ngay_nhan, phuong_thuc) -> list:
+    from datetime import timedelta
     goc = D(so_tien_goc)
     n = int(so_ky)
-    r = D(lai_suat_nam) / Decimal(100) * D(chu_ky_thang) / Decimal(12)
+    r = D(lai_suat_nam) / Decimal(100) * D(chu_ky_ngay) / Decimal(365)
     rows = []
     du_no = goc
     if phuong_thuc == "TRA_DEU" and r > 0:
         pmt = goc * r / (Decimal(1) - (Decimal(1) + r) ** (-n))
     for k in range(1, n + 1):
-        ngay = them_thang(ngay_nhan, k * int(chu_ky_thang))
+        ngay = ngay_nhan + timedelta(days=k * int(chu_ky_ngay))
         lai = _r(du_no * r)
         if phuong_thuc == "GOC_CUOI":
             g = goc if k == n else Decimal(0)

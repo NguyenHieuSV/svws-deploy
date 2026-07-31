@@ -4,7 +4,7 @@ Hạch toán tự động: nhận tiền (Nợ 111/112 / Có 341); trả nợ (N
 Cập nhật số dư quỹ tương ứng để đồng bộ với báo cáo tiền & dòng tiền.
 Thuộc quyền module 'tai_chinh'.
 """
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
@@ -42,6 +42,7 @@ def _vay_dict(db, v: KhoanVay):
         "so_tien_goc": _f(v.so_tien_goc), "lai_suat_nam": _f(v.lai_suat_nam),
         "phuong_thuc": v.phuong_thuc, "ngay_nhan": str(v.ngay_nhan),
         "so_ky": v.so_ky, "chu_ky_thang": v.chu_ky_thang,
+        "chu_ky_ngay": v.chu_ky_ngay or max(1, int(v.chu_ky_thang or 1) * 30),
         "ngay_dao_han": str(v.ngay_dao_han) if v.ngay_dao_han else None,
         "tk_tien": v.tk_tien, "con_lai_goc": _f(v.con_lai_goc), "trang_thai": v.trang_thai,
         "lai_con_phai_tra": lai_con, "so_ky_chua_tra": len(chua), "so_ky_qua_han": len(qua_han),
@@ -59,15 +60,17 @@ def _vay_dict(db, v: KhoanVay):
 @router.post("", status_code=201)
 def tao_khoan_vay(data: KhoanVayVao, db: Session = Depends(get_db),
                   nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    ck_ngay = data.chu_ky_ngay or max(1, int(data.chu_ky_thang or 1) * 30)
     rows = sinh_lich(data.so_tien_goc, data.lai_suat_nam, data.so_ky,
-                     data.chu_ky_thang, data.ngay_nhan, data.phuong_thuc)
-    dao_han = rows[-1]["ngay_den_han"] if rows else them_thang(data.ngay_nhan, data.so_ky * data.chu_ky_thang)
+                     ck_ngay, data.ngay_nhan, data.phuong_thuc)
+    dao_han = rows[-1]["ngay_den_han"] if rows else data.ngay_nhan + timedelta(days=data.so_ky * ck_ngay)
     if data.du_an_id and db.get(DuAn, data.du_an_id) is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy dự án")
     v = KhoanVay(so=data.so, ben_cho_vay=data.ben_cho_vay, loai=data.loai,
                  so_tien_goc=Decimal(data.so_tien_goc), lai_suat_nam=Decimal(data.lai_suat_nam),
                  phuong_thuc=data.phuong_thuc, ngay_nhan=data.ngay_nhan, so_ky=data.so_ky,
-                 chu_ky_thang=data.chu_ky_thang, ngay_dao_han=dao_han, tk_tien=data.tk_tien,
+                 chu_ky_thang=data.chu_ky_thang, chu_ky_ngay=ck_ngay,
+                 ngay_dao_han=dao_han, tk_tien=data.tk_tien,
                  con_lai_goc=Decimal(data.so_tien_goc), trang_thai="DANG_VAY", ghi_chu=data.ghi_chu,
                  du_an_id=data.du_an_id)
     db.add(v); db.flush()
