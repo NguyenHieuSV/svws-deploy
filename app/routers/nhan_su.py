@@ -29,6 +29,7 @@ from decimal import Decimal as _Dec
 
 router = APIRouter(prefix="/nhan-su", tags=["nhan_su"])
 MODULE = "nhan_su"
+MODULE_WT = "working_time"   # quyền riêng cho Working time & Report (mig 74)
 
 
 @router.get("/nhan-vien", response_model=list[NhanVienRa])
@@ -478,7 +479,7 @@ def _wt_dong_bo_luong(db, nv_id: int, ngay) -> bool:
 
 @router.get("/working-time")
 def ds_working_time(thang: str | None = None, db: Session = Depends(get_db),
-                    _=Depends(yeu_cau(MODULE, "XEM"))):
+                    _=Depends(yeu_cau(MODULE_WT, "XEM"))):
     """Bảng kiểm soát Working time & Overtime: chi tiết tháng + tổng hợp năm/tháng
     từng NV kèm cảnh báo vượt trần Bộ luật Lao động 2019."""
     from datetime import date as _d
@@ -546,7 +547,7 @@ def ds_working_time(thang: str | None = None, db: Session = Depends(get_db),
 
 @router.post("/working-time", status_code=201)
 def ghi_working_time(data: NgayNghiOtVao, db: Session = Depends(get_db),
-                     nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+                     nd: NguoiDung = Depends(yeu_cau(MODULE_WT, "THAO_TAC"))):
     """Ghi nhận nghỉ / tăng ca. Nghỉ nhiều ngày (den_ngay) → tạo từng dòng/ngày, bỏ Chủ nhật.
     Trùng (NV + ngày + loại) → cập nhật dòng cũ. Trả kèm cảnh báo vượt trần luật."""
     from datetime import timedelta
@@ -747,7 +748,7 @@ def huy_dang_ky_ot(wt_id: int, db: Session = Depends(get_db),
 
 @router.post("/working-time/{wt_id}/duyet")
 def duyet_ot(wt_id: int, db: Session = Depends(get_db),
-             nd: NguoiDung = Depends(yeu_cau(MODULE, "DUYET"))):
+             nd: NguoiDung = Depends(yeu_cau(MODULE_WT, "DUYET"))):
     r = db.get(NgayNghiOt, wt_id)
     if r is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đăng ký")
@@ -766,7 +767,7 @@ def duyet_ot(wt_id: int, db: Session = Depends(get_db),
 
 @router.post("/working-time/{wt_id}/tu-choi")
 def tu_choi_ot(wt_id: int, data: TuChoiOtVao = TuChoiOtVao(), db: Session = Depends(get_db),
-               nd: NguoiDung = Depends(yeu_cau(MODULE, "DUYET"))):
+               nd: NguoiDung = Depends(yeu_cau(MODULE_WT, "DUYET"))):
     r = db.get(NgayNghiOt, wt_id)
     if r is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đăng ký")
@@ -846,7 +847,7 @@ def bao_cao_cua_toi(thang: str | None = None, db: Session = Depends(get_db),
 @router.get("/bao-cao-ngay")
 def ds_bao_cao_ngay(ngay: str | None = None, thang: str | None = None,
                     nhan_vien_id: int | None = None, db: Session = Depends(get_db),
-                    _=Depends(yeu_cau(MODULE, "XEM"))):
+                    _=Depends(yeu_cau(MODULE_WT, "XEM"))):
     """Quản lý xem báo cáo của toàn công ty — lọc theo ngày/tháng/nhân viên."""
     q = db.query(BaoCaoNgay, NhanVien).join(NhanVien, BaoCaoNgay.nhan_vien_id == NhanVien.id)
     if nhan_vien_id:
@@ -1028,7 +1029,7 @@ def nhac_viec_cua_toi(db: Session = Depends(get_db),
 
 @router.get("/nhac-viec")
 def ds_nhac_viec(trang_thai: str | None = None, nhan_vien_id: int | None = None,
-                 db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
+                 db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE_WT, "XEM"))):
     """Quản lý xem toàn bộ lời nhắc của công ty."""
     q = db.query(NhacViec)
     if trang_thai:
