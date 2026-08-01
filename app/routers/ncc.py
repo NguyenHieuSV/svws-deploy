@@ -644,12 +644,24 @@ def ds_bao_gia_file(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XE
             for t, n in rows]
 
 
+class TuBgFileVao(_NccCnBase):
+    don_hang_id: int | None = None     # Mã đơn bán chọn ở form Tạo PO
+    ngay_hen_giao: date | None = None
+
+
 @router.post("/don-mua/tu-bao-gia-file/{tep_id}")
-def tao_po_tu_bao_gia_file(tep_id: int, db: Session = Depends(get_db),
+def tao_po_tu_bao_gia_file(tep_id: int, data: TuBgFileVao | None = None,
+                           db: Session = Depends(get_db),
                            nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
     """AI đọc file báo giá đã lưu và tự tạo PO nháp (chờ duyệt) cho NCC của file:
     mỗi dòng báo giá thành một dòng PO; hàng chưa có trong kho được tự thêm vào
-    danh mục hàng hóa. Số lượng thiếu trong báo giá mặc định = 1 (sửa trước khi duyệt)."""
+    danh mục hàng hóa. Số lượng thiếu trong báo giá mặc định = 1 (sửa trước khi duyệt).
+    Nhận kèm don_hang_id (Mã đơn bán) + ngày hẹn giao từ form Tạo PO."""
+    don_hang_id = data.don_hang_id if data else None
+    if don_hang_id:
+        from ..models import DonHang
+        if db.get(DonHang, don_hang_id) is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đơn hàng bán")
     t = db.get(TepDinhKem, tep_id)
     if t is None or t.doi_tuong != "BAO_GIA_NCC_FILE":
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy file báo giá")
@@ -667,7 +679,9 @@ def tao_po_tu_bao_gia_file(tep_id: int, db: Session = Depends(get_db),
     if not items:
         raise HTTPException(status.HTTP_400_BAD_REQUEST,
                             "AI không tìm thấy dòng sản phẩm nào trong file báo giá.")
-    dm = DonMua(nha_cung_cap_id=ncc.id, trang_thai="CHO_DUYET")
+    dm = DonMua(nha_cung_cap_id=ncc.id, trang_thai="CHO_DUYET",
+                don_hang_id=don_hang_id,
+                ngay_hen_giao=(data.ngay_hen_giao if data else None))
     db.add(dm); db.flush()
     dm.so = f"PO-{date.today():%Y%m%d}-{dm.id}"
     tien_hang, tien_thue = Decimal(0), Decimal(0)
@@ -701,7 +715,7 @@ def tao_po_tu_bao_gia_file(tep_id: int, db: Session = Depends(get_db),
     ghi_audit(db, nd.id, "AI_TAO_PO", "don_mua", dm.id,
               moi={"tu_file": t.ten_file, "ncc": ncc.ten, "so_dong": len(items),
                    "tong_tien": float(dm.tong_tien), "tien_thue": float(tien_thue),
-                   "hang_hoa_moi": len(hh_moi)})
+                   "hang_hoa_moi": len(hh_moi), "don_hang_id": don_hang_id})
     db.commit()
     return {"ok": True, "don_mua_id": dm.id, "so": dm.so, "ncc": ncc.ten,
             "so_dong": len(items), "tien_hang": float(tien_hang), "tien_thue": float(tien_thue),
