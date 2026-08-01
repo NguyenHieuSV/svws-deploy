@@ -2225,10 +2225,18 @@ def gui_po(dm_id: int, data: GuiPoVao, db: Session = Depends(get_db),
         than = data.noi_dung
     else:
         tieu_de, than = _noi_dung_po(db, dm, data)
-    if ncc is None or not ncc.email:
+    # NCC chưa có email nhưng người gửi điền email ngay trên form → lưu vào hồ sơ rồi gửi
+    if ncc is not None and not (ncc.email or "").strip() and (data.email_ncc or "").strip():
+        em = data.email_ncc.strip()[:120]
+        if "@" not in em or "." not in em.split("@")[-1]:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Email '{em}' không hợp lệ")
+        ncc.email = em
+        ghi_audit(db, nd.id, "SUA", "nha_cung_cap", ncc.id, moi={"email": em, "nguon": "form gửi PO"})
+    if ncc is None or not (ncc.email or "").strip():
         db.commit()
         return {"da_gui": False, "email": ncc.email if ncc else None,
-                "ly_do": "NCC chưa có email", "tieu_de": tieu_de}
+                "ly_do": "NCC chưa có email — nhập email NCC ngay trên form gửi để gửi và lưu vào hồ sơ.",
+                "tieu_de": tieu_de}
     dinh_kem = None
     co_pdf = False
     if getattr(data, "dinh_kem_pdf", True):

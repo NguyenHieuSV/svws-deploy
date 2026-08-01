@@ -348,6 +348,7 @@ class GuiPoVao(PoPdfVao):
     tieu_de: str | None = None
     noi_dung: str | None = None
     dinh_kem_pdf: bool = True
+    email_ncc: str | None = None   # điền khi NCC chưa có email — gửi luôn + lưu vào hồ sơ NCC
 
 
 class RfqNoiDungVao(BaseModel):
