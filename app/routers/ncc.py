@@ -1135,6 +1135,39 @@ def xoa_don_mua(dm_id: int, db: Session = Depends(get_db),
     return {"ok": True, "so": so_cu}
 
 
+# ----- XEM: danh mục hàng hóa GẮN VỚI một NCC (phục vụ form Tạo PO) -----
+@router.get("/nha-cung-cap/{ncc_id}/hang-hoa")
+def hang_hoa_cua_ncc(ncc_id: int, db: Session = Depends(get_db),
+                     _=Depends(yeu_cau(MODULE, "XEM"))):
+    """Gộp từ 3 nguồn: (1) lịch sử PO đã mua của NCC (giá mới nhất),
+    (2) báo giá NCC, (3) Sản phẩm NCC khớp mã/tên với danh mục kho."""
+    if db.get(NhaCungCap, ncc_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy NCC")
+    out = {}
+    q = (db.query(DonMuaCt).join(DonMua, DonMuaCt.don_mua_id == DonMua.id)
+         .filter(DonMua.nha_cung_cap_id == ncc_id, DonMua.trang_thai != "TU_CHOI")
+         .order_by(DonMuaCt.id))
+    for ct in q.all():
+        out[ct.hang_hoa_id] = {"gia": float(ct.don_gia or 0), "nguon": "PO"}
+    for bg in db.query(BaoGiaNcc).filter_by(nha_cung_cap_id=ncc_id).order_by(BaoGiaNcc.id).all():
+        out[bg.hang_hoa_id] = {"gia": float(bg.don_gia or 0), "nguon": "BAO_GIA"}
+    for sp in db.query(SanPhamNcc).filter_by(nha_cung_cap_id=ncc_id).all():
+        hh = None
+        if sp.ma_sp:
+            hh = db.query(HangHoa).filter(HangHoa.ma == sp.ma_sp).first()
+        if hh is None:
+            hh = db.query(HangHoa).filter(HangHoa.ten.ilike(sp.ten)).first()
+        if hh is not None and hh.id not in out:
+            out[hh.id] = {"gia": float(sp.don_gia or 0), "nguon": "SP_NCC"}
+    ds = []
+    for hid, v in out.items():
+        hh = db.get(HangHoa, hid)
+        if hh:
+            ds.append({"id": hid, "ma": hh.ma, "ten": hh.ten, "gia": v["gia"], "nguon": v["nguon"]})
+    ds.sort(key=lambda x: (x["ten"] or "").lower())
+    return ds
+
+
 @router.get("/don-mua", response_model=list[DonMuaRa])
 def ds_don_mua(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
     return db.query(DonMua).order_by(DonMua.id.desc()).all()
