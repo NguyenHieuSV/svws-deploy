@@ -835,6 +835,40 @@ def them_bao_tri(data: BaoTriVao, db: Session = Depends(get_db),
     return _bt_ra(db, b)
 
 
+class BaoTriSua(BaseModel):
+    ten_cong_viec: str | None = None
+    chu_ky_ngay: int | None = Field(default=None, ge=1, le=3660)
+    ngay_ke_tiep: date | None = None
+    chi_phi_du_kien: Decimal | None = None
+    ghi_chu: str | None = None
+
+
+@router.put("/bao-tri/{bt_id}")
+def sua_bao_tri(bt_id: int, data: BaoTriSua, db: Session = Depends(get_db),
+                nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    """Sửa kế hoạch bảo trì: công việc, chu kỳ, ngày kế tiếp, chi phí dự kiến, ghi chú."""
+    b = db.get(KeHoachBaoTri, bt_id)
+    if b is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy kế hoạch bảo trì")
+    cu = {"ten_cong_viec": b.ten_cong_viec, "chu_ky_ngay": b.chu_ky_ngay,
+          "ngay_ke_tiep": str(b.ngay_ke_tiep) if b.ngay_ke_tiep else None,
+          "chi_phi_du_kien": float(b.chi_phi_du_kien or 0), "ghi_chu": b.ghi_chu}
+    if data.ten_cong_viec is not None and data.ten_cong_viec.strip():
+        b.ten_cong_viec = data.ten_cong_viec.strip()[:200]
+    if data.chu_ky_ngay is not None:
+        b.chu_ky_ngay = data.chu_ky_ngay
+    if data.ngay_ke_tiep is not None:
+        b.ngay_ke_tiep = data.ngay_ke_tiep
+    if data.chi_phi_du_kien is not None:
+        b.chi_phi_du_kien = data.chi_phi_du_kien
+    if data.ghi_chu is not None:
+        b.ghi_chu = data.ghi_chu.strip() or None
+    ghi_audit(db, nd.id, "SUA", "ke_hoach_bao_tri", b.id, cu=cu,
+              moi=data.model_dump(exclude_none=True, mode="json"))
+    db.commit()
+    return _bt_ra(db, b)
+
+
 # ----- DUYET: xóa kế hoạch bảo trì -----
 @router.delete("/bao-tri/{bt_id}")
 def xoa_bao_tri(bt_id: int, db: Session = Depends(get_db),
