@@ -271,6 +271,33 @@ def them_chi_tieu(ts_id: int, data: CtChiTieuVao, db: Session = Depends(get_db),
     return {"id": c.id, "loai": c.loai, "vi_tri": c.vi_tri, "chi_tieu": c.chi_tieu, "don_vi": c.don_vi}
 
 
+class CtChiTieuSua(BaseModel):
+    vi_tri: str | None = None
+    chi_tieu: str | None = None
+    don_vi: str | None = None
+
+
+@router.put("/chi-tieu/{ct_id}")
+def sua_chi_tieu(ct_id: int, data: CtChiTieuSua, db: Session = Depends(get_db),
+                 nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    """Sửa chỉ tiêu trong bộ mẫu nhập liệu BCVH (vị trí / tên / đơn vị).
+    Các dòng báo cáo ĐÃ GHI giữ nguyên nội dung cũ."""
+    c = db.get(CtBcvhChiTieu, ct_id)
+    if c is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy chỉ tiêu")
+    cu = {"vi_tri": c.vi_tri, "chi_tieu": c.chi_tieu, "don_vi": c.don_vi}
+    if data.chi_tieu is not None and data.chi_tieu.strip():
+        c.chi_tieu = data.chi_tieu.strip()[:250]
+    if data.vi_tri is not None:
+        c.vi_tri = data.vi_tri.strip()[:150] or None
+    if data.don_vi is not None:
+        c.don_vi = data.don_vi.strip()[:20] or None
+    ghi_audit(db, nd.id, "SUA", "ct_bcvh_chi_tieu", c.id, cu=cu,
+              moi={"vi_tri": c.vi_tri, "chi_tieu": c.chi_tieu, "don_vi": c.don_vi})
+    db.commit()
+    return {"id": c.id, "loai": c.loai, "vi_tri": c.vi_tri, "chi_tieu": c.chi_tieu, "don_vi": c.don_vi}
+
+
 @router.delete("/chi-tieu/{ct_id}")
 def xoa_chi_tieu(ct_id: int, db: Session = Depends(get_db),
                  nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
