@@ -867,6 +867,7 @@ class KhoanVay(Base):
     trang_thai: Mapped[str] = mapped_column(String(16), default="DANG_VAY")
     ghi_chu: Mapped[str | None] = mapped_column(Text, nullable=True)   # diễn giải khoản vay
     du_an_id: Mapped[int | None] = mapped_column(ForeignKey("du_an.id", ondelete="SET NULL"), nullable=True)   # mig 65
+    ngay_tra_thang: Mapped[int | None] = mapped_column(Integer, nullable=True)   # ngày trả cố định hàng tháng (mig 75)
 
 
 class LichTraNo(Base):

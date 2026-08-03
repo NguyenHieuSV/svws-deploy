@@ -26,18 +26,40 @@ def them_thang(d: date, n: int) -> date:
     return date(y, m, min(d.day, _cuoi_thang(y, m)))
 
 
-def sinh_lich(so_tien_goc, lai_suat_nam, so_ky, chu_ky_ngay, ngay_nhan, phuong_thuc) -> list:
+def sinh_lich(so_tien_goc, lai_suat_nam, so_ky, chu_ky_ngay, ngay_nhan, phuong_thuc,
+              ngay_tra_thang=None) -> list:
+    """ngay_tra_thang (1-31): trả vào NGÀY CỐ ĐỊNH hàng tháng (VD 26 = ngày 26 mỗi tháng);
+    kỳ 1 = ngày đó đầu tiên SAU ngày nhận; lãi kỳ = dư nợ × lãi năm × số ngày thực ÷ 365.
+    None: lịch cách đều chu_ky_ngay như cũ."""
     from datetime import timedelta
     goc = D(so_tien_goc)
     n = int(so_ky)
     r = D(lai_suat_nam) / Decimal(100) * D(chu_ky_ngay) / Decimal(365)
+    co_dinh = ngay_tra_thang is not None and 1 <= int(ngay_tra_thang) <= 31
+    if co_dinh:
+        d = int(ngay_tra_thang)
+        ngay1 = date(ngay_nhan.year, ngay_nhan.month,
+                     min(d, _cuoi_thang(ngay_nhan.year, ngay_nhan.month)))
+        if ngay1 <= ngay_nhan:
+            nxt = them_thang(date(ngay_nhan.year, ngay_nhan.month, 1), 1)
+            ngay1 = date(nxt.year, nxt.month, min(d, _cuoi_thang(nxt.year, nxt.month)))
+
+        def _ngay_ky(k):
+            moc = them_thang(date(ngay1.year, ngay1.month, 1), k - 1)
+            return date(moc.year, moc.month, min(d, _cuoi_thang(moc.year, moc.month)))
     rows = []
     du_no = goc
     if phuong_thuc == "TRA_DEU" and r > 0:
         pmt = goc * r / (Decimal(1) - (Decimal(1) + r) ** (-n))
+    truoc = ngay_nhan
     for k in range(1, n + 1):
-        ngay = ngay_nhan + timedelta(days=k * int(chu_ky_ngay))
-        lai = _r(du_no * r)
+        if co_dinh:
+            ngay = _ngay_ky(k)
+            so_ngay = max(0, (ngay - truoc).days)
+            lai = _r(du_no * D(lai_suat_nam) / Decimal(100) * Decimal(so_ngay) / Decimal(365))
+        else:
+            ngay = ngay_nhan + timedelta(days=k * int(chu_ky_ngay))
+            lai = _r(du_no * r)
         if phuong_thuc == "GOC_CUOI":
             g = goc if k == n else Decimal(0)
         elif phuong_thuc == "TRA_DEU" and r > 0:
@@ -52,4 +74,5 @@ def sinh_lich(so_tien_goc, lai_suat_nam, so_ky, chu_ky_ngay, ngay_nhan, phuong_t
                      "goc_phai_tra": g, "lai_phai_tra": lai, "tong_phai_tra": g + lai,
                      "du_no_cuoi": du_cuoi})
         du_no = du_cuoi
+        truoc = ngay
     return rows
