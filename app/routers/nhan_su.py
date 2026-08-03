@@ -614,6 +614,89 @@ def ghi_working_time(data: NgayNghiOtVao, db: Session = Depends(get_db),
     return {"them": them, "cap_nhat": cap_nhat, "canh_bao": canh_bao, "dong_bo_luong": dong_bo}
 
 
+_WT_LOAI_HOP_LE = {"NGHI_PHEP", "KHONG_PHEP", "NGHI_LE", "VIEC_RIENG_CO_LUONG",
+                   "VIEC_RIENG_KHONG_LUONG", "NGHI_BU", "OT_THUONG", "OT_CUOI_TUAN", "OT_LE"}
+
+
+class WtSuaVao(_NVBase):
+    ngay: date | None = None
+    loai: str | None = None
+    so_gio: Decimal | None = None
+    so_ngay: Decimal | None = None
+    ghi_chu: str | None = None
+
+
+@router.put("/working-time/{wt_id}")
+def sua_working_time(wt_id: int, data: WtSuaVao, db: Session = Depends(get_db),
+                     nd: NguoiDung = Depends(yeu_cau(MODULE_WT, "DUYET"))):
+    """Quản lý sửa bản ghi nghỉ/tăng ca (ngày, loại, số giờ/ngày, ghi chú).
+    Bản ghi ĐÃ DUYỆT: sửa xong tự đồng bộ lại bảng lương (kỳ chưa chốt)."""
+    r = db.get(NgayNghiOt, wt_id)
+    if r is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy bản ghi")
+    cu = {"ngay": str(r.ngay), "loai": r.loai, "so_gio": _f(r.so_gio),
+          "so_ngay": _f(r.so_ngay), "ghi_chu": r.ghi_chu, "trang_thai": r.trang_thai}
+    ngay_cu = r.ngay
+    if data.ngay is not None:
+        r.ngay = data.ngay
+    if data.loai:
+        if data.loai not in _WT_LOAI_HOP_LE:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Loại không hợp lệ")
+        r.loai = data.loai
+    if data.so_gio is not None:
+        if not (0 <= float(data.so_gio) <= 16):
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Số giờ phải trong khoảng 0–16h")
+        r.so_gio = data.so_gio
+    if data.so_ngay is not None:
+        if not (0 <= float(data.so_ngay) <= 60):
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Số ngày không hợp lệ")
+        r.so_ngay = data.so_ngay
+    if data.ghi_chu is not None:
+        r.ghi_chu = data.ghi_chu.strip()[:300] or None
+    ghi_audit(db, nd.id, "SUA", "ngay_nghi_ot", r.id, cu=cu,
+              moi=data.model_dump(exclude_none=True, mode="json"))
+    db.flush()
+    if r.trang_thai == "DA_DUYET":
+        _wt_dong_bo_luong(db, r.nhan_vien_id, ngay_cu)
+        if r.ngay != ngay_cu:
+            _wt_dong_bo_luong(db, r.nhan_vien_id, r.ngay)
+    db.commit()
+    return {"ok": True, "id": r.id, "ngay": str(r.ngay), "loai": r.loai,
+            "so_gio": _f(r.so_gio), "so_ngay": _f(r.so_ngay), "trang_thai": r.trang_thai}
+
+
+@router.put("/working-time/cua-toi/{wt_id}")
+def sua_dang_ky_cua_toi(wt_id: int, data: WtSuaVao, db: Session = Depends(get_db),
+                        nd: NguoiDung = Depends(lay_nguoi_dung_hien_tai)):
+    """NV sửa đăng ký tăng ca CỦA MÌNH khi còn CHỜ DUYỆT (ngày / số giờ / lý do).
+    Đổi ngày thì loại OT tự tính lại theo lịch."""
+    nv_id = _wt_nv_cua_toi(db, nd)
+    r = db.get(NgayNghiOt, wt_id)
+    if r is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đăng ký")
+    if r.nhan_vien_id != nv_id:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Chỉ sửa được đăng ký của chính mình")
+    if r.trang_thai != "CHO_DUYET":
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Đăng ký đã được duyệt/từ chối — liên hệ quản lý nếu cần sửa.")
+    if r.loai not in _WT_OT:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Bản ghi này không phải đăng ký tăng ca")
+    cu = {"ngay": str(r.ngay), "loai": r.loai, "so_gio": _f(r.so_gio), "ghi_chu": r.ghi_chu}
+    if data.ngay is not None:
+        r.ngay = data.ngay
+        r.loai = _wt_loai_ngay(r.ngay)
+    if data.so_gio is not None:
+        if not (0 < float(data.so_gio) <= 16):
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Số giờ tăng ca phải trong khoảng 0–16h")
+        r.so_gio = data.so_gio
+    if data.ghi_chu is not None:
+        r.ghi_chu = data.ghi_chu.strip()[:300] or None
+    ghi_audit(db, nd.id, "SUA", "ngay_nghi_ot", r.id, cu=cu,
+              moi=data.model_dump(exclude_none=True, mode="json"))
+    db.commit()
+    return {"ok": True, "id": r.id, "ngay": str(r.ngay), "loai": r.loai, "so_gio": _f(r.so_gio)}
+
+
 @router.delete("/working-time/{wt_id}")
 def xoa_working_time(wt_id: int, db: Session = Depends(get_db),
                      nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
