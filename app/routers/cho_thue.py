@@ -9,7 +9,7 @@ from datetime import date, timedelta
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from ..database import get_db
-from ..rbac import yeu_cau
+from ..rbac import yeu_cau, chi_vai_tro
 from ..audit import ghi_audit
 from ..kho_service import xuat_ton, nhap_ton
 from ..models import (NguoiDung, KhachHang, HopDongThue, TaiSanThue, HoaDon, CongNo)
@@ -17,19 +17,22 @@ from ..schemas import HopDongThueVao, HopDongThueRa
 
 router = APIRouter(prefix="/cho-thue", tags=["cho_thue"])
 MODULE = "cho_thue"
+# Các tab từ Tài sản trở đi (hợp đồng, chi phí, vật tư, định mức, tổng hợp):
+# chỉ CEO / ADMIN / Trưởng P. Quản lý nội bộ được xem & thao tác.
+quan_ly_ct = chi_vai_tro("CEO", "ADMIN", "TP_QLNB")
 THUE_SUAT = Decimal("0.10")  # cho thuê thiết bị thường 10% — nên cấu hình theo đối tượng
 TU_KHO = {"HOA_CHAT", "VAT_TU", "THIET_BI"}
 
 
 @router.get("/hop-dong", response_model=list[HopDongThueRa])
-def ds_hop_dong(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
+def ds_hop_dong(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM")), _ql: NguoiDung = Depends(quan_ly_ct)):
     return db.query(HopDongThue).order_by(HopDongThue.id.desc()).all()
 
 
 # ----- Ký HĐ + xuất tài sản (HC/VT/TB trừ kho; NHAN_SU điều phối người) -----
 @router.post("/hop-dong", response_model=HopDongThueRa, status_code=201)
 def tao_hop_dong(data: HopDongThueVao, db: Session = Depends(get_db),
-                 nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+                 nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC")), _ql: NguoiDung = Depends(quan_ly_ct)):
     if db.get(KhachHang, data.khach_hang_id) is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy khách hàng")
     hd = HopDongThue(so=data.so, khach_hang_id=data.khach_hang_id, doi_tuong=data.doi_tuong,
@@ -57,7 +60,7 @@ def tao_hop_dong(data: HopDongThueVao, db: Session = Depends(get_db),
 # ----- Thu phí một kỳ: lập hóa đơn THUÊ + công nợ (bàn giao Kế toán) -----
 @router.post("/hop-dong/{hd_id}/thu-phi")
 def thu_phi_ky(hd_id: int, db: Session = Depends(get_db),
-               nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+               nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC")), _ql: NguoiDung = Depends(quan_ly_ct)):
     hd = db.get(HopDongThue, hd_id)
     if hd is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy hợp đồng")
@@ -83,7 +86,7 @@ def thu_phi_ky(hd_id: int, db: Session = Depends(get_db),
 # ----- Chạy thu phí định kỳ cho mọi HĐ còn hiệu lực -----
 @router.post("/chay-thu-phi-dinh-ky")
 def chay_thu_phi(db: Session = Depends(get_db),
-                 nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+                 nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC")), _ql: NguoiDung = Depends(quan_ly_ct)):
     hds = db.query(HopDongThue).filter_by(trang_thai="HIEU_LUC").all()
     ket_qua = []
     for hd in hds:
@@ -105,7 +108,7 @@ def chay_thu_phi(db: Session = Depends(get_db),
 # ----- Nhận trả tài sản: nhập lại kho + kết thúc HĐ -----
 @router.post("/hop-dong/{hd_id}/nhan-tra")
 def nhan_tra(hd_id: int, db: Session = Depends(get_db),
-             nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+             nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC")), _ql: NguoiDung = Depends(quan_ly_ct)):
     hd = db.get(HopDongThue, hd_id)
     if hd is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy hợp đồng")

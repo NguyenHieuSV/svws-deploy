@@ -23,6 +23,8 @@ from ..models import (NguoiDung, KhachHang, YeuCauMua, HangHoa, HoaDon,
 
 router = APIRouter(prefix="/cho-thue", tags=["cho_thue_ops"])
 MODULE = "cho_thue"
+# Các tab từ Tài sản trở đi: chỉ CEO / ADMIN / TP_QLNB (xem cho_thue.py).
+quan_ly_ct = chi_vai_tro("CEO", "ADMIN", "TP_QLNB")
 TINH_TRANG = {"SAN_SANG", "DANG_THUE", "BAO_TRI", "HONG", "THANH_LY"}
 
 
@@ -139,7 +141,7 @@ class CtTbSua(BaseModel):
 
 
 @router.get("/tai-san/{ts_id}/thiet-bi")
-def ds_thiet_bi(ts_id: int, db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
+def ds_thiet_bi(ts_id: int, db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM")), _ql: NguoiDung = Depends(quan_ly_ct)):
     if db.get(TaiSanChoThue, ts_id) is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy dự án cho thuê")
     rows = db.query(CtThietBi).filter_by(tai_san_id=ts_id).order_by(CtThietBi.id).all()
@@ -152,7 +154,7 @@ def ds_thiet_bi(ts_id: int, db: Session = Depends(get_db), _=Depends(yeu_cau(MOD
 
 @router.post("/tai-san/{ts_id}/thiet-bi", status_code=201)
 def them_thiet_bi(ts_id: int, data: CtTbVao, db: Session = Depends(get_db),
-                  nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+                  nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC")), _ql: NguoiDung = Depends(quan_ly_ct)):
     if db.get(TaiSanChoThue, ts_id) is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy dự án cho thuê")
     tb = CtThietBi(tai_san_id=ts_id, ten=data.ten.strip()[:250], thong_so=data.thong_so,
@@ -165,7 +167,7 @@ def them_thiet_bi(ts_id: int, data: CtTbVao, db: Session = Depends(get_db),
 
 @router.put("/thiet-bi/{tb_id}")
 def sua_thiet_bi(tb_id: int, data: CtTbSua, db: Session = Depends(get_db),
-                 nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+                 nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC")), _ql: NguoiDung = Depends(quan_ly_ct)):
     tb = db.get(CtThietBi, tb_id)
     if tb is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy thiết bị/vật tư")
@@ -328,7 +330,7 @@ def _so_tu_text(v):
 
 @router.get("/tai-san/{ts_id}/tong-hop-thang")
 def tong_hop_thang(ts_id: int, thang: str | None = None, db: Session = Depends(get_db),
-                   _=Depends(yeu_cau(MODULE, "XEM"))):
+                   _=Depends(yeu_cau(MODULE, "XEM")), _ql: NguoiDung = Depends(quan_ly_ct)):
     """Tổng hợp báo cáo vận hành theo tháng của dự án: chất lượng nước (BC kỹ thuật),
     hóa chất (SL dùng/nhập), tổng lượng nước (chỉ số cuối − mốc trước tháng)."""
     import calendar
@@ -609,7 +611,7 @@ class ChiPhiVao(BaseModel):
 
 @router.get("/chi-phi")
 def ds_chi_phi(tai_san_id: int | None = None, db: Session = Depends(get_db),
-               _=Depends(yeu_cau(MODULE, "XEM"))):
+               _=Depends(yeu_cau(MODULE, "XEM")), _ql: NguoiDung = Depends(quan_ly_ct)):
     q = db.query(ChiPhiVanHanh)
     if tai_san_id:
         q = q.filter_by(tai_san_id=tai_san_id)
@@ -625,7 +627,7 @@ def ds_chi_phi(tai_san_id: int | None = None, db: Session = Depends(get_db),
 
 @router.post("/chi-phi", status_code=201)
 def them_chi_phi(data: ChiPhiVao, db: Session = Depends(get_db),
-                 nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+                 nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC")), _ql: NguoiDung = Depends(quan_ly_ct)):
     ma = data.ma_ban_hang
     if data.tai_san_id and not ma:
         ts = db.get(TaiSanChoThue, data.tai_san_id)
@@ -656,7 +658,7 @@ def xoa_chi_phi(cp_id: int, db: Session = Depends(get_db),
 
 @router.post("/dong-bo-chi-phi")
 def dong_bo_chi_phi(db: Session = Depends(get_db),
-                    nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+                    nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC")), _ql: NguoiDung = Depends(quan_ly_ct)):
     """Sinh chi phí vận hành từ các đề xuất mua đã gắn mã cho thuê (chưa đồng bộ)."""
     da_co = {c.yeu_cau_mua_id for c in db.query(ChiPhiVanHanh)
              .filter(ChiPhiVanHanh.yeu_cau_mua_id.isnot(None)).all()}
@@ -703,7 +705,7 @@ class DeXuatMuaCT(BaseModel):
 
 
 @router.get("/de-xuat-mua")
-def ds_de_xuat(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
+def ds_de_xuat(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM")), _ql: NguoiDung = Depends(quan_ly_ct)):
     yc_id_da_dong_bo = {c.yeu_cau_mua_id for c in db.query(ChiPhiVanHanh)
                         .filter(ChiPhiVanHanh.yeu_cau_mua_id.isnot(None)).all()}
     rows = db.query(YeuCauMua).filter(YeuCauMua.cho_thue_ma.isnot(None)) \
@@ -724,7 +726,7 @@ def ds_de_xuat(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM")))
 
 @router.post("/de-xuat-mua", status_code=201)
 def tao_de_xuat(data: DeXuatMuaCT, db: Session = Depends(get_db),
-                nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+                nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC")), _ql: NguoiDung = Depends(quan_ly_ct)):
     if db.get(HangHoa, data.hang_hoa_id) is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy hàng hóa")
     yc = YeuCauMua(hang_hoa_id=data.hang_hoa_id, so_luong=data.so_luong, don_gia=data.don_gia,
@@ -887,7 +889,7 @@ class DinhMucVao(BaseModel):
 
 
 @router.get("/dinh-muc")
-def ds_dinh_muc(tai_san_id: int, db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
+def ds_dinh_muc(tai_san_id: int, db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM")), _ql: NguoiDung = Depends(quan_ly_ct)):
     rows = db.query(DinhMucTieuHao).filter_by(tai_san_id=tai_san_id).all()
     out = []
     for d in rows:
@@ -901,7 +903,7 @@ def ds_dinh_muc(tai_san_id: int, db: Session = Depends(get_db), _=Depends(yeu_ca
 
 @router.post("/dinh-muc", status_code=201)
 def luu_dinh_muc(data: DinhMucVao, db: Session = Depends(get_db),
-                 nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+                 nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC")), _ql: NguoiDung = Depends(quan_ly_ct)):
     if db.get(TaiSanChoThue, data.tai_san_id) is None or db.get(HangHoa, data.hang_hoa_id) is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy tài sản hoặc hàng hóa")
     d = db.query(DinhMucTieuHao).filter_by(tai_san_id=data.tai_san_id, hang_hoa_id=data.hang_hoa_id).first()
@@ -936,7 +938,7 @@ class TieuHaoVao(BaseModel):
 
 @router.post("/tieu-hao", status_code=201)
 def ghi_tieu_hao(data: TieuHaoVao, db: Session = Depends(get_db),
-                 nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+                 nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC")), _ql: NguoiDung = Depends(quan_ly_ct)):
     if db.get(TaiSanChoThue, data.tai_san_id) is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy tài sản")
     n = 0
@@ -960,7 +962,7 @@ def ghi_tieu_hao(data: TieuHaoVao, db: Session = Depends(get_db),
 
 @router.get("/bao-cao-tieu-hao")
 def bao_cao_tieu_hao(tai_san_id: int, thang: str, db: Session = Depends(get_db),
-                     _=Depends(yeu_cau(MODULE, "XEM"))):
+                     _=Depends(yeu_cau(MODULE, "XEM")), _ql: NguoiDung = Depends(quan_ly_ct)):
     dms = {d.hang_hoa_id: d for d in db.query(DinhMucTieuHao).filter_by(tai_san_id=tai_san_id).all()}
     ths = {t.hang_hoa_id: t for t in db.query(TieuHaoThucTe)
            .filter_by(tai_san_id=tai_san_id, thang=thang).all()}
@@ -995,7 +997,7 @@ def bao_cao_tieu_hao(tai_san_id: int, thang: str, db: Session = Depends(get_db),
 
 @router.post("/tieu-hao/{thang}/ghi-chi-phi")
 def ghi_chi_phi_tu_tieu_hao(thang: str, tai_san_id: int, db: Session = Depends(get_db),
-                            nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+                            nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC")), _ql: NguoiDung = Depends(quan_ly_ct)):
     """Đẩy tiêu hao thực tế (chưa ghi) của hệ thống/tháng vào chi phí vận hành."""
     ts = db.get(TaiSanChoThue, tai_san_id)
     ths = db.query(TieuHaoThucTe).filter_by(tai_san_id=tai_san_id, thang=thang).all()
@@ -1032,7 +1034,7 @@ def _month_list(den_thang: str, n: int) -> list[str]:
 
 @router.get("/so-sanh-tieu-hao")
 def so_sanh_tieu_hao(tai_san_id: int, den_thang: str | None = None, so_thang: int = 6,
-                     db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
+                     db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM")), _ql: NguoiDung = Depends(quan_ly_ct)):
     if not den_thang:
         den_thang = date.today().strftime("%Y-%m")
     so_thang = max(2, min(int(so_thang), 12))
@@ -1110,7 +1112,7 @@ def du_an_cac_thang(ts_id: int, so_thang: int = 12, db: Session = Depends(get_db
 
 # ===================== BÁO CÁO THEO DỰ ÁN (pivot) =====================
 @router.get("/bao-cao-theo-du-an")
-def bao_cao_theo_du_an(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
+def bao_cao_theo_du_an(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM")), _ql: NguoiDung = Depends(quan_ly_ct)):
     moc = date.today() + timedelta(days=7)
     out = []
     for t in db.query(TaiSanChoThue).order_by(TaiSanChoThue.id).all():
