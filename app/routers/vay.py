@@ -44,6 +44,7 @@ def _vay_dict(db, v: KhoanVay):
         "so_ky": v.so_ky, "chu_ky_thang": v.chu_ky_thang,
         "chu_ky_ngay": v.chu_ky_ngay or max(1, int(v.chu_ky_thang or 1) * 30),
         "ngay_tra_thang": v.ngay_tra_thang,
+        "goc_ky": _f(v.goc_ky) if v.goc_ky else None,
         "ngay_dao_han": str(v.ngay_dao_han) if v.ngay_dao_han else None,
         "tk_tien": v.tk_tien, "con_lai_goc": _f(v.con_lai_goc), "trang_thai": v.trang_thai,
         "lai_con_phai_tra": lai_con, "so_ky_chua_tra": len(chua), "so_ky_qua_han": len(qua_han),
@@ -63,7 +64,7 @@ def tao_khoan_vay(data: KhoanVayVao, db: Session = Depends(get_db),
                   nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
     ck_ngay = data.chu_ky_ngay or max(1, int(data.chu_ky_thang or 1) * 30)
     rows = sinh_lich(data.so_tien_goc, data.lai_suat_nam, data.so_ky,
-                     ck_ngay, data.ngay_nhan, data.phuong_thuc, data.ngay_tra_thang)
+                     ck_ngay, data.ngay_nhan, data.phuong_thuc, data.ngay_tra_thang, data.goc_ky)
     dao_han = rows[-1]["ngay_den_han"] if rows else data.ngay_nhan + timedelta(days=data.so_ky * ck_ngay)
     if data.du_an_id and db.get(DuAn, data.du_an_id) is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy dự án")
@@ -71,7 +72,7 @@ def tao_khoan_vay(data: KhoanVayVao, db: Session = Depends(get_db),
                  so_tien_goc=Decimal(data.so_tien_goc), lai_suat_nam=Decimal(data.lai_suat_nam),
                  phuong_thuc=data.phuong_thuc, ngay_nhan=data.ngay_nhan, so_ky=data.so_ky,
                  chu_ky_thang=data.chu_ky_thang, chu_ky_ngay=ck_ngay,
-                 ngay_tra_thang=data.ngay_tra_thang,
+                 ngay_tra_thang=data.ngay_tra_thang, goc_ky=data.goc_ky,
                  ngay_dao_han=dao_han, tk_tien=data.tk_tien,
                  con_lai_goc=Decimal(data.so_tien_goc), trang_thai="DANG_VAY", ghi_chu=data.ghi_chu,
                  du_an_id=data.du_an_id)
@@ -218,6 +219,7 @@ def sua_khoan_vay(vay_id: int, data: KhoanVayVao, db: Session = Depends(get_db),
                 or data.phuong_thuc != v.phuong_thuc or data.ngay_nhan != v.ngay_nhan
                 or int(data.so_ky) != int(v.so_ky or 0) or ck_ngay != ck_cu
                 or (data.ngay_tra_thang or None) != (v.ngay_tra_thang or None)
+                or Decimal(data.goc_ky or 0) != Decimal(v.goc_ky or 0)
                 or data.tk_tien != v.tk_tien)
     if da_tra and doi_tien:
         raise HTTPException(status.HTTP_400_BAD_REQUEST,
@@ -231,7 +233,7 @@ def sua_khoan_vay(vay_id: int, data: KhoanVayVao, db: Session = Depends(get_db),
         v.so = data.so
     if not da_tra and doi_tien:
         rows = sinh_lich(data.so_tien_goc, data.lai_suat_nam, data.so_ky,
-                         ck_ngay, data.ngay_nhan, data.phuong_thuc, data.ngay_tra_thang)
+                         ck_ngay, data.ngay_nhan, data.phuong_thuc, data.ngay_tra_thang, data.goc_ky)
         db.query(LichTraNo).filter_by(khoan_vay_id=vay_id).delete()
         for r in rows:
             db.add(LichTraNo(khoan_vay_id=v.id, **r))
@@ -242,6 +244,7 @@ def sua_khoan_vay(vay_id: int, data: KhoanVayVao, db: Session = Depends(get_db),
         v.so_ky = data.so_ky
         v.chu_ky_ngay = ck_ngay
         v.ngay_tra_thang = data.ngay_tra_thang
+        v.goc_ky = Decimal(data.goc_ky) if data.goc_ky else None
         v.tk_tien = data.tk_tien
         v.con_lai_goc = Decimal(data.so_tien_goc)
         v.ngay_dao_han = rows[-1]["ngay_den_han"] if rows else data.ngay_nhan + timedelta(days=data.so_ky * ck_ngay)

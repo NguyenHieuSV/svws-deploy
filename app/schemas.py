@@ -826,6 +826,7 @@ class KhoanVayVao(BaseModel):
     chu_ky_thang: int = Field(default=1, ge=1, le=12)       # cũ (giữ tương thích)
     chu_ky_ngay: int | None = Field(default=None, ge=1, le=366)   # số NGÀY mỗi kỳ
     ngay_tra_thang: int | None = Field(default=None, ge=1, le=31)  # ngày trả CỐ ĐỊNH hàng tháng
+    goc_ky: Decimal | None = Field(default=None, gt=0)  # gốc trả cố định mỗi kỳ (kỳ cuối trả nốt)
     tk_tien: str = "112"
     ghi_chu: str | None = None      # diễn giải
     du_an_id: int | None = None     # mã dự án gắn khoản vay

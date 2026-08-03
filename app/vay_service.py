@@ -27,10 +27,11 @@ def them_thang(d: date, n: int) -> date:
 
 
 def sinh_lich(so_tien_goc, lai_suat_nam, so_ky, chu_ky_ngay, ngay_nhan, phuong_thuc,
-              ngay_tra_thang=None) -> list:
+              ngay_tra_thang=None, goc_ky=None) -> list:
     """ngay_tra_thang (1-31): trả vào NGÀY CỐ ĐỊNH hàng tháng (VD 26 = ngày 26 mỗi tháng);
     kỳ 1 = ngày đó đầu tiên SAU ngày nhận; lãi kỳ = dư nợ × lãi năm × số ngày thực ÷ 365.
-    None: lịch cách đều chu_ky_ngay như cũ."""
+    None: lịch cách đều chu_ky_ngay như cũ.
+    goc_ky: số tiền GỐC trả cố định mỗi kỳ (GOC_DEU) — kỳ cuối tự trả phần còn lại."""
     from datetime import timedelta
     goc = D(so_tien_goc)
     n = int(so_ky)
@@ -65,7 +66,7 @@ def sinh_lich(so_tien_goc, lai_suat_nam, so_ky, chu_ky_ngay, ngay_nhan, phuong_t
         elif phuong_thuc == "TRA_DEU" and r > 0:
             g = _r(pmt - lai)
         else:  # GOC_DEU
-            g = _r(goc / n)
+            g = D(goc_ky) if goc_ky else _r(goc / n)
         if k == n:                      # kỳ cuối: trả hết dư nợ còn lại
             g = du_no
         g = min(g, du_no)
