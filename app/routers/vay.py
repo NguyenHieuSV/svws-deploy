@@ -125,6 +125,71 @@ def xoa_khoan_vay(vay_id: int, db: Session = Depends(get_db),
     return {"ok": True, "so": so_cu}
 
 
+from pydantic import BaseModel as _VayKyBase
+
+
+class TraKySuaVao(_VayKyBase):
+    ngay_tra: date
+
+
+@router.put("/{vay_id}/tra-ky/{ky}")
+def sua_ngay_tra_ky(vay_id: int, ky: int, data: TraKySuaVao, db: Session = Depends(get_db),
+                    nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
+    """Sửa NGÀY TRẢ thực tế của kỳ đã trả (ghi nhầm ngày khi bấm Trả kỳ).
+    Bút toán gốc/lãi của kỳ được cập nhật ngày theo."""
+    v = db.get(KhoanVay, vay_id)
+    if v is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy khoản vay")
+    l = db.query(LichTraNo).filter_by(khoan_vay_id=vay_id, ky=ky).first()
+    if l is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy kỳ trả nợ")
+    if not l.da_tra:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Kỳ này chưa trả — không có ngày trả để sửa.")
+    cu = str(l.ngay_tra) if l.ngay_tra else None
+    l.ngay_tra = data.ngay_tra
+    bts = (db.query(ButToan).filter(ButToan.nguon == "VAY", ButToan.nguon_id == v.id,
+                                    ButToan.dien_giai.like(f"%kỳ {ky}")).all())
+    for bt in bts:
+        bt.ngay = data.ngay_tra
+    ghi_audit(db, nd.id, "CAP_NHAT", "lich_tra_no", l.id,
+              cu={"ngay_tra": cu}, moi={"ngay_tra": str(data.ngay_tra), "but_toan_cap_nhat": len(bts)})
+    db.commit()
+    return {"ok": True, "ky": ky, "ngay_tra": str(data.ngay_tra), "but_toan_cap_nhat": len(bts)}
+
+
+@router.delete("/{vay_id}/tra-ky/{ky}")
+def hoan_tac_tra_ky(vay_id: int, ky: int, db: Session = Depends(get_db),
+                    nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
+    """Hoàn tác kỳ ĐÃ TRẢ ghi nhầm: gỡ bút toán gốc/lãi, cộng lại số dư quỹ,
+    kỳ về trạng thái chưa trả, dư nợ gốc cộng lại phần gốc của kỳ."""
+    v = db.get(KhoanVay, vay_id)
+    if v is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy khoản vay")
+    l = db.query(LichTraNo).filter_by(khoan_vay_id=vay_id, ky=ky).first()
+    if l is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy kỳ trả nợ")
+    if not l.da_tra:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Kỳ này chưa trả — không có gì để hoàn tác.")
+    bts = (db.query(ButToan).filter(ButToan.nguon == "VAY", ButToan.nguon_id == v.id,
+                                    ButToan.dien_giai.like(f"%kỳ {ky}")).all())
+    for bt in bts:
+        db.delete(bt)
+    quy = _quy_theo_tk(db, v.tk_tien)
+    if quy:
+        quy.so_du = Decimal(quy.so_du) + Decimal(l.tong_phai_tra or 0)
+    l.da_tra = False
+    ngay_cu = str(l.ngay_tra) if l.ngay_tra else None
+    l.ngay_tra = None
+    v.con_lai_goc = Decimal(v.con_lai_goc or 0) + Decimal(l.goc_phai_tra or 0)
+    if v.trang_thai == "DA_TAT_TOAN":
+        v.trang_thai = "DANG_VAY"
+    ghi_audit(db, nd.id, "XOA", "lich_tra_no", l.id,
+              cu={"ky": ky, "ngay_tra": ngay_cu, "goc": _f(l.goc_phai_tra), "lai": _f(l.lai_phai_tra)},
+              moi={"hoan_tac_tra_ky": True, "but_toan_go": len(bts)})
+    db.commit()
+    return {"ok": True, "ky": ky, "but_toan_go": len(bts)}
+
+
 @router.put("/{vay_id}")
 def sua_khoan_vay(vay_id: int, data: KhoanVayVao, db: Session = Depends(get_db),
                   nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
