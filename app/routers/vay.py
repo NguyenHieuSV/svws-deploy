@@ -125,6 +125,82 @@ def xoa_khoan_vay(vay_id: int, db: Session = Depends(get_db),
     return {"ok": True, "so": so_cu}
 
 
+@router.put("/{vay_id}")
+def sua_khoan_vay(vay_id: int, data: KhoanVayVao, db: Session = Depends(get_db),
+                  nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
+    """Sửa khế ước vay (CEO/ADMIN). Khoản CHƯA trả kỳ nào: sửa mọi thông số —
+    lịch trả nợ sinh lại, bút toán nhận tiền & số dư quỹ điều chỉnh theo.
+    Khoản ĐÃ trả kỳ: chỉ sửa bên cho vay / diễn giải / mã dự án / loại
+    (giữ nguyên số tiền & lịch để bảo toàn vết kế toán)."""
+    v = db.get(KhoanVay, vay_id)
+    if v is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy khế ước vay")
+    if data.du_an_id and db.get(DuAn, data.du_an_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy dự án")
+    da_tra = db.query(func.count(LichTraNo.id)).filter(
+        LichTraNo.khoan_vay_id == vay_id, LichTraNo.da_tra.is_(True)).scalar() or 0
+    ck_ngay = data.chu_ky_ngay or max(1, int(data.chu_ky_thang or 1) * 30)
+    ck_cu = v.chu_ky_ngay or max(1, int(v.chu_ky_thang or 1) * 30)
+    goc_cu, tk_cu = Decimal(v.so_tien_goc or 0), v.tk_tien
+    cu = {"ben": v.ben_cho_vay, "goc": _f(v.so_tien_goc), "ls": _f(v.lai_suat_nam),
+          "pt": v.phuong_thuc, "so_ky": v.so_ky, "ck_ngay": ck_cu,
+          "ngay_nhan": str(v.ngay_nhan), "tk": v.tk_tien, "loai": v.loai,
+          "du_an_id": v.du_an_id, "ghi_chu": v.ghi_chu}
+    doi_tien = (Decimal(data.so_tien_goc) != goc_cu
+                or Decimal(data.lai_suat_nam) != Decimal(v.lai_suat_nam or 0)
+                or data.phuong_thuc != v.phuong_thuc or data.ngay_nhan != v.ngay_nhan
+                or int(data.so_ky) != int(v.so_ky or 0) or ck_ngay != ck_cu
+                or data.tk_tien != v.tk_tien)
+    if da_tra and doi_tien:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            f"Khế ước đã trả {da_tra} kỳ — chỉ sửa được Bên cho vay, Diễn giải, "
+                            "Mã dự án, Loại; số tiền/lãi suất/lịch giữ nguyên để bảo toàn vết kế toán.")
+    v.ben_cho_vay = data.ben_cho_vay
+    v.loai = data.loai
+    v.ghi_chu = data.ghi_chu
+    v.du_an_id = data.du_an_id
+    if data.so:
+        v.so = data.so
+    if not da_tra and doi_tien:
+        rows = sinh_lich(data.so_tien_goc, data.lai_suat_nam, data.so_ky,
+                         ck_ngay, data.ngay_nhan, data.phuong_thuc)
+        db.query(LichTraNo).filter_by(khoan_vay_id=vay_id).delete()
+        for r in rows:
+            db.add(LichTraNo(khoan_vay_id=v.id, **r))
+        v.so_tien_goc = Decimal(data.so_tien_goc)
+        v.lai_suat_nam = Decimal(data.lai_suat_nam)
+        v.phuong_thuc = data.phuong_thuc
+        v.ngay_nhan = data.ngay_nhan
+        v.so_ky = data.so_ky
+        v.chu_ky_ngay = ck_ngay
+        v.tk_tien = data.tk_tien
+        v.con_lai_goc = Decimal(data.so_tien_goc)
+        v.ngay_dao_han = rows[-1]["ngay_den_han"] if rows else data.ngay_nhan + timedelta(days=data.so_ky * ck_ngay)
+        # điều chỉnh quỹ: rút lại gốc cũ khỏi quỹ cũ, cộng gốc mới vào quỹ mới
+        quy_cu = _quy_theo_tk(db, tk_cu)
+        if quy_cu:
+            quy_cu.so_du = Decimal(quy_cu.so_du) - goc_cu
+        quy_moi = _quy_theo_tk(db, data.tk_tien)
+        if quy_moi:
+            quy_moi.so_du = Decimal(quy_moi.so_du) + Decimal(data.so_tien_goc)
+        # cập nhật bút toán nhận tiền vay (Nợ 111/112 / Có 341)
+        bt = (db.query(ButToan).filter_by(nguon="VAY", nguon_id=v.id, tk_co="341")
+              .order_by(ButToan.id.asc()).first())
+        if bt:
+            bt.tk_no = data.tk_tien
+            bt.so_tien = Decimal(data.so_tien_goc)
+            bt.ngay = data.ngay_nhan
+            bt.dien_giai = f"Nhận tiền vay {data.ben_cho_vay}"
+    ghi_audit(db, nd.id, "CAP_NHAT", "khoan_vay", v.id, cu=cu,
+              moi={"ben": data.ben_cho_vay, "goc": float(data.so_tien_goc),
+                   "ls": float(data.lai_suat_nam), "pt": data.phuong_thuc,
+                   "so_ky": data.so_ky, "ck_ngay": ck_ngay, "ngay_nhan": str(data.ngay_nhan),
+                   "tk": data.tk_tien, "loai": data.loai, "du_an_id": data.du_an_id,
+                   "ghi_chu": data.ghi_chu, "sinh_lai_lich": bool(not da_tra and doi_tien)})
+    db.commit()
+    return _vay_dict(db, v)
+
+
 @router.get("/tong-quan")
 def tong_quan_vay(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
     today = date.today()
