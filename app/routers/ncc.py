@@ -1603,10 +1603,12 @@ def chi_phi_theo_don(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "X
 
 
 @router.delete("/cong-no/{cn_id}")
-def xoa_cong_no_ncc(cn_id: int, db: Session = Depends(get_db),
+def xoa_cong_no_ncc(cn_id: int, ep: bool = False, db: Session = Depends(get_db),
                     nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
     """Xóa công nợ phải trả ghi nhầm. Chặn khi đã có tiền trả thật hoặc chứng từ
-    liên quan (giữ vết kế toán); công nợ sinh từ hóa đơn phải hủy hóa đơn thay vì xóa."""
+    liên quan (giữ vết kế toán); công nợ sinh từ hóa đơn phải hủy hóa đơn thay vì xóa.
+    ep=True (CEO/ADMIN): xóa ÉP dòng trùng — gỡ các lần thanh toán đã ghi kèm theo,
+    phiếu thu/chi (nếu có) được tách khỏi công nợ chứ không xóa."""
     from ..models import PhieuThuChi
     cn = db.get(CongNo, cn_id)
     if cn is None:
@@ -1619,17 +1621,25 @@ def xoa_cong_no_ncc(cn_id: int, db: Session = Depends(get_db),
                             "công nợ sẽ được gỡ kèm theo.")
     co_lan_tt = db.query(ThanhToan).filter_by(cong_no_id=cn.id).first()
     co_phieu = db.query(PhieuThuChi).filter_by(cong_no_id=cn.id).first()
+    so_lan_go = so_phieu_tach = 0
     if co_lan_tt is not None or co_phieu is not None or float(cn.da_thanh_toan or 0) > 0:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST,
-                            "Công nợ này đã có tiền trả thật (lần thanh toán đã ghi / phiếu chi gắn kèm, "
-                            "kể cả đang chờ duyệt) — không thể xóa để giữ vết kế toán.")
+        if not ep:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                "Công nợ này đã có tiền trả thật (lần thanh toán đã ghi / phiếu chi gắn kèm, "
+                                "kể cả đang chờ duyệt) — không thể xóa để giữ vết kế toán.")
+        so_lan_go = db.query(ThanhToan).filter_by(cong_no_id=cn.id).delete(synchronize_session=False)
+        so_phieu_tach = (db.query(PhieuThuChi).filter_by(cong_no_id=cn.id)
+                         .update({"cong_no_id": None}, synchronize_session=False))
     ghi_audit(db, nd.id, "XOA", "cong_no", cn.id,
               cu={"loai": cn.loai, "nha_cung_cap_id": cn.nha_cung_cap_id,
-                  "so_tien": float(cn.so_tien or 0), "don_mua_id": cn.don_mua_id,
-                  "han": str(cn.han) if cn.han else None})
+                  "so_tien": float(cn.so_tien or 0), "da_thanh_toan": float(cn.da_thanh_toan or 0),
+                  "so_ct": cn.so_ct, "don_mua_id": cn.don_mua_id,
+                  "han": str(cn.han) if cn.han else None},
+              moi={"ep_xoa": bool(ep), "lan_tt_da_go": so_lan_go,
+                   "phieu_da_tach": so_phieu_tach} if ep else None)
     db.delete(cn)
     db.commit()
-    return {"da_xoa": True}
+    return {"da_xoa": True, "ep_xoa": bool(ep), "lan_tt_da_go": so_lan_go}
 
 
 # ============ AI UPLOAD CÔNG NỢ PHẢI TRẢ (Excel/CSV → CongNo PHAI_TRA) ============
