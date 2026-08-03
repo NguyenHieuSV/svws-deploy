@@ -27,7 +27,7 @@ def them_thang(d: date, n: int) -> date:
 
 
 def sinh_lich(so_tien_goc, lai_suat_nam, so_ky, chu_ky_ngay, ngay_nhan, phuong_thuc,
-              ngay_tra_thang=None, goc_ky=None) -> list:
+              ngay_tra_thang=None, goc_ky=None, lai_theo_thang=False) -> list:
     """ngay_tra_thang (1-31): trả vào NGÀY CỐ ĐỊNH hàng tháng (VD 26 = ngày 26 mỗi tháng);
     kỳ 1 = ngày đó đầu tiên SAU ngày nhận; lãi kỳ = dư nợ × lãi năm × số ngày thực ÷ 365.
     None: lịch cách đều chu_ky_ngay như cũ.
@@ -61,6 +61,8 @@ def sinh_lich(so_tien_goc, lai_suat_nam, so_ky, chu_ky_ngay, ngay_nhan, phuong_t
         else:
             ngay = ngay_nhan + timedelta(days=k * int(chu_ky_ngay))
             lai = _r(du_no * r)
+        if lai_theo_thang:                     # lãi THEO THÁNG: dư nợ x lãi năm / 12
+            lai = _r(du_no * D(lai_suat_nam) / Decimal(100) / Decimal(12))
         if phuong_thuc == "GOC_CUOI":
             g = goc if k == n else Decimal(0)
         elif phuong_thuc == "TRA_DEU" and r > 0:

@@ -869,6 +869,7 @@ class KhoanVay(Base):
     du_an_id: Mapped[int | None] = mapped_column(ForeignKey("du_an.id", ondelete="SET NULL"), nullable=True)   # mig 65
     ngay_tra_thang: Mapped[int | None] = mapped_column(Integer, nullable=True)   # ngày trả cố định hàng tháng (mig 75)
     goc_ky: Mapped[Decimal | None] = mapped_column(Numeric(18, 0), nullable=True)   # gốc trả cố định mỗi kỳ (mig 76)
+    lai_theo_thang: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)   # lãi kỳ = dư nợ x lãi năm/12 (mig 77)
 
 
 class LichTraNo(Base):
