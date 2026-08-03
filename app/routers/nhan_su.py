@@ -708,7 +708,26 @@ def dang_ky_ot(data: DangKyOtVao, db: Session = Depends(get_db),
     ghi_audit(db, nd.id, "DANG_KY_OT", "ngay_nghi_ot", nv_id,
               moi={"phan": ket_qua})
     db.commit()
-    return {"ok": True, "trang_thai": "CHO_DUYET", "phan": ket_qua}
+    # Báo lên NHÓM (Google Chat) giống tin nhắc việc — nuốt lỗi, không làm hỏng đăng ký
+    chat = None
+    try:
+        from ..chat_gateway import lay_chat_provider, dang_bat
+        if dang_bat():
+            nvv = db.get(NhanVien, nv_id)
+            nhan = {"OT_THUONG": "ngày thường", "OT_CUOI_TUAN": "Chủ nhật", "OT_LE": "ngày lễ 🎌"}
+            dong = [f"🕐 *ĐĂNG KÝ TĂNG CA — {nvv.ho_ten if nvv else ('NV#' + str(nv_id))}*"]
+            for p in ket_qua:
+                ng = p["ngay"]
+                dong.append(f"• Ngày {ng[8:10]}/{ng[5:7]}: {float(p['so_gio']):g}h ({nhan.get(p['loai'], p['loai'])})")
+            if data.tu_gio is not None and data.den_gio is not None:
+                dong.append(f"• Khung giờ: {int(data.tu_gio)}h–{int(data.den_gio)}h")
+            if (data.ghi_chu or "").strip():
+                dong.append(f"• Ghi chú: {data.ghi_chu.strip()[:200]}")
+            dong.append("• Trạng thái: ⏳ CHỜ DUYỆT — quản lý vào Working time & Report → Duyệt tăng ca")
+            chat = lay_chat_provider().gui_phong("\n".join(dong))
+    except Exception:
+        chat = {"loi": "gui_chat_hong"}
+    return {"ok": True, "trang_thai": "CHO_DUYET", "phan": ket_qua, "chat": chat}
 
 
 @router.get("/working-time/cua-toi")
