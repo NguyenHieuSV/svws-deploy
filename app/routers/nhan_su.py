@@ -76,7 +76,7 @@ def tao_nhan_vien(data: NhanVienMoiVao, db: Session = Depends(get_db),
 
 # ----- DUYET: xóa nhân viên (chỉ khi chưa có bảng lương/chấm công) -----
 @router.delete("/nhan-vien/{nv_id}")
-def xoa_nhan_vien(nv_id: int, db: Session = Depends(get_db),
+def xoa_nhan_vien(nv_id: int, ep: bool = False, db: Session = Depends(get_db),
                   nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
     """Xóa nhân viên thêm nhầm. Chặn khi đã có bảng lương, chấm công, nghỉ phép
     hoặc được tham chiếu trong chứng từ khác (người tạo/duyệt) — khi đó nên
@@ -97,17 +97,36 @@ def xoa_nhan_vien(nv_id: int, db: Session = Depends(get_db),
             n = 0
         if n:
             ban.append(f"{n} {ten_ref}")
-    if ban:
+    if ban and not ep:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
             f"Nhân viên '{nv.ho_ten}' đang gắn với {', '.join(ban)} — không thể xóa. "
-            "Hãy dùng trạng thái NGHỈ VIỆC để giữ hồ sơ.")
+            "Hãy dùng trạng thái NGHỈ VIỆC để giữ hồ sơ; hồ sơ TRÙNG TÊN thì CEO/ADMIN có thể ÉP XÓA.")
+    if ban and ep:
+        # ÉP XÓA hồ sơ trùng: gỡ dữ liệu cá nhân đi kèm. Phiếu lương chỉ gỡ được khi
+        # kỳ CHƯA chốt, phiếu chưa duyệt và chưa ghi sổ — vướng thì vẫn chặn (giữ vết kế toán).
+        for bl in db.query(BangLuong).filter_by(nhan_vien_id=nv_id).all():
+            ky = db.get(KyLuong, bl.thang)
+            if (ky is not None and ky.trang_thai == "DA_CHOT") or bl.trang_thai == "DA_DUYET"                     or _bt_luong_cua(db, [bl.id]):
+                raise HTTPException(
+                    status.HTTP_400_BAD_REQUEST,
+                    f"Phiếu lương tháng {bl.thang} của '{nv.ho_ten}' đã chốt/duyệt/ghi sổ — "
+                    "không thể ép xóa hồ sơ này (giữ vết kế toán).")
+            db.delete(bl); db.flush()
+            if ky is not None:
+                _cap_nhat_tong_ky(db, ky)
+        db.query(ChamCong).filter_by(nhan_vien_id=nv_id).delete(synchronize_session=False)
+        db.query(NghiPhep).filter_by(nhan_vien_id=nv_id).delete(synchronize_session=False)
+        db.flush()
     ten_cu, ma_cu = nv.ho_ten, nv.ma
     # Dọn tham chiếu mềm — MỖI CÂU 1 SAVEPOINT riêng: câu hỏng không làm độc transaction
     # (bài học: raw SQL fail làm PostgreSQL abort cả transaction → lệnh sau nổ 500)
     for cau in ("UPDATE nguoi_dung SET nhan_vien_id = NULL WHERE nhan_vien_id = :i",
                 "UPDATE danh_gia_ky SET nguoi_danh_gia = NULL WHERE nguoi_danh_gia = :i",
-                "UPDATE nhac_viec SET nguoi_ho_tro_id = NULL WHERE nguoi_ho_tro_id = :i"):
+                "UPDATE nhac_viec SET nguoi_ho_tro_id = NULL WHERE nguoi_ho_tro_id = :i",
+                "UPDATE ngay_nghi_ot SET nguoi_tao = NULL WHERE nguoi_tao = :i",
+                "UPDATE ngay_nghi_ot SET nguoi_duyet = NULL WHERE nguoi_duyet = :i",
+                "DELETE FROM nhac_viec WHERE nguoi_tao = :i"):
         try:
             with db.begin_nested():
                 db.execute(_sql(cau), {"i": nv_id})
@@ -122,7 +141,8 @@ def xoa_nhan_vien(nv_id: int, db: Session = Depends(get_db),
             status.HTTP_400_BAD_REQUEST,
             f"Nhân viên '{ten_cu}' được tham chiếu trong chứng từ khác (người tạo/duyệt/phụ trách) "
             "— không thể xóa. Hãy dùng trạng thái NGHỈ VIỆC để giữ hồ sơ.")
-    ghi_audit(db, nd.id, "XOA", "nhan_vien", nv_id, cu={"ma": ma_cu, "ho_ten": ten_cu})
+    ghi_audit(db, nd.id, "XOA", "nhan_vien", nv_id,
+              cu={"ma": ma_cu, "ho_ten": ten_cu, "ep_xoa": bool(ep), "da_gan": ban})
     db.commit()
     return {"ok": True, "ho_ten": ten_cu}
 
