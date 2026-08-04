@@ -138,7 +138,8 @@ class DonMuaRa(BaseModel):
 
 
 class YeuCauMuaItemVao(BaseModel):
-    hang_hoa_id: int
+    hang_hoa_id: int | None = None          # hàng hóa kho
+    san_pham_ncc_id: int | None = None      # HOẶC sản phẩm NCC — hệ thống tự tạo/khớp hàng hóa kho
     so_luong: Decimal = Field(gt=0)
     don_gia: Decimal | None = None
     ghi_chu: str | None = None

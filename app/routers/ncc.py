@@ -343,6 +343,33 @@ def tao_de_xuat(data: YeuCauMuaVao, db: Session = Depends(get_db),
                                   don_gia=data.don_gia, ghi_chu=data.ghi_chu)]
     if not items:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Cần ít nhất 1 sản phẩm trong đề xuất")
+    # Dòng chọn SẢN PHẨM NCC (chưa có trong kho): tự khớp/tạo hàng hóa kho tương ứng
+    for it in items:
+        if it.hang_hoa_id:
+            continue
+        if not it.san_pham_ncc_id:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                "Mỗi dòng cần chọn hàng hóa kho hoặc sản phẩm NCC")
+        sp = db.get(SanPhamNcc, it.san_pham_ncc_id)
+        if sp is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy sản phẩm NCC")
+        hh = None
+        if (sp.ma_sp or "").strip():
+            hh = db.query(HangHoa).filter(func.lower(HangHoa.ma) == sp.ma_sp.strip().lower()).first()
+        if hh is None:
+            hh = db.query(HangHoa).filter(func.lower(HangHoa.ten) == sp.ten.strip().lower()).first()
+        if hh is None:
+            hh = HangHoa(ma=(sp.ma_sp or "").strip() or None, ten=sp.ten.strip()[:200],
+                         loai="VAT_TU", don_vi=sp.don_vi)
+            db.add(hh); db.flush()
+            db.add(TonKho(hang_hoa_id=hh.id, so_luong=0, ton_min=0))
+            ghi_audit(db, nd.id, "TAO", "hang_hoa", hh.id,
+                      moi={"ten": hh.ten, "tu_san_pham_ncc": sp.id})
+        it.hang_hoa_id = hh.id
+        if it.don_gia is None and sp.don_gia:
+            it.don_gia = sp.don_gia
+        if not it.nha_cung_cap_id:
+            it.nha_cung_cap_id = sp.nha_cung_cap_id
     primary = items[0]
     ycm = YeuCauMua(hang_hoa_id=primary.hang_hoa_id, so_luong=primary.so_luong, ly_do=data.ly_do,
                     nha_cung_cap_id=data.nha_cung_cap_id, don_hang_id=data.don_hang_id,
