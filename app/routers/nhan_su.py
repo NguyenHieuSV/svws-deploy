@@ -1640,6 +1640,33 @@ async def nhap_excel_ho_so(file: UploadFile = File(...), db: Session = Depends(g
             "chi_tiet": chi_tiet[:60]}
 
 
+class GanTaiKhoanVao(_NVBase):
+    email: str
+
+
+@router.put("/nhan-vien/{nv_id}/gan-tai-khoan")
+def gan_tai_khoan(nv_id: int, data: GanTaiKhoanVao, db: Session = Depends(get_db),
+                  nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
+    """Gắn tài khoản đăng nhập ĐÃ CÓ vào hồ sơ nhân viên (khi liên kết bị mất
+    hoặc tài khoản tạo trước hồ sơ). Mỗi tài khoản chỉ gắn 1 hồ sơ."""
+    nv = db.get(NhanVien, nv_id)
+    if nv is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy nhân viên")
+    email = (data.email or "").strip().lower()
+    u = db.query(NguoiDung).filter(NguoiDung.email.ilike(email)).first()
+    if u is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"Không tìm thấy tài khoản '{email}'")
+    # gỡ liên kết cũ của tài khoản này (nếu đang gắn hồ sơ khác)
+    for cu in db.query(NhanVien).filter(NhanVien.nguoi_dung_id == u.id,
+                                        NhanVien.id != nv.id).all():
+        cu.nguoi_dung_id = None
+    nv.nguoi_dung_id = u.id
+    ghi_audit(db, nd.id, "SUA", "nhan_vien", nv.id,
+              moi={"gan_tai_khoan": email, "nguoi_dung_id": u.id})
+    db.commit()
+    return {"ok": True, "nhan_vien": nv.ho_ten, "email": email}
+
+
 class NghiViecVao(_NVBase):
     ngay_nghi_viec: date | None = None
     ngay_vao_lam: date | None = None
