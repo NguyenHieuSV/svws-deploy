@@ -964,6 +964,45 @@ def ds_bao_cao_ngay(ngay: str | None = None, thang: str | None = None,
     return {"danh_sach": [_bc_ra(r, nv) for r, nv in rows]}
 
 
+class BcNgaySuaVao(_NVBase):
+    da_lam: str | None = None
+    ket_qua: str | None = None
+    kho_khan: str | None = None
+    ke_hoach: str | None = None
+    so_gio: Decimal | None = None
+    ma_lien_quan: str | None = None
+
+
+@router.put("/bao-cao-ngay/{bc_id}")
+def sua_bao_cao_ngay(bc_id: int, data: BcNgaySuaVao, db: Session = Depends(get_db),
+                     nd: NguoiDung = Depends(lay_nguoi_dung_hien_tai)):
+    """Sửa báo cáo ngày — chủ nhân tự sửa, hoặc CEO/ADMIN sửa bất kỳ."""
+    r = db.get(BaoCaoNgay, bc_id)
+    if r is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy báo cáo")
+    nv_id = nhan_vien_id_cua(db, nd.id)
+    la_qtv = (nd.vai_tro.ma if nd.vai_tro else "").upper() in ("CEO", "ADMIN")
+    if r.nhan_vien_id != nv_id and not la_qtv:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Chỉ được sửa báo cáo của chính mình")
+    cu = {"ngay": str(r.ngay), "so_gio": _f(r.so_gio), "ma_lien_quan": r.ma_lien_quan}
+    if data.da_lam is not None:
+        r.da_lam = data.da_lam.strip()
+    if data.ket_qua is not None:
+        r.ket_qua = data.ket_qua.strip()
+    if data.kho_khan is not None:
+        r.kho_khan = data.kho_khan.strip() or None
+    if data.ke_hoach is not None:
+        r.ke_hoach = data.ke_hoach.strip() or None
+    if data.so_gio is not None:
+        r.so_gio = data.so_gio
+    if data.ma_lien_quan is not None:
+        r.ma_lien_quan = data.ma_lien_quan.strip()[:120] or None
+    ghi_audit(db, nd.id, "SUA", "bao_cao_ngay", bc_id, cu=cu,
+              moi=data.model_dump(exclude_none=True, mode="json"))
+    db.commit()
+    return _bc_ra(r)
+
+
 @router.delete("/bao-cao-ngay/{bc_id}")
 def xoa_bao_cao_ngay(bc_id: int, db: Session = Depends(get_db),
                      nd: NguoiDung = Depends(lay_nguoi_dung_hien_tai)):
@@ -1286,6 +1325,41 @@ def ban_tin_thu(db: Session = Depends(get_db),
     """Gửi NGAY bản tin tổng hợp (bỏ qua chốt ngày) để xem thử nội dung."""
     from ..nhac_viec_service import gui_ban_tin_ngay
     return gui_ban_tin_ngay(db, ep=True)
+
+
+@router.put("/nhac-viec/nhom/{nhom}")
+def sua_nhom_nhac_viec(nhom: str, data: NhacViecVao, db: Session = Depends(get_db),
+                       nd: NguoiDung = Depends(lay_nguoi_dung_hien_tai)):
+    """Sửa CẢ LÔ nhắc (nhắc tất cả): tiêu đề, thời điểm, hạn, mã liên quan,
+    chuẩn bị, người hỗ trợ, mức độ, ghi chú — áp cho mọi dòng trong lô."""
+    rows = db.query(NhacViec).filter(NhacViec.nhom == nhom).all()
+    if not rows:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy lô nhắc")
+    if not _nv_sua_duoc(db, rows[0], nd):
+        raise HTTPException(status.HTTP_403_FORBIDDEN,
+                            "Chỉ người tạo hoặc CEO/Admin mới sửa được lô nhắc này")
+    td = _nv_doc_thoi_diem(data.thoi_diem) if (data.thoi_diem or "").strip() else None
+    han = _nv_doc_thoi_diem(data.han_hoan_thanh) if (data.han_hoan_thanh or "").strip() else None
+    for r in rows:
+        if (data.tieu_de or "").strip():
+            r.tieu_de = data.tieu_de.strip()
+        if td is not None:
+            r.thoi_diem = td
+        r.han_hoan_thanh = han
+        if r.han_hoan_thanh is not None and r.han_hoan_thanh < r.thoi_diem:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                "Hạn hoàn thành phải sau thời điểm nhắc")
+        r.ma_lien_quan = (data.ma_lien_quan or "").strip()[:120] or None
+        r.chuan_bi = (data.chuan_bi or "").strip() or None
+        r.nguoi_ho_tro_id = data.nguoi_ho_tro_id
+        r.ho_tro_gi = (data.ho_tro_gi or "").strip() or None
+        r.ghi_chu = (data.ghi_chu or "").strip() or None
+        if data.muc_do in _NV_MUC_DO:
+            r.muc_do = data.muc_do
+    ghi_audit(db, nd.id, "SUA", "nhac_viec", rows[0].id,
+              moi={"nhom": nhom, "so_dong": len(rows), "tieu_de": rows[0].tieu_de})
+    db.commit()
+    return {"ok": True, "so_dong": len(rows)}
 
 
 @router.delete("/nhac-viec/nhom/{nhom}")
