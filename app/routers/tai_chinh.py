@@ -92,7 +92,8 @@ def dashboard(db: Session = Depends(get_db), _=Depends(yeu_cau("dashboard", "XEM
 def daily_remind(db: Session = Depends(get_db), _=Depends(yeu_cau("dashboard", "XEM"))):
     """Nhắc việc trong ngày: báo giá mới · mua hàng mới · phiếu chi chờ duyệt ·
     phiếu thu hôm nay · nhắc thu công nợ đến hạn/quá hạn."""
-    from ..models import (AuditLog, DonMua, DonHang, PhieuThuChi, BaoGiaForm, KhachHang, NhaCungCap)
+    from ..models import (AuditLog, DonMua, DonHang, PhieuThuChi, BaoGiaForm, KhachHang, NhaCungCap,
+                          YeuCauMua, HangHoa, NgayNghiOt, NhanVien, ChienDichEmail, CoHoi, BaoGia)
     hom_nay = date.today()
 
     def ten_kh(kid):
@@ -170,7 +171,71 @@ def daily_remind(db: Session = Depends(get_db), _=Depends(yeu_cau("dashboard", "
                    "con_lai": con_lai, "han": str(moc), "qua_han": moc < hom_nay})
     wr.sort(key=lambda x: (x["han"], x["huong"]))
 
+    # 6) VIỆC ĐANG CHỜ XỬ LÝ — nhắc tới khi xong, không giới hạn hôm nay
+    dx_cho = []
+    for y in db.query(YeuCauMua).filter(YeuCauMua.trang_thai == "MOI").order_by(YeuCauMua.id.desc()).limit(30).all():
+        hh = db.get(HangHoa, y.hang_hoa_id)
+        dx_cho.append({"id": y.id, "ten_hh": hh.ten if hh else f"HH #{y.hang_hoa_id}",
+                       "ngay": str(y.ngay) if y.ngay else None, "ly_do": y.ly_do})
+
+    po_cho = []
+    for dm in (db.query(DonMua).filter(DonMua.trang_thai == "CHO_DUYET")
+               .order_by(DonMua.id.desc()).limit(30).all()):
+        ncc = db.get(NhaCungCap, dm.nha_cung_cap_id)
+        po_cho.append({"id": dm.id, "so": dm.so or f"PO-{dm.id}", "ncc": ncc.ten if ncc else None,
+                       "tong_tien": float(dm.tong_tien or 0), "trang_thai": "Chờ duyệt"})
+
+    bg_cho = []
+    for b in (db.query(BaoGia).filter(BaoGia.trang_thai.in_(["NHAP", "CHO_DUYET"]))
+              .order_by(BaoGia.id.desc()).limit(30).all()):
+        bg_cho.append({"id": b.id, "so": b.so or f"BG-{b.id}", "khach": ten_kh(b.khach_hang_id),
+                       "trang_thai": "Nháp" if b.trang_thai == "NHAP" else "Chờ duyệt"})
+
+    co_hoi = []
+    for c in db.query(CoHoi).filter(CoHoi.giai_doan == "MOI").order_by(CoHoi.id.desc()).limit(30).all():
+        co_hoi.append({"id": c.id, "so": c.tieu_de or f"CH-{c.id}",
+                       "khach": ten_kh(c.khach_hang_id), "trang_thai": "Mới"})
+
+    cd_cho = []
+    for c in (db.query(ChienDichEmail).filter(ChienDichEmail.trang_thai == "CHO_DUYET")
+              .order_by(ChienDichEmail.id.desc()).limit(30).all()):
+        cd_cho.append({"id": c.id, "so": c.ten, "khach": c.tieu_de, "trang_thai": "Chờ duyệt"})
+
+    _ot_types = ("OT_THUONG", "OT_CUOI_TUAN", "OT_LE")
+    ot_cho = []
+    for r in (db.query(NgayNghiOt).filter(NgayNghiOt.trang_thai == "CHO_DUYET")
+              .order_by(NgayNghiOt.ngay.desc()).limit(30).all()):
+        nv = db.get(NhanVien, r.nhan_vien_id)
+        ot_cho.append({"id": r.id, "nv": nv.ho_ten if nv else f"NV #{r.nhan_vien_id}",
+                       "ngay": str(r.ngay), "loai": r.loai, "so_gio": float(r.so_gio or 0)})
+
+    ot_bc = []
+    for r in (db.query(NgayNghiOt).filter(NgayNghiOt.trang_thai == "DA_DUYET",
+                                          NgayNghiOt.loai.in_(_ot_types),
+                                          NgayNghiOt.bc_ot_luc.is_(None),
+                                          NgayNghiOt.ngay <= hom_nay)
+              .order_by(NgayNghiOt.ngay.desc()).limit(30).all()):
+        nv = db.get(NhanVien, r.nhan_vien_id)
+        ot_bc.append({"id": r.id, "nv": nv.ho_ten if nv else f"NV #{r.nhan_vien_id}",
+                      "ngay": str(r.ngay), "loai": r.loai, "so_gio": float(r.so_gio or 0)})
+
     muc = [
+        # --- Việc đang chờ xử lý (nhắc tới khi xong) ---
+        {"key": "dx_cho", "ten": "Đề xuất mua chờ duyệt", "icon": "🛍", "di_toi": "de_xuat",
+         "so": len(dx_cho), "items": dx_cho[:30], "cho": True},
+        {"key": "po_cho", "ten": "PO chờ duyệt", "icon": "📦", "di_toi": "ncc",
+         "so": len(po_cho), "items": po_cho[:30], "cho": True},
+        {"key": "bg_cho", "ten": "Báo giá đang xử lý", "icon": "🧮", "di_toi": "ban_hang",
+         "so": len(bg_cho), "items": bg_cho[:30], "cho": True},
+        {"key": "co_hoi", "ten": "Cơ hội mới cần theo", "icon": "✨", "di_toi": "ban_hang",
+         "so": len(co_hoi), "items": co_hoi[:30], "cho": True},
+        {"key": "cd_cho", "ten": "Chiến dịch chờ duyệt", "icon": "📣", "di_toi": "ban_hang",
+         "so": len(cd_cho), "items": cd_cho[:30], "cho": True},
+        {"key": "ot_cho", "ten": "Tăng ca chờ duyệt", "icon": "🕒", "di_toi": "working_time",
+         "so": len(ot_cho), "items": ot_cho[:30], "cho": True},
+        {"key": "ot_bc", "ten": "Tăng ca chưa báo cáo kết quả", "icon": "⏱", "di_toi": "working_time",
+         "so": len(ot_bc), "items": ot_bc[:30], "cho": True},
+        # --- Phát sinh trong hôm nay ---
         {"key": "bao_gia", "ten": "Báo giá mới", "icon": "📝", "di_toi": "ban_hang",
          "so": len(bg), "items": bg[:30]},
         {"key": "don_hang", "ten": "Đơn hàng / PO-HĐ mới", "icon": "🧾", "di_toi": "ban_hang",
