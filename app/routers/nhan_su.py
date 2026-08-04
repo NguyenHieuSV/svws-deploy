@@ -1438,6 +1438,8 @@ def ds_ho_so(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
     for nv in db.query(NhanVien).order_by(NhanVien.id).all():
         out.append({"id": nv.id, "ma": nv.ma, "ho_ten": nv.ho_ten, "chuc_danh": nv.chuc_danh,
                     "trang_thai": nv.trang_thai, "luong_co_ban": _f(nv.luong_co_ban),
+                    "ngay_vao_lam": str(nv.ngay_vao_lam) if nv.ngay_vao_lam else None,
+                    "ngay_nghi_viec": str(nv.ngay_nghi_viec) if nv.ngay_nghi_viec else None,
                     "luong_dong_bh": _f(nv.luong_dong_bh), "so_phu_thuoc": nv.so_phu_thuoc,
                     "phu_cap_an": _f(nv.phu_cap_an), "phu_cap_di_lai": _f(nv.phu_cap_di_lai),
                     "phu_cap_dien_thoai": _f(nv.phu_cap_dien_thoai),
@@ -1636,6 +1638,57 @@ async def nhap_excel_ho_so(file: UploadFile = File(...), db: Session = Depends(g
     db.commit()
     return {"cap_nhat": cap_nhat, "tao_moi": tao_moi, "bo_qua": bo_qua,
             "chi_tiet": chi_tiet[:60]}
+
+
+class NghiViecVao(_NVBase):
+    ngay_nghi_viec: date | None = None
+    ngay_vao_lam: date | None = None
+    luong_co_ban: Decimal | None = None
+    trang_thai: str | None = None   # NGHI_VIEC | DANG_LAM (khôi phục)
+
+
+@router.post("/nhan-vien/{nv_id}/nghi-viec")
+def cho_nghi_viec(nv_id: int, data: NghiViecVao, db: Session = Depends(get_db),
+                  nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    """Resign: chuyển nhân viên sang NGHỈ VIỆC (giữ nguyên hồ sơ & lịch sử lương)."""
+    nv = db.get(NhanVien, nv_id)
+    if nv is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy nhân viên")
+    if nv.trang_thai == "NGHI_VIEC":
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Nhân viên này đã ở trạng thái nghỉ việc")
+    nv.trang_thai = "NGHI_VIEC"
+    nv.ngay_nghi_viec = data.ngay_nghi_viec or date.today()
+    ghi_audit(db, nd.id, "NGHI_VIEC", "nhan_vien", nv.id,
+              moi={"ho_ten": nv.ho_ten, "ngay_nghi_viec": str(nv.ngay_nghi_viec)})
+    db.commit()
+    return {"ok": True, "id": nv.id, "ngay_nghi_viec": str(nv.ngay_nghi_viec)}
+
+
+@router.put("/nhan-vien/{nv_id}/nghi-viec")
+def sua_nghi_viec(nv_id: int, data: NghiViecVao, db: Session = Depends(get_db),
+                  nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    """Sửa thông tin trong Resign list: ngày vào làm, ngày nghỉ việc, mức lương;
+    trạng thái DANG_LAM = khôi phục nhân viên quay lại làm việc."""
+    nv = db.get(NhanVien, nv_id)
+    if nv is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy nhân viên")
+    cu = {"ngay_vao_lam": str(nv.ngay_vao_lam) if nv.ngay_vao_lam else None,
+          "ngay_nghi_viec": str(nv.ngay_nghi_viec) if nv.ngay_nghi_viec else None,
+          "luong_co_ban": _f(nv.luong_co_ban), "trang_thai": nv.trang_thai}
+    if data.ngay_vao_lam is not None:
+        nv.ngay_vao_lam = data.ngay_vao_lam
+    if data.ngay_nghi_viec is not None:
+        nv.ngay_nghi_viec = data.ngay_nghi_viec
+    if data.luong_co_ban is not None:
+        nv.luong_co_ban = data.luong_co_ban
+    if data.trang_thai in ("NGHI_VIEC", "DANG_LAM"):
+        nv.trang_thai = data.trang_thai
+        if data.trang_thai == "DANG_LAM":
+            nv.ngay_nghi_viec = None
+    ghi_audit(db, nd.id, "SUA", "nhan_vien", nv.id, cu=cu,
+              moi=data.model_dump(exclude_none=True, mode="json"))
+    db.commit()
+    return {"ok": True, "trang_thai": nv.trang_thai}
 
 
 @router.put("/nhan-vien/{nv_id}/ho-so")

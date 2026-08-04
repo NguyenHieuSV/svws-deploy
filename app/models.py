@@ -72,6 +72,8 @@ class NhanVien(Base):
     email: Mapped[str | None] = mapped_column(String(120), nullable=True)
     tk_chi_phi: Mapped[str] = mapped_column(String(10), default="642")
     trang_thai: Mapped[str] = mapped_column(String(20), default="DANG_LAM")
+    ngay_vao_lam: Mapped[date | None] = mapped_column(Date, nullable=True)      # mig 79
+    ngay_nghi_viec: Mapped[date | None] = mapped_column(Date, nullable=True)    # mig 79
 
 
 # ---------- Module Kho ----------
