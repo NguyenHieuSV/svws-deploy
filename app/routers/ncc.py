@@ -702,6 +702,7 @@ def tao_po_tu_bao_gia_file(tep_id: int, data: TuBgFileVao | None = None,
     danh mục hàng hóa. Số lượng thiếu trong báo giá mặc định = 1 (sửa trước khi duyệt).
     Nhận kèm don_hang_id (Mã đơn bán) + ngày hẹn giao từ form Tạo PO."""
     don_hang_id = data.don_hang_id if data else None
+    ngay_hen_giao = data.ngay_hen_giao if data else None   # lấy TRƯỚC khi biến data bị dùng lại
     if don_hang_id:
         from ..models import DonHang
         if db.get(DonHang, don_hang_id) is None:
@@ -713,11 +714,11 @@ def tao_po_tu_bao_gia_file(tep_id: int, data: TuBgFileVao | None = None,
     if ncc is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy nhà cung cấp của file")
     try:
-        data = doc_tep_chung(t.duong_dan)
+        noi_dung = doc_tep_chung(t.duong_dan)
     except FileNotFoundError as e:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(e))
     try:
-        items = doc_bao_gia_file(data, t.content_type, t.ten_file)
+        items = doc_bao_gia_file(noi_dung, t.content_type, t.ten_file)
     except ValueError as e:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e))
     if not items:
@@ -725,7 +726,7 @@ def tao_po_tu_bao_gia_file(tep_id: int, data: TuBgFileVao | None = None,
                             "AI không tìm thấy dòng sản phẩm nào trong file báo giá.")
     dm = DonMua(nha_cung_cap_id=ncc.id, trang_thai="CHO_DUYET",
                 don_hang_id=don_hang_id,
-                ngay_hen_giao=(data.ngay_hen_giao if data else None))
+                ngay_hen_giao=ngay_hen_giao)
     db.add(dm); db.flush()
     dm.so = f"PO-{date.today():%Y%m%d}-{dm.id}"
     tien_hang, tien_thue = Decimal(0), Decimal(0)
