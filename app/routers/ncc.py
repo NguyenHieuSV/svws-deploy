@@ -259,12 +259,22 @@ def _ycm_dict(db, y):
     items = [{"id": l.id, "hang_hoa_id": l.hang_hoa_id, "ten_hh": _name(l.hang_hoa_id),
               "so_luong": float(l.so_luong),
               "don_gia": float(l.don_gia) if l.don_gia is not None else None,
+              "thue_suat": float(l.thue_suat or 0),
               "ghi_chu": l.ghi_chu,
               "nha_cung_cap_id": l.nha_cung_cap_id, "ten_ncc": _ncc_name(l.nha_cung_cap_id)}
              for l in lines]
+    # Thành tiền / VAT / Tổng cộng của cả đề xuất (fallback dòng chính khi chưa có chi tiết)
+    if lines:
+        tong_tt = sum(float(l.so_luong or 0) * float(l.don_gia or 0) for l in lines)
+        tien_vat = sum(float(l.so_luong or 0) * float(l.don_gia or 0) * float(l.thue_suat or 0) / 100
+                       for l in lines)
+    else:
+        tong_tt = float(y.so_luong or 0) * float(y.don_gia or 0)
+        tien_vat = 0.0
     # NCC hiển thị: cấp đề xuất; trống thì lấy NCC của dòng sản phẩm đầu tiên có NCC
     ncc_hien = y.nha_cung_cap_id or next((l.nha_cung_cap_id for l in lines if l.nha_cung_cap_id), None)
-    return {"id": y.id, "hang_hoa_id": y.hang_hoa_id, "ten_hh": _name(y.hang_hoa_id),
+    return {"thanh_tien": tong_tt, "tien_vat": tien_vat, "tong_cong": tong_tt + tien_vat,
+            "id": y.id, "hang_hoa_id": y.hang_hoa_id, "ten_hh": _name(y.hang_hoa_id),
             "so_luong": float(y.so_luong), "ly_do": y.ly_do, "trang_thai": y.trang_thai,
             "nha_cung_cap_id": ncc_hien, "don_hang_id": y.don_hang_id,
             "don_gia": float(y.don_gia) if y.don_gia is not None else None,
@@ -382,8 +392,8 @@ def tao_de_xuat(data: YeuCauMuaVao, db: Session = Depends(get_db),
     db.add(ycm); db.flush()
     for it in items:
         db.add(YeuCauMuaCt(yeu_cau_mua_id=ycm.id, hang_hoa_id=it.hang_hoa_id,
-                           so_luong=it.so_luong, don_gia=it.don_gia, ghi_chu=it.ghi_chu,
-                           nha_cung_cap_id=it.nha_cung_cap_id))
+                           so_luong=it.so_luong, don_gia=it.don_gia, thue_suat=it.thue_suat,
+                           ghi_chu=it.ghi_chu, nha_cung_cap_id=it.nha_cung_cap_id))
     ghi_audit(db, nd.id, "TAO", "yeu_cau_mua", ycm.id, moi={"so_dong": len(items)})
     db.commit(); db.refresh(ycm)
     return ycm

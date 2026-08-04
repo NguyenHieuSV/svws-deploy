@@ -147,6 +147,7 @@ class YeuCauMuaCt(Base):
     hang_hoa_id: Mapped[int] = mapped_column(ForeignKey("hang_hoa.id"))
     so_luong: Mapped[Decimal] = mapped_column(Numeric(15, 3), default=0)
     don_gia: Mapped[Decimal | None] = mapped_column(Numeric(18, 0), nullable=True)
+    thue_suat: Mapped[Decimal | None] = mapped_column(Numeric(5, 2), default=0)   # VAT % (mig 78)
     ghi_chu: Mapped[str | None] = mapped_column(Text, nullable=True)
     nha_cung_cap_id: Mapped[int | None] = mapped_column(ForeignKey("nha_cung_cap.id"), nullable=True)
 

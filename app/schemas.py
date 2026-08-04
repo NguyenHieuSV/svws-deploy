@@ -141,6 +141,7 @@ class YeuCauMuaItemVao(BaseModel):
     hang_hoa_id: int | None = None          # hàng hóa kho
     san_pham_ncc_id: int | None = None      # HOẶC sản phẩm NCC — hệ thống tự tạo/khớp hàng hóa kho
     so_luong: Decimal = Field(gt=0)
+    thue_suat: Decimal = Field(default=0, ge=0, le=100)   # VAT % của dòng
     don_gia: Decimal | None = None
     ghi_chu: str | None = None
     nha_cung_cap_id: int | None = None
