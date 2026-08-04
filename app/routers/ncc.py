@@ -262,9 +262,11 @@ def _ycm_dict(db, y):
               "ghi_chu": l.ghi_chu,
               "nha_cung_cap_id": l.nha_cung_cap_id, "ten_ncc": _ncc_name(l.nha_cung_cap_id)}
              for l in lines]
+    # NCC hiển thị: cấp đề xuất; trống thì lấy NCC của dòng sản phẩm đầu tiên có NCC
+    ncc_hien = y.nha_cung_cap_id or next((l.nha_cung_cap_id for l in lines if l.nha_cung_cap_id), None)
     return {"id": y.id, "hang_hoa_id": y.hang_hoa_id, "ten_hh": _name(y.hang_hoa_id),
             "so_luong": float(y.so_luong), "ly_do": y.ly_do, "trang_thai": y.trang_thai,
-            "nha_cung_cap_id": y.nha_cung_cap_id, "don_hang_id": y.don_hang_id,
+            "nha_cung_cap_id": ncc_hien, "don_hang_id": y.don_hang_id,
             "don_gia": float(y.don_gia) if y.don_gia is not None else None,
             "ngay_can": str(y.ngay_can) if y.ngay_can else None, "don_mua_id": y.don_mua_id,
             "ai_ncc_id": y.ai_ncc_id, "ai_goi_y": y.ai_goi_y,
@@ -371,8 +373,9 @@ def tao_de_xuat(data: YeuCauMuaVao, db: Session = Depends(get_db),
         if not it.nha_cung_cap_id:
             it.nha_cung_cap_id = sp.nha_cung_cap_id
     primary = items[0]
+    ncc_chung = data.nha_cung_cap_id or next((it.nha_cung_cap_id for it in items if it.nha_cung_cap_id), None)
     ycm = YeuCauMua(hang_hoa_id=primary.hang_hoa_id, so_luong=primary.so_luong, ly_do=data.ly_do,
-                    nha_cung_cap_id=data.nha_cung_cap_id, don_hang_id=data.don_hang_id,
+                    nha_cung_cap_id=ncc_chung, don_hang_id=data.don_hang_id,
                     don_gia=primary.don_gia, ngay_can=data.ngay_can, ghi_chu=data.ghi_chu,
                     dinh_kem_url=data.dinh_kem_url,
                     nguoi_tao=nhan_vien_id_cua(db, nd.id), trang_thai="MOI")
