@@ -483,7 +483,7 @@ def _wt_dong_bo_luong(db, nv_id: int, ngay) -> bool:
 
 @router.get("/working-time")
 def ds_working_time(thang: str | None = None, db: Session = Depends(get_db),
-                    _=Depends(yeu_cau(MODULE_WT, "XEM"))):
+                    nd: NguoiDung = Depends(yeu_cau(MODULE_WT, "XEM"))):
     """Bảng kiểm soát Working time & Overtime: chi tiết tháng + tổng hợp năm/tháng
     từng NV kèm cảnh báo vượt trần Bộ luật Lao động 2019."""
     from datetime import date as _d
@@ -546,6 +546,9 @@ def ds_working_time(thang: str | None = None, db: Session = Depends(get_db),
             "ot_thuong": gio(thang_rs, "OT_THUONG"), "ot_cuoi_tuan": gio(thang_rs, "OT_CUOI_TUAN"),
             "ot_le": gio(thang_rs, "OT_LE"), "ot_thang": ot_thang, "ot_nam": ot_nam,
             "canh_bao": cb})
+    # Bảng kiểm soát (tổng hợp theo NV) chỉ dành cho CEO / ADMIN / Trưởng P. Quản lý nội bộ
+    if (nd.vai_tro.ma if nd.vai_tro else "").upper() not in ("CEO", "ADMIN", "TP_QLNB"):
+        tong_hop = []
     return {"thang": thang, "danh_sach": danh_sach, "tong_hop": tong_hop, "cho_duyet": cho_duyet}
 
 
