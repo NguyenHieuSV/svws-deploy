@@ -275,6 +275,7 @@ def _ycm_dict(db, y):
     ncc_hien = y.nha_cung_cap_id or next((l.nha_cung_cap_id for l in lines if l.nha_cung_cap_id), None)
     return {"thanh_tien": tong_tt, "tien_vat": tien_vat, "tong_cong": tong_tt + tien_vat,
             "id": y.id, "hang_hoa_id": y.hang_hoa_id, "ten_hh": _name(y.hang_hoa_id),
+            "ngay": str(y.ngay) if y.ngay else None,
             "so_luong": float(y.so_luong), "ly_do": y.ly_do, "trang_thai": y.trang_thai,
             "nha_cung_cap_id": ncc_hien, "don_hang_id": y.don_hang_id,
             "don_gia": float(y.don_gia) if y.don_gia is not None else None,
