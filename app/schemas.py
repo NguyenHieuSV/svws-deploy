@@ -507,6 +507,9 @@ class HoSoLuongVao(BaseModel):
     email: str | None = None
     tk_chi_phi: str = "642"
     chuc_danh: str | None = None
+    loai_hop_dong: str | None = None      # CHINH_THUC | THU_VIEC
+    cam_ket_08: bool | None = None
+    phu_thuoc_chi_tiet: str | None = None
 
 
 class KyLuongVao(BaseModel):
@@ -842,6 +845,7 @@ class ThamSoLuongVao(BaseModel):
     tl_bhxh_dn: Decimal | None = None
     tl_bhyt_dn: Decimal | None = None
     tl_bhtn_dn: Decimal | None = None
+    tl_kpcd_dn: Decimal | None = None
     tran_bhxh_bhyt: Decimal | None = None
     tran_bhtn: Decimal | None = None
     giam_tru_ban_than: Decimal | None = None

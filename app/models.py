@@ -74,6 +74,9 @@ class NhanVien(Base):
     trang_thai: Mapped[str] = mapped_column(String(20), default="DANG_LAM")
     ngay_vao_lam: Mapped[date | None] = mapped_column(Date, nullable=True)      # mig 79
     ngay_nghi_viec: Mapped[date | None] = mapped_column(Date, nullable=True)    # mig 79
+    loai_hop_dong: Mapped[str] = mapped_column(String(20), default="CHINH_THUC")   # mig 81: CHINH_THUC | THU_VIEC
+    cam_ket_08: Mapped[bool] = mapped_column(Boolean, default=False)               # mig 81: cam kết 08/CK-TNCN
+    phu_thuoc_chi_tiet: Mapped[str | None] = mapped_column(Text, nullable=True)    # mig 81: DS người phụ thuộc
 
 
 # ---------- Module Kho ----------
@@ -671,6 +674,7 @@ class BangLuong(Base):
     bhyt_dn: Mapped[Decimal] = mapped_column(Numeric(18, 0), default=0)
     bhtn_dn: Mapped[Decimal] = mapped_column(Numeric(18, 0), default=0)
     chi_phi_dn: Mapped[Decimal] = mapped_column(Numeric(18, 0), default=0)
+    kpcd_dn: Mapped[Decimal] = mapped_column(Numeric(18, 0), default=0)   # mig 81: kinh phí công đoàn 2%
     email_sent: Mapped[bool] = mapped_column(Boolean, default=False)
     ngay_gui_email: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     phu_cap_khac: Mapped[Decimal] = mapped_column(Numeric(18, 0), default=0)
@@ -914,6 +918,7 @@ class ThamSoLuong(Base):
     hs_ot_thuong: Mapped[Decimal] = mapped_column(Numeric(4, 2), default=Decimal("1.5"))
     hs_ot_cuoi_tuan: Mapped[Decimal] = mapped_column(Numeric(4, 2), default=Decimal("2.0"))
     hs_ot_le: Mapped[Decimal] = mapped_column(Numeric(4, 2), default=Decimal("3.0"))
+    tl_kpcd_dn: Mapped[Decimal] = mapped_column(Numeric(6, 4), default=Decimal("0.02"))  # mig 81
     luong_co_so: Mapped[Decimal] = mapped_column(Numeric(18, 0), default=2340000)
     luong_toi_thieu_vung: Mapped[Decimal] = mapped_column(Numeric(18, 0), default=4960000)
     bac_thue: Mapped[str] = mapped_column(Text, default="[]")

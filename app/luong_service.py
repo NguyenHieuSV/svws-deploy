@@ -23,6 +23,8 @@ MIEN_THUE_AN = Decimal("730000")
 # Hệ số tăng ca
 HS_OT_THUONG = Decimal("1.5"); HS_OT_CUOI_TUAN = Decimal("2.0"); HS_OT_LE = Decimal("3.0")
 GIO_CONG_NGAY = Decimal("8")
+# Kinh phí công đoàn DN nộp 2% quỹ lương đóng BHXH (Luật Công đoàn 2012)
+TL_KPCD_DN = Decimal("0.02")
 
 BIEU_THUE = [
     (Decimal("5000000"), Decimal("0.05")), (Decimal("10000000"), Decimal("0.10")),
@@ -53,6 +55,7 @@ def tinh_luong(luong_co_ban, luong_dong_bh=0, cong_chuan=26, cong_thuc_te=26,
                phu_cap_an=0, phu_cap_di_lai=0, phu_cap_dien_thoai=0, phu_cap_trach_nhiem=0,
                so_phu_thuoc=0, tam_ung=0,
                phu_cap_khac=0, ngay_nghi_kpep=0, so_phut_di_tre=0, khau_tru_khac=0,
+               loai_hop_dong="CHINH_THUC", cam_ket_08=False,
                cfg=None) -> dict:
     # Tham số theo luật — lấy từ cfg (cấu hình cập nhật được), thiếu thì dùng mặc định
     c = cfg or {}
@@ -64,6 +67,7 @@ def tinh_luong(luong_co_ban, luong_dong_bh=0, cong_chuan=26, cong_thuc_te=26,
     gt_bt = cv("giam_tru_ban_than", GIAM_TRU_BAN_THAN); gt_pt = cv("giam_tru_phu_thuoc", GIAM_TRU_PHU_THUOC)
     mien_an_max = cv("mien_thue_an", MIEN_THUE_AN)
     hs_th = cv("hs_ot_thuong", HS_OT_THUONG); hs_ct = cv("hs_ot_cuoi_tuan", HS_OT_CUOI_TUAN); hs_le = cv("hs_ot_le", HS_OT_LE)
+    tl_kpcd = cv("tl_kpcd_dn", TL_KPCD_DN)
     bieu = c.get("bac_thue") or BIEU_THUE
 
     lcb = D(luong_co_ban)
@@ -99,6 +103,7 @@ def tinh_luong(luong_co_ban, luong_dong_bh=0, cong_chuan=26, cong_thuc_te=26,
     bh_nv = bhxh + bhyt + bhtn
     bhxh_dn = _r(base_xhyt * tl_bhxh_dn); bhyt_dn = _r(base_xhyt * tl_bhyt_dn); bhtn_dn = _r(base_tn * tl_bhtn_dn)
     bh_dn = bhxh_dn + bhyt_dn + bhtn_dn
+    kpcd_dn = _r(base_xhyt * tl_kpcd)          # kinh phí công đoàn 2% — chi phí DN (TK 3382)
 
     # Thuế TNCN
     giam_tru = gt_bt + gt_pt * D(so_phu_thuoc)
@@ -106,11 +111,20 @@ def tinh_luong(luong_co_ban, luong_dong_bh=0, cong_chuan=26, cong_thuc_te=26,
     thu_nhap_tinh_thue = thu_nhap_chiu_thue - bh_nv - giam_tru
     thue = tinh_tncn(thu_nhap_tinh_thue, bieu)
 
+    # Thử việc / HĐ < 3 tháng: chưa thuộc diện BHXH bắt buộc; TNCN khấu trừ 10% tại nguồn
+    # trên toàn bộ thu nhập nếu ≥ 2 triệu/kỳ (TT111/2013); có cam kết 08/CK-TNCN → tạm không khấu trừ.
+    if str(loai_hop_dong or "CHINH_THUC").upper() == "THU_VIEC":
+        bhxh = bhyt = bhtn = bh_nv = Decimal(0)
+        bhxh_dn = bhyt_dn = bhtn_dn = bh_dn = kpcd_dn = Decimal(0)
+        thu_nhap_tinh_thue = tong_thu_nhap
+        thue = Decimal(0) if (cam_ket_08 or tong_thu_nhap < Decimal(2000000)) \
+            else _r(tong_thu_nhap * Decimal("0.10"))
+
     tu = D(tam_ung)
     ktkhac = D(khau_tru_khac)
     khau_tru = bh_nv + thue + tu + ktkhac
     thuc_linh = tong_thu_nhap - khau_tru
-    chi_phi_dn = tong_thu_nhap + bh_dn      # tổng chi phí lương cho DN
+    chi_phi_dn = tong_thu_nhap + bh_dn + kpcd_dn      # tổng chi phí lương cho DN (gồm KPCĐ 2%)
 
     return {
         "luong_co_ban": lcb, "luong_theo_cong": luong_theo_cong, "luong_thuc_te": luong_thuc_te,
@@ -121,7 +135,7 @@ def tinh_luong(luong_co_ban, luong_dong_bh=0, cong_chuan=26, cong_thuc_te=26,
         "khau_tru_nghi": khau_tru_nghi, "khau_tru_tre": khau_tru_tre, "khau_tru_khac": ktkhac,
         "tong_thu_nhap": tong_thu_nhap,
         "bhxh": bhxh, "bhyt": bhyt, "bhtn": bhtn,
-        "bhxh_dn": bhxh_dn, "bhyt_dn": bhyt_dn, "bhtn_dn": bhtn_dn,
+        "bhxh_dn": bhxh_dn, "bhyt_dn": bhyt_dn, "bhtn_dn": bhtn_dn, "kpcd_dn": kpcd_dn,
         "thu_nhap_chiu_thue": _r(max(Decimal(0), thu_nhap_tinh_thue)),
         "thue_tncn": thue, "tam_ung": tu,
         "khau_tru": khau_tru, "thuc_linh": thuc_linh, "chi_phi_dn": chi_phi_dn,

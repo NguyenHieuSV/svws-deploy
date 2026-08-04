@@ -305,6 +305,7 @@ def _cfg_luong(db):
     return {
         "tl_bhxh_nv": ts.tl_bhxh_nv, "tl_bhyt_nv": ts.tl_bhyt_nv, "tl_bhtn_nv": ts.tl_bhtn_nv,
         "tl_bhxh_dn": ts.tl_bhxh_dn, "tl_bhyt_dn": ts.tl_bhyt_dn, "tl_bhtn_dn": ts.tl_bhtn_dn,
+        "tl_kpcd_dn": ts.tl_kpcd_dn,
         "tran_bhxh_bhyt": ts.tran_bhxh_bhyt, "tran_bhtn": ts.tran_bhtn,
         "giam_tru_ban_than": ts.giam_tru_ban_than, "giam_tru_phu_thuoc": ts.giam_tru_phu_thuoc,
         "mien_thue_an": ts.mien_thue_an, "hs_ot_thuong": ts.hs_ot_thuong,
@@ -319,10 +320,11 @@ def _ap_dung_tinh(db, nv: NhanVien, bl: BangLuong, cfg=None):
                     bl.gio_ot_thuong, bl.gio_ot_cuoi_tuan, bl.gio_ot_le,
                     nv.phu_cap_an, nv.phu_cap_di_lai, nv.phu_cap_dien_thoai, nv.phu_cap_trach_nhiem,
                     nv.so_phu_thuoc, bl.tam_ung,
-                    (bl.phu_cap_khac or 0) + (bl.thuong_kpi or 0), bl.ngay_nghi_kpep, bl.so_phut_di_tre, bl.khau_tru_khac, cfg)
+                    (bl.phu_cap_khac or 0) + (bl.thuong_kpi or 0), bl.ngay_nghi_kpep, bl.so_phut_di_tre, bl.khau_tru_khac,
+                    nv.loai_hop_dong, bool(nv.cam_ket_08), cfg)
     bl.luong_co_ban = nv.luong_co_ban
     for k in ("luong_thuc_te", "ot", "phu_cap", "bhxh", "bhyt", "bhtn",
-              "bhxh_dn", "bhyt_dn", "bhtn_dn", "thu_nhap_chiu_thue",
+              "bhxh_dn", "bhyt_dn", "bhtn_dn", "kpcd_dn", "thu_nhap_chiu_thue",
               "thue_tncn", "khau_tru", "thuc_linh", "chi_phi_dn",
               "khau_tru_nghi", "khau_tru_tre"):
         setattr(bl, k, kq[k])
@@ -348,6 +350,7 @@ def _pl_dict(db, bl: BangLuong, nv: NhanVien = None):
         "khau_tru_khac": _f(bl.khau_tru_khac), "tong_thu_nhap": tong_thu_nhap,
         "bhxh": _f(bl.bhxh), "bhyt": _f(bl.bhyt), "bhtn": _f(bl.bhtn),
         "bhxh_dn": _f(bl.bhxh_dn), "bhyt_dn": _f(bl.bhyt_dn), "bhtn_dn": _f(bl.bhtn_dn),
+        "kpcd_dn": _f(bl.kpcd_dn), "loai_hop_dong": ((nv.loai_hop_dong or "CHINH_THUC") if nv else None),
         "thu_nhap_chiu_thue": _f(bl.thu_nhap_chiu_thue), "thue_tncn": _f(bl.thue_tncn),
         "tam_ung": _f(bl.tam_ung), "khau_tru": _f(bl.khau_tru), "thuc_linh": _f(bl.thuc_linh),
         "chi_phi_dn": _f(bl.chi_phi_dn), "trang_thai": bl.trang_thai,
@@ -371,7 +374,7 @@ def lay_tham_so_luong_ep(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE
     except Exception:
         bac = []
     return {k: _f(getattr(ts, k)) for k in (
-        "tl_bhxh_nv", "tl_bhyt_nv", "tl_bhtn_nv", "tl_bhxh_dn", "tl_bhyt_dn", "tl_bhtn_dn",
+        "tl_bhxh_nv", "tl_bhyt_nv", "tl_bhtn_nv", "tl_bhxh_dn", "tl_bhyt_dn", "tl_bhtn_dn", "tl_kpcd_dn",
         "tran_bhxh_bhyt", "tran_bhtn", "giam_tru_ban_than", "giam_tru_phu_thuoc",
         "mien_thue_an", "hs_ot_thuong", "hs_ot_cuoi_tuan", "hs_ot_le",
         "luong_co_so", "luong_toi_thieu_vung")} | {"bac_thue": bac}
@@ -381,7 +384,7 @@ def lay_tham_so_luong_ep(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE
 def cap_nhat_tham_so_luong(data: ThamSoLuongVao, db: Session = Depends(get_db),
                            nd: NguoiDung = Depends(yeu_cau(MODULE, "DUYET"))):
     ts = _lay_tham_so_luong(db)
-    for k in ("tl_bhxh_nv", "tl_bhyt_nv", "tl_bhtn_nv", "tl_bhxh_dn", "tl_bhyt_dn", "tl_bhtn_dn",
+    for k in ("tl_bhxh_nv", "tl_bhyt_nv", "tl_bhtn_nv", "tl_bhxh_dn", "tl_bhyt_dn", "tl_bhtn_dn", "tl_kpcd_dn",
               "tran_bhxh_bhyt", "tran_bhtn", "giam_tru_ban_than", "giam_tru_phu_thuoc",
               "mien_thue_an", "hs_ot_thuong", "hs_ot_cuoi_tuan", "hs_ot_le",
               "luong_co_so", "luong_toi_thieu_vung"):
@@ -432,7 +435,8 @@ def import_cham_cong(thang: str, data: ChamCongImportVao, db: Session = Depends(
 # ===================== WORKING TIME & OVERTIME (BLLĐ 2019) =====================
 _WT_OT = ("OT_THUONG", "OT_CUOI_TUAN", "OT_LE")
 _WT_NGHI = ("NGHI_PHEP", "KHONG_PHEP", "NGHI_LE",
-            "VIEC_RIENG_CO_LUONG", "VIEC_RIENG_KHONG_LUONG", "NGHI_BU")
+            "VIEC_RIENG_CO_LUONG", "VIEC_RIENG_KHONG_LUONG", "NGHI_BU",
+            "NGHI_OM_BHXH", "NGHI_THAI_SAN")   # ốm đau/thai sản: quỹ BHXH chi trả — ghi vết làm hồ sơ chế độ
 # Trần luật: Đ105 (8h/ngày), Đ107 (OT ≤50%/ngày = 4h, ≤40h/tháng, ≤200h/năm — đặc thù 300h),
 # Đ113 (phép năm 12 ngày), Đ125 (không phép ≥5 ngày/tháng hoặc ≥20 ngày/năm → căn cứ sa thải)
 _WT_OT_NGAY, _WT_OT_THANG, _WT_OT_NAM, _WT_PHEP_NAM = 4, 40, 200, 12
@@ -731,7 +735,8 @@ def bao_cao_ot(wt_id: int, data: BaoCaoOtVao, db: Session = Depends(get_db),
 
 
 _WT_LOAI_HOP_LE = {"NGHI_PHEP", "KHONG_PHEP", "NGHI_LE", "VIEC_RIENG_CO_LUONG",
-                   "VIEC_RIENG_KHONG_LUONG", "NGHI_BU", "OT_THUONG", "OT_CUOI_TUAN", "OT_LE"}
+                   "VIEC_RIENG_KHONG_LUONG", "NGHI_BU", "NGHI_OM_BHXH", "NGHI_THAI_SAN",
+                   "OT_THUONG", "OT_CUOI_TUAN", "OT_LE"}
 
 
 class WtSuaVao(_NVBase):
@@ -1516,6 +1521,8 @@ def ds_ho_so(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
                     "phu_cap_dien_thoai": _f(nv.phu_cap_dien_thoai),
                     "phu_cap_trach_nhiem": _f(nv.phu_cap_trach_nhiem),
                     "ma_so_thue": nv.ma_so_thue, "so_tai_khoan": nv.so_tai_khoan,
+                    "loai_hop_dong": nv.loai_hop_dong or "CHINH_THUC",
+                    "cam_ket_08": bool(nv.cam_ket_08), "phu_thuoc_chi_tiet": nv.phu_thuoc_chi_tiet,
                     "ngan_hang": nv.ngan_hang, "email": nv.email, "tk_chi_phi": nv.tk_chi_phi})
     return out
 
@@ -1738,6 +1745,28 @@ def gan_tai_khoan(nv_id: int, data: GanTaiKhoanVao, db: Session = Depends(get_db
     return {"ok": True, "nhan_vien": nv.ho_ten, "email": email}
 
 
+@router.get("/nhan-vien/{nv_id}/phep-ton")
+def phep_ton(nv_id: int, nam: int | None = None, db: Session = Depends(get_db),
+             _=Depends(yeu_cau(MODULE, "XEM"))):
+    """Phép năm chưa nghỉ (Đ113 BLLĐ: 12 ngày/năm) + tạm tính tiền phép chưa nghỉ
+    (đơn giá = lương CB / 26) — dùng khi cho nghỉ việc: thanh toán vào kỳ lương cuối."""
+    nv = db.get(NhanVien, nv_id)
+    if nv is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy nhân viên")
+    from datetime import date as _d
+    nam = nam or _d.today().year
+    rows = db.query(NgayNghiOt).filter(NgayNghiOt.nhan_vien_id == nv_id,
+                                       NgayNghiOt.loai == "NGHI_PHEP",
+                                       NgayNghiOt.trang_thai == "DA_DUYET",
+                                       NgayNghiOt.ngay >= _d(nam, 1, 1),
+                                       NgayNghiOt.ngay <= _d(nam, 12, 31)).all()
+    da_nghi = float(sum(float(r.so_ngay or 0) for r in rows))
+    con_lai = max(0.0, _WT_PHEP_NAM - da_nghi)
+    don_gia = float(nv.luong_co_ban or 0) / 26
+    return {"nam": nam, "phep_nam": _WT_PHEP_NAM, "da_nghi": da_nghi, "con_lai": con_lai,
+            "don_gia_ngay": round(don_gia), "thanh_tien": round(con_lai * don_gia)}
+
+
 class NghiViecVao(_NVBase):
     ngay_nghi_viec: date | None = None
     ngay_vao_lam: date | None = None
@@ -1799,6 +1828,14 @@ def cap_nhat_ho_so(nv_id: int, data: HoSoLuongVao, db: Session = Depends(get_db)
               "phu_cap_dien_thoai", "phu_cap_trach_nhiem", "ma_so_thue", "so_tai_khoan",
               "ngan_hang", "email", "tk_chi_phi"):
         setattr(nv, k, getattr(data, k))
+    if data.phu_thuoc_chi_tiet is not None:
+        nv.phu_thuoc_chi_tiet = data.phu_thuoc_chi_tiet.strip() or None
+    if data.loai_hop_dong is not None:
+        if data.loai_hop_dong not in ("CHINH_THUC", "THU_VIEC"):
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Loại hợp đồng không hợp lệ")
+        nv.loai_hop_dong = data.loai_hop_dong
+    if data.cam_ket_08 is not None:
+        nv.cam_ket_08 = bool(data.cam_ket_08)
     if data.chuc_danh is not None:
         nv.chuc_danh = data.chuc_danh
     if data.ho_ten is not None and data.ho_ten.strip():
@@ -1883,7 +1920,7 @@ def chi_tiet_ky(thang: str, db: Session = Depends(get_db), _=Depends(yeu_cau(MOD
             "tong": {"thu_nhap": sum(p["tong_thu_nhap"] for p in pl),
                      "thuc_linh": sum(p["thuc_linh"] for p in pl),
                      "bh_nv": sum(p["bhxh"] + p["bhyt"] + p["bhtn"] for p in pl),
-                     "bh_dn": sum(p["bhxh_dn"] + p["bhyt_dn"] + p["bhtn_dn"] for p in pl),
+                     "bh_dn": sum(p["bhxh_dn"] + p["bhyt_dn"] + p["bhtn_dn"] + p["kpcd_dn"] for p in pl),
                      "thue_tncn": sum(p["thue_tncn"] for p in pl),
                      "chi_phi_dn": sum(p["chi_phi_dn"] for p in pl)}}
 

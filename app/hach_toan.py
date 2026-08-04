@@ -13,7 +13,7 @@ TK = {
     "TIEN_MAT": "111", "TIEN_NH": "112",
     "CP_LUONG": "642", "PHAI_TRA_NLD": "334", "THUE_GTGT_VAO": "1331",
     "GIA_VON": "632", "CP_QLDN": "642",
-    "BHXH": "3383", "BHYT": "3384", "BHTN": "3389", "THUE_TNCN": "3335",
+    "BHXH": "3383", "BHYT": "3384", "BHTN": "3389", "THUE_TNCN": "3335", "KPCD": "3382",
     "VAY": "341", "CP_LAI_VAY": "635",
 }
 
@@ -77,6 +77,7 @@ def hach_toan_luong(db: Session, bl) -> list:
     """Lương đầy đủ:
     - Nợ CP(642/622/627) / Có 334  = tổng thu nhập (lương thực tế + phụ cấp + OT)
     - Nợ CP / Có 3383/3384/3389    = BHXH/BHYT/BHTN phần DN (chi phí DN)
+    - Nợ CP / Có 3382              = kinh phí công đoàn 2% (chi phí DN)
     - Nợ 334 / Có 3383/3384/3389/3335 = khấu trừ NLĐ (BH + thuế TNCN)
     """
     from datetime import date as _date
@@ -88,7 +89,8 @@ def hach_toan_luong(db: Session, bl) -> list:
     bts = [ButToan(tk_no=tkcp, tk_co=TK["PHAI_TRA_NLD"], so_tien=gross, ngay=_date.today(),
                    nguon="LUONG", nguon_id=bl.id, dien_giai=dg)]
     # BH phần DN -> chi phí DN
-    for tien, tk in [(bl.bhxh_dn, TK["BHXH"]), (bl.bhyt_dn, TK["BHYT"]), (bl.bhtn_dn, TK["BHTN"])]:
+    for tien, tk in [(bl.bhxh_dn, TK["BHXH"]), (bl.bhyt_dn, TK["BHYT"]), (bl.bhtn_dn, TK["BHTN"]),
+                     (getattr(bl, "kpcd_dn", 0), TK["KPCD"])]:
         if tien:
             bts.append(ButToan(tk_no=tkcp, tk_co=tk, so_tien=tien, ngay=_date.today(),
                                nguon="LUONG", nguon_id=bl.id, dien_giai=f"BH phần DN {bl.thang} NV {bl.nhan_vien_id}"))
