@@ -102,12 +102,12 @@ def xoa_nhan_vien(nv_id: int, ep: bool = False, db: Session = Depends(get_db),
             status.HTTP_400_BAD_REQUEST,
             f"Nhân viên '{nv.ho_ten}' đang gắn với {', '.join(ban)} — không thể xóa. "
             "Hãy dùng trạng thái NGHỈ VIỆC để giữ hồ sơ; hồ sơ TRÙNG TÊN thì CEO/ADMIN có thể ÉP XÓA.")
-    if ban and ep:
+    if ep:
         # ÉP XÓA hồ sơ trùng: gỡ dữ liệu cá nhân đi kèm. Phiếu lương chỉ gỡ được khi
         # kỳ CHƯA chốt, phiếu chưa duyệt và chưa ghi sổ — vướng thì vẫn chặn (giữ vết kế toán).
         for bl in db.query(BangLuong).filter_by(nhan_vien_id=nv_id).all():
             ky = db.get(KyLuong, bl.thang)
-            if (ky is not None and ky.trang_thai == "DA_CHOT") or bl.trang_thai == "DA_DUYET"                     or _bt_luong_cua(db, [bl.id]):
+            if (ky is not None and ky.trang_thai == "DA_CHOT") or bl.trang_thai == "DA_DUYET" or _bt_luong_cua(db, [bl.id]):
                 raise HTTPException(
                     status.HTTP_400_BAD_REQUEST,
                     f"Phiếu lương tháng {bl.thang} của '{nv.ho_ten}' đã chốt/duyệt/ghi sổ — "
@@ -117,6 +117,28 @@ def xoa_nhan_vien(nv_id: int, ep: bool = False, db: Session = Depends(get_db),
                 _cap_nhat_tong_ky(db, ky)
         db.query(ChamCong).filter_by(nhan_vien_id=nv_id).delete(synchronize_session=False)
         db.query(NghiPhep).filter_by(nhan_vien_id=nv_id).delete(synchronize_session=False)
+        db.flush()
+        # Quét MỌI khóa ngoại trỏ tới nhan_vien: cột cho phép NULL → gỡ tham chiếu
+        # (giữ nguyên chứng từ); cột bắt buộc → xóa dòng dữ liệu cá nhân đi kèm.
+        fks = db.execute(_sql(
+            "SELECT kcu.table_name, kcu.column_name,"
+            " (SELECT c.is_nullable FROM information_schema.columns c"
+            "   WHERE c.table_name = kcu.table_name AND c.column_name = kcu.column_name LIMIT 1)"
+            " FROM information_schema.table_constraints tc"
+            " JOIN information_schema.key_column_usage kcu ON tc.constraint_name = kcu.constraint_name"
+            " JOIN information_schema.constraint_column_usage ccu ON tc.constraint_name = ccu.constraint_name"
+            " WHERE tc.constraint_type = 'FOREIGN KEY'"
+            "   AND ccu.table_name = 'nhan_vien' AND ccu.column_name = 'id'")).all()
+        for bang, cot, nullable in fks:
+            try:
+                with db.begin_nested():
+                    if nullable == "YES":
+                        db.execute(_sql(f'UPDATE "{bang}" SET "{cot}" = NULL WHERE "{cot}" = :i'),
+                                   {"i": nv_id})
+                    else:
+                        db.execute(_sql(f'DELETE FROM "{bang}" WHERE "{cot}" = :i'), {"i": nv_id})
+            except Exception:
+                pass
         db.flush()
     ten_cu, ma_cu = nv.ho_ten, nv.ma
     # Dọn tham chiếu mềm — MỖI CÂU 1 SAVEPOINT riêng: câu hỏng không làm độc transaction
