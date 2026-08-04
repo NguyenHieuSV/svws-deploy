@@ -103,12 +103,16 @@ def xoa_nhan_vien(nv_id: int, db: Session = Depends(get_db),
             f"Nhân viên '{nv.ho_ten}' đang gắn với {', '.join(ban)} — không thể xóa. "
             "Hãy dùng trạng thái NGHỈ VIỆC để giữ hồ sơ.")
     ten_cu, ma_cu = nv.ho_ten, nv.ma
-    try:
-        db.execute(_sql("UPDATE nguoi_dung SET nhan_vien_id = NULL WHERE nhan_vien_id = :i"),
-                   {"i": nv_id})
-        db.execute(_sql("DELETE FROM kpi_danh_gia WHERE nhan_vien_id = :i"), {"i": nv_id})
-    except Exception:
-        pass
+    # Dọn tham chiếu mềm — MỖI CÂU 1 SAVEPOINT riêng: câu hỏng không làm độc transaction
+    # (bài học: raw SQL fail làm PostgreSQL abort cả transaction → lệnh sau nổ 500)
+    for cau in ("UPDATE nguoi_dung SET nhan_vien_id = NULL WHERE nhan_vien_id = :i",
+                "UPDATE danh_gia_ky SET nguoi_danh_gia = NULL WHERE nguoi_danh_gia = :i",
+                "UPDATE nhac_viec SET nguoi_ho_tro_id = NULL WHERE nguoi_ho_tro_id = :i"):
+        try:
+            with db.begin_nested():
+                db.execute(_sql(cau), {"i": nv_id})
+        except Exception:
+            pass
     try:
         db.delete(nv)
         db.flush()
