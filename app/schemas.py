@@ -128,6 +128,7 @@ class DonMuaRa(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int
     so: str | None
+    ngay: date | None = None            # ngày thực tạo PO (server_default khi tạo)
     nha_cung_cap_id: int
     don_hang_id: int | None = None
     tong_tien: Decimal
