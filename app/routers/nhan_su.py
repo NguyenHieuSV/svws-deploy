@@ -547,7 +547,11 @@ def ds_working_time(thang: str | None = None, db: Session = Depends(get_db),
                   "ho_ten": ten[r.nhan_vien_id].ho_ten if r.nhan_vien_id in ten else f"NV #{r.nhan_vien_id}",
                   "ngay": str(r.ngay), "loai": r.loai, "so_gio": _f(r.so_gio),
                   "so_ngay": _f(r.so_ngay), "ghi_chu": r.ghi_chu,
-                  "trang_thai": r.trang_thai, "ly_do_tu_choi": r.ly_do_tu_choi}
+                  "trang_thai": r.trang_thai, "ly_do_tu_choi": r.ly_do_tu_choi,
+                  "tt_tu": r.tt_tu, "tt_den": r.tt_den,
+                  "so_gio_dang_ky": _f(r.so_gio_dang_ky) if r.so_gio_dang_ky is not None else None,
+                  "ket_qua_cv": r.ket_qua_cv, "bc_ot_ghi_chu": r.bc_ot_ghi_chu,
+                  "bc_ot_luc": str(r.bc_ot_luc) if r.bc_ot_luc else None}
                  for r in sorted(rows_ca, key=lambda x: (x.ngay, x.nhan_vien_id))
                  if dau_thang <= r.ngay < cuoi_thang]
     # danh sách chờ duyệt (mọi tháng) cho người có quyền duyệt
@@ -661,6 +665,69 @@ def ghi_working_time(data: NgayNghiOtVao, db: Session = Depends(get_db),
                    "dong_bo_luong": dong_bo})
     db.commit()
     return {"them": them, "cap_nhat": cap_nhat, "canh_bao": canh_bao, "dong_bo_luong": dong_bo}
+
+
+class BaoCaoOtVao(_NVBase):
+    tt_tu: str            # "17:30"
+    tt_den: str           # "20:00" (nhỏ hơn tt_tu = qua nửa đêm)
+    ket_qua_cv: str
+    ghi_chu: str | None = None
+
+
+def _phut(hhmm: str) -> int:
+    h, m = str(hhmm).strip().split(":")
+    h, m = int(h), int(m)
+    if not (0 <= h <= 23 and 0 <= m <= 59):
+        raise ValueError
+    return h * 60 + m
+
+
+@router.post("/working-time/{wt_id}/bao-cao-ot")
+def bao_cao_ot(wt_id: int, data: BaoCaoOtVao, db: Session = Depends(get_db),
+               nd: NguoiDung = Depends(lay_nguoi_dung_hien_tai)):
+    """Overtime Report: sau khi OT được duyệt, người tăng ca báo cáo giờ THỰC TẾ
+    (trễ nhất 8h sau khi kết thúc) + kết quả công việc. Giờ thực tế THAY giờ đăng ký
+    trong Ghi nhận Nghỉ/Tăng ca — bảng lương tính theo số thực."""
+    r = db.get(NgayNghiOt, wt_id)
+    if r is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy bản ghi tăng ca")
+    if r.loai not in _WT_OT:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Bản ghi này không phải tăng ca")
+    if r.trang_thai != "DA_DUYET":
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Chỉ báo cáo được tăng ca ĐÃ DUYỆT")
+    me = nhan_vien_id_cua(db, nd.id)
+    la_qtv = (nd.vai_tro.ma if nd.vai_tro else "").upper() in ("CEO", "ADMIN")
+    if r.nhan_vien_id != me and not la_qtv:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Chỉ báo cáo được tăng ca của chính mình")
+    if not (data.ket_qua_cv or "").strip():
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Nhập kết quả công việc chi tiết")
+    try:
+        p1, p2 = _phut(data.tt_tu), _phut(data.tt_den)
+    except Exception:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Giờ không hợp lệ (định dạng HH:MM)")
+    if p2 <= p1:
+        p2 += 24 * 60                      # ca qua nửa đêm
+    gio_tt = round((p2 - p1) / 60, 2)
+    if not (0 < gio_tt <= 16):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Số giờ thực tế phải trong khoảng 0–16h")
+    cu = {"so_gio": _f(r.so_gio), "tt_tu": r.tt_tu, "tt_den": r.tt_den}
+    if r.so_gio_dang_ky is None:
+        r.so_gio_dang_ky = r.so_gio        # giữ lại số giờ ĐĂNG KÝ để đối chiếu
+    r.tt_tu, r.tt_den = data.tt_tu.strip(), data.tt_den.strip()
+    r.so_gio = gio_tt                      # giờ THỰC TẾ — nguồn tính lương
+    r.ket_qua_cv = data.ket_qua_cv.strip()
+    r.bc_ot_ghi_chu = (data.ghi_chu or "").strip() or None
+    from ..nhac_viec_service import gio_hien_tai
+    r.bc_ot_luc = gio_hien_tai()
+    ghi_audit(db, nd.id, "BAO_CAO_OT", "ngay_nghi_ot", r.id, cu=cu,
+              moi={"tt_tu": r.tt_tu, "tt_den": r.tt_den, "so_gio_tt": gio_tt,
+                   "ket_qua_cv": r.ket_qua_cv[:150]})
+    db.flush()
+    _wt_dong_bo_luong(db, r.nhan_vien_id, r.ngay)   # lương tính lại theo giờ thực tế
+    db.commit()
+    return {"ok": True, "so_gio_thuc_te": gio_tt,
+            "so_gio_dang_ky": _f(r.so_gio_dang_ky), "bc_ot_luc": str(r.bc_ot_luc)}
 
 
 _WT_LOAI_HOP_LE = {"NGHI_PHEP", "KHONG_PHEP", "NGHI_LE", "VIEC_RIENG_CO_LUONG",
@@ -878,7 +945,11 @@ def wt_cua_toi(db: Session = Depends(get_db),
     ot_nam = sum(float(r.so_gio or 0) for r in rows if r.trang_thai == "DA_DUYET")
     return {"danh_sach": [{"id": r.id, "ngay": str(r.ngay), "loai": r.loai,
                            "so_gio": _f(r.so_gio), "ghi_chu": r.ghi_chu,
-                           "trang_thai": r.trang_thai, "ly_do_tu_choi": r.ly_do_tu_choi}
+                           "trang_thai": r.trang_thai, "ly_do_tu_choi": r.ly_do_tu_choi,
+                           "tt_tu": r.tt_tu, "tt_den": r.tt_den,
+                           "so_gio_dang_ky": _f(r.so_gio_dang_ky) if r.so_gio_dang_ky is not None else None,
+                           "ket_qua_cv": r.ket_qua_cv, "bc_ot_ghi_chu": r.bc_ot_ghi_chu,
+                           "bc_ot_luc": str(r.bc_ot_luc) if r.bc_ot_luc else None}
                           for r in rows],
             "ot_thang": ot_thang, "ot_nam": ot_nam}
 

@@ -580,6 +580,13 @@ class NgayNghiOt(Base):
     trang_thai: Mapped[str] = mapped_column(Text, default="DA_DUYET")   # CHO_DUYET | DA_DUYET | TU_CHOI
     nguoi_duyet: Mapped[int | None] = mapped_column(ForeignKey("nhan_vien.id"), nullable=True)
     ly_do_tu_choi: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    # Overtime Report (mig 80): báo cáo giờ THỰC TẾ sau khi OT được duyệt
+    tt_tu: Mapped[str | None] = mapped_column(String(5), nullable=True)        # "17:30"
+    tt_den: Mapped[str | None] = mapped_column(String(5), nullable=True)
+    so_gio_dang_ky: Mapped[Decimal | None] = mapped_column(Numeric(5, 2), nullable=True)
+    ket_qua_cv: Mapped[str | None] = mapped_column(Text, nullable=True)
+    bc_ot_ghi_chu: Mapped[str | None] = mapped_column(Text, nullable=True)
+    bc_ot_luc: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
 class BaoCaoNgay(Base):
