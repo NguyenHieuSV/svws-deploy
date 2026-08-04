@@ -276,6 +276,7 @@ def _ycm_dict(db, y):
     return {"thanh_tien": tong_tt, "tien_vat": tien_vat, "tong_cong": tong_tt + tien_vat,
             "id": y.id, "hang_hoa_id": y.hang_hoa_id, "ten_hh": _name(y.hang_hoa_id),
             "ngay": str(y.ngay) if y.ngay else None,
+            "ngay_duyet": str(y.ngay_duyet) if y.ngay_duyet else None,
             "so_luong": float(y.so_luong), "ly_do": y.ly_do, "trang_thai": y.trang_thai,
             "nha_cung_cap_id": ncc_hien, "don_hang_id": y.don_hang_id,
             "don_gia": float(y.don_gia) if y.don_gia is not None else None,
@@ -438,6 +439,8 @@ def duyet_de_xuat(ycm_id: int, db: Session = Depends(get_db),
     if ycm.trang_thai != "MOI":
         raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Đề xuất đang ở trạng thái {ycm.trang_thai}")
     ycm.trang_thai = "DA_DUYET"; ycm.nguoi_duyet = nhan_vien_id_cua(db, nd.id)
+    from ..nhac_viec_service import gio_hien_tai
+    ycm.ngay_duyet = gio_hien_tai().date()          # ngày duyệt thực tế (giờ VN)
     # Tự động chạy AI Sourcing ngay khi duyệt (nếu bật cấu hình)
     if settings.auto_tim_ncc:
         try:

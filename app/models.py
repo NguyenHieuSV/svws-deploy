@@ -136,6 +136,7 @@ class YeuCauMua(Base):
     don_gia: Mapped[Decimal | None] = mapped_column(Numeric(18, 0), nullable=True)
     ngay_can: Mapped[date | None] = mapped_column(Date, nullable=True)
     nguoi_duyet: Mapped[int | None] = mapped_column(ForeignKey("nhan_vien.id"), nullable=True)
+    ngay_duyet: Mapped[date | None] = mapped_column(Date, nullable=True)   # mig 82: ngày duyệt thực tế
     don_mua_id: Mapped[int | None] = mapped_column(ForeignKey("don_mua.id", ondelete="SET NULL"), nullable=True)
     ghi_chu: Mapped[str | None] = mapped_column(Text, nullable=True)
     ai_ncc_id: Mapped[int | None] = mapped_column(ForeignKey("nha_cung_cap.id"), nullable=True)
