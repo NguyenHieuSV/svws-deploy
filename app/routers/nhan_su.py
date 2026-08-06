@@ -562,7 +562,7 @@ def ds_working_time(thang: str | None = None, db: Session = Depends(get_db),
     cho_duyet = [{"id": r.id, "nhan_vien_id": r.nhan_vien_id,
                   "ho_ten": ten[r.nhan_vien_id].ho_ten if r.nhan_vien_id in ten else f"NV #{r.nhan_vien_id}",
                   "ngay": str(r.ngay), "loai": r.loai, "so_gio": _f(r.so_gio),
-                  "ghi_chu": r.ghi_chu}
+                  "so_ngay": _f(r.so_ngay), "ghi_chu": r.ghi_chu}
                  for r in sorted((x for x in rows_ca if x.trang_thai == "CHO_DUYET"),
                                  key=lambda x: x.ngay, reverse=True)][:100]
     tong_hop = []
@@ -866,6 +866,49 @@ def dang_ky_ot(data: DangKyOtVao, db: Session = Depends(get_db),
     Khai Từ giờ/ngày → Đến giờ/ngày: loại + số giờ TỰ TÍNH theo lịch; ca qua đêm tách 2 phần theo ngày."""
     from datetime import timedelta
     nv_id = _wt_nv_cua_toi(db, nd)
+    # ĐĂNG KÝ NGHỈ PHÉP tự phục vụ (chờ duyệt): Từ ngày → Đến ngày, bỏ Chủ nhật, mỗi ngày = 1 ngày phép
+    if (data.loai or "").upper() == "NGHI_PHEP":
+        den = data.den_ngay or data.ngay
+        if den < data.ngay:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Đến ngày phải sau Từ ngày")
+        if (den - data.ngay).days > 31:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Mỗi lần đăng ký phép tối đa 31 ngày")
+        cac_ngay = [data.ngay + timedelta(days=i) for i in range((den - data.ngay).days + 1)]
+        cac_ngay = [d_ for d_ in cac_ngay if d_.weekday() != 6]
+        if not cac_ngay:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Khoảng chọn chỉ có Chủ nhật — không cần đăng ký phép")
+        ket_qua = []
+        for ng in cac_ngay:
+            cu = db.query(NgayNghiOt).filter_by(nhan_vien_id=nv_id, ngay=ng, loai="NGHI_PHEP").first()
+            if cu is not None and cu.trang_thai == "DA_DUYET":
+                raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                    f"Ngày {ng:%d/%m} đã có phép ĐÃ DUYỆT — liên hệ quản lý nếu cần sửa.")
+            gc = (data.ghi_chu or "").strip()[:300] or None
+            if cu is not None:
+                cu.so_ngay = 1; cu.so_gio = 0; cu.ghi_chu = gc
+                cu.trang_thai = "CHO_DUYET"; cu.ly_do_tu_choi = None; cu.nguoi_duyet = None
+            else:
+                db.add(NgayNghiOt(nhan_vien_id=nv_id, ngay=ng, loai="NGHI_PHEP", so_gio=0,
+                                  so_ngay=1, ghi_chu=gc, nguoi_tao=nv_id, trang_thai="CHO_DUYET"))
+            ket_qua.append({"ngay": str(ng), "loai": "NGHI_PHEP", "so_ngay": 1})
+        ghi_audit(db, nd.id, "DANG_KY_PHEP", "ngay_nghi_ot", nv_id, moi={"phan": ket_qua})
+        db.commit()
+        chat = None
+        try:
+            from ..chat_gateway import lay_chat_provider, dang_bat
+            if dang_bat():
+                nvv = db.get(NhanVien, nv_id)
+                text = (f"🌴 {nvv.ho_ten if nvv else 'Nhân viên'} xin NGHỈ PHÉP "
+                        f"{cac_ngay[0]:%d/%m}"
+                        + (f" → {cac_ngay[-1]:%d/%m}" if len(cac_ngay) > 1 else "")
+                        + f" ({len(cac_ngay)} ngày)"
+                        + (f" — {data.ghi_chu}" if data.ghi_chu else "")
+                        + " · chờ duyệt trong SVWS")
+                lay_chat_provider().gui_phong(text)
+                chat = {"ok": True}
+        except Exception as e:
+            chat = {"loi": str(e)[:120]}
+        return {"phan": ket_qua, "chat": chat}
     phan = []                                    # [(ngay, so_gio, khung_gio)]
     if data.tu_gio is not None and data.den_gio is not None:
         t1, t2 = int(data.tu_gio), int(data.den_gio)
@@ -942,21 +985,23 @@ def wt_cua_toi(db: Session = Depends(get_db),
     nv_id = _wt_nv_cua_toi(db, nd)
     hom_nay = _d.today()
     rows = db.query(NgayNghiOt).filter(
-        NgayNghiOt.nhan_vien_id == nv_id, NgayNghiOt.loai.in_(_WT_OT),
+        NgayNghiOt.nhan_vien_id == nv_id, NgayNghiOt.loai.in_(_WT_OT + ("NGHI_PHEP",)),
         NgayNghiOt.ngay >= _d(hom_nay.year, 1, 1)).order_by(NgayNghiOt.ngay.desc()).all()
     thang_nay = hom_nay.strftime("%Y-%m")
     ot_thang = sum(float(r.so_gio or 0) for r in rows
                    if r.trang_thai == "DA_DUYET" and str(r.ngay)[:7] == thang_nay)
     ot_nam = sum(float(r.so_gio or 0) for r in rows if r.trang_thai == "DA_DUYET")
+    phep_nam = sum(float(r.so_ngay or 0) for r in rows
+                   if r.loai == "NGHI_PHEP" and r.trang_thai == "DA_DUYET")
     return {"danh_sach": [{"id": r.id, "ngay": str(r.ngay), "loai": r.loai,
-                           "so_gio": _f(r.so_gio), "ghi_chu": r.ghi_chu,
+                           "so_gio": _f(r.so_gio), "so_ngay": _f(r.so_ngay), "ghi_chu": r.ghi_chu,
                            "trang_thai": r.trang_thai, "ly_do_tu_choi": r.ly_do_tu_choi,
                            "tt_tu": r.tt_tu, "tt_den": r.tt_den,
                            "so_gio_dang_ky": _f(r.so_gio_dang_ky) if r.so_gio_dang_ky is not None else None,
                            "ket_qua_cv": r.ket_qua_cv, "bc_ot_ghi_chu": r.bc_ot_ghi_chu,
                            "bc_ot_luc": str(r.bc_ot_luc) if r.bc_ot_luc else None}
                           for r in rows],
-            "ot_thang": ot_thang, "ot_nam": ot_nam}
+            "ot_thang": ot_thang, "ot_nam": ot_nam, "phep_nam": phep_nam}
 
 
 @router.delete("/working-time/cua-toi/{wt_id}")
