@@ -1962,8 +1962,9 @@ def xoa_cong_no_nhap_ncc(data: DepTrungNccVao, db: Session = Depends(get_db),
 
 
 class SuaCongNoVao(_SPBase):
-    so_tien: Decimal | None = None   # None = giữ nguyên
-    han: date | None = None          # gửi None = xóa hạn
+    so_tien: Decimal | None = None   # None = giữ nguyên (tổng gồm VAT)
+    tien_thue: Decimal | None = None  # None = giữ nguyên (tiền VAT trong tổng)
+    han: date | None = None          # không gửi = giữ nguyên; gửi null = xóa hạn
 
 
 @router.put("/cong-no/{cn_id}")
@@ -1993,11 +1994,19 @@ def sua_cong_no_ncc(cn_id: int, data: SuaCongNoVao, db: Session = Depends(get_db
                                 "Công nợ đã có tiền trả thật — không sửa được số tiền để giữ vết "
                                 "kế toán; chỉ sửa được hạn thanh toán.")
         cn.so_tien = data.so_tien
-    cn.han = data.han
+    if data.tien_thue is not None:
+        if data.tien_thue < 0 or Decimal(data.tien_thue) > (cn.so_tien or 0):
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                "Tiền VAT phải từ 0 đến Tổng của khoản công nợ")
+        cn.tien_thue = data.tien_thue
+    if "han" in data.model_fields_set:      # không gửi han = giữ nguyên hạn cũ
+        cn.han = data.han
     ghi_audit(db, nd.id, "CAP_NHAT", "cong_no", cn.id, cu=cu,
-              moi={"so_tien": float(cn.so_tien or 0), "han": str(cn.han) if cn.han else None})
+              moi={"so_tien": float(cn.so_tien or 0), "tien_thue": float(cn.tien_thue or 0),
+                   "han": str(cn.han) if cn.han else None})
     db.commit()
     return {"id": cn.id, "so_tien": float(cn.so_tien or 0),
+            "tien_thue": float(cn.tien_thue or 0),
             "da_thanh_toan": float(cn.da_thanh_toan or 0),
             "han": str(cn.han) if cn.han else None, "trang_thai": cn.trang_thai}
 
