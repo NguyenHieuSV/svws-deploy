@@ -45,7 +45,7 @@ def ds_kh(q: str | None = None, db: Session = Depends(get_db),
     if q:
         like = f"%{q.strip()}%"
         qr = qr.filter(KhachHang.ten.ilike(like))
-    return qr.order_by(KhachHang.ten).limit(50).all()
+    return qr.order_by(KhachHang.ten).limit(1000).all()
 
 
 @router.post("/khach-hang", response_model=KhachHangRa, status_code=201)
