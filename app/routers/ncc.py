@@ -1652,6 +1652,95 @@ def chi_phi_theo_don(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "X
     return out
 
 
+@router.post("/chi-phi-theo-don/{don_hang_id}/luu-kho")
+def chi_phi_chi_tiet_luu_kho(don_hang_id: int, db: Session = Depends(get_db),
+                             nd: NguoiDung = Depends(yeu_cau(MODULE, "XEM"))):
+    """Danh mục TẤT CẢ chi phí của một mã đơn hàng bán: từng dòng hàng đã mua (PO)
+    + khoản công nợ nhập ngoài khớp mã. Mỗi lần gọi, bản CSV mới nhất được lưu vào
+    KHO TỆP DÙNG CHUNG (nhóm Đơn hàng — thay bản cũ, không nhân bản file)."""
+    import re as _re
+    from ..models import DonHang, TepDinhKem
+    from ..luu_tru import luu as _luu, xoa as _xoa
+    dh = db.get(DonHang, don_hang_id)
+    if dh is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đơn hàng bán")
+    ma = dh.so or f"DH-{dh.id}"
+    # 1) Từng dòng hàng đã mua thuộc các PO gắn mã
+    mua = []
+    for dm, ct in (db.query(DonMua, DonMuaCt)
+                   .join(DonMuaCt, DonMuaCt.don_mua_id == DonMua.id)
+                   .filter(DonMua.don_hang_id == dh.id, DonMua.trang_thai != "TU_CHOI")
+                   .order_by(DonMua.id.desc()).all()):
+        hh = db.get(HangHoa, ct.hang_hoa_id)
+        ncc = db.get(NhaCungCap, dm.nha_cung_cap_id)
+        mua.append({"po_so": dm.so or f"PO#{dm.id}", "ngay": str(dm.ngay or "")[:10],
+                    "ncc_ten": ncc.ten if ncc else None,
+                    "hang_hoa": hh.ten if hh else f"HH#{ct.hang_hoa_id}",
+                    "so_luong": float(ct.so_luong or 0), "don_gia": float(ct.don_gia or 0),
+                    "thue_suat": float(ct.thue_suat or 0),
+                    "thanh_tien": float((ct.so_luong or 0) * (ct.don_gia or 0)),
+                    "trang_thai": dm.trang_thai})
+    # 2) Khoản công nợ nhập ngoài khớp mã
+    ngoai = []
+    if dh.so:
+        for cn in (db.query(CongNo).filter(CongNo.loai == "PHAI_TRA",
+                                           CongNo.don_mua_id.is_(None),
+                                           func.lower(CongNo.ma_ban_ngoai) == dh.so.lower()).all()):
+            nc = db.get(NhaCungCap, cn.nha_cung_cap_id) if cn.nha_cung_cap_id else None
+            ngoai.append({"ncc_ten": nc.ten if nc else None, "so_hd": cn.so_ct,
+                          "so_tien": float(cn.so_tien or 0),
+                          "da_thanh_toan": float(cn.da_thanh_toan or 0),
+                          "con_lai": float((cn.so_tien or 0) - (cn.da_thanh_toan or 0))})
+    # 3) Tổng — đúng công thức bảng Chi phí theo Mã
+    con_lai_expr = func.coalesce(func.sum(CongNo.so_tien - CongNo.da_thanh_toan), 0)
+    po_ids = [i for (i,) in db.query(DonMua.id).filter(DonMua.don_hang_id == dh.id).all()]
+    thanh_toan_mua = float(db.query(func.coalesce(func.sum(DonMua.de_nghi_tt), 0))
+                           .filter(DonMua.don_hang_id == dh.id).scalar() or 0)
+    cn_po = float(db.query(con_lai_expr).filter(CongNo.loai == "PHAI_TRA",
+                                                CongNo.don_mua_id.in_(po_ids)).scalar() or 0) if po_ids else 0.0
+    cn_ng = sum(max(x["con_lai"], 0.0) for x in ngoai)
+    cong_no_pt = max(cn_po, 0.0) + cn_ng
+    tong_chi_phi = thanh_toan_mua + cong_no_pt
+    doanh_thu = float(dh.tong_tien or 0)
+    # 4) CSV lưu Kho tệp dùng chung — bản mới nhất thay bản cũ
+    q = lambda v: '"' + str('' if v is None else v).replace('"', '""') + '"'
+    dong = [f"DANH MỤC CHI PHÍ THEO MÃ ĐƠN HÀNG {ma}", "",
+            "— HÀNG ĐÃ MUA (theo PO) —",
+            ",".join(map(q, ["PO", "Ngày", "Nhà cung cấp", "Mặt hàng", "SL", "Đơn giá", "VAT %", "Thành tiền", "Trạng thái PO"]))]
+    for x in mua:
+        dong.append(",".join(map(q, [x["po_so"], x["ngay"], x["ncc_ten"], x["hang_hoa"],
+                                     x["so_luong"], x["don_gia"], x["thue_suat"], x["thanh_tien"], x["trang_thai"]])))
+    if ngoai:
+        dong += ["", "— KHOẢN CÔNG NỢ NHẬP NGOÀI KHỚP MÃ —",
+                 ",".join(map(q, ["Nhà cung cấp", "Số HĐ", "Tổng", "Đã trả", "Còn lại"]))]
+        for x in ngoai:
+            dong.append(",".join(map(q, [x["ncc_ten"], x["so_hd"], x["so_tien"], x["da_thanh_toan"], x["con_lai"]])))
+    dong += ["", ",".join(map(q, ["Doanh thu", doanh_thu])),
+             ",".join(map(q, ["Thanh toán mua hàng", thanh_toan_mua])),
+             ",".join(map(q, ["Công nợ phải trả còn lại", cong_no_pt])),
+             ",".join(map(q, ["TỔNG CHI PHÍ", tong_chi_phi])),
+             ",".join(map(q, ["LỢI NHUẬN", doanh_thu - tong_chi_phi]))]
+    data = ("\ufeff" + "\n".join(dong)).encode("utf-8")
+    ten_file = "Chi_phi_" + _re.sub(r"[^A-Za-z0-9._-]", "-", ma) + ".csv"
+    for t in db.query(TepDinhKem).filter_by(doi_tuong="DON_HANG", doi_tuong_id=dh.id,
+                                            loai="CHI_PHI").all():
+        try:
+            _xoa(t.duong_dan)
+        except Exception:
+            pass
+        db.delete(t)
+    ref = _luu(data, "don_hang", dh.id, ten_file, "text/csv")
+    tep = TepDinhKem(doi_tuong="DON_HANG", doi_tuong_id=dh.id, loai="CHI_PHI",
+                     ten_file=ten_file, duong_dan=ref, kich_thuoc=len(data),
+                     content_type="text/csv", nguoi_tai_len=nhan_vien_id_cua(db, nd.id))
+    db.add(tep)
+    db.commit()
+    return {"ma_ban": ma, "doanh_thu": doanh_thu, "mua_hang": mua, "cong_no_ngoai": ngoai,
+            "thanh_toan_mua": thanh_toan_mua, "cong_no_phai_tra": cong_no_pt,
+            "tong_chi_phi": tong_chi_phi, "loi_nhuan": doanh_thu - tong_chi_phi,
+            "tep": ten_file}
+
+
 @router.delete("/cong-no/{cn_id}")
 def xoa_cong_no_ncc(cn_id: int, ep: bool = False, db: Session = Depends(get_db),
                     nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
