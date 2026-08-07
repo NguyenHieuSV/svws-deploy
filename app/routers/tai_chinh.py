@@ -3,7 +3,7 @@ Module TÀI CHÍNH — tổng hợp dòng tiền & công nợ quá hạn (cảnh
 Đọc dữ liệu do Kế toán/Bán hàng sinh ra; không nhập liệu trùng.
 """
 from datetime import date, timedelta
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from ..database import get_db
@@ -31,6 +31,43 @@ def dong_tien(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
         "con_phai_tra": float(phai_tra),
         "dong_tien_rong_du_kien": float(phai_thu - phai_tra),
     }
+
+
+@router.get("/thu-tra-chi-tiet")
+def thu_tra_chi_tiet(loai: str = "PHAI_THU", db: Session = Depends(get_db),
+                     _=Depends(yeu_cau("dashboard", "XEM"))):
+    """Chi tiết từng lần ĐÃ THU (khách) / ĐÃ TRẢ (NCC) — khớp đúng số lũy kế trên
+    thẻ Overall Financial: ngày, mã hàng, đối tác, số hóa đơn, số tiền."""
+    from ..models import KhachHang, NhaCungCap, DonHang, DonMua, HoaDon
+    if loai not in ("PHAI_THU", "PHAI_TRA"):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "loai phải là PHAI_THU hoặc PHAI_TRA")
+    rows = (db.query(ThanhToan, CongNo).join(CongNo, ThanhToan.cong_no_id == CongNo.id)
+            .filter(CongNo.loai == loai)
+            .order_by(ThanhToan.ngay.desc(), ThanhToan.id.desc()).limit(800).all())
+    out = []
+    for tt, cn in rows:
+        ma = cn.ma_ban_ngoai
+        if not ma and cn.don_hang_id:
+            dh = db.get(DonHang, cn.don_hang_id)
+            ma = dh.so if dh else None
+        if not ma and cn.don_mua_id:
+            dm = db.get(DonMua, cn.don_mua_id)
+            ma = dm.so if dm else None
+        if not ma and cn.hoa_don_id:
+            hd = db.get(HoaDon, cn.hoa_don_id)
+            if hd and hd.don_hang_id:
+                dh = db.get(DonHang, hd.don_hang_id)
+                ma = dh.so if dh else None
+        if loai == "PHAI_THU":
+            kh = db.get(KhachHang, cn.khach_hang_id) if cn.khach_hang_id else None
+            doi_tac = kh.ten if kh else None
+        else:
+            nc = db.get(NhaCungCap, cn.nha_cung_cap_id) if cn.nha_cung_cap_id else None
+            doi_tac = nc.ten if nc else None
+        out.append({"ngay": str(tt.ngay) if tt.ngay else None, "ma": ma,
+                    "doi_tac": doi_tac, "so_hd": cn.so_ct,
+                    "so_tien": float(tt.so_tien or 0)})
+    return {"tong": sum(x["so_tien"] for x in out), "so_dong": len(out), "rows": out}
 
 
 @router.get("/dashboard")
