@@ -883,6 +883,7 @@ def ds_thanh_toan_mua(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "
                 ngay_tt = str(tt_cuoi.ngay)
         out.append({"id": dm.id, "so": dm.so, "ngay": str(dm.ngay or "")[:10],
                     "so_hoa_don": dm.so_hoa_don or so_hd, "ma_don_ban": _ma_ban_hang_po(db, dm),
+                    "nha_cung_cap_id": dm.nha_cung_cap_id,
                     "ncc_ten": ncc.ten if ncc else None,
                     "tong_tien": float(dm.tong_tien or 0),
                     "de_nghi_tt": float(dm.de_nghi_tt or 0),
@@ -1992,7 +1993,8 @@ def dep_trung_cong_no_ncc(data: DepTrungNccVao, db: Session = Depends(get_db),
     du = []
     for cn in q:
         if cn.so_ct and str(cn.so_ct).strip():
-            fp = "hd:" + str(cn.so_ct).strip().lower()
+            # trùng số HĐ chỉ tính trong CÙNG nhà cung cấp — khác NCC được phép trùng số
+            fp = "hd:" + str(cn.so_ct).strip().lower() + f"|ncc:{cn.nha_cung_cap_id}"
         else:
             fp = f"ncc:{cn.nha_cung_cap_id}|st:{cn.so_tien}|mb:{cn.ma_ban_ngoai or ''}|ng:{cn.ngay_ct or ''}"
         if fp in giu:
