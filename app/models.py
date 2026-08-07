@@ -857,6 +857,19 @@ class CoHoi(Base):
     closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class BankRecord(Base):
+    __tablename__ = "bank_record"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    ngay: Mapped[date] = mapped_column(Date, server_default=func.current_date())
+    loai: Mapped[str] = mapped_column(String(4), default="CHI")      # THU | CHI
+    ngan_hang: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    dien_giai: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    ma_ban: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    so_tien: Mapped[Decimal] = mapped_column(Numeric(18, 0), default=0)
+    nguoi_tao: Mapped[int | None] = mapped_column(ForeignKey("nguoi_dung.id"), nullable=True)
+    tao_luc: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
 class ThamSoTaiChinh(Base):
     __tablename__ = "tham_so_tai_chinh"
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, default=1)

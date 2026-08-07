@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from ..database import get_db
-from ..rbac import yeu_cau
+from ..rbac import yeu_cau, chi_vai_tro
 from ..models import (CongNo, ThanhToan, ButToan, TaiKhoanQuy, TonKho, HangHoa,
                       NguoiDung, ThamSoTaiChinh, KhoanVay, LichTraNo)
 from ..ai_gateway import tu_van_tai_chinh
@@ -118,6 +118,89 @@ def con_phai_chi_tiet(loai: str = "PHAI_THU", db: Session = Depends(get_db),
                     "qua_han": bool(cn.han and con > 0 and cn.han < hom_nay)})
     out.sort(key=lambda x: (x["han"] or "9999-12-31"))
     return {"tong": tong, "so_dong": len(out), "rows": out}
+
+
+# ============ 🏦 Bank record — sổ thu/chi ngân hàng CEO tự cập nhật ============
+from pydantic import BaseModel as _BRBase
+
+
+class BankRecordVao(_BRBase):
+    ngay: date | None = None
+    loai: str = "CHI"                 # THU | CHI
+    ngan_hang: str | None = None
+    dien_giai: str | None = None
+    ma_ban: str | None = None
+    so_tien: float = 0
+
+
+def _br_dict(r):
+    return {"id": r.id, "ngay": str(r.ngay) if r.ngay else None, "loai": r.loai,
+            "ngan_hang": r.ngan_hang, "dien_giai": r.dien_giai, "ma_ban": r.ma_ban,
+            "so_tien": float(r.so_tien or 0)}
+
+
+@router.get("/bank-record")
+def ds_bank_record(db: Session = Depends(get_db),
+                   nd=Depends(chi_vai_tro("CEO", "ADMIN"))):
+    from ..models import BankRecord
+    rows = db.query(BankRecord).order_by(BankRecord.ngay.desc(), BankRecord.id.desc()).limit(500).all()
+    return [_br_dict(r) for r in rows]
+
+
+@router.post("/bank-record", status_code=201)
+def tao_bank_record(data: BankRecordVao, db: Session = Depends(get_db),
+                    nd=Depends(chi_vai_tro("CEO", "ADMIN"))):
+    from ..models import BankRecord
+    from ..nhac_viec_service import gio_hien_tai
+    if data.loai not in ("THU", "CHI"):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Loại phải là THU hoặc CHI")
+    if not (data.so_tien and data.so_tien > 0):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Nhập số tiền lớn hơn 0")
+    r = BankRecord(ngay=data.ngay or date.today(), loai=data.loai,
+                   ngan_hang=(data.ngan_hang or "").strip()[:60] or None,
+                   dien_giai=(data.dien_giai or "").strip()[:300] or None,
+                   ma_ban=(data.ma_ban or "").strip()[:60] or None,
+                   so_tien=data.so_tien, nguoi_tao=nd.id, tao_luc=gio_hien_tai())
+    db.add(r); db.flush()
+    ghi_audit(db, nd.id, "TAO", "bank_record", r.id,
+              moi={"loai": r.loai, "so_tien": float(r.so_tien), "ngan_hang": r.ngan_hang})
+    db.commit()
+    return _br_dict(r)
+
+
+@router.put("/bank-record/{br_id}")
+def sua_bank_record(br_id: int, data: BankRecordVao, db: Session = Depends(get_db),
+                    nd=Depends(chi_vai_tro("CEO", "ADMIN"))):
+    from ..models import BankRecord
+    r = db.get(BankRecord, br_id)
+    if r is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy dòng bank record")
+    if data.loai not in ("THU", "CHI"):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Loại phải là THU hoặc CHI")
+    if not (data.so_tien and data.so_tien > 0):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Nhập số tiền lớn hơn 0")
+    cu = _br_dict(r)
+    r.ngay = data.ngay or r.ngay
+    r.loai = data.loai
+    r.ngan_hang = (data.ngan_hang or "").strip()[:60] or None
+    r.dien_giai = (data.dien_giai or "").strip()[:300] or None
+    r.ma_ban = (data.ma_ban or "").strip()[:60] or None
+    r.so_tien = data.so_tien
+    ghi_audit(db, nd.id, "SUA", "bank_record", r.id, cu=cu, moi=_br_dict(r))
+    db.commit()
+    return _br_dict(r)
+
+
+@router.delete("/bank-record/{br_id}")
+def xoa_bank_record(br_id: int, db: Session = Depends(get_db),
+                    nd=Depends(chi_vai_tro("CEO", "ADMIN"))):
+    from ..models import BankRecord
+    r = db.get(BankRecord, br_id)
+    if r is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy dòng bank record")
+    ghi_audit(db, nd.id, "XOA", "bank_record", r.id, cu=_br_dict(r))
+    db.delete(r); db.commit()
+    return {"ok": True}
 
 
 @router.get("/dashboard")
