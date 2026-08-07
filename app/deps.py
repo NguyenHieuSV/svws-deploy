@@ -24,4 +24,5 @@ def lay_nguoi_dung_hien_tai(token: str = Depends(oauth2), db: Session = Depends(
 
 def nhan_vien_id_cua(db: Session, nguoi_dung_id: int):
     """Tìm nhan_vien tương ứng người dùng (để gán nguoi_tao trên phiếu)."""
-    return db.query(NhanVien.id).filter_by(nguoi_dung_id=nguoi_dung_id).scalar()
+    return (db.query(NhanVien.id).filter_by(nguoi_dung_id=nguoi_dung_id)
+            .order_by(NhanVien.id).limit(1).scalar())
