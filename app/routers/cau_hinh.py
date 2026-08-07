@@ -160,7 +160,16 @@ def danh_sach_nguoi_dung(
     nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN")),
     db: Session = Depends(get_db),
 ):
-    return [_nd_ra(u) for u in db.query(NguoiDung).order_by(NguoiDung.id).all()]
+    from ..models import NhanVien
+    nvs = {}
+    for nv in db.query(NhanVien).filter(NhanVien.nguoi_dung_id.isnot(None)).all():
+        nvs.setdefault(nv.nguoi_dung_id, []).append(nv.ho_ten + (f" ({nv.ma})" if nv.ma else ""))
+    out = []
+    for u in db.query(NguoiDung).order_by(NguoiDung.id).all():
+        d = _nd_ra(u)
+        d["ho_so"] = "; ".join(nvs.get(u.id, [])) or None   # hồ sơ NV đang gắn — None = tài khoản mồ côi
+        out.append(d)
+    return out
 
 
 class TaoNguoiDung(BaseModel):
