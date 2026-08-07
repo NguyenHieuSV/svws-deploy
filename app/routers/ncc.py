@@ -1061,6 +1061,38 @@ def cap_nhat_thanh_toan_mua(dm_id: int, data: ThanhToanMuaVao, db: Session = Dep
             "con_lai": float(tong - dn)}
 
 
+@router.post("/don-mua/{dm_id}/chot-thanh-toan")
+def chot_thanh_toan_mua(dm_id: int, db: Session = Depends(get_db),
+                        nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    """Hộp chọn THANH TOÁN (bảng Các đơn hàng cần thanh toán): chốt theo Đề nghị
+    thanh toán hiện tại. Còn lại = 0 → PO chuyển vào Kiểm soát 'Đã thanh toán 100%';
+    còn lại > 0 → phần còn lại nằm ở Công nợ phải trả (nếu chưa đặt Ngày TT tiếp theo
+    thì tự lấy hạn của khoản công nợ để khoản hiện trong bảng Công nợ)."""
+    dm = db.get(DonMua, dm_id)
+    if dm is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đơn mua")
+    dn = Decimal(dm.de_nghi_tt or 0)
+    tong = Decimal(dm.tong_tien or 0)
+    if tong <= 0:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "PO chưa có giá trị")
+    if dn <= 0:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Chưa có Đề nghị thanh toán — nhập số tiền ở bảng Thanh toán mua hàng trước.")
+    if dn < tong and not dm.ngay_tt_tiep:
+        cn = db.query(CongNo).filter_by(don_mua_id=dm.id).first()
+        if cn is not None and cn.han:
+            dm.ngay_tt_tiep = cn.han
+        else:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                "Khoản còn nợ cần Ngày thanh toán tiếp theo — nhập ở bảng "
+                                "Thanh toán mua hàng rồi tick lại.")
+    da_tt_100 = _ap_dung_tt_mua(db, dm, dn)
+    ghi_audit(db, nd.id, "CHOT_TT_MUA", "don_mua", dm.id,
+              moi={"de_nghi_tt": float(dn), "tong": float(tong), "tt_du": da_tt_100})
+    db.commit()
+    return {"ok": True, "da_tt_100": da_tt_100, "con_lai": float(tong - dn)}
+
+
 @router.delete("/don-mua/{dm_id}/thanh-toan")
 def xoa_thanh_toan_mua(dm_id: int, db: Session = Depends(get_db),
                        nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
