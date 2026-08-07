@@ -205,6 +205,9 @@ class DonMua(Base):
     ngay_giao_thuc: Mapped[date | None] = mapped_column(Date, nullable=True)
     trang_thai_nhan: Mapped[str] = mapped_column(String(12), default="CHUA")
     da_dat_hang: Mapped[bool] = mapped_column(Boolean, default=False)
+    cho_lenh_bank: Mapped[bool] = mapped_column(Boolean, default=False)              # mig 83: chờ lệnh NH
+    lenh_bank_tien: Mapped[Decimal] = mapped_column(Numeric(18, 0), default=0)       # mig 83
+    lenh_bank_luc: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)  # mig 83
     ngay_dat_hang: Mapped[date | None] = mapped_column(Date, nullable=True)
     de_nghi_tt: Mapped[Decimal] = mapped_column(Numeric(18, 0), default=0)
     ngay_tt_tiep: Mapped[date | None] = mapped_column(Date, nullable=True)

@@ -1087,10 +1087,49 @@ def chot_thanh_toan_mua(dm_id: int, db: Session = Depends(get_db),
                                 "Khoản còn nợ cần Ngày thanh toán tiếp theo — nhập ở bảng "
                                 "Thanh toán mua hàng rồi tick lại.")
     da_tt_100 = _ap_dung_tt_mua(db, dm, dn)
+    # đưa vào bảng THANH TOÁN bên Kế toán (chờ lệnh ngân hàng thật → Biến động ngân hàng)
+    from ..nhac_viec_service import gio_hien_tai
+    dm.cho_lenh_bank = True
+    dm.lenh_bank_tien = dn
+    dm.lenh_bank_luc = gio_hien_tai()
     ghi_audit(db, nd.id, "CHOT_TT_MUA", "don_mua", dm.id,
               moi={"de_nghi_tt": float(dn), "tong": float(tong), "tt_du": da_tt_100})
     db.commit()
     return {"ok": True, "da_tt_100": da_tt_100, "con_lai": float(tong - dn)}
+
+
+@router.get("/lenh-thanh-toan")
+def ds_lenh_thanh_toan(db: Session = Depends(get_db), _=Depends(yeu_cau("ke_toan", "XEM"))):
+    """Bảng THANH TOÁN (Kế toán → Thống kê thu–chi): PO đã tick chốt thanh toán,
+    chờ lệnh ngân hàng thật rồi Cập nhật vào form Biến động ngân hàng."""
+    out = []
+    for dm in (db.query(DonMua).filter(DonMua.cho_lenh_bank.is_(True))
+               .order_by(DonMua.id.desc()).all()):
+        ncc = db.get(NhaCungCap, dm.nha_cung_cap_id)
+        out.append({"id": dm.id, "so": dm.so or f"PO-{dm.id}",
+                    "chot_luc": str(dm.lenh_bank_luc)[:16] if dm.lenh_bank_luc else None,
+                    "so_hoa_don": dm.so_hoa_don, "ma_don_ban": _ma_ban_hang_po(db, dm),
+                    "don_hang_id": dm.don_hang_id,
+                    "ncc_ten": ncc.ten if ncc else None,
+                    "tong_tien": float(dm.tong_tien or 0),
+                    "so_tien_chi": float(dm.lenh_bank_tien or 0),
+                    "con_lai": float((dm.tong_tien or 0) - (dm.de_nghi_tt or 0)),
+                    "tt_du": bool(dm.tt_du)})
+    return out
+
+
+@router.post("/don-mua/{dm_id}/lenh-bank-xong")
+def lenh_bank_xong(dm_id: int, db: Session = Depends(get_db),
+                   nd: NguoiDung = Depends(yeu_cau("ke_toan", "THAO_TAC"))):
+    """Gỡ PO khỏi bảng THANH TOÁN sau khi đã ghi Biến động ngân hàng."""
+    dm = db.get(DonMua, dm_id)
+    if dm is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đơn mua")
+    dm.cho_lenh_bank = False
+    ghi_audit(db, nd.id, "LENH_BANK_XONG", "don_mua", dm.id,
+              moi={"so_tien": float(dm.lenh_bank_tien or 0)})
+    db.commit()
+    return {"ok": True}
 
 
 @router.delete("/don-mua/{dm_id}/thanh-toan")
