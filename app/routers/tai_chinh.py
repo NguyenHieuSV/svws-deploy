@@ -70,6 +70,56 @@ def thu_tra_chi_tiet(loai: str = "PHAI_THU", db: Session = Depends(get_db),
     return {"tong": sum(x["so_tien"] for x in out), "so_dong": len(out), "rows": out}
 
 
+@router.get("/con-phai-chi-tiet")
+def con_phai_chi_tiet(loai: str = "PHAI_THU", db: Session = Depends(get_db),
+                      _=Depends(yeu_cau("dashboard", "XEM"))):
+    """Chi tiết khoản CÒN PHẢI THU / CÒN PHẢI TRẢ — khớp đúng số trên thẻ
+    Overall Financial (cùng công thức với dashboard): ngày, mã hàng, đối tác,
+    số HĐ, tổng, đã trả, còn lại, hạn (quá hạn đánh dấu)."""
+    from ..models import KhachHang, NhaCungCap, DonHang, DonMua, HoaDon
+    if loai not in ("PHAI_THU", "PHAI_TRA"):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "loai phải là PHAI_THU hoặc PHAI_TRA")
+    hom_nay = date.today()
+    rows = (db.query(CongNo).filter(CongNo.loai == loai, CongNo.trang_thai != "THU_DU")
+            .order_by(CongNo.id.desc()).limit(1000).all())
+    out, tong = [], 0.0
+    for cn in rows:
+        con = float((cn.so_tien or 0) - (cn.da_thanh_toan or 0))
+        tong += con                      # cộng đủ mọi dòng — khớp tuyệt đối công thức thẻ
+        if con == 0:
+            continue                     # dòng đã trả đủ không cần hiển thị
+        ma = cn.ma_ban_ngoai
+        ngay = cn.ngay_ct
+        if not ma and cn.don_hang_id:
+            dh = db.get(DonHang, cn.don_hang_id)
+            ma = dh.so if dh else None
+        if cn.don_mua_id:
+            dm = db.get(DonMua, cn.don_mua_id)
+            if dm:
+                ma = ma or dm.so
+                ngay = ngay or dm.ngay
+        if not ma and cn.hoa_don_id:
+            hd = db.get(HoaDon, cn.hoa_don_id)
+            if hd:
+                ngay = ngay or hd.ngay
+                if hd.don_hang_id:
+                    dh = db.get(DonHang, hd.don_hang_id)
+                    ma = dh.so if dh else None
+        if loai == "PHAI_THU":
+            kh = db.get(KhachHang, cn.khach_hang_id) if cn.khach_hang_id else None
+            doi_tac = kh.ten if kh else None
+        else:
+            nc = db.get(NhaCungCap, cn.nha_cung_cap_id) if cn.nha_cung_cap_id else None
+            doi_tac = nc.ten if nc else None
+        out.append({"ngay": str(ngay) if ngay else None, "ma": ma, "doi_tac": doi_tac,
+                    "so_hd": cn.so_ct, "tong": float(cn.so_tien or 0),
+                    "da_tra": float(cn.da_thanh_toan or 0), "con_lai": con,
+                    "han": str(cn.han) if cn.han else None,
+                    "qua_han": bool(cn.han and con > 0 and cn.han < hom_nay)})
+    out.sort(key=lambda x: (x["han"] or "9999-12-31"))
+    return {"tong": tong, "so_dong": len(out), "rows": out}
+
+
 @router.get("/dashboard")
 def dashboard(db: Session = Depends(get_db), _=Depends(yeu_cau("dashboard", "XEM"))):
     """Tổng quan điều hành — TỔNG HỢP THẬT từ Bán hàng, Mua hàng (NCC), Kho, Công nợ.
