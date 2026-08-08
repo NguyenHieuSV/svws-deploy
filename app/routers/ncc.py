@@ -883,6 +883,7 @@ def ds_thanh_toan_mua(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "
                 ngay_tt = str(tt_cuoi.ngay)
         out.append({"id": dm.id, "so": dm.so, "ngay": str(dm.ngay or "")[:10],
                     "so_hoa_don": dm.so_hoa_don or so_hd, "ma_don_ban": _ma_ban_hang_po(db, dm),
+                    "don_hang_id": dm.don_hang_id,
                     "nha_cung_cap_id": dm.nha_cung_cap_id,
                     "ncc_ten": ncc.ten if ncc else None,
                     "tong_tien": float(dm.tong_tien or 0),
@@ -903,6 +904,7 @@ class ThanhToanMuaVao(_SPBase):
     ngay_thanh_toan: date | None = None  # ngày của đợt thanh toán này
     so_hoa_don: str | None = None        # số hóa đơn mua (gắn sang công nợ phải trả)
     hinh_thuc: str | None = None         # ngân hàng / tiền mặt của đợt trả
+    don_hang_id: int | None = None       # Mã đơn bán — gắn/đổi ngay tại form thanh toán
 
 
 def _ap_dung_tt_mua(db: Session, dm: DonMua, dn: Decimal) -> bool:
@@ -1024,6 +1026,12 @@ def cap_nhat_thanh_toan_mua(dm_id: int, data: ThanhToanMuaVao, db: Session = Dep
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đơn mua")
     if data.so_hoa_don is not None:
         dm.so_hoa_don = (data.so_hoa_don or "").strip()[:60] or None
+    if "don_hang_id" in data.model_fields_set:
+        if data.don_hang_id:
+            from ..models import DonHang
+            if db.get(DonHang, data.don_hang_id) is None:
+                raise HTTPException(status.HTTP_400_BAD_REQUEST, "Mã đơn bán không tồn tại")
+        dm.don_hang_id = data.don_hang_id
     tong = Decimal(dm.tong_tien or 0)
     da_cu = Decimal(dm.de_nghi_tt or 0)
     if data.so_tien_dot is not None:      # ghi nhận THÊM một đợt → cộng dồn
