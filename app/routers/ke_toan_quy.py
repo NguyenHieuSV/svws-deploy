@@ -74,6 +74,49 @@ def _phieu_dict(db, p: PhieuThuChi):
             "con_lai_tam_ung": _f(p.so_tien) - _f(p.da_can_tru) if p.la_tam_ung else 0}
 
 
+def _snapshot_so_quy(db, su_kien: str):
+    """Chụp CSV toàn bộ quỹ + sổ quỹ tại thời điểm biến động → Kho tệp dùng chung
+    (nhóm "Sổ quỹ — CEO snapshot"). Lỗi snapshot không được làm hỏng nghiệp vụ chính."""
+    try:
+        from ..models import TepDinhKem
+        from .. import luu_tru
+        from ..nhac_viec_service import gio_hien_tai
+        luc = gio_hien_tai()
+
+        def _c(v):
+            return '"' + str(v if v is not None else "").replace('"', '""') + '"'
+
+        dong = ["\ufeffSNAPSHOT SỔ QUỸ", "Thời điểm," + luc.strftime("%Y-%m-%d %H:%M:%S"),
+                "Sự kiện," + _c(su_kien), "", "SỐ DƯ CÁC QUỸ",
+                "Mã,Tên quỹ,Loại,Số TK,TK kế toán,Số dư đầu,Số dư hiện tại"]
+        quys = db.query(TaiKhoanQuy).order_by(TaiKhoanQuy.id).all()
+        for q in quys:
+            dong.append(",".join([_c(q.ma), _c(q.ten), _c(q.loai), _c(q.so_tk),
+                                  _c(q.tk_ke_toan), str(_f(q.so_du_dau)), str(_f(q.so_du))]))
+        for q in quys:
+            dong += ["", f"SỔ QUỸ: {q.ma} — {q.ten}",
+                     "Ngày,Số phiếu,Loại,Diễn giải,Đối tác,Thu,Chi,Số dư lũy kế"]
+            sd = Decimal(q.so_du_dau or 0)
+            ps = (db.query(PhieuThuChi)
+                  .filter(PhieuThuChi.quy_id == q.id, PhieuThuChi.trang_thai == "DA_DUYET")
+                  .order_by(PhieuThuChi.ngay, PhieuThuChi.id).all())
+            for p in ps:
+                sd += Decimal(p.so_tien) if p.loai == "THU" else -Decimal(p.so_tien)
+                dong.append(",".join([str(p.ngay or ""), _c(p.so), p.loai, _c(p.dien_giai),
+                                      _c(_ten_doi_tac(db, p)),
+                                      str(_f(p.so_tien) if p.loai == "THU" else 0),
+                                      str(_f(p.so_tien) if p.loai == "CHI" else 0), str(_f(sd))]))
+        data = "\n".join(dong).encode("utf-8")
+        ten = "So_quy_" + luc.strftime("%Y%m%d_%H%M%S") + ".csv"
+        ref = luu_tru.luu(data, "so_quy", luc.strftime("%Y%m"), ten, "text/csv")
+        t = TepDinhKem(doi_tuong="SO_QUY", doi_tuong_id=0, loai=(su_kien or "SNAPSHOT")[:20],
+                       ten_file=ten, duong_dan=ref, kich_thuoc=len(data), content_type="text/csv")
+        db.add(t)
+        return t
+    except Exception:
+        return None
+
+
 # ---------- QUỸ TIỀN ----------
 @router.get("/quy")
 def ds_quy(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
@@ -101,6 +144,7 @@ def tao_quy(data: QuyVao, db: Session = Depends(get_db),
                     tk_ke_toan=data.tk_ke_toan, so_du_dau=data.so_du_dau, so_du=data.so_du_dau)
     db.add(q); db.flush()
     ghi_audit(db, nd.id, "TAO", "tai_khoan_quy", q.id, moi={"ma": ma})
+    _snapshot_so_quy(db, "TAO QUY " + ma)
     db.commit(); db.refresh(q)
     return _quy_dict(q)
 
@@ -129,8 +173,21 @@ def sua_quy(quy_id: int, data: QuyVao, db: Session = Depends(get_db),
     ghi_audit(db, nd.id, "SUA", "tai_khoan_quy", q.id, cu=cu,
               moi={"ten": q.ten, "loai": q.loai, "so_tk": q.so_tk,
                    "so_du_dau": _f(q.so_du_dau), "so_du": _f(q.so_du)})
+    _snapshot_so_quy(db, "SUA QUY " + (q.ma or ""))
     db.commit(); db.refresh(q)
     return _quy_dict(q)
+
+
+@router.post("/so-quy-snapshot")
+def chup_so_quy(db: Session = Depends(get_db),
+                nd: NguoiDung = Depends(yeu_cau(MODULE, "XEM"))):
+    """CEO bấm chụp thủ công một bản snapshot sổ quỹ ngay bây giờ."""
+    t = _snapshot_so_quy(db, "THU CONG")
+    if t is None:
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "Không chụp được snapshot")
+    ghi_audit(db, nd.id, "SNAPSHOT", "so_quy", 0, moi={"tep": t.ten_file})
+    db.commit()
+    return {"ok": True, "tep": t.ten_file}
 
 
 @router.get("/quy/{quy_id}/so-quy")
@@ -327,6 +384,7 @@ def duyet_phieu(pid: int, data: DuyetPhieuVao = DuyetPhieuVao(),
         p.ghi_chu = (p.ghi_chu or "") + f" | Duyệt: {data.ghi_chu}"
     ghi_audit(db, nd.id, "DUYET", "phieu_thu_chi", p.id,
               moi={"but_toan": bt.id, "tk_no": bt.tk_no, "tk_co": bt.tk_co})
+    _snapshot_so_quy(db, "DUYET " + (p.so or f"PC-{p.id}"))
     db.commit(); db.refresh(p)
     return _phieu_dict(db, p)
 
