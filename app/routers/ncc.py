@@ -1677,6 +1677,7 @@ def ds_cong_no(nha_cung_cap_id: int | None = None, chua_tra: bool = False,
         # Mã đơn hàng: mã nhập ngoài, hoặc số đơn mua nếu công nợ sinh từ PO
         ma = r.ma_ban_ngoai
         dm = db.get(DonMua, r.don_mua_id) if r.don_mua_id else None
+        ma_ban = _ma_ban_hang_po(db, dm) if dm else None   # mã đơn BÁN gắn với PO
         if not ma and dm:
             ma = dm.so
         # Ngày mua hàng thực tế: ngày tạo PO; công nợ nhập ngoài dùng ngày chứng từ
@@ -1687,7 +1688,8 @@ def ds_cong_no(nha_cung_cap_id: int | None = None, chua_tra: bool = False,
                     "ngay_mua": str(ngay_mua) if ngay_mua else None,
                     "tu_po": bool(r.don_mua_id),
                     "ngay_tt_tiep": str(dm.ngay_tt_tiep) if (dm and dm.ngay_tt_tiep) else None,
-                    "ma": ma, "so_hd": r.so_ct, "tien_thue": float(r.tien_thue or 0),
+                    "ma": ma, "ma_ban": ma_ban, "so_po": dm.so if dm else None,
+                    "so_hd": r.so_ct, "tien_thue": float(r.tien_thue or 0),
                     "so_tien": float(r.so_tien or 0), "da_thanh_toan": float(r.da_thanh_toan or 0),
                     "con_lai": con_lai, "han": str(r.han) if r.han else None,
                     "ngay_thanh_toan": str(ngay_tt) if ngay_tt else None,
