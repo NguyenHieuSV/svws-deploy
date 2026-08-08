@@ -286,6 +286,8 @@ def tao_cong_no_khach(data: TaoCongNoVao, db: Session = Depends(get_db),
     ghi_audit(db, nd.id, "THANH_TOAN" if tt > 0 else "TAO", "cong_no", cn.id,
               moi={"don_hang_id": dh.id, "hoa_don_id": hd_id, "so_tien_dot": float(tt),
                    "da_thanh_toan": float(cn.da_thanh_toan), "trang_thai": cn.trang_thai})
+    from ..fin_snapshot import snapshot_financial
+    snapshot_financial(db, "THU KHACH " + (dh.so or f"DH-{dh.id}"))
     db.commit()
     return {"id": cn.id, "hoa_don_id": hd_id, "so_tien": float(cn.so_tien),
             "da_thanh_toan": float(cn.da_thanh_toan),
@@ -1153,7 +1155,8 @@ def ds_kho_tep(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM")))
             "CHIEN_DICH": "Email chào hàng", "DON_MUA": "Đơn mua NCC (PO)",
             "YEU_CAU_MUA": "Đề xuất mua — dự toán", "CHO_THUE_DA": "Cho thuê — tài liệu",
             "BAO_GIA_NCC_FILE": "Báo giá NCC — file", "NCC_HO_SO": "Hồ sơ NCC",
-            "DU_AN_DU_TOAN": "Dự án — báo giá dự toán", "SO_QUY": "Sổ quỹ — CEO snapshot"}
+            "DU_AN_DU_TOAN": "Dự án — báo giá dự toán", "SO_QUY": "Sổ quỹ — CEO snapshot",
+            "FIN_CEO": "Financial — CEO snapshot"}
     out = []
     for t in db.query(TepDinhKem).order_by(TepDinhKem.id.desc()).limit(500).all():
         ref = None
@@ -1183,7 +1186,7 @@ def ds_kho_tep(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM")))
         elif t.doi_tuong == "DU_AN_DU_TOAN":
             d_a = db.get(DuAn, t.doi_tuong_id)
             ref = (d_a.ma or d_a.ten) if d_a else None
-        elif t.doi_tuong == "SO_QUY":
+        elif t.doi_tuong in ("SO_QUY", "FIN_CEO"):
             ref = t.loai
         out.append({"nhom": NHOM.get(t.doi_tuong, t.doi_tuong), "ref": ref or f"#{t.doi_tuong_id}",
                     "ten_file": t.ten_file, "kich_thuoc": t.kich_thuoc,

@@ -612,6 +612,18 @@ def xoa_von_muc(vm_id: int, db: Session = Depends(get_db),
     return {"ok": True}
 
 
+@router.post("/financial-snapshot")
+def chup_financial(db: Session = Depends(get_db), nd=Depends(chi_vai_tro("CEO", "ADMIN"))):
+    """CEO bấm chụp thủ công một bản snapshot Financial ngay bây giờ (bỏ qua giãn cách)."""
+    from ..fin_snapshot import snapshot_financial
+    t = snapshot_financial(db, "THU CONG")
+    if t is None:
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "Không chụp được snapshot")
+    ghi_audit(db, nd.id, "SNAPSHOT", "fin_ceo", 0, moi={"tep": t.ten_file})
+    db.commit()
+    return {"ok": True, "tep": t.ten_file}
+
+
 @router.get("/dashboard")
 def dashboard(db: Session = Depends(get_db), _=Depends(yeu_cau("dashboard", "XEM"))):
     """Tổng quan điều hành — TỔNG HỢP THẬT từ Bán hàng, Mua hàng (NCC), Kho, Công nợ.

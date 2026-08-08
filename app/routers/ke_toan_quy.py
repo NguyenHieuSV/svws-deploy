@@ -385,6 +385,8 @@ def duyet_phieu(pid: int, data: DuyetPhieuVao = DuyetPhieuVao(),
     ghi_audit(db, nd.id, "DUYET", "phieu_thu_chi", p.id,
               moi={"but_toan": bt.id, "tk_no": bt.tk_no, "tk_co": bt.tk_co})
     _snapshot_so_quy(db, "DUYET " + (p.so or f"PC-{p.id}"))
+    from ..fin_snapshot import snapshot_financial
+    snapshot_financial(db, "DUYET " + (p.so or f"PC-{p.id}"))
     db.commit(); db.refresh(p)
     return _phieu_dict(db, p)
 

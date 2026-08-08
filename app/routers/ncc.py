@@ -1065,6 +1065,8 @@ def cap_nhat_thanh_toan_mua(dm_id: int, data: ThanhToanMuaVao, db: Session = Dep
               moi={"de_nghi_tt": float(dn), "tong": float(tong), "tt_du": da_tt_100,
                    "so_tien_dot": float(data.so_tien_dot) if data.so_tien_dot is not None else None,
                    "ngay_tt_tiep": str(data.ngay_tt_tiep) if data.ngay_tt_tiep else None})
+    from ..fin_snapshot import snapshot_financial
+    snapshot_financial(db, "TT MUA " + (dm.so or f"PO-{dm.id}"))
     db.commit()
     return {"ok": True, "da_tt_100": da_tt_100, "da_thanh_toan": float(dn),
             "con_lai": float(tong - dn)}
@@ -1103,6 +1105,8 @@ def chot_thanh_toan_mua(dm_id: int, db: Session = Depends(get_db),
     dm.lenh_bank_luc = gio_hien_tai()
     ghi_audit(db, nd.id, "CHOT_TT_MUA", "don_mua", dm.id,
               moi={"de_nghi_tt": float(dn), "tong": float(tong), "tt_du": da_tt_100})
+    from ..fin_snapshot import snapshot_financial
+    snapshot_financial(db, "CHOT TT " + (dm.so or f"PO-{dm.id}"))
     db.commit()
     return {"ok": True, "da_tt_100": da_tt_100, "con_lai": float(tong - dn)}
 
