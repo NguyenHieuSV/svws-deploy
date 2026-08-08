@@ -427,6 +427,121 @@ def dong_tien_du_kien(tuan: int = 13, db: Session = Depends(get_db),
             "ngoai_ky": {"thu": nk_thu, "chi": nk_chi}}
 
 
+# ============ 🧾 Thuế & bắt buộc · 📈 Chỉ số dòng tiền · 🎯 Ngân sách ============
+def _thue_thang(db, thang):
+    """Ước tính nghĩa vụ của một tháng 'YYYY-MM' từ hóa đơn + bảng lương trong hệ thống."""
+    from ..models import HoaDon, BangLuong
+    y, m = int(thang[:4]), int(thang[5:7])
+    d1 = date(y, m, 1)
+    d2 = date(y + (1 if m == 12 else 0), 1 if m == 12 else m + 1, 1)
+    hds = db.query(HoaDon).filter(HoaDon.ngay >= d1, HoaDon.ngay < d2).all()
+    vat_ra = sum(float(h.tien_thue or 0) for h in hds if h.loai != "MUA")
+    vat_vao = sum(float(h.tien_thue or 0) for h in hds if h.loai == "MUA")
+    bls = db.query(BangLuong).filter(BangLuong.thang == thang).all()
+    bhxh = sum(float((b.bhxh or 0)) + float(b.bhyt or 0) + float(b.bhtn or 0)
+               + float(b.bhxh_dn or 0) + float(b.bhyt_dn or 0) + float(b.bhtn_dn or 0)
+               + float(b.kpcd_dn or 0) for b in bls)
+    tncn = sum(float(b.thue_tncn or 0) for b in bls)
+    han = d2.replace(day=20)             # hạn VAT/TNCN: 20 tháng sau
+    han_bh = (d2 - __import__("datetime").timedelta(days=1))   # BHXH: cuối tháng phát sinh
+    return {"thang": thang, "vat_ra": vat_ra, "vat_vao": vat_vao,
+            "vat_nop": max(0.0, vat_ra - vat_vao), "tncn": tncn, "bhxh": bhxh,
+            "han_vat": str(han), "han_bhxh": str(han_bh), "so_hd": len(hds), "so_bl": len(bls)}
+
+
+@router.get("/thue-du-kien")
+def thue_du_kien(db: Session = Depends(get_db), nd=Depends(chi_vai_tro("CEO", "ADMIN"))):
+    hom_nay = date.today()
+    thang_nay = hom_nay.strftime("%Y-%m")
+    truoc = (hom_nay.replace(day=1) - __import__("datetime").timedelta(days=1)).strftime("%Y-%m")
+    return {"ky_truoc": _thue_thang(db, truoc), "ky_nay": _thue_thang(db, thang_nay)}
+
+
+@router.get("/chi-so-tai-chinh")
+def chi_so_tai_chinh(db: Session = Depends(get_db), nd=Depends(chi_vai_tro("CEO", "ADMIN"))):
+    """DSO/DPO 90 ngày: bình quân bao nhiêu ngày thu được tiền khách / chiếm dụng vốn NCC."""
+    from datetime import timedelta
+    from ..models import DonHang, DonMua
+    moc = date.today() - timedelta(days=90)
+    dt90 = float(db.query(func.coalesce(func.sum(DonHang.tong_tien), 0))
+                 .filter(DonHang.ngay >= moc).scalar())
+    mua90 = float(db.query(func.coalesce(func.sum(DonMua.tong_tien), 0))
+                  .filter(DonMua.ngay >= moc).scalar())
+    phai_thu = float(db.query(func.coalesce(func.sum(CongNo.so_tien - CongNo.da_thanh_toan), 0))
+                     .filter(CongNo.loai == "PHAI_THU", CongNo.trang_thai != "THU_DU").scalar())
+    phai_tra = float(db.query(func.coalesce(func.sum(CongNo.so_tien - CongNo.da_thanh_toan), 0))
+                     .filter(CongNo.loai == "PHAI_TRA", CongNo.trang_thai != "THU_DU").scalar())
+    dso = round(phai_thu / (dt90 / 90), 1) if dt90 > 0 else None
+    dpo = round(phai_tra / (mua90 / 90), 1) if mua90 > 0 else None
+    return {"dso": dso, "dpo": dpo,
+            "chenh": round(dso - dpo, 1) if (dso is not None and dpo is not None) else None,
+            "doanh_thu_90": dt90, "mua_90": mua90,
+            "phai_thu": phai_thu, "phai_tra": phai_tra}
+
+
+class NganSachVao(_BRBase):
+    thang: str = ""                       # 'YYYY-MM'
+    thu_ke_hoach: float = 0
+    chi_ke_hoach: float = 0
+    ghi_chu: str | None = None
+
+
+@router.get("/ngan-sach")
+def ds_ngan_sach(db: Session = Depends(get_db), nd=Depends(chi_vai_tro("CEO", "ADMIN"))):
+    from ..models import NganSach
+    out = []
+    for ns in db.query(NganSach).order_by(NganSach.thang.desc()).limit(12).all():
+        y, m = int(ns.thang[:4]), int(ns.thang[5:7])
+        d1 = date(y, m, 1)
+        d2 = date(y + (1 if m == 12 else 0), 1 if m == 12 else m + 1, 1)
+        thuc_thu = float(db.query(func.coalesce(func.sum(ThanhToan.so_tien), 0))
+                         .join(CongNo, ThanhToan.cong_no_id == CongNo.id)
+                         .filter(CongNo.loai == "PHAI_THU",
+                                 ThanhToan.ngay >= d1, ThanhToan.ngay < d2).scalar())
+        thuc_chi = float(db.query(func.coalesce(func.sum(ThanhToan.so_tien), 0))
+                         .join(CongNo, ThanhToan.cong_no_id == CongNo.id)
+                         .filter(CongNo.loai == "PHAI_TRA",
+                                 ThanhToan.ngay >= d1, ThanhToan.ngay < d2).scalar())
+        out.append({"id": ns.id, "thang": ns.thang,
+                    "thu_ke_hoach": float(ns.thu_ke_hoach or 0),
+                    "chi_ke_hoach": float(ns.chi_ke_hoach or 0),
+                    "thuc_thu": thuc_thu, "thuc_chi": thuc_chi, "ghi_chu": ns.ghi_chu})
+    return out
+
+
+@router.post("/ngan-sach")
+def luu_ngan_sach(data: NganSachVao, db: Session = Depends(get_db),
+                  nd=Depends(chi_vai_tro("CEO", "ADMIN"))):
+    from ..models import NganSach
+    import re as _re
+    if not _re.match(r"^\d{4}-\d{2}$", data.thang or ""):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Tháng phải dạng YYYY-MM")
+    ns = db.query(NganSach).filter_by(thang=data.thang).first()
+    if ns is None:
+        ns = NganSach(thang=data.thang)
+        db.add(ns)
+    ns.thu_ke_hoach = data.thu_ke_hoach or 0
+    ns.chi_ke_hoach = data.chi_ke_hoach or 0
+    ns.ghi_chu = (data.ghi_chu or "").strip()[:200] or None
+    db.flush()
+    ghi_audit(db, nd.id, "LUU", "ngan_sach", ns.id,
+              moi={"thang": ns.thang, "thu": float(ns.thu_ke_hoach), "chi": float(ns.chi_ke_hoach)})
+    db.commit()
+    return {"id": ns.id}
+
+
+@router.delete("/ngan-sach/{ns_id}")
+def xoa_ngan_sach(ns_id: int, db: Session = Depends(get_db),
+                  nd=Depends(chi_vai_tro("CEO", "ADMIN"))):
+    from ..models import NganSach
+    ns = db.get(NganSach, ns_id)
+    if ns is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy ngân sách")
+    ghi_audit(db, nd.id, "XOA", "ngan_sach", ns.id, cu={"thang": ns.thang})
+    db.delete(ns); db.commit()
+    return {"ok": True}
+
+
 @router.get("/dashboard")
 def dashboard(db: Session = Depends(get_db), _=Depends(yeu_cau("dashboard", "XEM"))):
     """Tổng quan điều hành — TỔNG HỢP THẬT từ Bán hàng, Mua hàng (NCC), Kho, Công nợ.

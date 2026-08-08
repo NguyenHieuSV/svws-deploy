@@ -890,6 +890,15 @@ class ChiCoDinh(Base):
     ghi_chu: Mapped[str | None] = mapped_column(String(200), nullable=True)
 
 
+class NganSach(Base):
+    __tablename__ = "ngan_sach"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    thang: Mapped[str] = mapped_column(String(7), unique=True)   # 'YYYY-MM'
+    thu_ke_hoach: Mapped[Decimal] = mapped_column(Numeric(18, 0), default=0)
+    chi_ke_hoach: Mapped[Decimal] = mapped_column(Numeric(18, 0), default=0)
+    ghi_chu: Mapped[str | None] = mapped_column(String(200), nullable=True)
+
+
 class ThamSoTaiChinh(Base):
     __tablename__ = "tham_so_tai_chinh"
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, default=1)
