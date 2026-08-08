@@ -542,6 +542,76 @@ def xoa_ngan_sach(ns_id: int, db: Session = Depends(get_db),
     return {"ok": True}
 
 
+# ============ 📋 Danh mục kê khai VCSH / TSCĐ / Nợ dài hạn ============
+_VM_LOAI = {"VCSH", "TSCD", "NO_DH"}
+
+
+class VonMucVao(_BRBase):
+    loai: str = ""
+    ten: str = ""
+    so_tien: float = 0
+    ghi_chu: str | None = None
+
+
+@router.get("/von-muc")
+def ds_von_muc(loai: str = "", db: Session = Depends(get_db),
+               _=Depends(yeu_cau(MODULE, "XEM"))):
+    from ..models import VonMuc
+    q = db.query(VonMuc)
+    if loai:
+        q = q.filter(VonMuc.loai == loai)
+    return [{"id": v.id, "loai": v.loai, "ten": v.ten,
+             "so_tien": float(v.so_tien or 0), "ghi_chu": v.ghi_chu}
+            for v in q.order_by(VonMuc.id).all()]
+
+
+@router.post("/von-muc", status_code=201)
+def tao_von_muc(data: VonMucVao, db: Session = Depends(get_db),
+                nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    from ..models import VonMuc
+    if data.loai not in _VM_LOAI:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Loại phải là VCSH / TSCD / NO_DH")
+    if not (data.ten or "").strip():
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Nhập tên mục")
+    v = VonMuc(loai=data.loai, ten=data.ten.strip()[:160], so_tien=data.so_tien or 0,
+               ghi_chu=(data.ghi_chu or "").strip()[:200] or None)
+    db.add(v); db.flush()
+    ghi_audit(db, nd.id, "TAO", "von_muc", v.id,
+              moi={"loai": v.loai, "ten": v.ten, "so_tien": float(v.so_tien or 0)})
+    db.commit()
+    return {"id": v.id}
+
+
+@router.put("/von-muc/{vm_id}")
+def sua_von_muc(vm_id: int, data: VonMucVao, db: Session = Depends(get_db),
+                nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    from ..models import VonMuc
+    v = db.get(VonMuc, vm_id)
+    if v is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy mục kê khai")
+    cu = {"ten": v.ten, "so_tien": float(v.so_tien or 0)}
+    if (data.ten or "").strip():
+        v.ten = data.ten.strip()[:160]
+    v.so_tien = data.so_tien or 0
+    v.ghi_chu = (data.ghi_chu or "").strip()[:200] or None
+    ghi_audit(db, nd.id, "SUA", "von_muc", v.id, cu=cu,
+              moi={"ten": v.ten, "so_tien": float(v.so_tien or 0)})
+    db.commit()
+    return {"ok": True}
+
+
+@router.delete("/von-muc/{vm_id}")
+def xoa_von_muc(vm_id: int, db: Session = Depends(get_db),
+                nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    from ..models import VonMuc
+    v = db.get(VonMuc, vm_id)
+    if v is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy mục kê khai")
+    ghi_audit(db, nd.id, "XOA", "von_muc", v.id, cu={"loai": v.loai, "ten": v.ten})
+    db.delete(v); db.commit()
+    return {"ok": True}
+
+
 @router.get("/dashboard")
 def dashboard(db: Session = Depends(get_db), _=Depends(yeu_cau("dashboard", "XEM"))):
     """Tổng quan điều hành — TỔNG HỢP THẬT từ Bán hàng, Mua hàng (NCC), Kho, Công nợ.

@@ -899,6 +899,15 @@ class NganSach(Base):
     ghi_chu: Mapped[str | None] = mapped_column(String(200), nullable=True)
 
 
+class VonMuc(Base):
+    __tablename__ = "von_muc"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    loai: Mapped[str] = mapped_column(String(10))     # VCSH | TSCD | NO_DH
+    ten: Mapped[str] = mapped_column(String(160))
+    so_tien: Mapped[Decimal] = mapped_column(Numeric(18, 0), default=0)
+    ghi_chu: Mapped[str | None] = mapped_column(String(200), nullable=True)
+
+
 class ThamSoTaiChinh(Base):
     __tablename__ = "tham_so_tai_chinh"
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, default=1)
