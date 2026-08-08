@@ -105,6 +105,34 @@ def tao_quy(data: QuyVao, db: Session = Depends(get_db),
     return _quy_dict(q)
 
 
+@router.put("/quy/{quy_id}")
+def sua_quy(quy_id: int, data: QuyVao, db: Session = Depends(get_db),
+            nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    """Sửa quỹ: tên, loại, số TK, TK kế toán, số dư đầu — số dư hiện tại tự điều
+    chỉnh theo chênh lệch số dư đầu (các phiếu đã duyệt giữ nguyên)."""
+    q = db.get(TaiKhoanQuy, quy_id)
+    if q is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy quỹ")
+    if data.loai not in ("TIEN_MAT", "NGAN_HANG"):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Loại phải là TIEN_MAT hoặc NGAN_HANG")
+    if not (data.ten or "").strip():
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Nhập tên quỹ")
+    cu = {"ten": q.ten, "loai": q.loai, "so_tk": q.so_tk,
+          "so_du_dau": _f(q.so_du_dau), "so_du": _f(q.so_du)}
+    delta = Decimal(data.so_du_dau or 0) - Decimal(q.so_du_dau or 0)
+    q.ten = data.ten.strip()[:120]
+    q.loai = data.loai
+    q.so_tk = (data.so_tk or "").strip()[:40] or None
+    q.tk_ke_toan = data.tk_ke_toan or ("112" if data.loai == "NGAN_HANG" else "111")
+    q.so_du_dau = Decimal(data.so_du_dau or 0)
+    q.so_du = Decimal(q.so_du or 0) + delta
+    ghi_audit(db, nd.id, "SUA", "tai_khoan_quy", q.id, cu=cu,
+              moi={"ten": q.ten, "loai": q.loai, "so_tk": q.so_tk,
+                   "so_du_dau": _f(q.so_du_dau), "so_du": _f(q.so_du)})
+    db.commit(); db.refresh(q)
+    return _quy_dict(q)
+
+
 @router.get("/quy/{quy_id}/so-quy")
 def so_quy(quy_id: int, db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
     """Sổ quỹ: số dư đầu + các phiếu ĐÃ DUYỆT (thu +, chi −) với số dư lũy kế."""
