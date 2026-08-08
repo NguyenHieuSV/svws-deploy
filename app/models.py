@@ -870,6 +870,26 @@ class BankRecord(Base):
     tao_luc: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
+class BankTaiKhoan(Base):
+    __tablename__ = "bank_tai_khoan"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    ten: Mapped[str] = mapped_column(String(60))
+    so_tk: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    so_du_dau: Mapped[Decimal] = mapped_column(Numeric(18, 0), default=0)
+    ngay_du_dau: Mapped[date | None] = mapped_column(Date, nullable=True)
+    ghi_chu: Mapped[str | None] = mapped_column(String(200), nullable=True)
+
+
+class ChiCoDinh(Base):
+    __tablename__ = "chi_co_dinh"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    ten: Mapped[str] = mapped_column(String(120))
+    so_tien: Mapped[Decimal] = mapped_column(Numeric(18, 0), default=0)
+    ngay_trong_thang: Mapped[int] = mapped_column(BigInteger, default=5)
+    dang_ap_dung: Mapped[bool] = mapped_column(Boolean, default=True)
+    ghi_chu: Mapped[str | None] = mapped_column(String(200), nullable=True)
+
+
 class ThamSoTaiChinh(Base):
     __tablename__ = "tham_so_tai_chinh"
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, default=1)

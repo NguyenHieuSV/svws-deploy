@@ -203,6 +203,230 @@ def xoa_bank_record(br_id: int, db: Session = Depends(get_db),
     return {"ok": True}
 
 
+# ============ 💼 Số dư ngân hàng + 📅 Lịch dòng tiền dự kiến ============
+class BankTkVao(_BRBase):
+    ten: str = ""
+    so_tk: str | None = None
+    so_du_dau: float = 0
+    ngay_du_dau: date | None = None
+    ghi_chu: str | None = None
+
+
+class ChiCoDinhVao(_BRBase):
+    ten: str = ""
+    so_tien: float = 0
+    ngay_trong_thang: int = 5
+    ghi_chu: str | None = None
+
+
+def _btk_so_du(db, tk):
+    """(tiền vào, tiền ra, số dư) của một tài khoản: khớp Bank record theo tên NH từ ngày đầu kỳ."""
+    from ..models import BankRecord
+    q = db.query(BankRecord).filter(func.lower(BankRecord.ngan_hang) == (tk.ten or "").strip().lower())
+    if tk.ngay_du_dau:
+        q = q.filter(BankRecord.ngay >= tk.ngay_du_dau)
+    rows = q.all()
+    thu = sum(float(r.so_tien or 0) for r in rows if r.loai == "THU")
+    chi = sum(float(r.so_tien or 0) for r in rows if r.loai == "CHI")
+    return thu, chi, float(tk.so_du_dau or 0) + thu - chi
+
+
+@router.get("/bank-tai-khoan")
+def ds_bank_tk(db: Session = Depends(get_db), nd=Depends(chi_vai_tro("CEO", "ADMIN"))):
+    from ..models import BankTaiKhoan, BankRecord
+    tks = db.query(BankTaiKhoan).order_by(BankTaiKhoan.id).all()
+    ten_set = {(t.ten or "").strip().lower() for t in tks}
+    out = []
+    for t in tks:
+        thu, chi, so_du = _btk_so_du(db, t)
+        out.append({"id": t.id, "ten": t.ten, "so_tk": t.so_tk,
+                    "so_du_dau": float(t.so_du_dau or 0),
+                    "ngay_du_dau": str(t.ngay_du_dau) if t.ngay_du_dau else None,
+                    "thu": thu, "chi": chi, "so_du": so_du})
+    kk_thu = kk_chi = 0.0
+    kk_n = 0
+    for r in db.query(BankRecord).all():
+        if (r.ngan_hang or "").strip().lower() not in ten_set:
+            kk_n += 1
+            if r.loai == "THU":
+                kk_thu += float(r.so_tien or 0)
+            else:
+                kk_chi += float(r.so_tien or 0)
+    return {"tai_khoan": out, "tong": sum(x["so_du"] for x in out),
+            "khong_khop": {"so_dong": kk_n, "thu": kk_thu, "chi": kk_chi}}
+
+
+@router.post("/bank-tai-khoan", status_code=201)
+def tao_bank_tk(data: BankTkVao, db: Session = Depends(get_db),
+                nd=Depends(chi_vai_tro("CEO", "ADMIN"))):
+    from ..models import BankTaiKhoan
+    if not (data.ten or "").strip():
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Nhập tên ngân hàng")
+    t = BankTaiKhoan(ten=data.ten.strip()[:60], so_tk=(data.so_tk or "").strip()[:40] or None,
+                     so_du_dau=data.so_du_dau or 0, ngay_du_dau=data.ngay_du_dau or date.today(),
+                     ghi_chu=(data.ghi_chu or "").strip()[:200] or None)
+    db.add(t); db.flush()
+    ghi_audit(db, nd.id, "TAO", "bank_tai_khoan", t.id, moi={"ten": t.ten, "so_du_dau": float(t.so_du_dau or 0)})
+    db.commit()
+    return {"id": t.id}
+
+
+@router.put("/bank-tai-khoan/{tk_id}")
+def sua_bank_tk(tk_id: int, data: BankTkVao, db: Session = Depends(get_db),
+                nd=Depends(chi_vai_tro("CEO", "ADMIN"))):
+    from ..models import BankTaiKhoan
+    t = db.get(BankTaiKhoan, tk_id)
+    if t is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy tài khoản")
+    if not (data.ten or "").strip():
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Nhập tên ngân hàng")
+    cu = {"ten": t.ten, "so_du_dau": float(t.so_du_dau or 0)}
+    t.ten = data.ten.strip()[:60]
+    t.so_tk = (data.so_tk or "").strip()[:40] or None
+    t.so_du_dau = data.so_du_dau or 0
+    t.ngay_du_dau = data.ngay_du_dau or t.ngay_du_dau
+    ghi_audit(db, nd.id, "SUA", "bank_tai_khoan", t.id, cu=cu,
+              moi={"ten": t.ten, "so_du_dau": float(t.so_du_dau or 0)})
+    db.commit()
+    return {"ok": True}
+
+
+@router.delete("/bank-tai-khoan/{tk_id}")
+def xoa_bank_tk(tk_id: int, db: Session = Depends(get_db),
+                nd=Depends(chi_vai_tro("CEO", "ADMIN"))):
+    from ..models import BankTaiKhoan
+    t = db.get(BankTaiKhoan, tk_id)
+    if t is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy tài khoản")
+    ghi_audit(db, nd.id, "XOA", "bank_tai_khoan", t.id, cu={"ten": t.ten})
+    db.delete(t); db.commit()
+    return {"ok": True}
+
+
+@router.get("/chi-co-dinh")
+def ds_chi_co_dinh(db: Session = Depends(get_db), nd=Depends(chi_vai_tro("CEO", "ADMIN"))):
+    from ..models import ChiCoDinh
+    return [{"id": c.id, "ten": c.ten, "so_tien": float(c.so_tien or 0),
+             "ngay_trong_thang": int(c.ngay_trong_thang or 5), "ghi_chu": c.ghi_chu}
+            for c in db.query(ChiCoDinh).filter(ChiCoDinh.dang_ap_dung.is_(True))
+                       .order_by(ChiCoDinh.ngay_trong_thang, ChiCoDinh.id).all()]
+
+
+@router.post("/chi-co-dinh", status_code=201)
+def tao_chi_co_dinh(data: ChiCoDinhVao, db: Session = Depends(get_db),
+                    nd=Depends(chi_vai_tro("CEO", "ADMIN"))):
+    from ..models import ChiCoDinh
+    if not (data.ten or "").strip():
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Nhập tên khoản chi")
+    if not (data.so_tien and data.so_tien > 0):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Số tiền phải lớn hơn 0")
+    ng = min(max(int(data.ngay_trong_thang or 5), 1), 28)
+    c = ChiCoDinh(ten=data.ten.strip()[:120], so_tien=data.so_tien, ngay_trong_thang=ng,
+                  ghi_chu=(data.ghi_chu or "").strip()[:200] or None)
+    db.add(c); db.flush()
+    ghi_audit(db, nd.id, "TAO", "chi_co_dinh", c.id, moi={"ten": c.ten, "so_tien": float(c.so_tien)})
+    db.commit()
+    return {"id": c.id}
+
+
+@router.put("/chi-co-dinh/{cd_id}")
+def sua_chi_co_dinh(cd_id: int, data: ChiCoDinhVao, db: Session = Depends(get_db),
+                    nd=Depends(chi_vai_tro("CEO", "ADMIN"))):
+    from ..models import ChiCoDinh
+    c = db.get(ChiCoDinh, cd_id)
+    if c is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy khoản chi")
+    if not (data.so_tien and data.so_tien > 0):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Số tiền phải lớn hơn 0")
+    cu = {"ten": c.ten, "so_tien": float(c.so_tien or 0)}
+    c.ten = (data.ten or c.ten).strip()[:120]
+    c.so_tien = data.so_tien
+    c.ngay_trong_thang = min(max(int(data.ngay_trong_thang or 5), 1), 28)
+    c.ghi_chu = (data.ghi_chu or "").strip()[:200] or None
+    ghi_audit(db, nd.id, "SUA", "chi_co_dinh", c.id, cu=cu, moi={"ten": c.ten, "so_tien": float(c.so_tien)})
+    db.commit()
+    return {"ok": True}
+
+
+@router.delete("/chi-co-dinh/{cd_id}")
+def xoa_chi_co_dinh(cd_id: int, db: Session = Depends(get_db),
+                    nd=Depends(chi_vai_tro("CEO", "ADMIN"))):
+    from ..models import ChiCoDinh
+    c = db.get(ChiCoDinh, cd_id)
+    if c is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy khoản chi")
+    ghi_audit(db, nd.id, "XOA", "chi_co_dinh", c.id, cu={"ten": c.ten})
+    db.delete(c); db.commit()
+    return {"ok": True}
+
+
+@router.get("/dong-tien-du-kien")
+def dong_tien_du_kien(tuan: int = 13, db: Session = Depends(get_db),
+                      nd=Depends(chi_vai_tro("CEO", "ADMIN"))):
+    """Lịch dòng tiền theo tuần: thu = công nợ phải thu theo hạn; chi = công nợ phải
+    trả theo hạn + chi cố định hàng tháng; số dư chạy từ tổng Số dư ngân hàng.
+    Khoản quá hạn dồn vào tuần hiện tại; khoản không hạn / ngoài kỳ trả về riêng."""
+    from datetime import timedelta
+    from ..models import BankTaiKhoan, ChiCoDinh
+    tuan = max(4, min(26, tuan))
+    hom_nay = date.today()
+    start = hom_nay - timedelta(days=hom_nay.weekday())
+    horizon_end = start + timedelta(weeks=tuan)
+    thu = [0.0] * tuan
+    chi = [0.0] * tuan
+    cod = [0.0] * tuan
+    kh_thu = kh_chi = nk_thu = nk_chi = 0.0
+    for cn in db.query(CongNo).filter(CongNo.trang_thai != "THU_DU").all():
+        con = float((cn.so_tien or 0) - (cn.da_thanh_toan or 0))
+        if con <= 0:
+            continue
+        la_thu = cn.loai == "PHAI_THU"
+        if cn.han is None:
+            if la_thu:
+                kh_thu += con
+            else:
+                kh_chi += con
+            continue
+        idx = (cn.han - start).days // 7
+        if idx < 0:
+            idx = 0                      # quá hạn → dồn tuần hiện tại
+        if idx >= tuan:
+            if la_thu:
+                nk_thu += con
+            else:
+                nk_chi += con
+            continue
+        (thu if la_thu else chi)[idx] += con
+    for c in db.query(ChiCoDinh).filter(ChiCoDinh.dang_ap_dung.is_(True)).all():
+        d = min(int(c.ngay_trong_thang or 5), 28)
+        y, m = start.year, start.month
+        for _ in range(tuan // 4 + 3):
+            ng = date(y, m, d)
+            if start <= ng < horizon_end:
+                idx = (ng - start).days // 7
+                if 0 <= idx < tuan:
+                    cod[idx] += float(c.so_tien or 0)
+            m += 1
+            if m > 12:
+                m = 1
+                y += 1
+    so_du = 0.0
+    for t in db.query(BankTaiKhoan).all():
+        so_du += _btk_so_du(db, t)[2]
+    ra = []
+    run = so_du
+    for i in range(tuan):
+        rong = thu[i] - chi[i] - cod[i]
+        run += rong
+        ra.append({"bat_dau": str(start + timedelta(weeks=i)),
+                   "ket_thuc": str(start + timedelta(weeks=i, days=6)),
+                   "thu": thu[i], "chi_cong_no": chi[i], "chi_co_dinh": cod[i],
+                   "rong": rong, "so_du": run})
+    return {"so_du_dau": so_du, "tuan": ra,
+            "khong_han": {"thu": kh_thu, "chi": kh_chi},
+            "ngoai_ky": {"thu": nk_thu, "chi": nk_chi}}
+
+
 @router.get("/dashboard")
 def dashboard(db: Session = Depends(get_db), _=Depends(yeu_cau("dashboard", "XEM"))):
     """Tổng quan điều hành — TỔNG HỢP THẬT từ Bán hàng, Mua hàng (NCC), Kho, Công nợ.
