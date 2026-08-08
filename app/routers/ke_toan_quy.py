@@ -83,9 +83,20 @@ def ds_quy(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
 @router.post("/quy", status_code=201)
 def tao_quy(data: QuyVao, db: Session = Depends(get_db),
             nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
-    ma = data.ma or ("Q" + str(int(date.today().strftime("%y%m%d"))))
-    if db.query(TaiKhoanQuy).filter_by(ma=ma).first():
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Mã quỹ đã tồn tại")
+    if data.ma:
+        # Người dùng tự nhập mã → mã trùng là lỗi thật.
+        ma = data.ma
+        if db.query(TaiKhoanQuy).filter_by(ma=ma).first():
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Mã quỹ đã tồn tại")
+    else:
+        # Tự sinh mã theo ngày; nếu đã có quỹ tạo trong cùng ngày thì thêm hậu tố
+        # -2, -3… để không bao giờ trùng (trước đây tạo quỹ thứ 2 cùng ngày bị lỗi).
+        base = "Q" + date.today().strftime("%y%m%d")
+        ma = base
+        seq = 1
+        while db.query(TaiKhoanQuy).filter_by(ma=ma).first():
+            seq += 1
+            ma = f"{base}-{seq}"
     q = TaiKhoanQuy(ma=ma, ten=data.ten, loai=data.loai, so_tk=data.so_tk,
                     tk_ke_toan=data.tk_ke_toan, so_du_dau=data.so_du_dau, so_du=data.so_du_dau)
     db.add(q); db.flush()
