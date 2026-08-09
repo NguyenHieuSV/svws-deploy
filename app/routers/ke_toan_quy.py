@@ -75,42 +75,45 @@ def _phieu_dict(db, p: PhieuThuChi):
 
 
 def _snapshot_so_quy(db, su_kien: str):
-    """Chụp CSV toàn bộ quỹ + sổ quỹ tại thời điểm biến động → Kho tệp dùng chung
-    (nhóm "Sổ quỹ — CEO snapshot"). Lỗi snapshot không được làm hỏng nghiệp vụ chính."""
+    """Ghi thêm số dư các quỹ tại thời điểm biến động vào MỘT file lũy kế
+    So_quy_bien_dong.csv (Kho tệp dùng chung, nhóm "Sổ quỹ — CEO snapshot").
+    Thời điểm là một cột; khối dòng mới nhất nằm TRÊN CÙNG. Lỗi snapshot không
+    được làm hỏng nghiệp vụ chính."""
     try:
         from ..models import TepDinhKem
         from .. import luu_tru
         from ..nhac_viec_service import gio_hien_tai
         luc = gio_hien_tai()
+        TEN = "So_quy_bien_dong.csv"
+        HEADER = "\ufeffThời điểm,Sự kiện,Mã quỹ,Tên quỹ,Loại,Số dư đầu kỳ,Số dư tại thời điểm"
 
         def _c(v):
             return '"' + str(v if v is not None else "").replace('"', '""') + '"'
 
-        dong = ["\ufeffSNAPSHOT SỔ QUỸ", "Thời điểm," + luc.strftime("%Y-%m-%d %H:%M:%S"),
-                "Sự kiện," + _c(su_kien), "", "SỐ DƯ CÁC QUỸ",
-                "Mã,Tên quỹ,Loại,Số TK,TK kế toán,Số dư đầu,Số dư hiện tại"]
-        quys = db.query(TaiKhoanQuy).order_by(TaiKhoanQuy.id).all()
-        for q in quys:
-            dong.append(",".join([_c(q.ma), _c(q.ten), _c(q.loai), _c(q.so_tk),
-                                  _c(q.tk_ke_toan), str(_f(q.so_du_dau)), str(_f(q.so_du))]))
-        for q in quys:
-            dong += ["", f"SỔ QUỸ: {q.ma} — {q.ten}",
-                     "Ngày,Số phiếu,Loại,Diễn giải,Đối tác,Thu,Chi,Số dư lũy kế"]
-            sd = Decimal(q.so_du_dau or 0)
-            ps = (db.query(PhieuThuChi)
-                  .filter(PhieuThuChi.quy_id == q.id, PhieuThuChi.trang_thai == "DA_DUYET")
-                  .order_by(PhieuThuChi.ngay, PhieuThuChi.id).all())
-            for p in ps:
-                sd += Decimal(p.so_tien) if p.loai == "THU" else -Decimal(p.so_tien)
-                dong.append(",".join([str(p.ngay or ""), _c(p.so), p.loai, _c(p.dien_giai),
-                                      _c(_ten_doi_tac(db, p)),
-                                      str(_f(p.so_tien) if p.loai == "THU" else 0),
-                                      str(_f(p.so_tien) if p.loai == "CHI" else 0), str(_f(sd))]))
-        data = "\n".join(dong).encode("utf-8")
-        ten = "So_quy_" + luc.strftime("%Y%m%d_%H%M%S") + ".csv"
-        ref = luu_tru.luu(data, "so_quy", luc.strftime("%Y%m"), ten, "text/csv")
+        ts = luc.strftime("%Y-%m-%d %H:%M:%S")
+        moi = []
+        tong = 0.0
+        for q in db.query(TaiKhoanQuy).order_by(TaiKhoanQuy.id).all():
+            tong += _f(q.so_du)
+            moi.append(",".join([ts, _c(su_kien), _c(q.ma), _c(q.ten), _c(q.loai),
+                                 str(_f(q.so_du_dau)), str(_f(q.so_du))]))
+        moi.append(",".join([ts, _c(su_kien), "TONG", _c("TỔNG TẤT CẢ QUỸ"), "", "", str(tong)]))
+
+        cu = []
+        t_cu = db.query(TepDinhKem).filter_by(doi_tuong="SO_QUY", ten_file=TEN).first()
+        if t_cu is not None:
+            try:
+                lines = luu_tru.doc(t_cu.duong_dan).decode("utf-8").splitlines()
+                cu = [l for l in lines[1:] if l.strip()][:20000]   # giữ tối đa 20.000 dòng gần nhất
+            except Exception:
+                cu = []
+            luu_tru.xoa(t_cu.duong_dan)
+            db.delete(t_cu)
+            db.flush()
+        data = "\n".join([HEADER] + moi + cu).encode("utf-8")
+        ref = luu_tru.luu(data, "so_quy", "bien_dong", TEN, "text/csv")
         t = TepDinhKem(doi_tuong="SO_QUY", doi_tuong_id=0, loai=(su_kien or "SNAPSHOT")[:20],
-                       ten_file=ten, duong_dan=ref, kich_thuoc=len(data), content_type="text/csv")
+                       ten_file=TEN, duong_dan=ref, kich_thuoc=len(data), content_type="text/csv")
         db.add(t)
         return t
     except Exception:
