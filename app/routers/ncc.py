@@ -1299,7 +1299,21 @@ def hang_hoa_cua_ncc(ncc_id: int, db: Session = Depends(get_db),
 
 @router.get("/don-mua", response_model=list[DonMuaRa])
 def ds_don_mua(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
-    return db.query(DonMua).order_by(DonMua.id.desc()).all()
+    from ..models import HangHoa
+    # gộp tên mặt hàng theo PO trong MỘT query (tránh N+1)
+    tens = {}
+    for dm_id, ten in (db.query(DonMuaCt.don_mua_id, HangHoa.ten)
+                       .join(HangHoa, DonMuaCt.hang_hoa_id == HangHoa.id)
+                       .order_by(DonMuaCt.id).all()):
+        tens.setdefault(dm_id, []).append(ten or "")
+    out = []
+    for dm in db.query(DonMua).order_by(DonMua.id.desc()).all():
+        r = DonMuaRa.model_validate(dm)
+        ds_ten = tens.get(dm.id) or []
+        if ds_ten:
+            r.hang_hoa = " · ".join(ds_ten[:2]) + (f" +{len(ds_ten) - 2} mặt hàng nữa" if len(ds_ten) > 2 else "")
+        out.append(r)
+    return out
 
 
 @router.post("/don-mua/{dm_id}/xac-nhan-dat-hang")

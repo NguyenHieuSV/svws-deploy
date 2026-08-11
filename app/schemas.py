@@ -136,6 +136,8 @@ class DonMuaRa(BaseModel):
     trang_thai_nhan: str = "CHUA"
     ngay_hen_giao: date | None = None
     ngay_giao_thuc: date | None = None
+    da_dat_hang: bool = False
+    hang_hoa: str | None = None         # tóm tắt tên mặt hàng của PO (danh sách)
 
 
 class YeuCauMuaItemVao(BaseModel):
