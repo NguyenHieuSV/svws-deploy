@@ -1707,6 +1707,12 @@ def ds_cong_no(nha_cung_cap_id: int | None = None, chua_tra: bool = False,
         q = q.filter(CongNo.nha_cung_cap_id == nha_cung_cap_id)
     rows = q.order_by(CongNo.id.desc()).limit(300).all()
     hom_nay = date.today()
+    from ..models import HangHoa as _HH
+    hh_tens = {}
+    for _dmid, _ten in (db.query(DonMuaCt.don_mua_id, _HH.ten)
+                        .join(_HH, DonMuaCt.hang_hoa_id == _HH.id)
+                        .order_by(DonMuaCt.id).all()):
+        hh_tens.setdefault(_dmid, []).append(_ten or "")
     # ngày thanh toán thực tế: lần trả gần nhất của mỗi khoản
     ids = [r.id for r in rows]
     lan_tra = {}
@@ -1735,6 +1741,10 @@ def ds_cong_no(nha_cung_cap_id: int | None = None, chua_tra: bool = False,
                     "tu_po": bool(r.don_mua_id),
                     "ngay_tt_tiep": str(dm.ngay_tt_tiep) if (dm and dm.ngay_tt_tiep) else None,
                     "ma": ma, "ma_ban": ma_ban, "so_po": dm.so if dm else None,
+                    "hang_hoa": ((" · ".join(hh_tens[r.don_mua_id][:2])
+                                  + (f" +{len(hh_tens[r.don_mua_id]) - 2} mặt hàng nữa"
+                                     if len(hh_tens[r.don_mua_id]) > 2 else ""))
+                                 if (r.don_mua_id and r.don_mua_id in hh_tens) else None),
                     "so_hd": r.so_ct, "tien_thue": float(r.tien_thue or 0),
                     "so_tien": float(r.so_tien or 0), "da_thanh_toan": float(r.da_thanh_toan or 0),
                     "con_lai": con_lai, "han": str(r.han) if r.han else None,
