@@ -1145,6 +1145,25 @@ def lenh_bank_xong(dm_id: int, db: Session = Depends(get_db),
     return {"ok": True}
 
 
+@router.post("/don-mua/{dm_id}/mo-lai-thanh-toan")
+def mo_lai_thanh_toan(dm_id: int, db: Session = Depends(get_db),
+                      nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
+    """Đưa PO đã thanh toán 100% quay lại bảng Thanh toán mua hàng — giữ nguyên số
+    liệu đã trả, chỉ gỡ cờ tất toán (dùng khi lỡ ghi trả đủ nhưng thực tế chưa).
+    Kế toán chỉnh lại tổng đã thanh toán bằng nút ✏️ sau khi PO quay về bảng."""
+    dm = db.get(DonMua, dm_id)
+    if dm is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đơn mua")
+    if not dm.tt_du:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "PO này chưa ở trạng thái thanh toán 100%")
+    dm.tt_du = False
+    dm.ngay_tt_du = None
+    ghi_audit(db, nd.id, "MO_LAI_TT", "don_mua", dm.id,
+              moi={"so": dm.so, "de_nghi_tt": float(dm.de_nghi_tt or 0)})
+    db.commit()
+    return {"ok": True, "so": dm.so or f"PO-{dm.id}"}
+
+
 @router.delete("/don-mua/{dm_id}/thanh-toan")
 def xoa_thanh_toan_mua(dm_id: int, db: Session = Depends(get_db),
                        nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
