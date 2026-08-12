@@ -872,6 +872,10 @@ def ds_thanh_toan_mua(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "
         hh_tens.setdefault(_dmid, []).append(_ten or "")
     out = []
     for dm in db.query(DonMua).order_by(DonMua.id.desc()).limit(300).all():
+        # LOGIC: PO chỉ chạy sang Thanh toán mua hàng khi ĐÃ DUYỆT.
+        # PO chưa duyệt nhưng đã có số liệu trả từ trước vẫn hiển thị để không mất vết.
+        if dm.trang_thai != "DA_DUYET" and not dm.tt_du and float(dm.de_nghi_tt or 0) <= 0:
+            continue
         ncc = db.get(NhaCungCap, dm.nha_cung_cap_id)
         cn = db.query(CongNo).filter_by(don_mua_id=dm.id).first()
         # Số hóa đơn = hóa đơn mua (HĐM) sinh khi nhận hàng, gắn với công nợ phải trả
@@ -1035,6 +1039,10 @@ def cap_nhat_thanh_toan_mua(dm_id: int, data: ThanhToanMuaVao, db: Session = Dep
     dm = db.get(DonMua, dm_id)
     if dm is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đơn mua")
+    if dm.trang_thai != "DA_DUYET" and not dm.tt_du and float(dm.de_nghi_tt or 0) <= 0:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "PO chưa được duyệt — duyệt ở tab Đơn mua (PO) trước, "
+                            "sau đó PO mới chạy sang Thanh toán mua hàng.")
     if data.so_hoa_don is not None:
         dm.so_hoa_don = (data.so_hoa_don or "").strip()[:60] or None
     if "don_hang_id" in data.model_fields_set:
