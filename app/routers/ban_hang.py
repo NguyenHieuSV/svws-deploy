@@ -217,6 +217,7 @@ class TaoCongNoVao(_CNBase):
     so_hoa_don: str | None = None         # bắt buộc khi mở công nợ mới
     tien_truoc_thue: Decimal
     thue_suat: Decimal = Decimal(8)
+    tong_gom_vat: Decimal | None = None   # giá trị đơn ĐÃ GỒM VAT → VAT tách ngược, không cộng thêm
     ngay_thanh_toan: date | None = None   # ngày của đợt thanh toán này
     so_tien: Decimal = Decimal(0)         # số tiền khách trả đợt này (0 = chỉ mở công nợ)
     ngay_tt_tiep: date | None = None
@@ -251,11 +252,19 @@ def tao_cong_no_khach(data: TaoCongNoVao, db: Session = Depends(get_db),
         if not so_hd:
             raise HTTPException(status.HTTP_400_BAD_REQUEST,
                                 "Chưa có số hóa đơn — nhập Số HĐ trước khi mở công nợ")
-        if data.tien_truoc_thue <= 0:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Giá trị chưa VAT phải lớn hơn 0")
-        truoc = Decimal(data.tien_truoc_thue)
-        thue = (truoc * Decimal(data.thue_suat or 0) / 100).quantize(Decimal("1"))
-        tong = truoc + thue
+        if data.tong_gom_vat and Decimal(data.tong_gom_vat) > 0:
+            # Giá trị đơn ĐÃ GỒM VAT (mặc định khi chọn từ danh sách đơn):
+            # VAT tách ngược = Tổng × ts/(100+ts) — tổng phải thu = đúng giá trị đơn.
+            tong = Decimal(data.tong_gom_vat)
+            ts = Decimal(data.thue_suat or 0)
+            thue = (tong * ts / (100 + ts)).quantize(Decimal("1"))
+            truoc = tong - thue
+        else:
+            if data.tien_truoc_thue <= 0:
+                raise HTTPException(status.HTTP_400_BAD_REQUEST, "Giá trị chưa VAT phải lớn hơn 0")
+            truoc = Decimal(data.tien_truoc_thue)
+            thue = (truoc * Decimal(data.thue_suat or 0) / 100).quantize(Decimal("1"))
+            tong = truoc + thue
         hd = HoaDon(loai="BAN", don_hang_id=dh.id, khach_hang_id=dh.khach_hang_id, so=so_hd[:40],
                     ngay=date.today(), tien_truoc_thue=truoc, tien_thue=thue, tong_tien=tong,
                     hddt_trang_thai="CHUA_PHAT_HANH", da_hach_toan=False, trang_thai="GHI_NHAN",
