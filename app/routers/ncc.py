@@ -864,7 +864,12 @@ def xoa_de_xuat(ycm_id: int, db: Session = Depends(get_db),
 def ds_thanh_toan_mua(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
     """Danh sách PO kèm tình trạng thanh toán: tổng, đề nghị thanh toán lũy kế,
     ngày thanh toán tiếp theo, số hóa đơn mua + mã đơn bán liên quan."""
-    from ..models import ThanhToan as _TT, HoaDon
+    from ..models import ThanhToan as _TT, HoaDon, HangHoa
+    hh_tens = {}
+    for _dmid, _ten in (db.query(DonMuaCt.don_mua_id, HangHoa.ten)
+                        .join(HangHoa, DonMuaCt.hang_hoa_id == HangHoa.id)
+                        .order_by(DonMuaCt.id).all()):
+        hh_tens.setdefault(_dmid, []).append(_ten or "")
     out = []
     for dm in db.query(DonMua).order_by(DonMua.id.desc()).limit(300).all():
         ncc = db.get(NhaCungCap, dm.nha_cung_cap_id)
@@ -883,6 +888,10 @@ def ds_thanh_toan_mua(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "
                 ngay_tt = str(tt_cuoi.ngay)
         out.append({"id": dm.id, "so": dm.so, "ngay": str(dm.ngay or "")[:10],
                     "so_hoa_don": dm.so_hoa_don or so_hd, "ma_don_ban": _ma_ban_hang_po(db, dm),
+                    "hang_hoa": ((" · ".join(hh_tens[dm.id][:2])
+                                  + (f" +{len(hh_tens[dm.id]) - 2} mặt hàng nữa"
+                                     if len(hh_tens[dm.id]) > 2 else ""))
+                                 if dm.id in hh_tens else None),
                     "don_hang_id": dm.don_hang_id,
                     "nha_cung_cap_id": dm.nha_cung_cap_id,
                     "ncc_ten": ncc.ten if ncc else None,
