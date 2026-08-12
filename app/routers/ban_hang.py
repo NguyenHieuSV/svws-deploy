@@ -587,6 +587,47 @@ class SuaDotThuVao(_CNBase):
     so_tien: Decimal | None = None
 
 
+from pydantic import BaseModel as _BhBase
+
+
+class SuaTongCongNoVao(_BhBase):
+    so_tien: Decimal | None = None       # tổng phải thu mới (None = không đổi)
+    gia_tri_don: Decimal | None = None   # giá trị đơn hàng mới (None = không đổi)
+
+
+@router.put("/cong-no/{cn_id}/sua-tong")
+def sua_tong_cong_no_khach(cn_id: int, data: SuaTongCongNoVao, db: Session = Depends(get_db),
+                           nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN", "TP_QLNB"))):
+    """Sửa Tổng phải thu của khoản công nợ khách và/hoặc Giá trị đơn hàng gắn kèm —
+    CEO/ADMIN/Trưởng phòng QLNB (chế độ ✏️ Edit). Ghi audit đầy đủ; hóa đơn đã xuất
+    không tự đổi — điều chỉnh hóa đơn làm ở Kế toán."""
+    cn = db.get(CongNo, cn_id)
+    if cn is None or cn.loai != "PHAI_THU":
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy khoản phải thu")
+    cu = {"so_tien": float(cn.so_tien or 0)}
+    if data.so_tien is not None:
+        if Decimal(data.so_tien) <= 0:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Tổng phải thu phải lớn hơn 0")
+        if Decimal(data.so_tien) < Decimal(cn.da_thanh_toan or 0):
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                f"Tổng phải thu không được nhỏ hơn số đã thanh toán "
+                                f"({float(cn.da_thanh_toan or 0):,.0f} đ)")
+        cn.so_tien = data.so_tien
+        da = Decimal(cn.da_thanh_toan or 0)
+        cn.trang_thai = ("THU_DU" if da >= Decimal(cn.so_tien)
+                         else ("THU_MOT_PHAN" if da > 0 else "CHUA_THU"))
+    moi = {"so_tien": float(cn.so_tien or 0)}
+    if data.gia_tri_don is not None and cn.don_hang_id:
+        dh = db.get(DonHang, cn.don_hang_id)
+        if dh is not None:
+            cu["gia_tri_don"] = float(dh.tong_tien or 0)
+            dh.tong_tien = data.gia_tri_don
+            moi["gia_tri_don"] = float(dh.tong_tien or 0)
+    ghi_audit(db, nd.id, "SUA_TONG", "cong_no", cn.id, cu=cu, moi=moi)
+    db.commit()
+    return {"ok": True, "so_tien": float(cn.so_tien or 0), "trang_thai": cn.trang_thai}
+
+
 @router.put("/dot-thu/{tt_id}")
 def sua_dot_thu(tt_id: int, data: SuaDotThuVao, db: Session = Depends(get_db),
                 nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN", "TP_QLNB"))):
