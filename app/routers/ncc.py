@@ -2604,6 +2604,7 @@ def gui_po(dm_id: int, data: GuiPoVao, db: Session = Depends(get_db),
                 "tieu_de": tieu_de}
     dinh_kem = None
     co_pdf = False
+    loi_pdf = None
     if getattr(data, "dinh_kem_pdf", True):
         try:
             ppath = _xuat_po_pdf(db, dm, data)
@@ -2613,8 +2614,9 @@ def gui_po(dm_id: int, data: GuiPoVao, db: Session = Depends(get_db),
                 _luu_po_pdf_kho(db, nd, dm, ppath)   # bản gửi NCC cũng vào kho tệp dùng chung
             except Exception:
                 pass
-        except Exception:
+        except Exception as e:   # KHÔNG nuốt lỗi thầm lặng — trả về để UI cảnh báo rõ
             dinh_kem = None
+            loi_pdf = str(e)[:200]
     kq = lay_email_provider().gui(ncc.email, tieu_de, than, dinh_kem, gui_tu=settings.email_from_ncc)
     ok = kq.get("trang_thai") == "GUI_OK"
     if ok and dm.trang_thai == "DA_DUYET" and not dm.da_dat_hang:
@@ -2625,7 +2627,7 @@ def gui_po(dm_id: int, data: GuiPoVao, db: Session = Depends(get_db),
               moi={"email": ncc.email, "da_gui": ok, "co_pdf": co_pdf, "gui_tu": settings.email_from_ncc})
     db.commit()
     return {"da_gui": ok, "email": ncc.email, "gui_tu": settings.email_from_ncc,
-            "co_pdf": co_pdf, "tieu_de": tieu_de, "ket_qua": kq.get("ghi_chu")}
+            "co_pdf": co_pdf, "loi_pdf": loi_pdf, "tieu_de": tieu_de, "ket_qua": kq.get("ghi_chu")}
 
 
 def _xep_hang_ncc(db: Session, hang_hoa_id: int, so_luong) -> dict:
