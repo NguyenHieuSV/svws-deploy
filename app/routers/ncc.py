@@ -925,7 +925,8 @@ def _ap_dung_tt_mua(db: Session, dm: DonMua, dn: Decimal) -> bool:
     da_tt_100 = tong > 0 and dn >= tong
     if da_tt_100:
         dm.tt_du = True
-        dm.ngay_tt_du = date.today()
+        if not dm.ngay_tt_du:
+            dm.ngay_tt_du = date.today()   # chỉ đóng dấu lần đầu — bổ sung chứng từ không đổi ngày tất toán
         if cn is not None:
             cn.da_thanh_toan = cn.so_tien
             cn.trang_thai = "DA_TRA"
