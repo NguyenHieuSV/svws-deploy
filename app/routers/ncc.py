@@ -887,6 +887,7 @@ def ds_thanh_toan_mua(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "
             if tt_cuoi and tt_cuoi.ngay:
                 ngay_tt = str(tt_cuoi.ngay)
         out.append({"id": dm.id, "so": dm.so, "ngay": str(dm.ngay or "")[:10],
+                    "ncc_mst": ncc.ma_so_thue if ncc else None,
                     "so_hoa_don": dm.so_hoa_don or so_hd, "ma_don_ban": _ma_ban_hang_po(db, dm),
                     "hang_hoa": ((" · ".join(hh_tens[dm.id][:2])
                                   + (f" +{len(hh_tens[dm.id]) - 2} mặt hàng nữa"
@@ -1152,6 +1153,25 @@ def lenh_bank_xong(dm_id: int, db: Session = Depends(get_db),
               moi={"so_tien": float(dm.lenh_bank_tien or 0)})
     db.commit()
     return {"ok": True}
+
+
+class MstVao(_SPBase):
+    ma_so_thue: str | None = None
+
+
+@router.put("/nha-cung-cap/{ncc_id}/mst")
+def cap_nhat_mst_ncc(ncc_id: int, data: MstVao, db: Session = Depends(get_db),
+                     nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    """Bổ sung/sửa Mã số thuế của NCC (dùng ngay trong form thanh toán — chứng từ hóa đơn)."""
+    ncc = db.get(NhaCungCap, ncc_id)
+    if ncc is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy nhà cung cấp")
+    cu = ncc.ma_so_thue
+    ncc.ma_so_thue = (data.ma_so_thue or "").strip()[:20] or None
+    ghi_audit(db, nd.id, "SUA", "nha_cung_cap", ncc.id,
+              cu={"ma_so_thue": cu}, moi={"ma_so_thue": ncc.ma_so_thue})
+    db.commit()
+    return {"ok": True, "ma_so_thue": ncc.ma_so_thue}
 
 
 @router.post("/don-mua/{dm_id}/mo-lai-thanh-toan")
