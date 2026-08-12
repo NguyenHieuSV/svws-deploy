@@ -589,8 +589,8 @@ class SuaDotThuVao(_CNBase):
 
 @router.put("/dot-thu/{tt_id}")
 def sua_dot_thu(tt_id: int, data: SuaDotThuVao, db: Session = Depends(get_db),
-                nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
-    """Sửa một đợt thu đã ghi (ghi nhầm) — chỉ CEO/ADMIN. Sinh bút toán điều chỉnh."""
+                nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN", "TP_QLNB"))):
+    """Sửa một đợt thu đã ghi (ghi nhầm) — CEO/ADMIN/Trưởng phòng QLNB. Sinh bút toán điều chỉnh."""
     from ..models import ThanhToan
     t = db.get(ThanhToan, tt_id)
     if t is None:
@@ -621,8 +621,8 @@ def sua_dot_thu(tt_id: int, data: SuaDotThuVao, db: Session = Depends(get_db),
 
 @router.delete("/dot-thu/{tt_id}")
 def xoa_dot_thu(tt_id: int, db: Session = Depends(get_db),
-                nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
-    """Xóa một đợt thu ghi nhầm — chỉ CEO/ADMIN. Sinh bút toán đảo tương ứng."""
+                nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN", "TP_QLNB"))):
+    """Xóa một đợt thu ghi nhầm — CEO/ADMIN/Trưởng phòng QLNB. Sinh bút toán đảo tương ứng."""
     from ..models import ThanhToan
     t = db.get(ThanhToan, tt_id)
     if t is None:
