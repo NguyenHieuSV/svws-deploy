@@ -1122,6 +1122,21 @@ def chot_thanh_toan_mua(dm_id: int, db: Session = Depends(get_db),
     dm.cho_lenh_bank = True
     dm.lenh_bank_tien = dn
     dm.lenh_bank_luc = gio_hien_tai()
+    # LỆNH CHI phải qua bước DUYỆT (tab Duyệt chi Ngân Hàng) trước khi về Kế toán thực chi
+    from ..models import LenhChiBank
+    lcb = (db.query(LenhChiBank)
+           .filter(LenhChiBank.don_mua_id == dm.id,
+                   LenhChiBank.trang_thai.in_(["CHO_DUYET", "DA_DUYET"]))
+           .order_by(LenhChiBank.id.desc()).first())
+    if lcb is None:
+        db.add(LenhChiBank(don_mua_id=dm.id, so_tien=dn, de_nghi_luc=gio_hien_tai()))
+    else:
+        lcb.so_tien = dn
+        lcb.de_nghi_luc = gio_hien_tai()
+        if lcb.trang_thai == "DA_DUYET":     # đổi số tiền sau khi đã duyệt → duyệt lại
+            lcb.trang_thai = "CHO_DUYET"
+            lcb.duyet_luc = None
+            lcb.nguoi_duyet = None
     ghi_audit(db, nd.id, "CHOT_TT_MUA", "don_mua", dm.id,
               moi={"de_nghi_tt": float(dn), "tong": float(tong), "tt_du": da_tt_100})
     from ..fin_snapshot import snapshot_financial
@@ -1130,13 +1145,89 @@ def chot_thanh_toan_mua(dm_id: int, db: Session = Depends(get_db),
     return {"ok": True, "da_tt_100": da_tt_100, "con_lai": float(tong - dn)}
 
 
+def _lcb_dict(db, r):
+    dm = db.get(DonMua, r.don_mua_id) if r.don_mua_id else None
+    ncc = db.get(NhaCungCap, dm.nha_cung_cap_id) if dm else None
+    nguoi = db.get(NguoiDung, r.nguoi_duyet) if r.nguoi_duyet else None
+    return {"id": r.id, "don_mua_id": r.don_mua_id,
+            "so": (dm.so if dm else None) or (f"PO-{r.don_mua_id}" if r.don_mua_id else "—"),
+            "so_hoa_don": dm.so_hoa_don if dm else None,
+            "ma_don_ban": _ma_ban_hang_po(db, dm) if dm else None,
+            "ncc_ten": ncc.ten if ncc else None,
+            "tong_tien": float(dm.tong_tien or 0) if dm else 0,
+            "so_tien": float(r.so_tien or 0),
+            "de_nghi_luc": str(r.de_nghi_luc)[:16] if r.de_nghi_luc else None,
+            "trang_thai": r.trang_thai,
+            "duyet_luc": str(r.duyet_luc)[:16] if r.duyet_luc else None,
+            "nguoi_duyet": getattr(nguoi, "ho_ten", None) or (nguoi.email if nguoi else None),
+            "chi_luc": str(r.chi_luc)[:16] if r.chi_luc else None}
+
+
+@router.get("/duyet-chi-bank")
+def ds_duyet_chi_bank(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
+    """Tab Duyệt chi Ngân Hàng: lệnh chờ duyệt · đã duyệt chờ thực chi · lịch sử thực chi."""
+    from ..models import LenhChiBank
+    rows = db.query(LenhChiBank).order_by(LenhChiBank.id.desc()).limit(600).all()
+    return {"cho_duyet": [_lcb_dict(db, r) for r in rows if r.trang_thai == "CHO_DUYET"],
+            "da_duyet": [_lcb_dict(db, r) for r in rows if r.trang_thai == "DA_DUYET"],
+            "lich_su": [_lcb_dict(db, r) for r in rows if r.trang_thai == "DA_CHI"]}
+
+
+@router.post("/lenh-chi-bank/{lcb_id}/duyet")
+def duyet_lenh_chi_bank(lcb_id: int, db: Session = Depends(get_db),
+                        nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN", "KTT"))):
+    """DUYỆT lệnh chi ngân hàng — sau bước này lệnh mới đổ về Kế toán để thực chi."""
+    from ..models import LenhChiBank
+    from ..nhac_viec_service import gio_hien_tai
+    r = db.get(LenhChiBank, lcb_id)
+    if r is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy lệnh chi")
+    if r.trang_thai != "CHO_DUYET":
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Lệnh chi đang ở trạng thái {r.trang_thai}")
+    r.trang_thai = "DA_DUYET"
+    r.duyet_luc = gio_hien_tai()
+    r.nguoi_duyet = nd.id
+    ghi_audit(db, nd.id, "DUYET_CHI_BANK", "lenh_chi_bank", r.id,
+              moi={"don_mua_id": r.don_mua_id, "so_tien": float(r.so_tien or 0)})
+    db.commit()
+    return _lcb_dict(db, r)
+
+
+@router.post("/lenh-chi-bank/{lcb_id}/tu-choi")
+def tu_choi_lenh_chi_bank(lcb_id: int, db: Session = Depends(get_db),
+                          nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN", "KTT"))):
+    """TỪ CHỐI lệnh chi — lệnh bị gỡ, PO quay về Thanh toán mua hàng để kế toán chỉnh lại."""
+    from ..models import LenhChiBank
+    from ..nhac_viec_service import gio_hien_tai
+    r = db.get(LenhChiBank, lcb_id)
+    if r is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy lệnh chi")
+    if r.trang_thai not in ("CHO_DUYET", "DA_DUYET"):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Lệnh chi đang ở trạng thái {r.trang_thai}")
+    r.trang_thai = "TU_CHOI"
+    r.duyet_luc = gio_hien_tai()
+    r.nguoi_duyet = nd.id
+    dm = db.get(DonMua, r.don_mua_id) if r.don_mua_id else None
+    if dm is not None:
+        dm.cho_lenh_bank = False
+    ghi_audit(db, nd.id, "TU_CHOI_CHI_BANK", "lenh_chi_bank", r.id,
+              moi={"don_mua_id": r.don_mua_id, "so_tien": float(r.so_tien or 0)})
+    db.commit()
+    return _lcb_dict(db, r)
+
+
 @router.get("/lenh-thanh-toan")
 def ds_lenh_thanh_toan(db: Session = Depends(get_db), _=Depends(yeu_cau("ke_toan", "XEM"))):
     """Bảng THANH TOÁN (Kế toán → Thống kê thu–chi): PO đã tick chốt thanh toán,
     chờ lệnh ngân hàng thật rồi Cập nhật vào form Biến động ngân hàng."""
+    from ..models import LenhChiBank
+    duyet_ids = {r.don_mua_id for r in db.query(LenhChiBank)
+                 .filter(LenhChiBank.trang_thai == "DA_DUYET").all()}
     out = []
     for dm in (db.query(DonMua).filter(DonMua.cho_lenh_bank.is_(True))
                .order_by(DonMua.id.desc()).all()):
+        if dm.id not in duyet_ids:
+            continue                        # chưa qua Duyệt chi Ngân Hàng → chưa về Kế toán
         ncc = db.get(NhaCungCap, dm.nha_cung_cap_id)
         out.append({"id": dm.id, "so": dm.so or f"PO-{dm.id}",
                     "chot_luc": str(dm.lenh_bank_luc)[:16] if dm.lenh_bank_luc else None,
@@ -1158,6 +1249,13 @@ def lenh_bank_xong(dm_id: int, db: Session = Depends(get_db),
     if dm is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đơn mua")
     dm.cho_lenh_bank = False
+    from ..models import LenhChiBank
+    from ..nhac_viec_service import gio_hien_tai
+    lcb = (db.query(LenhChiBank).filter_by(don_mua_id=dm.id, trang_thai="DA_DUYET")
+           .order_by(LenhChiBank.id.desc()).first())
+    if lcb is not None:
+        lcb.trang_thai = "DA_CHI"
+        lcb.chi_luc = gio_hien_tai()
     ghi_audit(db, nd.id, "LENH_BANK_XONG", "don_mua", dm.id,
               moi={"so_tien": float(dm.lenh_bank_tien or 0)})
     db.commit()

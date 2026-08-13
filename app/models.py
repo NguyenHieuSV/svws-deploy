@@ -908,6 +908,19 @@ class VonMuc(Base):
     ghi_chu: Mapped[str | None] = mapped_column(String(200), nullable=True)
 
 
+class LenhChiBank(Base):
+    __tablename__ = "lenh_chi_bank"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    don_mua_id: Mapped[int | None] = mapped_column(ForeignKey("don_mua.id"), nullable=True)
+    so_tien: Mapped[Decimal] = mapped_column(Numeric(18, 0), default=0)
+    de_nghi_luc: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    trang_thai: Mapped[str] = mapped_column(String(12), default="CHO_DUYET")
+    duyet_luc: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    nguoi_duyet: Mapped[int | None] = mapped_column(ForeignKey("nguoi_dung.id"), nullable=True)
+    chi_luc: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    ghi_chu: Mapped[str | None] = mapped_column(String(200), nullable=True)
+
+
 class ThamSoTaiChinh(Base):
     __tablename__ = "tham_so_tai_chinh"
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, default=1)
