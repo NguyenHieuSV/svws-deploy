@@ -122,8 +122,8 @@ ON CONFLICT (vai_tro_id, module) DO UPDATE SET muc = EXCLUDED.muc;
 INSERT INTO han_muc_duyet (loai, vai_tro_id, nguong_tu, nguong_den)
 SELECT v.loai, vt.id, v.tu, v.den
 FROM (VALUES
-  ('po','TP_CU',0,10000000),
-  ('po','CEO',10000001,NULL::numeric),
+  ('po','TP_CU',0,25000000),
+  ('po','CEO',25000001,NULL::numeric),
   ('chi_phi_du_an','TP_DA',0,5000000),
   ('chi_phi_du_an','KTT',5000001,50000000),
   ('chi_phi_du_an','CEO',50000001,NULL::numeric),
