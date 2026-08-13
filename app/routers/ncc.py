@@ -1320,12 +1320,21 @@ def xoa_thanh_toan_mua(dm_id: int, db: Session = Depends(get_db),
                                 "thanh toán đã ghi — không thể xóa theo dõi thanh toán để giữ vết kế toán. "
                                 "Điều chỉnh bằng phiếu chi hoặc đề nghị thanh toán mới.")
         db.delete(cn)
+    # gỡ lệnh chi ngân hàng đang mở kèm theo (nhập nhầm thì lệnh chờ duyệt cũng bỏ)
+    from ..models import LenhChiBank
+    (db.query(LenhChiBank)
+       .filter(LenhChiBank.don_mua_id == dm_id,
+               LenhChiBank.trang_thai.in_(["CHO_DUYET", "DA_DUYET"]))
+       .delete(synchronize_session=False))
     cu = {"de_nghi_tt": float(dm.de_nghi_tt or 0), "tt_du": bool(dm.tt_du)}
     dm.de_nghi_tt = 0
     dm.ngay_tt_tiep = None
     dm.tt_du = False
     dm.ngay_tt_du = None
     dm.ngay_tt = None
+    dm.cho_lenh_bank = False
+    dm.lenh_bank_tien = None
+    dm.lenh_bank_luc = None
     ghi_audit(db, nd.id, "XOA", "thanh_toan_mua", dm.id, cu=cu)
     db.commit()
     return {"da_xoa": True, "so": dm.so or f"PO-{dm.id}"}
@@ -1407,6 +1416,8 @@ def xoa_don_mua(dm_id: int, db: Session = Depends(get_db),
         if y.trang_thai == "DA_TAO_PO":
             y.trang_thai = "DA_DUYET"
     db.query(DonMuaCt).filter_by(don_mua_id=dm_id).delete()
+    from ..models import LenhChiBank
+    db.query(LenhChiBank).filter_by(don_mua_id=dm_id).delete(synchronize_session=False)
     try:
         db.delete(dm)
         db.flush()
