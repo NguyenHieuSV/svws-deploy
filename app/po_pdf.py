@@ -26,15 +26,15 @@ _DEFAULT_SIGN = os.path.join(os.path.dirname(__file__), "assets", "e_sign.png")
 def _dang_ky_font(regular, bold):
     global _FONTS_OK
     if _FONTS_OK:
-        return ("SV", "SVb")
+        return _FONTS_OK          # trả đúng cặp font đã chốt ở lần đầu (kể cả fallback)
     reg = regular if os.path.exists(regular) else None
     bd = bold if os.path.exists(bold) else None
     if reg:
         pdfmetrics.registerFont(TTFont("SV", reg))
     if bd:
         pdfmetrics.registerFont(TTFont("SVb", bd))
-    _FONTS_OK = True
-    return ("SV" if reg else "Helvetica", "SVb" if bd else "Helvetica-Bold")
+    _FONTS_OK = ("SV" if reg else "Helvetica", "SVb" if bd else "Helvetica-Bold")
+    return _FONTS_OK
 
 
 def _tien(x):

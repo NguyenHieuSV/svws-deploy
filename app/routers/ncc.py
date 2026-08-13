@@ -2723,17 +2723,28 @@ def gui_po(dm_id: int, data: GuiPoVao, db: Session = Depends(get_db),
     co_pdf = False
     loi_pdf = None
     if getattr(data, "dinh_kem_pdf", True):
-        try:
-            ppath = _xuat_po_pdf(db, dm, data)
-            dinh_kem = [{"duong_dan": ppath, "ten_file": os.path.basename(ppath)}]
-            co_pdf = True
+        for lan in (1, 2):                    # PDF lỗi thoáng qua → tự thử lại 1 lần
             try:
-                _luu_po_pdf_kho(db, nd, dm, ppath)   # bản gửi NCC cũng vào kho tệp dùng chung
-            except Exception:
-                pass
-        except Exception as e:   # KHÔNG nuốt lỗi thầm lặng — trả về để UI cảnh báo rõ
-            dinh_kem = None
-            loi_pdf = str(e)[:200]
+                ppath = _xuat_po_pdf(db, dm, data)
+                dinh_kem = [{"duong_dan": ppath, "ten_file": os.path.basename(ppath)}]
+                co_pdf = True
+                loi_pdf = None
+                try:
+                    _luu_po_pdf_kho(db, nd, dm, ppath)   # bản gửi NCC cũng vào kho tệp dùng chung
+                except Exception:
+                    pass
+                break
+            except Exception as e:
+                dinh_kem = None
+                loi_pdf = str(e)[:200]
+        if not co_pdf:
+            # BẮT BUỘC có PDF: không gửi email thiếu chứng từ — báo rõ để người dùng bấm gửi lại
+            ghi_audit(db, nd.id, "GUI_PO_LOI_PDF", "don_mua", dm.id, moi={"loi_pdf": loi_pdf})
+            db.commit()
+            return {"da_gui": False, "email": ncc.email, "co_pdf": False, "loi_pdf": loi_pdf,
+                    "ly_do": "KHÔNG gửi email vì tạo PDF thất bại (đã thử 2 lần): "
+                             + (loi_pdf or "lỗi không rõ")
+                             + " — Bấm '✉️ Gửi PO' lại lần nữa; nếu vẫn lỗi, dùng nút 📄 Tải PDF và báo quản trị."}
     kq = lay_email_provider().gui(ncc.email, tieu_de, than, dinh_kem, gui_tu=settings.email_from_ncc)
     ok = kq.get("trang_thai") == "GUI_OK"
     if ok and dm.trang_thai == "DA_DUYET" and not dm.da_dat_hang:
