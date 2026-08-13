@@ -1418,6 +1418,13 @@ def xoa_don_mua(dm_id: int, db: Session = Depends(get_db),
     db.query(DonMuaCt).filter_by(don_mua_id=dm_id).delete()
     from ..models import LenhChiBank
     db.query(LenhChiBank).filter_by(don_mua_id=dm_id).delete(synchronize_session=False)
+    # dọn PDF của PO trong kho tệp dùng chung (nếu có) — tránh tệp mồ côi
+    for t in db.query(TepDinhKem).filter_by(doi_tuong="DON_MUA", doi_tuong_id=dm_id).all():
+        try:
+            xoa_tep_chung(t.duong_dan)
+        except Exception:
+            pass
+        db.delete(t)
     try:
         db.delete(dm)
         db.flush()
