@@ -953,6 +953,29 @@ def _ap_dung_tt_mua(db: Session, dm: DonMua, dn: Decimal) -> bool:
     return da_tt_100
 
 
+def _hang_cho_duyet_chi(db: Session, dm: DonMua, dn: Decimal):
+    """Đưa đề nghị chi vào HÀNG CHỜ DUYỆT (tab Duyệt chi Ngân Hàng). KHÔNG phân bổ
+    vào Công nợ/Kiểm soát ở bước này — phân bổ chỉ chạy khi CEO/KTT bấm Duyệt chi."""
+    from ..nhac_viec_service import gio_hien_tai
+    from ..models import LenhChiBank
+    dm.cho_lenh_bank = True
+    dm.lenh_bank_tien = dn
+    dm.lenh_bank_luc = gio_hien_tai()
+    lcb = (db.query(LenhChiBank)
+           .filter(LenhChiBank.don_mua_id == dm.id,
+                   LenhChiBank.trang_thai.in_(["CHO_DUYET", "DA_DUYET"]))
+           .order_by(LenhChiBank.id.desc()).first())
+    if lcb is None:
+        db.add(LenhChiBank(don_mua_id=dm.id, so_tien=dn, de_nghi_luc=gio_hien_tai()))
+    else:
+        lcb.so_tien = dn
+        lcb.de_nghi_luc = gio_hien_tai()
+        if lcb.trang_thai == "DA_DUYET":     # đổi số tiền sau khi đã duyệt → duyệt lại
+            lcb.trang_thai = "CHO_DUYET"
+            lcb.duyet_luc = None
+            lcb.nguoi_duyet = None
+
+
 @router.get("/don-mua/{dm_id}/dot-thanh-toan")
 def ds_dot_thanh_toan(dm_id: int, db: Session = Depends(get_db),
                       _=Depends(yeu_cau(MODULE, "XEM"))):
@@ -1079,7 +1102,22 @@ def cap_nhat_thanh_toan_mua(dm_id: int, data: ThanhToanMuaVao, db: Session = Dep
                            so_tien=Decimal(data.so_tien_dot),
                            hinh_thuc=(data.hinh_thuc or "").strip()[:30] or None,
                            nguoi_tao=nhan_vien_id_cua(db, nd.id)))
-    da_tt_100 = _ap_dung_tt_mua(db, dm, dn)
+    # KHÔNG phân bổ ngay: khoản chỉ vào Công nợ/Kiểm soát SAU KHI lệnh chi được DUYỆT
+    if dn == da_cu:
+        # số tiền không đổi (bổ sung chứng từ / hạn) → chỉ đồng bộ sang công nợ hiện có
+        cn = db.query(CongNo).filter_by(don_mua_id=dm.id).first()
+        if cn is not None:
+            if dm.so_hoa_don:
+                cn.so_ct = dm.so_hoa_don[:60]
+            if dm.ngay_tt_tiep:
+                cn.han = dm.ngay_tt_tiep
+        da_tt_100 = bool(dm.tt_du)
+        cho_duyet_chi = False
+    else:
+        dm.de_nghi_tt = dn
+        _hang_cho_duyet_chi(db, dm, dn)
+        da_tt_100 = False
+        cho_duyet_chi = True
     ghi_audit(db, nd.id, "THANH_TOAN_MUA", "don_mua", dm.id,
               moi={"de_nghi_tt": float(dn), "tong": float(tong), "tt_du": da_tt_100,
                    "so_tien_dot": float(data.so_tien_dot) if data.so_tien_dot is not None else None,
@@ -1088,7 +1126,7 @@ def cap_nhat_thanh_toan_mua(dm_id: int, data: ThanhToanMuaVao, db: Session = Dep
     snapshot_financial(db, "TT MUA " + (dm.so or f"PO-{dm.id}"))
     db.commit()
     return {"ok": True, "da_tt_100": da_tt_100, "da_thanh_toan": float(dn),
-            "con_lai": float(tong - dn)}
+            "con_lai": float(tong - dn), "cho_duyet_chi": cho_duyet_chi}
 
 
 @router.post("/don-mua/{dm_id}/chot-thanh-toan")
@@ -1116,27 +1154,10 @@ def chot_thanh_toan_mua(dm_id: int, db: Session = Depends(get_db),
             raise HTTPException(status.HTTP_400_BAD_REQUEST,
                                 "Khoản còn nợ cần Ngày thanh toán tiếp theo — nhập ở bảng "
                                 "Thanh toán mua hàng rồi tick lại.")
-    da_tt_100 = _ap_dung_tt_mua(db, dm, dn)
-    # đưa vào bảng THANH TOÁN bên Kế toán (chờ lệnh ngân hàng thật → Biến động ngân hàng)
-    from ..nhac_viec_service import gio_hien_tai
-    dm.cho_lenh_bank = True
-    dm.lenh_bank_tien = dn
-    dm.lenh_bank_luc = gio_hien_tai()
-    # LỆNH CHI phải qua bước DUYỆT (tab Duyệt chi Ngân Hàng) trước khi về Kế toán thực chi
-    from ..models import LenhChiBank
-    lcb = (db.query(LenhChiBank)
-           .filter(LenhChiBank.don_mua_id == dm.id,
-                   LenhChiBank.trang_thai.in_(["CHO_DUYET", "DA_DUYET"]))
-           .order_by(LenhChiBank.id.desc()).first())
-    if lcb is None:
-        db.add(LenhChiBank(don_mua_id=dm.id, so_tien=dn, de_nghi_luc=gio_hien_tai()))
-    else:
-        lcb.so_tien = dn
-        lcb.de_nghi_luc = gio_hien_tai()
-        if lcb.trang_thai == "DA_DUYET":     # đổi số tiền sau khi đã duyệt → duyệt lại
-            lcb.trang_thai = "CHO_DUYET"
-            lcb.duyet_luc = None
-            lcb.nguoi_duyet = None
+    # KHÔNG phân bổ ở bước này — chỉ đưa lệnh chi vào hàng chờ DUYỆT (tab Duyệt chi
+    # Ngân Hàng); CEO/KTT duyệt xong hệ thống mới phân bổ vào Công nợ / Kiểm soát.
+    da_tt_100 = dn >= tong
+    _hang_cho_duyet_chi(db, dm, dn)
     ghi_audit(db, nd.id, "CHOT_TT_MUA", "don_mua", dm.id,
               moi={"de_nghi_tt": float(dn), "tong": float(tong), "tt_du": da_tt_100})
     from ..fin_snapshot import snapshot_financial
@@ -1187,6 +1208,14 @@ def duyet_lenh_chi_bank(lcb_id: int, db: Session = Depends(get_db),
     r.trang_thai = "DA_DUYET"
     r.duyet_luc = gio_hien_tai()
     r.nguoi_duyet = nd.id
+    # DUYỆT XONG mới PHÂN BỔ: đủ 100% → Kiểm soát; còn thiếu → Công nợ phải trả
+    dm = db.get(DonMua, r.don_mua_id) if r.don_mua_id else None
+    if dm is not None:
+        _ap_dung_tt_mua(db, dm, Decimal(r.so_tien or 0))
+        dm.cho_lenh_bank = True
+        dm.lenh_bank_tien = r.so_tien
+        if not dm.lenh_bank_luc:
+            dm.lenh_bank_luc = gio_hien_tai()
     ghi_audit(db, nd.id, "DUYET_CHI_BANK", "lenh_chi_bank", r.id,
               moi={"don_mua_id": r.don_mua_id, "so_tien": float(r.so_tien or 0)})
     db.commit()
