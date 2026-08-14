@@ -2144,6 +2144,9 @@ def xoa_cong_no_ncc(cn_id: int, ep: bool = False, db: Session = Depends(get_db),
                   "han": str(cn.han) if cn.han else None},
               moi={"ep_xoa": bool(ep), "lan_tt_da_go": so_lan_go,
                    "phieu_da_tach": so_phieu_tach} if ep else None)
+    # gỡ các lệnh chi ngân hàng tham chiếu khoản này (kể cả lịch sử) — tránh kẹt khóa ngoại
+    from ..models import LenhChiBank
+    db.query(LenhChiBank).filter_by(cong_no_id=cn.id).delete(synchronize_session=False)
     db.delete(cn)
     db.commit()
     return {"da_xoa": True, "ep_xoa": bool(ep), "lan_tt_da_go": so_lan_go}
