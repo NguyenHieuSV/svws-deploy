@@ -633,7 +633,8 @@ def _tinh_lai_lo_tong(db: Session) -> dict:
     con_lai_expr = func.coalesce(func.sum(CongNo.so_tien - CongNo.da_thanh_toan), 0)
     theo_ma, tong_dt, tong_cp = [], 0.0, 0.0
     for dh in db.query(DonHang).order_by(DonHang.id.desc()).all():
-        doanh_thu = float(dh.tong_tien or 0)
+        # DOANH THU tính GỒM VAT — cùng cơ sở với chi phí (PO & công nợ đều gồm VAT)
+        doanh_thu = float(dh.tong_tien or 0) + float(dh.tien_thue or 0)
         po_ids = [i for (i,) in db.query(DonMua.id).filter(DonMua.don_hang_id == dh.id).all()]
         ttm = float(db.query(func.coalesce(func.sum(DonMua.de_nghi_tt), 0))
                     .filter(DonMua.don_hang_id == dh.id).scalar() or 0)

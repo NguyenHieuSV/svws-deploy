@@ -1965,7 +1965,8 @@ def chi_phi_theo_don(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "X
     con_lai_expr = func.coalesce(func.sum(CongNo.so_tien - CongNo.da_thanh_toan), 0)
     out = []
     for dh in db.query(DonHang).order_by(DonHang.id.desc()).all():
-        doanh_thu = float(dh.tong_tien or 0)
+        # DOANH THU tính GỒM VAT — cùng cơ sở với chi phí (PO & công nợ đều gồm VAT)
+        doanh_thu = float(dh.tong_tien or 0) + float(dh.tien_thue or 0)
         po_ids = [i for (i,) in db.query(DonMua.id).filter(DonMua.don_hang_id == dh.id).all()]
         # 1) Thanh toán mua hàng = tổng đề nghị thanh toán của các PO gắn mã đơn bán
         thanh_toan_mua = float(db.query(func.coalesce(func.sum(DonMua.de_nghi_tt), 0))
