@@ -199,6 +199,20 @@ class AppChatProvider:
                 "loi": "Chế độ APP chỉ nhắn riêng; muốn đăng vào phòng chung hãy điền thêm GCHAT_WEBHOOK_URL."}
 
 
+def gui_webhook_rieng(url: str, noi_dung: str) -> dict:
+    """Đăng tin vào MỘT webhook chỉ định (group riêng) — độc lập với phòng nhắc việc chung
+    và độc lập với CHAT_PROVIDER. Chưa cấu hình thì trả lỗi rõ, không gửi nhầm group khác."""
+    url = (url or "").strip()
+    if not url:
+        return {"da_gui": False, "che_do": "WEBHOOK_RIENG",
+                "loi": "Chưa điền GCHAT_WEBHOOK_DUYET_CHI (webhook của group riêng) trên Render."}
+    try:
+        _http_json(url, {"text": noi_dung})
+        return {"da_gui": True, "che_do": "WEBHOOK_RIENG"}
+    except Exception as e:
+        return {"da_gui": False, "che_do": "WEBHOOK_RIENG", "loi": _loi_ro_rang(e)}
+
+
 def lay_chat_provider() -> ChatProvider:
     ch = (settings.chat_provider or "DEMO").strip().upper()
     if ch == "APP":

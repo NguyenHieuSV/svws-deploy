@@ -1197,10 +1197,10 @@ def ds_duyet_chi_bank(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "
 @router.post("/duyet-chi-bank/gui-thu")
 def gui_thu_duyet_chi_chat(db: Session = Depends(get_db),
                            nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN", "KTT"))):
-    """Gửi tin NHẮN THỬ vào group Google Chat để kiểm tra cấu hình webhook."""
-    from ..chat_gateway import lay_chat_provider
+    """Gửi tin NHẮN THỬ vào GROUP RIÊNG của Duyệt chi (webhook GCHAT_WEBHOOK_DUYET_CHI)."""
+    from ..chat_gateway import gui_webhook_rieng
     ten_nd = getattr(nd, "ho_ten", None) or nd.email
-    return lay_chat_provider().gui_phong(
+    return gui_webhook_rieng(settings.gchat_webhook_duyet_chi,
         "🔔 SVWS — tin nhắn thử từ tab Duyệt chi Ngân Hàng.\n"
         f"Người gửi: {ten_nd}. Thấy tin này trong group nghĩa là cấu hình ĐÃ ĐÚNG ✅")
 
@@ -1231,15 +1231,15 @@ def duyet_lenh_chi_bank(lcb_id: int, db: Session = Depends(get_db),
               moi={"don_mua_id": r.don_mua_id, "so_tien": float(r.so_tien or 0)})
     db.commit()
     kq = _lcb_dict(db, r)
-    # 🔔 Báo lên group Google Chat SAU khi đã lưu xong — lỗi chat không ảnh hưởng nghiệp vụ
+    # 🔔 Báo lên GROUP RIÊNG (webhook Duyệt chi) SAU khi đã lưu xong — lỗi chat không ảnh hưởng nghiệp vụ
     try:
-        from ..chat_gateway import lay_chat_provider, dang_bat
-        if dang_bat():
+        from ..chat_gateway import gui_webhook_rieng
+        if (settings.gchat_webhook_duyet_chi or "").strip():
             ten_nd = getattr(nd, "ho_ten", None) or nd.email
             tien = f"{float(r.so_tien or 0):,.0f}".replace(",", ".")
             phan_bo = ("đủ 100% → PO vào Kiểm soát" if (dm is not None and dm.tt_du)
                        else "phần còn lại vào Công nợ phải trả")
-            lay_chat_provider().gui_phong(
+            gui_webhook_rieng(settings.gchat_webhook_duyet_chi,
                 "🏦 *DUYỆT CHI NGÂN HÀNG*\n"
                 f"• PO: {kq['so']} · NCC: {kq.get('ncc_ten') or '—'}\n"
                 f"• Số tiền duyệt chi: {tien} ₫\n"

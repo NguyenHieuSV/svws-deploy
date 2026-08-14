@@ -52,6 +52,7 @@ class Settings(BaseSettings):
     # WEBHOOK: đăng vào một Phòng chung qua Incoming Webhook (setup 5 phút)
     chat_provider: str = "DEMO"
     gchat_webhook_url: str = ""          # dùng cho chế độ WEBHOOK
+    gchat_webhook_duyet_chi: str = ""    # webhook GROUP RIÊNG cho Duyệt chi Ngân Hàng (hạn chế người xem)
     gchat_service_account: str = ""      # dùng cho chế độ APP: DÁN NGUYÊN nội dung file JSON key
     nhac_viec_gui_khi_tao: bool = True   # gửi ngay khi vừa đặt lời nhắc
     nhac_viec_ban_tin: bool = True       # bản tin tổng hợp đầu ngày
