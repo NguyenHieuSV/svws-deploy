@@ -924,6 +924,9 @@ class LenhChiBank(Base):
     __tablename__ = "lenh_chi_bank"
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     don_mua_id: Mapped[int | None] = mapped_column(ForeignKey("don_mua.id"), nullable=True)
+    cong_no_id: Mapped[int | None] = mapped_column(ForeignKey("cong_no.id"), nullable=True)
+    hinh_thuc: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    ngay_tt: Mapped[date | None] = mapped_column(Date, nullable=True)
     so_tien: Mapped[Decimal] = mapped_column(Numeric(18, 0), default=0)
     de_nghi_luc: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     trang_thai: Mapped[str] = mapped_column(String(12), default="CHO_DUYET")

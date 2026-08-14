@@ -1168,14 +1168,28 @@ def chot_thanh_toan_mua(dm_id: int, db: Session = Depends(get_db),
 
 def _lcb_dict(db, r):
     dm = db.get(DonMua, r.don_mua_id) if r.don_mua_id else None
-    ncc = db.get(NhaCungCap, dm.nha_cung_cap_id) if dm else None
+    cn = db.get(CongNo, r.cong_no_id) if getattr(r, "cong_no_id", None) else None
+    ncc = None
+    if dm is not None:
+        ncc = db.get(NhaCungCap, dm.nha_cung_cap_id)
+    elif cn is not None and cn.nha_cung_cap_id:
+        ncc = db.get(NhaCungCap, cn.nha_cung_cap_id)
+    ma_cn = None
+    if cn is not None:
+        if cn.don_mua_id:
+            dm_cn = db.get(DonMua, cn.don_mua_id)
+            ma_cn = _ma_ban_hang_po(db, dm_cn) if dm_cn else None
+        else:
+            ma_cn = cn.ma_ban_ngoai
     nguoi = db.get(NguoiDung, r.nguoi_duyet) if r.nguoi_duyet else None
-    return {"id": r.id, "don_mua_id": r.don_mua_id,
-            "so": (dm.so if dm else None) or (f"PO-{r.don_mua_id}" if r.don_mua_id else "—"),
-            "so_hoa_don": dm.so_hoa_don if dm else None,
-            "ma_don_ban": _ma_ban_hang_po(db, dm) if dm else None,
+    return {"id": r.id, "don_mua_id": r.don_mua_id, "cong_no_id": getattr(r, "cong_no_id", None),
+            "nguon": "PO" if dm is not None else ("CONG_NO" if cn is not None else "—"),
+            "so": (dm.so if dm else None) or (f"CN-{cn.id}" if cn else None)
+                  or (f"PO-{r.don_mua_id}" if r.don_mua_id else "—"),
+            "so_hoa_don": (dm.so_hoa_don if dm else None) or (cn.so_ct if cn else None),
+            "ma_don_ban": (_ma_ban_hang_po(db, dm) if dm else None) or ma_cn,
             "ncc_ten": ncc.ten if ncc else None,
-            "tong_tien": float(dm.tong_tien or 0) if dm else 0,
+            "tong_tien": float(dm.tong_tien or 0) if dm else (float(cn.so_tien or 0) if cn else 0),
             "so_tien": float(r.so_tien or 0),
             "de_nghi_luc": str(r.de_nghi_luc)[:16] if r.de_nghi_luc else None,
             "trang_thai": r.trang_thai,
@@ -1227,6 +1241,18 @@ def duyet_lenh_chi_bank(lcb_id: int, db: Session = Depends(get_db),
         dm.lenh_bank_tien = r.so_tien
         if not dm.lenh_bank_luc:
             dm.lenh_bank_luc = gio_hien_tai()
+    # Lệnh trả CÔNG NỢ: duyệt = thực chi ngay (ghi lần trả + bút toán) → vào Lịch sử thực chi
+    cn = db.get(CongNo, r.cong_no_id) if getattr(r, "cong_no_id", None) else None
+    if cn is not None:
+        con_lai = Decimal(cn.so_tien or 0) - Decimal(cn.da_thanh_toan or 0)
+        if Decimal(r.so_tien or 0) > con_lai:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                f"Số tiền lệnh ({float(r.so_tien or 0):,.0f}) vượt còn lại hiện tại "
+                                f"({float(con_lai):,.0f}) của khoản công nợ — từ chối lệnh và đề nghị lại.")
+        _thuc_hien_tra_ncc(db, nd, cn, Decimal(r.so_tien or 0), r.hinh_thuc,
+                           r.ngay_tt or date.today())
+        r.trang_thai = "DA_CHI"
+        r.chi_luc = gio_hien_tai()
     ghi_audit(db, nd.id, "DUYET_CHI_BANK", "lenh_chi_bank", r.id,
               moi={"don_mua_id": r.don_mua_id, "so_tien": float(r.so_tien or 0)})
     db.commit()
@@ -2952,16 +2978,35 @@ def thanh_toan_ncc(cn_id: int, data: NccTraVao, db: Session = Depends(get_db),
     if data.so_tien > con_lai:
         raise HTTPException(status.HTTP_400_BAD_REQUEST,
                             f"Thanh toán {data.so_tien:,.0f} vượt còn lại {con_lai:,.0f}")
-    ngay_tra = data.ngay_thanh_toan or date.today()
-    db.add(ThanhToan(cong_no_id=cn.id, so_tien=data.so_tien, ngay=ngay_tra, hinh_thuc=data.hinh_thuc))
-    cn.da_thanh_toan = cn.da_thanh_toan + data.so_tien
+    # KHÔNG chi ngay — tạo LỆNH CHI chờ duyệt ở tab Duyệt chi Ngân Hàng; CEO/KTT
+    # duyệt xong hệ thống mới ghi lần trả + bút toán + giảm công nợ.
+    from ..models import LenhChiBank
+    from ..nhac_viec_service import gio_hien_tai
+    dang_cho = db.query(func.coalesce(func.sum(LenhChiBank.so_tien), 0)).filter(
+        LenhChiBank.cong_no_id == cn.id,
+        LenhChiBank.trang_thai == "CHO_DUYET").scalar() or 0
+    if float(data.so_tien) > float(con_lai) - float(dang_cho):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            f"Khoản này đang có {float(dang_cho):,.0f} chờ duyệt chi — "
+                            f"chỉ còn đề nghị được tối đa {float(con_lai) - float(dang_cho):,.0f}.")
+    db.add(LenhChiBank(cong_no_id=cn.id, so_tien=data.so_tien, de_nghi_luc=gio_hien_tai(),
+                       hinh_thuc=(data.hinh_thuc or "").strip()[:30] or None,
+                       ngay_tt=data.ngay_thanh_toan))
+    ghi_audit(db, nd.id, "DE_NGHI_TRA_CN", "cong_no", cn.id,
+              moi={"so_tien": float(data.so_tien), "hinh_thuc": data.hinh_thuc})
+    db.commit()
+    return {"id": cn.id, "cho_duyet_chi": True, "so_tien": float(data.so_tien),
+            "con_lai": float(cn.so_tien - cn.da_thanh_toan)}
+
+
+def _thuc_hien_tra_ncc(db, nd, cn, so_tien, hinh_thuc, ngay_tra):
+    """THỰC CHI khoản công nợ (chạy khi lệnh chi được DUYỆT): ghi lần trả + bút toán."""
+    db.add(ThanhToan(cong_no_id=cn.id, so_tien=so_tien, ngay=ngay_tra, hinh_thuc=hinh_thuc))
+    cn.da_thanh_toan = cn.da_thanh_toan + so_tien
     cn.trang_thai = "DA_TRA" if cn.da_thanh_toan >= cn.so_tien else "TRA_MOT_PHAN"
     # Bút toán sổ cái: Nợ 331 / Có 111/112 (đối xứng với thu tiền khách)
     from ..hach_toan import hach_toan_tra_ncc
-    tien_mat = (data.hinh_thuc or "").upper() in ("TM", "TIEN_MAT", "MAT")
-    hach_toan_tra_ncc(db, cn, data.so_tien, tien_mat=tien_mat)
+    tien_mat = (hinh_thuc or "").upper() in ("TM", "TIEN_MAT", "MAT")
+    hach_toan_tra_ncc(db, cn, so_tien, tien_mat=tien_mat)
     ghi_audit(db, nd.id, "THANH_TOAN", "cong_no", cn.id,
-              moi={"so_tien": float(data.so_tien), "trang_thai": cn.trang_thai})
-    db.commit()
-    return {"id": cn.id, "da_thanh_toan": float(cn.da_thanh_toan),
-            "con_lai": float(cn.so_tien - cn.da_thanh_toan), "trang_thai": cn.trang_thai}
+              moi={"so_tien": float(so_tien), "trang_thai": cn.trang_thai})
