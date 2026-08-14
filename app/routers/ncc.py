@@ -1194,6 +1194,17 @@ def ds_duyet_chi_bank(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "
             "lich_su": [_lcb_dict(db, r) for r in rows if r.trang_thai == "DA_CHI"]}
 
 
+@router.post("/duyet-chi-bank/gui-thu")
+def gui_thu_duyet_chi_chat(db: Session = Depends(get_db),
+                           nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN", "KTT"))):
+    """Gửi tin NHẮN THỬ vào group Google Chat để kiểm tra cấu hình webhook."""
+    from ..chat_gateway import lay_chat_provider
+    ten_nd = getattr(nd, "ho_ten", None) or nd.email
+    return lay_chat_provider().gui_phong(
+        "🔔 SVWS — tin nhắn thử từ tab Duyệt chi Ngân Hàng.\n"
+        f"Người gửi: {ten_nd}. Thấy tin này trong group nghĩa là cấu hình ĐÃ ĐÚNG ✅")
+
+
 @router.post("/lenh-chi-bank/{lcb_id}/duyet")
 def duyet_lenh_chi_bank(lcb_id: int, db: Session = Depends(get_db),
                         nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN", "KTT"))):
@@ -1219,7 +1230,25 @@ def duyet_lenh_chi_bank(lcb_id: int, db: Session = Depends(get_db),
     ghi_audit(db, nd.id, "DUYET_CHI_BANK", "lenh_chi_bank", r.id,
               moi={"don_mua_id": r.don_mua_id, "so_tien": float(r.so_tien or 0)})
     db.commit()
-    return _lcb_dict(db, r)
+    kq = _lcb_dict(db, r)
+    # 🔔 Báo lên group Google Chat SAU khi đã lưu xong — lỗi chat không ảnh hưởng nghiệp vụ
+    try:
+        from ..chat_gateway import lay_chat_provider, dang_bat
+        if dang_bat():
+            ten_nd = getattr(nd, "ho_ten", None) or nd.email
+            tien = f"{float(r.so_tien or 0):,.0f}".replace(",", ".")
+            phan_bo = ("đủ 100% → PO vào Kiểm soát" if (dm is not None and dm.tt_du)
+                       else "phần còn lại vào Công nợ phải trả")
+            lay_chat_provider().gui_phong(
+                "🏦 *DUYỆT CHI NGÂN HÀNG*\n"
+                f"• PO: {kq['so']} · NCC: {kq.get('ncc_ten') or '—'}\n"
+                f"• Số tiền duyệt chi: {tien} ₫\n"
+                + (f"• Mã đơn bán: {kq['ma_don_ban']}\n" if kq.get("ma_don_ban") else "")
+                + f"• Người duyệt: {ten_nd}\n"
+                f"• Phân bổ: {phan_bo} — lệnh đã chuyển sang Kế toán để thực chi.")
+    except Exception:
+        pass
+    return kq
 
 
 @router.post("/lenh-chi-bank/{lcb_id}/tu-choi")
