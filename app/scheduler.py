@@ -13,6 +13,7 @@ from .database import SessionLocal
 
 _CHU_KY = 300          # 5 phút quét một lần
 _luong: threading.Thread | None = None
+_GIO_LAI_LO = ""       # mốc giờ đã chốt Lãi/Lỗ Record gần nhất
 
 
 def _vong_lap():
@@ -27,6 +28,19 @@ def _vong_lap():
                     kq = gui_ban_tin_ngay(db)
                     if kq.get("da_gui"):
                         print(f"[SCHEDULER] Bản tin nhắc việc: {kq}")
+                finally:
+                    db.close()
+            # 📈 Lãi/Lỗ Record: chốt mỗi giờ — bản ghi hôm nay luôn là số mới nhất,
+            # nhờ đó ngày cuối tháng luôn có record chốt tháng dù không ai mở app.
+            global _GIO_LAI_LO
+            gio_nay = gio_hien_tai().strftime("%Y-%m-%d %H")
+            if gio_nay != _GIO_LAI_LO:
+                _GIO_LAI_LO = gio_nay
+                db = SessionLocal()
+                try:
+                    from .routers.tai_chinh import luu_lai_lo_hom_nay
+                    luu_lai_lo_hom_nay(db)
+                    db.commit()
                 finally:
                     db.close()
         except Exception as e:                     # không bao giờ để luồng nền chết

@@ -890,6 +890,18 @@ class ChiCoDinh(Base):
     ghi_chu: Mapped[str | None] = mapped_column(String(200), nullable=True)
 
 
+class LaiLoRecord(Base):
+    __tablename__ = "lai_lo_record"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    ngay: Mapped[date] = mapped_column(Date, unique=True)
+    doanh_thu: Mapped[Decimal] = mapped_column(Numeric(18, 0), default=0)
+    chi_phi_don: Mapped[Decimal] = mapped_column(Numeric(18, 0), default=0)
+    lai_gop: Mapped[Decimal] = mapped_column(Numeric(18, 0), default=0)
+    chi_phi_khac: Mapped[Decimal] = mapped_column(Numeric(18, 0), default=0)
+    lai_lo: Mapped[Decimal] = mapped_column(Numeric(18, 0), default=0)
+    tao_luc: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
 class NganSach(Base):
     __tablename__ = "ngan_sach"
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)

@@ -624,6 +624,88 @@ def chup_financial(db: Session = Depends(get_db), nd=Depends(chi_vai_tro("CEO", 
     return {"ok": True, "tep": t.ten_file}
 
 
+def _tinh_lai_lo_tong(db: Session) -> dict:
+    """Lãi/lỗ tổng: doanh thu & chi phí TỪNG MÃ đơn hàng bán (cùng công thức bảng
+    Chi phí theo Mã bên Kiểm soát) + chi phí khác = chi cố định/tháng x số tháng từ đầu năm."""
+    from sqlalchemy import func
+    from ..models import DonHang, DonMua, CongNo, ChiCoDinh
+    from ..nhac_viec_service import gio_hien_tai
+    con_lai_expr = func.coalesce(func.sum(CongNo.so_tien - CongNo.da_thanh_toan), 0)
+    theo_ma, tong_dt, tong_cp = [], 0.0, 0.0
+    for dh in db.query(DonHang).order_by(DonHang.id.desc()).all():
+        doanh_thu = float(dh.tong_tien or 0)
+        po_ids = [i for (i,) in db.query(DonMua.id).filter(DonMua.don_hang_id == dh.id).all()]
+        ttm = float(db.query(func.coalesce(func.sum(DonMua.de_nghi_tt), 0))
+                    .filter(DonMua.don_hang_id == dh.id).scalar() or 0)
+        cn_po = float(db.query(con_lai_expr).filter(CongNo.loai == "PHAI_TRA",
+                      CongNo.don_mua_id.in_(po_ids)).scalar() or 0) if po_ids else 0.0
+        cn_ngoai = 0.0
+        if dh.so:
+            cn_ngoai = float(db.query(con_lai_expr).filter(CongNo.loai == "PHAI_TRA",
+                             CongNo.don_mua_id.is_(None),
+                             func.lower(CongNo.ma_ban_ngoai) == dh.so.lower()).scalar() or 0)
+        chi_phi = ttm + max(cn_po, 0.0) + max(cn_ngoai, 0.0)
+        if doanh_thu == 0 and chi_phi == 0:
+            continue
+        tong_dt += doanh_thu
+        tong_cp += chi_phi
+        theo_ma.append({"don_hang_id": dh.id, "ma_ban": dh.so or f"DH-{dh.id}",
+                        "doanh_thu": doanh_thu, "tong_chi_phi": chi_phi,
+                        "loi_nhuan": doanh_thu - chi_phi,
+                        "ty_suat": round((doanh_thu - chi_phi) / doanh_thu * 100, 1)
+                                   if doanh_thu else None})
+    chi_thang = float(db.query(func.coalesce(func.sum(ChiCoDinh.so_tien), 0))
+                      .filter(ChiCoDinh.dang_ap_dung.is_(True)).scalar() or 0)
+    hom_nay = gio_hien_tai().date()
+    chi_khac = chi_thang * hom_nay.month          # lũy kế từ đầu năm, tính trọn tháng hiện tại
+    lai_gop = tong_dt - tong_cp
+    return {"doanh_thu": tong_dt, "chi_phi_don": tong_cp, "lai_gop": lai_gop,
+            "chi_thang": chi_thang, "chi_phi_khac": chi_khac,
+            "lai_lo": lai_gop - chi_khac, "theo_ma": theo_ma, "ngay": str(hom_nay)}
+
+
+def luu_lai_lo_hom_nay(db: Session) -> dict:
+    """Ghi/cập nhật bản ghi Lãi/Lỗ của HÔM NAY (giờ VN) — gọi từ scheduler mỗi giờ
+    và mỗi lần mở panel; bản ghi ngày cuối tháng chính là record chốt tháng."""
+    from ..models import LaiLoRecord
+    from ..nhac_viec_service import gio_hien_tai
+    t = _tinh_lai_lo_tong(db)
+    hom_nay = gio_hien_tai().date()
+    r = db.query(LaiLoRecord).filter_by(ngay=hom_nay).first()
+    if r is None:
+        r = LaiLoRecord(ngay=hom_nay)
+        db.add(r)
+    r.doanh_thu = t["doanh_thu"]
+    r.chi_phi_don = t["chi_phi_don"]
+    r.lai_gop = t["lai_gop"]
+    r.chi_phi_khac = t["chi_phi_khac"]
+    r.lai_lo = t["lai_lo"]
+    r.tao_luc = gio_hien_tai()
+    return t
+
+
+@router.get("/lai-lo-record")
+def lai_lo_record(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
+    """Lãi/Lỗ Record 3 phần: ① theo ngày · ② theo mã đơn hàng · ③ chốt cuối tháng."""
+    from ..models import LaiLoRecord
+    from ..nhac_viec_service import gio_hien_tai
+    t = luu_lai_lo_hom_nay(db)
+    db.commit()
+    rows = db.query(LaiLoRecord).order_by(LaiLoRecord.ngay.desc()).limit(400).all()
+    ser = lambda r: {"ngay": str(r.ngay), "doanh_thu": float(r.doanh_thu or 0),
+                     "chi_phi_don": float(r.chi_phi_don or 0), "lai_gop": float(r.lai_gop or 0),
+                     "chi_phi_khac": float(r.chi_phi_khac or 0), "lai_lo": float(r.lai_lo or 0)}
+    theo_ngay = [ser(r) for r in rows]
+    thang = {}
+    for r in sorted(rows, key=lambda x: str(x.ngay)):     # bản ghi MUỘN NHẤT của mỗi tháng
+        thang[str(r.ngay)[:7]] = ser(r)
+    thang_nay = str(gio_hien_tai().date())[:7]
+    theo_thang = [dict(v, thang=k, tam_tinh=(k == thang_nay))
+                  for k, v in sorted(thang.items(), reverse=True)]
+    theo_ma = t.pop("theo_ma")
+    return {"tong": t, "theo_ngay": theo_ngay, "theo_ma": theo_ma, "theo_thang": theo_thang}
+
+
 @router.get("/dashboard")
 def dashboard(db: Session = Depends(get_db), _=Depends(yeu_cau("dashboard", "XEM"))):
     """Tổng quan điều hành — TỔNG HỢP THẬT từ Bán hàng, Mua hàng (NCC), Kho, Công nợ.
