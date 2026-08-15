@@ -268,6 +268,11 @@ def tao_phieu(data: PhieuVao, db: Session = Depends(get_db),
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy quỹ")
     # kiểm tra cấn trừ công nợ (đúng loại + không vượt số còn lại)
     kh_id, ncc_id = data.khach_hang_id, data.nha_cung_cap_id
+    # TỰ LIÊN KẾT: phiếu THU gắn mã hàng bán mà chưa chọn khách → lấy khách của đơn hàng
+    if data.loai == "THU" and not kh_id and data.don_hang_id and not data.la_tam_ung:
+        _dh0 = db.get(DonHang, data.don_hang_id)
+        if _dh0 is not None:
+            kh_id = _dh0.khach_hang_id
     if data.la_tam_ung:
         # TẠM ỨNG / TRẢ TRƯỚC: chưa có hóa đơn → bắt buộc gắn mã hàng bán, không cấn trừ công nợ
         if not data.don_hang_id:
@@ -554,6 +559,33 @@ def thong_ke_thu_chi(tu_ngay: str | None = None, den_ngay: str | None = None,
             tong_thu += amt
         else:
             tong_chi += amt
+        # 🔗 TỰ LIÊN KẾT chi tiết từng khoản: Đối tác (NCC/Khách) + Số hóa đơn
+        import re as _re
+        from ..models import CongNo as _CN, NhaCungCap as _NCC, KhachHang as _KH, DonHang as _DH
+        cn0 = db.get(_CN, p.cong_no_id) if p.cong_no_id else None
+        so_hd = cn0.so_ct if cn0 else None
+        if not so_hd and p.dien_giai:                     # phiếu từ lệnh bank: số HĐ nằm trong diễn giải
+            m2 = _re.search(r"HĐ\s*([A-Za-z0-9\-/\.]+)", p.dien_giai)
+            if m2:
+                so_hd = m2.group(1)
+        doi_tac = None
+        if p.loai == "CHI":
+            _nid = p.nha_cung_cap_id or (cn0.nha_cung_cap_id if cn0 else None)
+            if _nid:
+                _x = db.get(_NCC, _nid)
+                doi_tac = _x.ten if _x else None
+        else:
+            _kid = p.khach_hang_id or (cn0.khach_hang_id if cn0 else None)
+            if not _kid and p.don_hang_id:
+                _d2 = db.get(_DH, p.don_hang_id)
+                _kid = _d2.khach_hang_id if _d2 else None
+            if _kid:
+                _x = db.get(_KH, _kid)
+                doi_tac = _x.ten if _x else None
+        maban[mb].setdefault("ct", []).append({
+            "ngay": str(p.ngay) if p.ngay else None, "so": p.so, "loai": p.loai,
+            "so_tien": amt, "doi_tac": doi_tac, "so_hd": so_hd,
+            "dien_giai": (p.dien_giai or "")[:90]})
 
     def _net(d):
         return {k: {**v, "rong": v["thu"] - v["chi"]} for k, v in d.items()}

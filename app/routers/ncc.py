@@ -1317,6 +1317,7 @@ def ds_lenh_thanh_toan(db: Session = Depends(get_db), _=Depends(yeu_cau("ke_toan
                     "chot_luc": str(dm.lenh_bank_luc)[:16] if dm.lenh_bank_luc else None,
                     "so_hoa_don": dm.so_hoa_don, "ma_don_ban": _ma_ban_hang_po(db, dm),
                     "don_hang_id": dm.don_hang_id,
+                    "nha_cung_cap_id": dm.nha_cung_cap_id,
                     "ncc_ten": ncc.ten if ncc else None,
                     "tong_tien": float(dm.tong_tien or 0),
                     "so_tien_chi": float(dm.lenh_bank_tien or 0),
