@@ -607,6 +607,7 @@ def thong_ke_thu_chi(tu_ngay: str | None = None, den_ngay: str | None = None,
             elif "phi chuyen" in _dg or "phi ngan hang" in _dg or "phi giao dich" in _dg:
                 doi_tac = f"🏦 Phí ngân hàng ({_qn})"
         maban[mb].setdefault("ct", []).append({
+            "pid": p.id,
             "ngay": str(p.ngay) if p.ngay else None, "so": p.so, "loai": p.loai,
             "so_tien": amt, "doi_tac": doi_tac, "so_hd": so_hd, "tk": off,
             "canh_bao": canh_bao, "dien_giai": (p.dien_giai or "")[:90]})
@@ -625,6 +626,32 @@ def thong_ke_thu_chi(tu_ngay: str | None = None, den_ngay: str | None = None,
             "tong_thu": tong_thu, "tong_chi": tong_chi, "rong": tong_thu - tong_chi,
             "theo_thang": theo_thang, "theo_loai": theo_loai,
             "theo_quy": theo_quy, "theo_ma_ban": theo_ma_ban}
+
+
+@router.put("/phieu/{p_id}/tk-doi-ung")
+def sua_tk_doi_ung(p_id: int, tk: str, db: Session = Depends(get_db),
+                   nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN", "KTT"))):
+    """Sửa TÀI KHOẢN ĐỐI ỨNG của một phiếu (kể cả ĐÃ DUYỆT) — chỉ đổi chân định khoản
+    phi tiền mặt, KHÔNG đổi số tiền/quỹ nên số dư quỹ giữ nguyên. Bút toán sửa theo."""
+    tk = (tk or "").strip()[:20]
+    if not tk:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Thiếu tài khoản")
+    p = db.get(PhieuThuChi, p_id)
+    if p is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy phiếu")
+    cu = {"tk_doi_ung": p.tk_doi_ung}
+    p.tk_doi_ung = tk
+    if p.but_toan_id:
+        bt = db.get(ButToan, p.but_toan_id)
+        if bt is not None:
+            cu["but_toan"] = {"tk_no": bt.tk_no, "tk_co": bt.tk_co}
+            if p.loai == "THU":
+                bt.tk_co = tk
+            else:
+                bt.tk_no = tk
+    ghi_audit(db, nd.id, "SUA_TK_DOI_UNG", "phieu_thu_chi", p.id, cu=cu, moi={"tk": tk})
+    db.commit()
+    return {"ok": True, "so": p.so, "tk": tk}
 
 
 # ---------- CÂN ĐỐI PHÁT SINH (trial balance) ----------
