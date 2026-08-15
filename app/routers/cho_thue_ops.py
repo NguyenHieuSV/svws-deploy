@@ -1166,6 +1166,7 @@ def du_an_cac_thang(ts_id: int, so_thang: int = 12, db: Session = Depends(get_db
     for m in months:
         cp = round(cp_thang.get(m, 0.0))
         rows.append({"thang": m, "ma_ban_hang": _ma_thang(prefix, m),
+                     "don_gia": dt, "don_vi_gia": ts.don_vi_gia or "VND/THANG",
                      "doanh_thu": dt, "chi_phi": cp, "loi_nhuan": dt - cp})
     return {"tai_san_id": ts_id, "ten_du_an": prefix, "gia_thue_thang": dt,
             "dang_thue": dang_thue, "cac_thang": rows}
