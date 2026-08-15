@@ -525,6 +525,14 @@ def tong_quan(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
 
 
 # ---------- THỐNG KÊ THU–CHI (dòng tiền) ----------
+def _kd_vn(s: str) -> str:
+    """Bỏ dấu tiếng Việt + thường hóa — để nhận diện diễn giải gõ có dấu lẫn không dấu."""
+    import unicodedata
+    s = unicodedata.normalize("NFD", s or "")
+    s = "".join(ch for ch in s if unicodedata.category(ch) != "Mn")
+    return s.replace("đ", "d").replace("Đ", "D").lower()
+
+
 @router.get("/thong-ke-thu-chi")
 def thong_ke_thu_chi(tu_ngay: str | None = None, den_ngay: str | None = None,
                      quy_id: int | None = None, don_hang_id: int | None = None,
@@ -582,10 +590,26 @@ def thong_ke_thu_chi(tu_ngay: str | None = None, den_ngay: str | None = None,
             if _kid:
                 _x = db.get(_KH, _kid)
                 doi_tac = _x.ten if _x else None
+        canh_bao = None
+        if doi_tac is None:
+            # 🔁 TỰ NHẬN DIỆN giao dịch nội bộ (không có đối tác ngoài)
+            _dg = _kd_vn(p.dien_giai or "")
+            _qn = quy_ten.get(p.quy_id, "")
+            if off == "113" or "chuyen tien noi bo" in _dg or "chuyen tien sang so quy" in _dg \
+                    or "nhan tien chuyen" in _dg:
+                doi_tac = f"🔁 Chuyển nội bộ ({_qn})"
+                if off not in ("113", "111", "112"):
+                    canh_bao = f"Chuyển nội bộ nên dùng TK 113 (tiền đang chuyển) — đang ghi TK {off}: làm phồng thu nhập/chi phí"
+            elif ("rut tien" in _dg or "nop tien" in _dg) and "quy" in _dg:
+                doi_tac = f"🏦 Nộp / rút tiền giữa quỹ ({_qn})"
+                if off not in ("111", "112", "113"):
+                    canh_bao = f"Nộp/rút giữa quỹ nên dùng TK 111/112 — đang ghi TK {off}: làm phồng thu nhập/chi phí"
+            elif "phi chuyen" in _dg or "phi ngan hang" in _dg or "phi giao dich" in _dg:
+                doi_tac = f"🏦 Phí ngân hàng ({_qn})"
         maban[mb].setdefault("ct", []).append({
             "ngay": str(p.ngay) if p.ngay else None, "so": p.so, "loai": p.loai,
-            "so_tien": amt, "doi_tac": doi_tac, "so_hd": so_hd,
-            "dien_giai": (p.dien_giai or "")[:90]})
+            "so_tien": amt, "doi_tac": doi_tac, "so_hd": so_hd, "tk": off,
+            "canh_bao": canh_bao, "dien_giai": (p.dien_giai or "")[:90]})
 
     def _net(d):
         return {k: {**v, "rong": v["thu"] - v["chi"]} for k, v in d.items()}
