@@ -179,6 +179,12 @@ def cham_cong(data: ChamCongVao, db: Session = Depends(get_db),
         db.add(cc)
     cc.gio_vao = data.gio_vao or cc.gio_vao
     cc.gio_ra = data.gio_ra or cc.gio_ra
+    db.flush()
+    from ..audit import ghi_audit
+    ghi_audit(db, nd.id, "CHAM_CONG", "cham_cong", cc.id or 0,
+              moi={"nhan_vien_id": data.nhan_vien_id, "ngay": str(data.ngay),
+                   "gio_vao": str(cc.gio_vao) if cc.gio_vao else None,
+                   "gio_ra": str(cc.gio_ra) if cc.gio_ra else None})
     db.commit()
     return {"nhan_vien_id": data.nhan_vien_id, "ngay": str(data.ngay), "trang_thai": "DA_GHI"}
 
@@ -197,12 +203,22 @@ def xin_nghi(data: NghiPhepVao, db: Session = Depends(get_db),
 
 @router.post("/nghi-phep/{np_id}/duyet")
 def duyet_nghi(np_id: int, db: Session = Depends(get_db),
-               nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+               nd: NguoiDung = Depends(yeu_cau(MODULE, "DUYET"))):
     np = db.get(NghiPhep, np_id)
     if np is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đơn")
+    if np.trang_thai == "DA_DUYET":
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Đơn này đã duyệt rồi")
+    nv_duyet = nhan_vien_id_cua(db, nd.id)
+    if nv_duyet and np.nhan_vien_id == nv_duyet and nd.vai_tro not in ("CEO", "ADMIN"):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Không thể tự duyệt đơn nghỉ của chính mình — cần cấp trên duyệt")
     np.trang_thai = "DA_DUYET"
-    np.nguoi_duyet = nhan_vien_id_cua(db, nd.id)
+    np.nguoi_duyet = nv_duyet
+    from ..audit import ghi_audit
+    ghi_audit(db, nd.id, "DUYET", "nghi_phep", np.id,
+              moi={"nhan_vien_id": np.nhan_vien_id,
+                   "tu_ngay": str(np.tu_ngay), "den_ngay": str(np.den_ngay), "loai": np.loai})
     db.commit()
     return {"id": np.id, "trang_thai": "DA_DUYET"}
 
@@ -1014,6 +1030,11 @@ def huy_dang_ky_ot(wt_id: int, db: Session = Depends(get_db),
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đăng ký của bạn")
     if r.trang_thai != "CHO_DUYET":
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Chỉ hủy được đăng ký còn chờ duyệt")
+    from ..audit import ghi_audit
+    ghi_audit(db, nd.id, "HUY_DK_OT", "ngay_nghi_ot", r.id,
+              cu={"nhan_vien_id": r.nhan_vien_id,
+                  "ngay": str(getattr(r, "ngay", None)) if getattr(r, "ngay", None) else None,
+                  "loai": getattr(r, "loai", None)})
     db.delete(r); db.commit()
     return {"da_huy": True}
 
@@ -1998,6 +2019,12 @@ def cham_cong_phieu(bl_id: int, data: ChamCongLuongVao, db: Session = Depends(ge
     ky = db.get(KyLuong, bl.thang)
     if ky:
         _cap_nhat_tong_ky(db, ky)
+    from ..audit import ghi_audit
+    ghi_audit(db, nd.id, "SUA_PHIEU_LUONG", "bang_luong", bl.id,
+              moi={k: float(getattr(data, k)) for k in
+                   ("cong_thuc_te", "gio_ot_thuong", "gio_ot_cuoi_tuan", "gio_ot_le",
+                    "tam_ung", "phu_cap_khac", "ngay_nghi_kpep", "so_phut_di_tre", "khau_tru_khac")
+                   if getattr(data, k) is not None})
     db.commit()
     return _pl_dict(db, bl, nv)
 

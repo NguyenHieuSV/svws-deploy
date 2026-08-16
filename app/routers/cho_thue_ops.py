@@ -182,7 +182,8 @@ def sua_thiet_bi(tb_id: int, data: CtTbSua, db: Session = Depends(get_db),
 
 @router.delete("/thiet-bi/{tb_id}")
 def xoa_thiet_bi(tb_id: int, db: Session = Depends(get_db),
-                 nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+                 nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC")),
+                 _ql: NguoiDung = Depends(quan_ly_ct)):
     tb = db.get(CtThietBi, tb_id)
     if tb is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy thiết bị/vật tư")
@@ -336,7 +337,8 @@ def sua_chi_tieu(ct_id: int, data: CtChiTieuSua, db: Session = Depends(get_db),
 
 @router.delete("/chi-tieu/{ct_id}")
 def xoa_chi_tieu(ct_id: int, db: Session = Depends(get_db),
-                 nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+                 nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC")),
+                 _ql: NguoiDung = Depends(quan_ly_ct)):
     c = db.get(CtBcvhChiTieu, ct_id)
     if c is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy chỉ tiêu")
@@ -1452,6 +1454,9 @@ def sua_hoa_don_dau_vao(hd_id: int, data: HdVaoSua, db: Session = Depends(get_db
         r.don_gia = data.don_gia or None
     if data.loai_chi_phi is not None and data.loai_chi_phi in ("VAT_TU", "SUA_CHUA", "NHAN_CONG", "KHAC"):
         r.loai_chi_phi = data.loai_chi_phi
+    ghi_audit(db, nd.id, "SUA_HD_VAO", "ct_hoa_don_dau_vao", r.id,
+              moi={"so_hoa_don": r.so_hoa_don, "so_tien": float(r.so_tien or 0),
+                   "tai_san_id": r.tai_san_id})
     db.commit()
     return {"ok": True}
 
@@ -1507,6 +1512,9 @@ def bo_qua_hoa_don_dau_vao(hd_id: int, db: Session = Depends(get_db),
     if r.trang_thai == "DA_GHI":
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Hóa đơn đã ghi — không bỏ qua được")
     r.trang_thai = "BO_QUA"
+    ghi_audit(db, nd.id, "BO_QUA_HD_VAO", "ct_hoa_don_dau_vao", r.id,
+              cu={"so_hoa_don": r.so_hoa_don, "so_tien": float(r.so_tien or 0),
+                  "tu_email": r.tu_email})
     db.commit()
     return {"ok": True}
 

@@ -135,7 +135,7 @@ def doi_trang_thai(dv_id: int, data: DichVuKTTrangThai, db: Session = Depends(ge
 
 @router.delete("/{dv_id}")
 def xoa_dich_vu(dv_id: int, db: Session = Depends(get_db),
-                nd: NguoiDung = Depends(yeu_cau(MODULE, "DUYET"))):
+                nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
     d = db.get(DichVuKT, dv_id)
     if not d:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy dịch vụ")
@@ -227,7 +227,7 @@ def tai_ve_tai_lieu(tl_id: int, db: Session = Depends(get_db),
 
 @router.delete("/tai-lieu/{tl_id}")
 def xoa_tai_lieu(tl_id: int, db: Session = Depends(get_db),
-                 nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+                 nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
     t = db.get(DichVuKtTaiLieu, tl_id)
     if t is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy tài liệu")

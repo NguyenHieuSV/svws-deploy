@@ -437,6 +437,10 @@ def huy_phieu(pid: int, db: Session = Depends(get_db),
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy phiếu")
     if p.trang_thai not in ("NHAP", "CHO_DUYET"):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Chỉ hủy được phiếu NHÁP/CHỜ DUYỆT")
+    nv_toi = nhan_vien_id_cua(db, nd.id)
+    if nd.vai_tro not in ("CEO", "ADMIN", "KTT") and getattr(p, "nguoi_tao", None) not in (None, nv_toi):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Chỉ người lập phiếu (hoặc KTT/CEO/ADMIN) mới hủy được phiếu này")
     p.trang_thai = "HUY"
     ghi_audit(db, nd.id, "HUY", "phieu_thu_chi", p.id)
     db.commit(); db.refresh(p)
@@ -1013,6 +1017,9 @@ def sua_hoa_don_cho(h_id: int, data: KtHdcSua, db: Session = Depends(get_db),
         r.don_hang_id = data.don_hang_id or None
     r.tong_tien = (Decimal(r.tien_truoc_thue or 0) *
                    (1 + Decimal(r.thue_suat or 0) / 100)).quantize(Decimal("1"))
+    ghi_audit(db, nd.id, "SUA_HD_CHO", "kt_hoa_don_cho", r.id,
+              moi={"so_hoa_don": r.so_hoa_don, "truoc": float(r.tien_truoc_thue or 0),
+                   "ts": float(r.thue_suat or 0), "ncc": r.nha_cung_cap_id})
     db.commit()
     return {"ok": True, "tong_tien": float(r.tong_tien)}
 
@@ -1087,6 +1094,9 @@ def bo_qua_hoa_don_cho(h_id: int, db: Session = Depends(get_db),
     if r.trang_thai == "DA_GHI":
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Đã ghi — không bỏ qua được")
     r.trang_thai = "BO_QUA"
+    ghi_audit(db, nd.id, "BO_QUA_HD_CHO", "kt_hoa_don_cho", r.id,
+              cu={"so_hoa_don": r.so_hoa_don, "tong": float(r.tong_tien or 0),
+                  "tu_email": r.tu_email})
     db.commit()
     return {"ok": True}
 
@@ -1111,8 +1121,13 @@ def sua_tk_doi_ung(p_id: int, tk: str, db: Session = Depends(get_db),
     """Sửa TÀI KHOẢN ĐỐI ỨNG của một phiếu (kể cả ĐÃ DUYỆT) — chỉ đổi chân định khoản
     phi tiền mặt, KHÔNG đổi số tiền/quỹ nên số dư quỹ giữ nguyên. Bút toán sửa theo."""
     tk = (tk or "").strip()[:20]
-    if not tk:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Thiếu tài khoản")
+    TK_HOP_LE = {"111", "112", "113", "131", "141", "211", "214", "242", "331", "334",
+                 "338", "3383", "3384", "3385", "1331", "3331", "511", "515", "632",
+                 "635", "641", "642", "627", "711", "811"}
+    if tk not in TK_HOP_LE:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            f"Tài khoản '{tk}' không thuộc danh mục TK cho phép: "
+                            + ", ".join(sorted(TK_HOP_LE)))
     p = db.get(PhieuThuChi, p_id)
     if p is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy phiếu")

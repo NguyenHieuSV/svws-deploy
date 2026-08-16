@@ -2054,7 +2054,7 @@ def chi_phi_theo_don(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "X
 
 @router.post("/chi-phi-theo-don/{don_hang_id}/luu-kho")
 def chi_phi_chi_tiet_luu_kho(don_hang_id: int, db: Session = Depends(get_db),
-                             nd: NguoiDung = Depends(yeu_cau(MODULE, "XEM"))):
+                             nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
     """Danh mục TẤT CẢ chi phí của một mã đơn hàng bán: từng dòng hàng đã mua (PO)
     + khoản công nợ nhập ngoài khớp mã. Mỗi lần gọi, bản CSV mới nhất được lưu vào
     KHO TỆP DÙNG CHUNG (nhóm Đơn hàng — thay bản cũ, không nhân bản file)."""

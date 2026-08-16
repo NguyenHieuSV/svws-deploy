@@ -602,7 +602,7 @@ def sua_von_muc(vm_id: int, data: VonMucVao, db: Session = Depends(get_db),
 
 @router.delete("/von-muc/{vm_id}")
 def xoa_von_muc(vm_id: int, db: Session = Depends(get_db),
-                nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+                nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN", "KTT"))):
     from ..models import VonMuc
     v = db.get(VonMuc, vm_id)
     if v is None:

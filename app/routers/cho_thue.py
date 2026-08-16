@@ -101,6 +101,10 @@ def chay_thu_phi(db: Session = Depends(get_db),
                       trang_thai="CHUA_THU"))
         ket_qua.append({"hop_dong_id": hd.id, "hoa_don_id": hoa_don.id,
                         "tong_tien": float(hoa_don.tong_tien)})
+    from ..audit import ghi_audit
+    ghi_audit(db, nd.id, "CHAY_THU_PHI", "hop_dong_thue", 0,
+              moi={"so_hop_dong": len(ket_qua),
+                   "tong_tien": sum(x["tong_tien"] for x in ket_qua)})
     db.commit()
     return {"so_hop_dong_thu_phi": len(ket_qua), "chi_tiet": ket_qua}
 
