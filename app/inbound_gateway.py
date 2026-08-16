@@ -77,6 +77,34 @@ class ImapInboundProvider:
         return out
 
 
+def _dinh_kem(m) -> list[dict]:
+    """Nhặt file đính kèm hóa đơn (PDF / XML / ảnh) — tối đa 3 file, mỗi file ≤ 8MB."""
+    out = []
+    if not m.is_multipart():
+        return out
+    for p in m.walk():
+        cd = str(p.get("Content-Disposition") or "")
+        fn = p.get_filename()
+        if not fn and "attachment" not in cd.lower():
+            continue
+        fn = _txt(fn or "dinh_kem")
+        ct = (p.get_content_type() or "").lower()
+        low = fn.lower()
+        if not (ct == "application/pdf" or low.endswith((".pdf", ".xml"))
+                or ct.startswith("image/") or low.endswith((".png", ".jpg", ".jpeg"))
+                or ct in ("application/xml", "text/xml")):
+            continue
+        try:
+            data = p.get_payload(decode=True) or b""
+        except Exception:
+            continue
+        if 0 < len(data) <= 8 * 1024 * 1024:
+            out.append({"ten_file": fn, "content_type": ct, "data": data})
+        if len(out) >= 3:
+            break
+    return out
+
+
 def _imap_lay_thu(tu_ngay=None) -> list[dict]:
     """Quét theo MỐC THỜI GIAN (SINCE) — đọc bằng BODY.PEEK nên KHÔNG đánh dấu đã đọc
     trong hộp thư; 'AI chưa đọc' do nơi gọi tự khử trùng bằng Message-ID đã lưu."""
@@ -97,6 +125,7 @@ def _imap_lay_thu(tu_ngay=None) -> list[dict]:
         out.append({"tu_email": parseaddr(m.get("From"))[1],
                     "tieu_de": _txt(m.get("Subject")),
                     "noi_dung": _body(m),
+                    "dinh_kem": _dinh_kem(m),
                     "message_id": m.get("Message-ID"),
                     "in_reply_to": m.get("In-Reply-To")})
     M.logout()

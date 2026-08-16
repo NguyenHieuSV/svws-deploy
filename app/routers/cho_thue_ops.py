@@ -1315,6 +1315,18 @@ def quet_hoa_don_email(tu_ngay: date | None = None, db: Session = Depends(get_db
             dung_ai += 1
         else:
             info = _rut_hd_email(tieu_de, nd_thu)
+        # 📎 Thân thư không có số tiền → AI đọc FILE ĐÍNH KÈM (PDF/XML hóa đơn điện tử)
+        if not float(info.get("so_tien") or 0):
+            from ..ai_gateway import doc_hoa_don_tep
+            for tep in (m.get("dinh_kem") or []):
+                info2 = doc_hoa_don_tep(tep.get("data") or b"", tep.get("content_type") or "",
+                                        tep.get("ten_file") or "",
+                                        dk.hoa_chat_vat_tu if dk else None)
+                if info2 and float(info2.get("so_tien") or 0):
+                    for k in ("ncc_ten", "so_hoa_don", "ngay", "so_tien", "mo_ta"):
+                        if info2.get(k):
+                            info[k] = info2[k]
+                    break
         ngay_hd = None
         try:
             if info.get("ngay"):

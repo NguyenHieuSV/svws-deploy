@@ -1183,3 +1183,35 @@ def doc_hoa_don_email(tieu_de: str, noi_dung: str, goi_y: str | None = None) -> 
         return ds[0] if ds else None
     except Exception:
         return None
+
+
+def doc_hoa_don_tep(data: bytes, content_type: str, filename: str,
+                    goi_y: str | None = None) -> dict | None:
+    """AI đọc FILE hóa đơn đính kèm email (PDF / XML / ảnh) → cùng JSON như
+    doc_hoa_don_email. Trả None khi AI tắt hoặc không đọc được file."""
+    if (settings.ai_provider or "").upper() != "ANTHROPIC" or not settings.anthropic_api_key:
+        return None
+    fn = (filename or "").lower()
+    ct = (content_type or "").lower()
+    try:
+        if fn.endswith(".xml") or ct in ("application/xml", "text/xml"):
+            khoi = {"type": "text", "text": data.decode("utf-8", errors="replace")[:60000]}
+        else:
+            khoi = _khoi_noi_dung_file(data, content_type, filename)
+    except Exception:
+        return None
+    sys_p = ("Bạn là kế toán Việt Nam. Đọc file hóa đơn của nhà cung cấp "
+             "và trả về DUY NHẤT một JSON object: "
+             '{"ncc_ten": string|null (tên công ty NCC xuất hóa đơn), "so_hoa_don": string|null, '
+             '"ngay": "YYYY-MM-DD"|null (ngày hóa đơn), '
+             '"so_tien": number|null (TỔNG TIỀN THANH TOÁN gồm VAT, đơn vị VNĐ, chỉ chữ số), '
+             '"mo_ta": string|null (tóm tắt hàng hóa/dịch vụ, ngắn gọn)}')
+    cau_hoi = "Trích thông tin hóa đơn từ file trên."
+    if goi_y:
+        cau_hoi += f" Gợi ý: nhà cung cấp này thường bán các mặt hàng: {goi_y[:200]}."
+    try:
+        txt = _goi_claude_json(khoi, sys_p, cau_hoi, max_tokens=500, timeout=90)
+        ds = _vot_json_mang(txt)
+        return ds[0] if ds else None
+    except Exception:
+        return None
