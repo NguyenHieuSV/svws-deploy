@@ -1323,7 +1323,8 @@ def quet_hoa_don_email(tu_ngay: date | None = None, db: Session = Depends(get_db
                                         tep.get("ten_file") or "",
                                         dk.hoa_chat_vat_tu if dk else None)
                 if info2 and float(info2.get("so_tien") or 0):
-                    for k in ("ncc_ten", "so_hoa_don", "ngay", "so_tien", "mo_ta"):
+                    for k in ("ncc_ten", "so_hoa_don", "ngay", "so_tien", "mo_ta",
+                              "so_luong", "don_vi_hang", "don_gia"):
                         if info2.get(k):
                             info[k] = info2[k]
                     break
@@ -1343,6 +1344,9 @@ def quet_hoa_don_email(tu_ngay: date | None = None, db: Session = Depends(get_db
             ncc_ten=(str(info.get("ncc_ten") or "")[:200]) or (dk.ten_ncc if dk else None),
             so_hoa_don=(str(info.get("so_hoa_don") or "")[:60]) or None,
             ngay_hd=ngay_hd, so_tien=tien,
+            so_luong=_so_ai(info.get("so_luong")),
+            don_vi_hang=(str(info.get("don_vi_hang") or "")[:20]) or None,
+            don_gia=_so_ai(info.get("don_gia")),
             mo_ta=(str(info.get("mo_ta") or "")[:300]) or None,
             tieu_de=tieu_de or None, message_id=mid, tao_luc=gio_hien_tai()))
         them += 1
@@ -1350,6 +1354,15 @@ def quet_hoa_don_email(tu_ngay: date | None = None, db: Session = Depends(get_db
     return {"ok": True, "che_do": prov.ten, "thu_moi": len(thu),
             "tu_ngay": str(moc), "da_them": them, "trung_bo_qua": trung,
             "ai": dung_ai, "khong_khop": khong_khop, "con_lai": con_lai}
+
+
+def _so_ai(v):
+    """Ép số AI trả về (số hoặc chuỗi số) thành Decimal dương; hỏng/âm/0 → None."""
+    try:
+        d = Decimal(str(float(v)))
+        return d if d > 0 else None
+    except Exception:
+        return None
 
 
 @router.get("/hoa-don-dau-vao")
@@ -1364,6 +1377,9 @@ def ds_hoa_don_dau_vao(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, 
                     "so_hoa_don": r.so_hoa_don,
                     "ngay_hd": str(r.ngay_hd) if r.ngay_hd else None,
                     "so_tien": float(r.so_tien or 0), "mo_ta": r.mo_ta,
+                    "so_luong": float(r.so_luong) if getattr(r, "so_luong", None) is not None else None,
+                    "don_vi_hang": getattr(r, "don_vi_hang", None),
+                    "don_gia": float(r.don_gia) if getattr(r, "don_gia", None) is not None else None,
                     "loai_chi_phi": getattr(r, "loai_chi_phi", None) or "VAT_TU",
                     "tieu_de": r.tieu_de, "trang_thai": r.trang_thai})
     return out
@@ -1376,6 +1392,9 @@ class HdVaoSua(BaseModel):
     ngay_hd: date | None = None
     so_tien: Decimal | None = None
     mo_ta: str | None = None
+    so_luong: Decimal | None = None
+    don_vi_hang: str | None = None
+    don_gia: Decimal | None = None
     loai_chi_phi: str | None = None
 
 
@@ -1400,6 +1419,12 @@ def sua_hoa_don_dau_vao(hd_id: int, data: HdVaoSua, db: Session = Depends(get_db
         r.so_tien = data.so_tien
     if data.mo_ta is not None:
         r.mo_ta = data.mo_ta.strip()[:300] or None
+    if data.so_luong is not None:
+        r.so_luong = data.so_luong or None
+    if data.don_vi_hang is not None:
+        r.don_vi_hang = data.don_vi_hang.strip()[:20] or None
+    if data.don_gia is not None:
+        r.don_gia = data.don_gia or None
     if data.loai_chi_phi is not None and data.loai_chi_phi in ("VAT_TU", "SUA_CHUA", "NHAN_CONG", "KHAC"):
         r.loai_chi_phi = data.loai_chi_phi
     db.commit()
