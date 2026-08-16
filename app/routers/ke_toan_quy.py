@@ -944,6 +944,12 @@ def tao_ncc_tu_hoa_don_cho(hdc_id: int, db: Session = Depends(get_db),
 from pydantic import BaseModel as _BM_hdc
 
 
+class HdBanSua(_BM_hdc):
+    don_hang_id: int | None = None      # 0 = bỏ gắn đơn hàng
+    khach_hang_id: int | None = None    # chỉ đổi khi > 0
+    dien_giai: str | None = None
+
+
 class HdMuaSua(_BM_hdc):
     don_hang_id: int | None = None      # 0 = bỏ gắn đơn hàng
     tk_chi_phi: str | None = None
@@ -1119,6 +1125,7 @@ def _hd_dict(db, hd: HoaDon):
         ten = None
     return {"id": hd.id, "so": hd.so or f"HD-{hd.id}", "loai": hd.loai,
             "ngay": str(hd.ngay) if hd.ngay else None, "ten_doi_tac": ten,
+            "khach_hang_id": hd.khach_hang_id, "nha_cung_cap_id": hd.nha_cung_cap_id,
             "don_hang_id": hd.don_hang_id, "ma_ban": _ma_ban(db, hd.don_hang_id),
             "tien_truoc_thue": _f(hd.tien_truoc_thue), "tien_thue": _f(hd.tien_thue),
             "tong_tien": _f(hd.tong_tien), "tk_chi_phi": hd.tk_chi_phi,
@@ -1150,6 +1157,45 @@ def ds_hoa_don(loai: str | None = None, db: Session = Depends(get_db),
         d["tu_email"] = h.id in tu_email
         out.append(d)
     return out
+
+
+@router.put("/hoa-don/{hd_id}/sua-ban")
+def sua_hoa_don_ban(hd_id: int, data: HdBanSua, db: Session = Depends(get_db),
+                    nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    """✏️ Sửa hóa đơn BÁN: khách hàng / mã đơn hàng / diễn giải — đồng bộ bút toán
+    (don_hang_id) + công nợ (khach_hang_id). Khóa khi đã phát hành HĐĐT."""
+    hd = db.get(HoaDon, hd_id)
+    if hd is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy hóa đơn")
+    if hd.loai != "BAN":
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Endpoint này chỉ sửa hóa đơn BÁN")
+    if hd.hddt_trang_thai == "DA_PHAT_HANH":
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            f"'{hd.so}' đã phát hành HĐĐT — không sửa được, cần lập hóa đơn điều chỉnh/thay thế")
+    cu = {"don_hang_id": hd.don_hang_id, "khach_hang_id": hd.khach_hang_id, "dien_giai": hd.dien_giai}
+    if data.don_hang_id is not None:
+        moi_dh = data.don_hang_id or None
+        if moi_dh and db.get(DonHang, moi_dh) is None:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Không tìm thấy đơn hàng")
+        hd.don_hang_id = moi_dh
+        for bt in db.query(ButToan).filter_by(hoa_don_id=hd.id).all():
+            bt.don_hang_id = moi_dh
+    if data.khach_hang_id and data.khach_hang_id != hd.khach_hang_id:
+        if db.get(KhachHang, data.khach_hang_id) is None:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Không tìm thấy khách hàng")
+        cns = db.query(CongNo).filter_by(hoa_don_id=hd.id).all()
+        if any(_f(cn.da_thanh_toan) > 0 for cn in cns):
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                f"Công nợ của '{hd.so}' đã thu một phần — không đổi được khách hàng")
+        hd.khach_hang_id = data.khach_hang_id
+        for cn in cns:
+            cn.khach_hang_id = data.khach_hang_id
+    if data.dien_giai is not None and data.dien_giai.strip():
+        hd.dien_giai = data.dien_giai.strip()[:300]
+    ghi_audit(db, nd.id, "SUA_HD_BAN", "hoa_don", hd.id, cu=cu,
+              moi={"don_hang_id": hd.don_hang_id, "khach_hang_id": hd.khach_hang_id})
+    db.commit()
+    return _hd_dict(db, hd)
 
 
 @router.put("/hoa-don/{hd_id}/sua-mua")
