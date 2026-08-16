@@ -1432,15 +1432,25 @@ def sua_hoa_don_dau_vao(hd_id: int, data: HdVaoSua, db: Session = Depends(get_db
 
 
 @router.post("/hoa-don-dau-vao/{hd_id}/ghi")
-def ghi_hoa_don_dau_vao(hd_id: int, db: Session = Depends(get_db),
+def ghi_hoa_don_dau_vao(hd_id: int, bo_qua_trung: bool = False,
+                        db: Session = Depends(get_db),
                         nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
     """XÁC NHẬN: ghi hóa đơn thành khoản Chi phí vận hành của dự án theo đúng ngày HĐ."""
-    from ..models import CtHoaDonDauVao
-    r = db.get(CtHoaDonDauVao, hd_id)
+    from ..models import CtHoaDonDauVao, KtHoaDonCho
+    r = db.query(CtHoaDonDauVao).filter_by(id=hd_id).with_for_update().first()
     if r is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy hóa đơn")
     if r.trang_thai == "DA_GHI":
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Hóa đơn này đã ghi rồi")
+    # 🛡 CHỐNG GHI TRÙNG CHÉO: cùng email đã được Kế toán ghi thành Hóa đơn MUA (đã vào sổ 632 + công nợ)
+    if not bo_qua_trung and r.message_id:
+        kt = (db.query(KtHoaDonCho).filter_by(message_id=r.message_id)
+              .filter(KtHoaDonCho.trang_thai == "DA_GHI").first())
+        if kt is not None:
+            raise HTTPException(status.HTTP_409_CONFLICT,
+                                "⚠TRÙNG: email này Kế toán ĐÃ GHI thành Hóa đơn MUA "
+                                f"(số {kt.so_hoa_don or '—'}, {float(kt.tong_tien or 0):,.0f}đ) — "
+                                "ghi thêm vào Chi phí vận hành sẽ đếm chi phí 2 lần")
     if not r.tai_san_id or db.get(TaiSanChoThue, r.tai_san_id) is None:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Chưa chọn dự án cho hóa đơn")
     if float(r.so_tien or 0) <= 0:

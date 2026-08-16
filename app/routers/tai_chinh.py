@@ -659,10 +659,22 @@ def _tinh_lai_lo_tong(db: Session) -> dict:
                       .filter(ChiCoDinh.dang_ap_dung.is_(True)).scalar() or 0)
     hom_nay = gio_hien_tai().date()
     chi_khac = chi_thang * hom_nay.month          # lũy kế từ đầu năm, tính trọn tháng hiện tại
+    # 🧾 CHI PHÍ HÓA ĐƠN MUA NGOÀI PO (ghi qua Kế toán: email / nhập tay) — trước đây bị bỏ sót
+    from ..models import HoaDon
+    po_cn_hd = {h for (h,) in db.query(CongNo.hoa_don_id)
+                .filter(CongNo.don_mua_id.isnot(None), CongNo.hoa_don_id.isnot(None)).all()}
+    chi_hd_mua = 0.0
+    for (hid, htong, hdg) in db.query(HoaDon.id, HoaDon.tong_tien, HoaDon.dien_giai) \
+                               .filter(HoaDon.loai == "MUA").all():
+        # bỏ hóa đơn tự sinh khi nhận hàng PO — chi phí PO đã tính ở trên
+        if hid in po_cn_hd or str(hdg or "").startswith("Nhận hàng PO"):
+            continue
+        chi_hd_mua += float(htong or 0)
     lai_gop = tong_dt - tong_cp
     return {"doanh_thu": tong_dt, "chi_phi_don": tong_cp, "lai_gop": lai_gop,
             "chi_thang": chi_thang, "chi_phi_khac": chi_khac,
-            "lai_lo": lai_gop - chi_khac, "theo_ma": theo_ma, "ngay": str(hom_nay)}
+            "chi_phi_hd_mua": chi_hd_mua,
+            "lai_lo": lai_gop - chi_khac - chi_hd_mua, "theo_ma": theo_ma, "ngay": str(hom_nay)}
 
 
 def luu_lai_lo_hom_nay(db: Session) -> dict:

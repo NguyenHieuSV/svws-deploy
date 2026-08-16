@@ -337,7 +337,20 @@ def trinh_phieu(pid: int, db: Session = Depends(get_db),
 
 
 def _hach_toan_phieu(db, p: PhieuThuChi):
-    quy = db.get(TaiKhoanQuy, p.quy_id)
+    quy = db.query(TaiKhoanQuy).filter_by(id=p.quy_id).with_for_update().first()
+    # ✅ KIỂM LẠI TẠI THỜI ĐIỂM DUYỆT (khóa hàng chống race / chống cấn vượt):
+    if p.cong_no_id:
+        cn0k = db.query(CongNo).filter_by(id=p.cong_no_id).with_for_update().first()
+        if cn0k is not None:
+            con_lai0 = Decimal(cn0k.so_tien or 0) - Decimal(cn0k.da_thanh_toan or 0)
+            if Decimal(p.so_tien) > con_lai0:
+                raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                    f"Phiếu {p.so or p.id}: số tiền vượt phần còn lại hiện tại của công nợ "
+                                    f"({float(con_lai0):,.0f}đ) — khoản này có thể đã được thu/chi ở phiếu/lệnh khác")
+    if p.loai == "CHI" and Decimal(quy.so_du or 0) < Decimal(p.so_tien):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            f"Số dư quỹ '{quy.ten}' ({float(quy.so_du or 0):,.0f}đ) không đủ chi "
+                            f"{float(p.so_tien):,.0f}đ — nạp/điều chuyển quỹ trước khi duyệt")
     if p.tk_doi_ung:
         tk_du = p.tk_doi_ung
     elif p.la_tam_ung:
@@ -1003,11 +1016,14 @@ def sua_hoa_don_cho(h_id: int, data: KtHdcSua, db: Session = Depends(get_db),
 
 @router.post("/hoa-don-cho/{h_id}/ghi")
 def ghi_hoa_don_cho(h_id: int, tao_cong_no: bool = True, hach_toan: bool = True,
+                    bo_qua_trung: bool = False,
                     db: Session = Depends(get_db),
                     nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
-    """XÁC NHẬN: chính thức tạo HÓA ĐƠN MUA (kèm công nợ + hạch toán như tạo tay)."""
-    from ..models import KtHoaDonCho, HoaDon as _HD
-    r = db.get(KtHoaDonCho, h_id)
+    """XÁC NHẬN: chính thức tạo HÓA ĐƠN MUA (kèm công nợ + hạch toán như tạo tay).
+    Có chốt CHỐNG GHI TRÙNG chi phí: (a) cùng email đã ghi bên Chi phí vận hành cho thuê;
+    (b) đã có hóa đơn MUA cùng NCC cùng số tiền (thường là hóa đơn tự sinh khi nhận hàng PO)."""
+    from ..models import KtHoaDonCho, HoaDon as _HD, CtHoaDonDauVao as _CT
+    r = db.query(KtHoaDonCho).filter_by(id=h_id).with_for_update().first()
     if r is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy")
     if r.trang_thai == "DA_GHI":
@@ -1016,9 +1032,29 @@ def ghi_hoa_don_cho(h_id: int, tao_cong_no: bool = True, hach_toan: bool = True,
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Chọn nhà cung cấp (khớp hồ sơ NCC) trước khi ghi")
     if float(r.tien_truoc_thue or 0) <= 0:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Tiền trước thuế phải lớn hơn 0")
-    if r.so_hoa_don and db.query(_HD).filter_by(so=r.so_hoa_don).first():
+    # trùng số hóa đơn CÙNG NCC → chặn cứng (2 NCC khác nhau trùng số là chuyện bình thường)
+    if r.so_hoa_don and db.query(_HD).filter_by(so=r.so_hoa_don,
+                                                nha_cung_cap_id=r.nha_cung_cap_id).first():
         raise HTTPException(status.HTTP_400_BAD_REQUEST,
-                            f"Số hóa đơn '{r.so_hoa_don}' đã có trong bảng Hóa đơn — kiểm tra trùng.")
+                            f"Số hóa đơn '{r.so_hoa_don}' của NCC này đã có trong bảng Hóa đơn — trùng.")
+    # 🛡 CHỐNG GHI TRÙNG CHI PHÍ — kế toán xác nhận rõ ràng mới được bỏ qua
+    if not bo_qua_trung:
+        canh = []
+        if r.message_id:
+            ct = (db.query(_CT).filter_by(message_id=r.message_id)
+                  .filter(_CT.trang_thai == "DA_GHI").first())
+            if ct is not None:
+                canh.append("email này ĐÃ GHI vào Chi phí vận hành dự án cho thuê "
+                            f"(HĐ {ct.so_hoa_don or '—'}, {float(ct.so_tien or 0):,.0f}đ) — ghi tiếp sẽ đếm chi phí 2 lần")
+        nghi = (db.query(_HD).filter(_HD.loai == "MUA",
+                                     _HD.nha_cung_cap_id == r.nha_cung_cap_id,
+                                     _HD.tong_tien == Decimal(str(int(float(r.tong_tien or 0)))))
+                .order_by(_HD.id.desc()).first())
+        if nghi is not None:
+            canh.append(f"đã có hóa đơn MUA '{nghi.so}' cùng NCC cùng số tiền "
+                        f"{float(nghi.tong_tien or 0):,.0f}đ (có thể là hóa đơn tự sinh khi nhận hàng PO)")
+        if canh:
+            raise HTTPException(status.HTTP_409_CONFLICT, "⚠TRÙNG: " + "; ".join(canh))
     data = HoaDonVao(loai="MUA", nha_cung_cap_id=r.nha_cung_cap_id,
                      so=r.so_hoa_don or None, ngay=r.ngay_hd,
                      don_hang_id=getattr(r, "don_hang_id", None),
@@ -1027,11 +1063,12 @@ def ghi_hoa_don_cho(h_id: int, tao_cong_no: bool = True, hach_toan: bool = True,
                      thue_suat=Decimal(r.thue_suat or 8),
                      dien_giai=(r.mo_ta or f"Hóa đơn email {r.tu_email or ''}")[:200] or None,
                      tao_cong_no=tao_cong_no, hach_toan_luon=hach_toan)
+    r.trang_thai = "DA_GHI"          # đặt TRƯỚC khi tạo — cùng 1 commit với hóa đơn, hết khe hở ghi đúp
     kq = tao_hoa_don(data, db, nd)
-    r.trang_thai = "DA_GHI"
     r.hoa_don_id = (kq or {}).get("id") if isinstance(kq, dict) else None
     ghi_audit(db, nd.id, "GHI_HD_EMAIL_MUA", "kt_hoa_don_cho", r.id,
-              moi={"hoa_don_id": r.hoa_don_id, "tong": float(r.tong_tien or 0)})
+              moi={"hoa_don_id": r.hoa_don_id, "tong": float(r.tong_tien or 0),
+                   "bo_qua_canh_bao_trung": bool(bo_qua_trung)})
     db.commit()
     return {"ok": True, "hoa_don_id": r.hoa_don_id,
             "so": (kq or {}).get("so") if isinstance(kq, dict) else r.so_hoa_don}

@@ -37,8 +37,12 @@ def phat_hanh_hddt(hd_id: int, data: PhatHanhVao = PhatHanhVao(),
     hd.hddt_provider = kq["provider"]
     hd.hddt_ma_tra_cuu = kq["ma_tra_cuu"]
     hd.hddt_trang_thai = kq["trang_thai"]
-    # 2) Hạch toán doanh thu (chỉ hóa đơn bán, lần đầu)
-    bts = hach_toan_hoa_don_ban(db, hd) if hd.loai in ("BAN", "THUE") else []
+    # 2) Hạch toán doanh thu — CHỈ KHI CHƯA hạch toán (chặn ghi doanh thu 2 lần)
+    bts = []
+    if hd.loai in ("BAN", "THUE") and not hd.da_hach_toan:
+        bts = hach_toan_hoa_don_ban(db, hd)
+        hd.da_hach_toan = True
+        hd.trang_thai = "DA_HACH_TOAN"
     ghi_audit(db, nd.id, "PHAT_HANH", "hoa_don", hd.id,
               moi={"provider": kq["provider"], "ma_tra_cuu": kq["ma_tra_cuu"], "so_but_toan": len(bts)})
     db.commit(); db.refresh(hd)
@@ -57,6 +61,10 @@ def thu_tien(cn_id: int, data: ThuTienVao, db: Session = Depends(get_db),
     cn = db.query(CongNo).filter_by(id=cn_id).with_for_update().first()
     if cn is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy công nợ")
+    if cn.loai != "PHAI_THU":
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Đây là công nợ PHẢI TRẢ nhà cung cấp — không dùng nút thu tiền; "
+                            "việc trả NCC phải đi qua Duyệt chi Ngân hàng")
     con_lai = cn.so_tien - cn.da_thanh_toan
     if data.so_tien > con_lai:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Vượt số còn phải thu ({con_lai})")

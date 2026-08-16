@@ -944,10 +944,14 @@ def _ap_dung_tt_mua(db: Session, dm: DonMua, dn: Decimal) -> bool:
             db.add(cn)
         else:
             cn.so_tien = tong
-            cn.da_thanh_toan = dn
+            # CHỈ TIẾN KHÔNG LÙI: không ghi đè xuống dưới số đã trả thật (phiếu chi / 💳)
+            if Decimal(dn) > Decimal(cn.da_thanh_toan or 0):
+                cn.da_thanh_toan = dn
             if dm.ngay_tt_tiep:
                 cn.han = dm.ngay_tt_tiep
-            cn.trang_thai = "TRA_MOT_PHAN" if dn > 0 else "CHUA_TRA"
+            _da = Decimal(cn.da_thanh_toan or 0)
+            cn.trang_thai = ("DA_TRA" if (tong > 0 and _da >= tong)
+                             else ("TRA_MOT_PHAN" if _da > 0 else "CHUA_TRA"))
     if cn is not None and dm.so_hoa_don:      # gắn số hóa đơn của PO sang công nợ phải trả
         cn.so_ct = dm.so_hoa_don[:60]
     return da_tt_100
@@ -1230,6 +1234,9 @@ def duyet_lenh_chi_bank(lcb_id: int, db: Session = Depends(get_db),
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy lệnh chi")
     if r.trang_thai != "CHO_DUYET":
         raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Lệnh chi đang ở trạng thái {r.trang_thai}")
+    # TRẦN TIỀN NHIỀU CẤP: KTT duyệt theo hạn mức 'thu_chi' (bảng han_muc_duyet); CEO/ADMIN không trần
+    if nd.vai_tro not in ("CEO", "ADMIN"):
+        kiem_han_muc(db, nd, "thu_chi", Decimal(r.so_tien or 0))
     r.trang_thai = "DA_DUYET"
     r.duyet_luc = gio_hien_tai()
     r.nguoi_duyet = nd.id
@@ -1286,8 +1293,12 @@ def tu_choi_lenh_chi_bank(lcb_id: int, db: Session = Depends(get_db),
     r = db.get(LenhChiBank, lcb_id)
     if r is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy lệnh chi")
-    if r.trang_thai not in ("CHO_DUYET", "DA_DUYET"):
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Lệnh chi đang ở trạng thái {r.trang_thai}")
+    if r.trang_thai != "CHO_DUYET":
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            f"Lệnh chi đang ở trạng thái {r.trang_thai} — chỉ từ chối được lệnh CHỜ DUYỆT. "
+                            "Lệnh đã duyệt đã phân bổ vào Công nợ/Kiểm soát (lệnh công nợ còn chi tiền thật) "
+                            "nên không thể gỡ bằng nút này; cần điều chỉnh hãy ghi đợt thanh toán điều chỉnh "
+                            "hoặc liên hệ ADMIN.")
     r.trang_thai = "TU_CHOI"
     r.duyet_luc = gio_hien_tai()
     r.nguoi_duyet = nd.id
@@ -1897,6 +1908,7 @@ def nhan_hang(dm_id: int, data: NhanHangVao, db: Session = Depends(get_db),
         db.add(hd); db.flush()
         hd.so = f"HDM-{date.today():%Y%m%d}-{hd.id}"; hd_mua_id = hd.id
         cn = CongNo(loai="PHAI_TRA", hoa_don_id=hd.id, nha_cung_cap_id=dm.nha_cung_cap_id,
+                    don_mua_id=dm.id,   # gắn PO — luồng thanh toán mua tìm thấy, hết 2 bản công nợ song song
                     so_tien=tong_hd, da_thanh_toan=0, han=data.han_thanh_toan,
                     trang_thai="CHUA_TRA")
         db.add(cn); db.flush(); cn_id = cn.id
