@@ -707,7 +707,15 @@ def quet_hoa_don_mua_email(tu_ngay: date | None = None, db: Session = Depends(ge
                 ngay_hd = date.fromisoformat(str(info["ngay"])[:10])
         except Exception:
             pass
+        # 🏷 TÀI KHOẢN chi phí: AI phân loại; thiếu thì luật dự phòng theo từ khóa
+        tk_ai = str(info.get("tk_chi_phi") or "")
+        if tk_ai not in ("632", "642", "641", "627"):
+            nd_kd = _kd2((str(info.get("mo_ta") or "") + " " + tieu_de))
+            tk_ai = "632" if any(w in nd_kd for w in
+                                 ("hoa chat", "vat tu", "thiet bi", "hang hoa", "vat lieu",
+                                  "pac", "naoh", "polymer", "loc", "bom")) else "642"
         db.add(KtHoaDonCho(
+            tk_chi_phi=tk_ai,
             nha_cung_cap_id=tin_cay.get(nguoi),
             tu_email=(m.get("tu_email") or "")[:160] or None,
             ncc_ten=(str(info.get("ncc_ten") or "")[:200]) or None,
@@ -739,6 +747,7 @@ def ds_hoa_don_cho(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM
                     "thue_suat": float(r.thue_suat or 8),
                     "tong_tien": float(r.tong_tien or 0),
                     "mo_ta": r.mo_ta, "tieu_de": r.tieu_de,
+                    "tk_chi_phi": getattr(r, "tk_chi_phi", None),
                     "hoa_don_id": r.hoa_don_id, "trang_thai": r.trang_thai})
     return out
 
@@ -754,6 +763,7 @@ class KtHdcSua(_BM_hdc):
     tien_truoc_thue: Decimal | None = None
     thue_suat: Decimal | None = None
     mo_ta: str | None = None
+    tk_chi_phi: str | None = None
 
 
 @router.put("/hoa-don-cho/{h_id}")
@@ -779,6 +789,8 @@ def sua_hoa_don_cho(h_id: int, data: KtHdcSua, db: Session = Depends(get_db),
         r.thue_suat = data.thue_suat
     if data.mo_ta is not None:
         r.mo_ta = data.mo_ta.strip()[:300] or None
+    if data.tk_chi_phi is not None and data.tk_chi_phi in ("632", "642", "641", "627"):
+        r.tk_chi_phi = data.tk_chi_phi
     r.tong_tien = (Decimal(r.tien_truoc_thue or 0) *
                    (1 + Decimal(r.thue_suat or 0) / 100)).quantize(Decimal("1"))
     db.commit()
@@ -805,6 +817,7 @@ def ghi_hoa_don_cho(h_id: int, tao_cong_no: bool = True, hach_toan: bool = True,
                             f"Số hóa đơn '{r.so_hoa_don}' đã có trong bảng Hóa đơn — kiểm tra trùng.")
     data = HoaDonVao(loai="MUA", nha_cung_cap_id=r.nha_cung_cap_id,
                      so=r.so_hoa_don or None, ngay=r.ngay_hd,
+                     tk_chi_phi=(getattr(r, "tk_chi_phi", None) or None),
                      tien_truoc_thue=Decimal(r.tien_truoc_thue or 0),
                      thue_suat=Decimal(r.thue_suat or 8),
                      dien_giai=(r.mo_ta or f"Hóa đơn email {r.tu_email or ''}")[:200] or None,

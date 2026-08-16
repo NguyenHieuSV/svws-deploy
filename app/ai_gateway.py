@@ -1175,6 +1175,9 @@ def doc_hoa_don_email(tieu_de: str, noi_dung: str, goi_y: str | None = None) -> 
              '"so_tien": number|null (TỔNG TIỀN gồm VAT, đơn vị VNĐ, chỉ chữ số), '
              '"tien_truoc_thue": number|null (tiền hàng CHƯA VAT), '
              '"tien_thue": number|null (tiền thuế GTGT), '
+             '"tk_chi_phi": "632"|"642"|"641"|"627"|null (phân loại: 632=nguyên vật liệu/hóa chất/'
+             'hàng hóa-dịch vụ mua phục vụ hợp đồng-dự án, 642=chi phí quản lý như văn phòng/phí ngân hàng/'
+             'tư vấn/thuê VP, 641=chi phí bán hàng như quảng cáo/vận chuyển bán, 627=chi phí sản xuất chung), '
              '"mo_ta": string|null (tóm tắt hàng hóa/dịch vụ, ngắn gọn)}')
     try:
         cau_hoi = "Trích thông tin hóa đơn từ email trên."
@@ -1209,6 +1212,9 @@ def doc_hoa_don_tep(data: bytes, content_type: str, filename: str,
              '"so_tien": number|null (TỔNG TIỀN THANH TOÁN gồm VAT, đơn vị VNĐ, chỉ chữ số), '
              '"tien_truoc_thue": number|null (tiền hàng CHƯA VAT), '
              '"tien_thue": number|null (tiền thuế GTGT), '
+             '"tk_chi_phi": "632"|"642"|"641"|"627"|null (phân loại: 632=nguyên vật liệu/hóa chất/'
+             'hàng hóa-dịch vụ mua phục vụ hợp đồng-dự án, 642=chi phí quản lý như văn phòng/phí ngân hàng/'
+             'tư vấn/thuê VP, 641=chi phí bán hàng như quảng cáo/vận chuyển bán, 627=chi phí sản xuất chung), '
              '"mo_ta": string|null (tóm tắt hàng hóa/dịch vụ, ngắn gọn)}')
     cau_hoi = "Trích thông tin hóa đơn từ file trên."
     if goi_y:
