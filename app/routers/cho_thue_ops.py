@@ -1363,6 +1363,21 @@ def bo_qua_hoa_don_dau_vao(hd_id: int, db: Session = Depends(get_db),
     return {"ok": True}
 
 
+@router.delete("/hoa-don-dau-vao/{hd_id}")
+def xoa_hoa_don_dau_vao(hd_id: int, db: Session = Depends(get_db),
+                        nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
+    """Xóa bản ghi hóa đơn đầu vào (thư rác / quét nhầm). Khoản chi phí đã ghi (nếu có) giữ nguyên."""
+    from ..models import CtHoaDonDauVao
+    r = db.get(CtHoaDonDauVao, hd_id)
+    if r is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy hóa đơn")
+    ghi_audit(db, nd.id, "XOA", "ct_hoa_don_dau_vao", hd_id,
+              cu={"tieu_de": r.tieu_de, "so_tien": float(r.so_tien or 0), "trang_thai": r.trang_thai})
+    db.delete(r)
+    db.commit()
+    return {"ok": True}
+
+
 @router.get("/tai-san/{ts_id}/chi-phi-van-hanh-tong-hop")
 def chi_phi_vh_tong_hop(ts_id: int, db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
     """Tổng hợp chi phí vận hành TỰ ĐỘNG từ mục vận hành: SL dùng hóa chất-vật tư
