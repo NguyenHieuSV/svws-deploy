@@ -1259,7 +1259,7 @@ def xoa_ncc_email(e_id: int, db: Session = Depends(get_db),
 
 
 @router.post("/hoa-don-dau-vao/quet")
-def quet_hoa_don_email(db: Session = Depends(get_db),
+def quet_hoa_don_email(tu_ngay: date | None = None, db: Session = Depends(get_db),
                        nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
     """🤖 Quét hộp thư công ty: thư mới của NCC được AI đọc (số HĐ · ngày · số tiền),
     tự gắn dự án nếu tiêu đề/nội dung chứa MÃ DỰ ÁN → vào hàng CHỜ XÁC NHẬN."""
@@ -1268,8 +1268,9 @@ def quet_hoa_don_email(db: Session = Depends(get_db),
     from ..models import CtHoaDonDauVao
     from ..nhac_viec_service import gio_hien_tai
     prov = lay_inbound_provider()
+    moc = tu_ngay or (date.today() - timedelta(days=30))
     try:
-        thu = prov.lay_thu_moi()
+        thu = prov.lay_thu(moc) if hasattr(prov, "lay_thu") else prov.lay_thu_moi()
     except Exception as e:
         raise HTTPException(status.HTTP_400_BAD_REQUEST,
                             f"Không đọc được hộp thư ({prov.ten}): {str(e)[:150]} — "
@@ -1281,11 +1282,15 @@ def quet_hoa_don_email(db: Session = Depends(get_db),
         k = (e.email or "").strip().lower()
         if k:
             theo_email[k] = e
-    them = trung = dung_ai = khong_khop = 0
+    them = trung = dung_ai = khong_khop = con_lai = 0
+    GIOI_HAN = 25          # mỗi lần quét AI đọc tối đa 25 thư mới — phần còn lại quét lần sau
     for m in thu:
         mid = (m.get("message_id") or "").strip()[:250] or None
         if mid and db.query(CtHoaDonDauVao).filter_by(message_id=mid).first():
             trung += 1
+            continue
+        if them >= GIOI_HAN:
+            con_lai += 1
             continue
         tieu_de = (m.get("tieu_de") or "")[:250]
         nd_thu = m.get("noi_dung") or ""
@@ -1331,8 +1336,8 @@ def quet_hoa_don_email(db: Session = Depends(get_db),
         them += 1
     db.commit()
     return {"ok": True, "che_do": prov.ten, "thu_moi": len(thu),
-            "da_them": them, "trung_bo_qua": trung, "ai": dung_ai,
-            "khong_khop": khong_khop}
+            "tu_ngay": str(moc), "da_them": them, "trung_bo_qua": trung,
+            "ai": dung_ai, "khong_khop": khong_khop, "con_lai": con_lai}
 
 
 @router.get("/hoa-don-dau-vao")
@@ -1347,6 +1352,7 @@ def ds_hoa_don_dau_vao(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, 
                     "so_hoa_don": r.so_hoa_don,
                     "ngay_hd": str(r.ngay_hd) if r.ngay_hd else None,
                     "so_tien": float(r.so_tien or 0), "mo_ta": r.mo_ta,
+                    "loai_chi_phi": getattr(r, "loai_chi_phi", None) or "VAT_TU",
                     "tieu_de": r.tieu_de, "trang_thai": r.trang_thai})
     return out
 
@@ -1358,6 +1364,7 @@ class HdVaoSua(BaseModel):
     ngay_hd: date | None = None
     so_tien: Decimal | None = None
     mo_ta: str | None = None
+    loai_chi_phi: str | None = None
 
 
 @router.put("/hoa-don-dau-vao/{hd_id}")
@@ -1381,6 +1388,8 @@ def sua_hoa_don_dau_vao(hd_id: int, data: HdVaoSua, db: Session = Depends(get_db
         r.so_tien = data.so_tien
     if data.mo_ta is not None:
         r.mo_ta = data.mo_ta.strip()[:300] or None
+    if data.loai_chi_phi is not None and data.loai_chi_phi in ("VAT_TU", "SUA_CHUA", "NHAN_CONG", "KHAC"):
+        r.loai_chi_phi = data.loai_chi_phi
     db.commit()
     return {"ok": True}
 
@@ -1403,7 +1412,7 @@ def ghi_hoa_don_dau_vao(hd_id: int, db: Session = Depends(get_db),
     ngay_hd = r.ngay_hd or date.today()
     ma_bh = _ma_thang(ts.ten_du_an or ts.ma, ngay_hd.strftime("%Y-%m"))
     cp = ChiPhiVanHanh(tai_san_id=r.tai_san_id, ma_ban_hang=ma_bh,
-                       loai_chi_phi="VAT_TU", so_tien=r.so_tien, ngay=ngay_hd,
+                       loai_chi_phi=(r.loai_chi_phi or "VAT_TU"), so_tien=r.so_tien, ngay=ngay_hd,
                        mo_ta=(f"HĐ {r.so_hoa_don or '—'} — {r.ncc_ten or r.tu_email or 'NCC'}")[:300],
                        nguon="HD_EMAIL")
     db.add(cp)

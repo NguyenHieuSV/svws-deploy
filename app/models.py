@@ -1332,6 +1332,7 @@ class CtHoaDonDauVao(Base):
     tieu_de: Mapped[str | None] = mapped_column(String(250), nullable=True)
     message_id: Mapped[str | None] = mapped_column(String(250), unique=True, nullable=True)
     trang_thai: Mapped[str] = mapped_column(String(16), default="CHO_XAC_NHAN")
+    loai_chi_phi: Mapped[str] = mapped_column(String(16), default="VAT_TU")
     chi_phi_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     tao_luc: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 

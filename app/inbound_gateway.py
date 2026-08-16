@@ -17,6 +17,9 @@ class InboundProvider(Protocol):
 
 class FakeInboundProvider:
     ten = "DEMO"
+    def lay_thu(self, tu_ngay=None) -> list[dict]:
+        return self.lay_thu_moi()
+
     def lay_thu_moi(self) -> list[dict]:
         return [
             {"tu_email": "detmayx@kh.vn",
@@ -49,6 +52,9 @@ def _body(m) -> str:
 
 class ImapInboundProvider:
     ten = "IMAP"
+    def lay_thu(self, tu_ngay=None) -> list[dict]:
+        return _imap_lay_thu(tu_ngay)
+
     def lay_thu_moi(self) -> list[dict]:
         out = []
         M = imaplib.IMAP4_SSL(settings.imap_host, settings.imap_port)
@@ -69,6 +75,32 @@ class ImapInboundProvider:
                         "in_reply_to": m.get("In-Reply-To")})
         M.logout()
         return out
+
+
+def _imap_lay_thu(tu_ngay=None) -> list[dict]:
+    """Quét theo MỐC THỜI GIAN (SINCE) — đọc bằng BODY.PEEK nên KHÔNG đánh dấu đã đọc
+    trong hộp thư; 'AI chưa đọc' do nơi gọi tự khử trùng bằng Message-ID đã lưu."""
+    out = []
+    M = imaplib.IMAP4_SSL(settings.imap_host, settings.imap_port)
+    M.login(settings.imap_user, settings.imap_pass)
+    M.select("INBOX")
+    if tu_ngay is not None:
+        typ, data = M.search(None, f"(SINCE {tu_ngay.strftime('%d-%b-%Y')})")
+    else:
+        typ, data = M.search(None, "UNSEEN")
+    for num in data[0].split():
+        typ, md = M.fetch(num, "(BODY.PEEK[])")
+        m = email.message_from_bytes(md[0][1])
+        if (m.get("Auto-Submitted", "no").lower() != "no"
+                or "bulk" in (m.get("Precedence", "").lower())):
+            continue
+        out.append({"tu_email": parseaddr(m.get("From"))[1],
+                    "tieu_de": _txt(m.get("Subject")),
+                    "noi_dung": _body(m),
+                    "message_id": m.get("Message-ID"),
+                    "in_reply_to": m.get("In-Reply-To")})
+    M.logout()
+    return out
 
 
 def lay_inbound_provider() -> InboundProvider:
