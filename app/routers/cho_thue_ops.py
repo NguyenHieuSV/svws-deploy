@@ -1216,14 +1216,18 @@ def du_an_cac_thang(ts_id: int, so_thang: int = 12, db: Session = Depends(get_db
             mk = arr[i].ngay.strftime("%Y-%m") if arr[i].ngay else None
             if mk:
                 kl_thang[mk] = kl_thang.get(mk, 0.0) + (float(arr[i].luong_ton) - float(arr[i - 1].luong_ton))
+    theo_m3 = (ts.don_vi_gia or "").upper() == "VND/M3"
     rows = []
     for m in months:
         cp = round(cp_thang.get(m, 0.0))
+        kl = round(kl_thang.get(m, 0.0), 1)
+        # Dự án tính VND/m³: DOANH THU = KHỐI LƯỢNG × ĐƠN GIÁ; dự án VND/tháng: giá thuê tháng
+        doanh_thu = round(kl * dt) if theo_m3 else dt
         rows.append({"thang": m, "ma_ban_hang": _ma_thang(prefix, m),
-                     "khoi_luong": round(kl_thang.get(m, 0.0), 1),
+                     "khoi_luong": kl,
                      "don_vi_kl": don_vi_kl or "m³",
                      "don_gia": dt, "don_vi_gia": ts.don_vi_gia or "VND/THANG",
-                     "doanh_thu": dt, "chi_phi": cp, "loi_nhuan": dt - cp})
+                     "doanh_thu": doanh_thu, "chi_phi": cp, "loi_nhuan": doanh_thu - cp})
     return {"tai_san_id": ts_id, "ten_du_an": prefix, "gia_thue_thang": dt,
             "dang_thue": dang_thue, "cac_thang": rows}
 
