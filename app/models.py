@@ -1308,6 +1308,16 @@ class KeHoachBaoTri(Base):
 
 
 # ---------- Cho thuê: định mức & tiêu hao theo hệ thống/tháng ----------
+class CtNccEmail(Base):
+    __tablename__ = "ct_ncc_email"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    tai_san_id: Mapped[int | None] = mapped_column(ForeignKey("tai_san_cho_thue.id", ondelete="CASCADE"), nullable=True)
+    email: Mapped[str] = mapped_column(String(160))
+    ten_ncc: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    hoa_chat_vat_tu: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    tao_luc: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
 class CtHoaDonDauVao(Base):
     __tablename__ = "ct_hoa_don_dau_vao"
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)

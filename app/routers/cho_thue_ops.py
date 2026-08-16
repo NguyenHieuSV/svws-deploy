@@ -1208,6 +1208,56 @@ def _rut_hd_email(tieu_de: str, noi_dung: str) -> dict:
             "ncc_ten": None, "mo_ta": None}
 
 
+@router.get("/tai-san/{ts_id}/ncc-email")
+def ds_ncc_email(ts_id: int, db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
+    from ..models import CtNccEmail
+    return [{"id": e.id, "email": e.email, "ten_ncc": e.ten_ncc,
+             "hoa_chat_vat_tu": e.hoa_chat_vat_tu}
+            for e in db.query(CtNccEmail).filter_by(tai_san_id=ts_id).order_by(CtNccEmail.id).all()]
+
+
+class NccEmailVao(BaseModel):
+    email: str
+    ten_ncc: str | None = None
+    hoa_chat_vat_tu: str | None = None
+
+
+@router.post("/tai-san/{ts_id}/ncc-email", status_code=201)
+def them_ncc_email(ts_id: int, data: NccEmailVao, db: Session = Depends(get_db),
+                   nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    from ..models import CtNccEmail
+    from ..nhac_viec_service import gio_hien_tai
+    if db.get(TaiSanChoThue, ts_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy dự án")
+    em = (data.email or "").strip().lower()[:160]
+    if "@" not in em or "." not in em.split("@")[-1]:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Email '{em}' không hợp lệ")
+    if db.query(CtNccEmail).filter_by(tai_san_id=ts_id, email=em).first():
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Email này đã khai cho dự án")
+    e = CtNccEmail(tai_san_id=ts_id, email=em,
+                   ten_ncc=(data.ten_ncc or "").strip()[:200] or None,
+                   hoa_chat_vat_tu=(data.hoa_chat_vat_tu or "").strip()[:300] or None,
+                   tao_luc=gio_hien_tai())
+    db.add(e)
+    db.flush()
+    ghi_audit(db, nd.id, "TAO", "ct_ncc_email", e.id, moi={"tai_san_id": ts_id, "email": em})
+    db.commit()
+    return {"id": e.id, "ok": True}
+
+
+@router.delete("/ncc-email/{e_id}")
+def xoa_ncc_email(e_id: int, db: Session = Depends(get_db),
+                  nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    from ..models import CtNccEmail
+    e = db.get(CtNccEmail, e_id)
+    if e is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy")
+    ghi_audit(db, nd.id, "XOA", "ct_ncc_email", e_id, cu={"email": e.email})
+    db.delete(e)
+    db.commit()
+    return {"ok": True}
+
+
 @router.post("/hoa-don-dau-vao/quet")
 def quet_hoa_don_email(db: Session = Depends(get_db),
                        nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
@@ -1225,7 +1275,13 @@ def quet_hoa_don_email(db: Session = Depends(get_db),
                             f"Không đọc được hộp thư ({prov.ten}): {str(e)[:150]} — "
                             "kiểm tra INBOUND_PROVIDER=IMAP + IMAP_HOST/USER/PASS trên Render.")
     ds_ts = db.query(TaiSanChoThue).all()
-    them = trung = dung_ai = 0
+    from ..models import CtNccEmail
+    theo_email = {}
+    for e in db.query(CtNccEmail).all():
+        k = (e.email or "").strip().lower()
+        if k:
+            theo_email[k] = e
+    them = trung = dung_ai = khong_khop = 0
     for m in thu:
         mid = (m.get("message_id") or "").strip()[:250] or None
         if mid and db.query(CtHoaDonDauVao).filter_by(message_id=mid).first():
@@ -1239,7 +1295,17 @@ def quet_hoa_don_email(db: Session = Depends(get_db),
             for ma in {(t.ten_du_an or "").strip().upper(), (t.ma or "").strip().upper()}:
                 if ma and len(ma) >= 4 and ma in tU and len(ma) > len(best):
                     best, ts_id, ma_da = ma, t.id, ma
-        info = doc_hoa_don_email(tieu_de, nd_thu)
+        # ƯU TIÊN DANH BẠ: thư từ email NCC đã khai → gắn thẳng dự án của danh bạ
+        dk = theo_email.get((m.get("tu_email") or "").strip().lower())
+        if dk is not None and dk.tai_san_id:
+            ts_id = dk.tai_san_id
+            t_dk = db.get(TaiSanChoThue, dk.tai_san_id)
+            ma_da = (t_dk.ten_du_an or t_dk.ma) if t_dk else ma_da
+        elif ts_id is None and theo_email:
+            # đã có danh bạ nhưng thư không thuộc NCC nào và không chứa mã dự án → bỏ qua
+            khong_khop += 1
+            continue
+        info = doc_hoa_don_email(tieu_de, nd_thu, dk.hoa_chat_vat_tu if dk else None)
         if info:
             dung_ai += 1
         else:
@@ -1257,7 +1323,7 @@ def quet_hoa_don_email(db: Session = Depends(get_db),
         db.add(CtHoaDonDauVao(
             tai_san_id=ts_id, ma_du_an=ma_da,
             tu_email=(m.get("tu_email") or "")[:160] or None,
-            ncc_ten=(str(info.get("ncc_ten") or "")[:200]) or None,
+            ncc_ten=(str(info.get("ncc_ten") or "")[:200]) or (dk.ten_ncc if dk else None),
             so_hoa_don=(str(info.get("so_hoa_don") or "")[:60]) or None,
             ngay_hd=ngay_hd, so_tien=tien,
             mo_ta=(str(info.get("mo_ta") or "")[:300]) or None,
@@ -1265,7 +1331,8 @@ def quet_hoa_don_email(db: Session = Depends(get_db),
         them += 1
     db.commit()
     return {"ok": True, "che_do": prov.ten, "thu_moi": len(thu),
-            "da_them": them, "trung_bo_qua": trung, "ai": dung_ai}
+            "da_them": them, "trung_bo_qua": trung, "ai": dung_ai,
+            "khong_khop": khong_khop}
 
 
 @router.get("/hoa-don-dau-vao")

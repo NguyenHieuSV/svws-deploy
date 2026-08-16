@@ -1162,7 +1162,7 @@ def phan_tich_thiet_ke(info):
     return _phan_tich_heuristic(info)
 
 
-def doc_hoa_don_email(tieu_de: str, noi_dung: str) -> dict | None:
+def doc_hoa_don_email(tieu_de: str, noi_dung: str, goi_y: str | None = None) -> dict | None:
     """AI đọc email hóa đơn của NCC → {ncc_ten, so_hoa_don, ngay, so_tien, mo_ta}.
     Trả None khi AI chưa bật — nơi gọi tự rơi về bộ đọc regex."""
     if (settings.ai_provider or "").upper() != "ANTHROPIC" or not settings.anthropic_api_key:
@@ -1175,8 +1175,10 @@ def doc_hoa_don_email(tieu_de: str, noi_dung: str) -> dict | None:
              '"so_tien": number|null (TỔNG TIỀN gồm VAT, đơn vị VNĐ, chỉ chữ số), '
              '"mo_ta": string|null (tóm tắt hàng hóa/dịch vụ, ngắn gọn)}')
     try:
-        txt = _goi_claude_json(khoi, sys_p, "Trích thông tin hóa đơn từ email trên.",
-                               max_tokens=500, timeout=60)
+        cau_hoi = "Trích thông tin hóa đơn từ email trên."
+        if goi_y:
+            cau_hoi += f" Gợi ý: nhà cung cấp này thường bán các mặt hàng: {goi_y[:200]}."
+        txt = _goi_claude_json(khoi, sys_p, cau_hoi, max_tokens=500, timeout=60)
         ds = _vot_json_mang(txt)
         return ds[0] if ds else None
     except Exception:
