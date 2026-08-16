@@ -1190,10 +1190,30 @@ def du_an_cac_thang(ts_id: int, so_thang: int = 12, db: Session = Depends(get_db
             cp_thang[mk] = cp_thang.get(mk, 0.0) + float(c.so_tien or 0)
     dt = float(ts.gia_thue_thang or 0)
     dang_thue = ts.tinh_trang == "DANG_THUE"
+    # KHỐI LƯỢNG nước xử lý theo tháng = tổng chênh lệch chỉ số giữa các lần ghi
+    # (tính riêng từng hệ thống, cộng dồn vào tháng của lần ghi sau)
+    kls = (db.query(CtBaoCaoVh).filter_by(tai_san_id=ts_id, loai="KHOI_LUONG")
+           .order_by(CtBaoCaoVh.ngay, CtBaoCaoVh.id).all())
+    he_thong: dict = {}
+    don_vi_kl = None
+    for r in kls:
+        if r.luong_ton is None:
+            continue
+        if r.don_vi and not don_vi_kl:
+            don_vi_kl = r.don_vi
+        he_thong.setdefault((r.noi_dung or "").strip().lower(), []).append(r)
+    kl_thang: dict[str, float] = {}
+    for arr in he_thong.values():
+        for i in range(1, len(arr)):
+            mk = arr[i].ngay.strftime("%Y-%m") if arr[i].ngay else None
+            if mk:
+                kl_thang[mk] = kl_thang.get(mk, 0.0) + (float(arr[i].luong_ton) - float(arr[i - 1].luong_ton))
     rows = []
     for m in months:
         cp = round(cp_thang.get(m, 0.0))
         rows.append({"thang": m, "ma_ban_hang": _ma_thang(prefix, m),
+                     "khoi_luong": round(kl_thang.get(m, 0.0), 1),
+                     "don_vi_kl": don_vi_kl or "m³",
                      "don_gia": dt, "don_vi_gia": ts.don_vi_gia or "VND/THANG",
                      "doanh_thu": dt, "chi_phi": cp, "loi_nhuan": dt - cp})
     return {"tai_san_id": ts_id, "ten_du_an": prefix, "gia_thue_thang": dt,
