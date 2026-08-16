@@ -1180,6 +1180,37 @@ def _ma_thang(prefix: str, thang: str) -> str:
     return f"{prefix}{thang[5:7]}{thang[2:4]}"
 
 
+@router.get("/tai-san/{ts_id}/chi-phi-van-hanh-tong-hop")
+def chi_phi_vh_tong_hop(ts_id: int, db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
+    """Tổng hợp chi phí vận hành TỰ ĐỘNG từ mục vận hành: SL dùng hóa chất-vật tư
+    (Báo cáo hóa chất) × đơn giá hàng hóa trong Kho + các khoản Bảo trì/Sửa chữa đã ghi.
+    Bảng thống kê để kiểm soát — không ghi sổ kế toán."""
+    if db.get(TaiSanChoThue, ts_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy dự án")
+    gia = {}
+    for h in db.query(HangHoa).all():
+        k = (h.ten or "").strip().lower()
+        if k and k not in gia:
+            gia[k] = float(h.gia_ban or 0)
+    out = []
+    for r in (db.query(CtBaoCaoVh).filter_by(tai_san_id=ts_id, loai="HOA_CHAT_VT")
+              .order_by(CtBaoCaoVh.ngay.desc(), CtBaoCaoVh.id.desc()).limit(1000).all()):
+        sl = float(r.so_luong or 0)
+        if sl <= 0:
+            continue
+        g = gia.get((r.noi_dung or "").strip().lower())
+        out.append({"ngay": str(r.ngay) if r.ngay else None, "nhom": "HOA_CHAT_VT",
+                    "ten": r.noi_dung, "sl": sl, "don_vi": r.don_vi,
+                    "don_gia": g or 0, "thanh_tien": round(sl * (g or 0)),
+                    "co_gia": bool(g)})
+    for c in db.query(ChiPhiVanHanh).filter_by(tai_san_id=ts_id).all():
+        if (c.nguon or "") == "BAO_TRI" or (c.loai_chi_phi or "") == "SUA_CHUA":
+            out.append({"ngay": str(c.ngay) if c.ngay else None, "nhom": "BAO_TRI",
+                        "ten": c.mo_ta or "Bảo trì / sửa chữa", "sl": None, "don_vi": None,
+                        "don_gia": None, "thanh_tien": float(c.so_tien or 0), "co_gia": True})
+    return out
+
+
 @router.get("/du-an/{ts_id}/cac-thang")
 def du_an_cac_thang(ts_id: int, so_thang: int = 12, db: Session = Depends(get_db),
                     _=Depends(yeu_cau(MODULE, "XEM"))):
