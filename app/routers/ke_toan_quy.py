@@ -628,6 +628,53 @@ def thong_ke_thu_chi(tu_ngay: str | None = None, den_ngay: str | None = None,
             "theo_quy": theo_quy, "theo_ma_ban": theo_ma_ban}
 
 
+# --- 🏢 Tự khớp hồ sơ NCC theo tên AI đọc / tên miền email ---
+_DOMAIN_CHUNG = {"gmail.com", "googlemail.com", "yahoo.com", "yahoo.com.vn",
+                 "hotmail.com", "outlook.com", "icloud.com", "watersolutions.company"}
+
+
+def _ten_goc_ncc(s):
+    """Chuẩn hóa tên NCC: bỏ dấu, bỏ từ pháp lý (Công ty CP/TNHH/SX-TM…) để so khớp."""
+    import unicodedata
+    import re as _re
+    s = unicodedata.normalize("NFD", s or "")
+    s = "".join(c for c in s if unicodedata.category(c) != "Mn")
+    s = s.replace("đ", "d").replace("Đ", "D").lower()
+    s = _re.sub(r"[^a-z0-9 ]", " ", s)
+    s = _re.sub(r"\b(trach nhiem huu han|mot thanh vien|cong ty|co phan|thuong mai|"
+                r"san xuat|dich vu|xay dung|cty|tnhh|mtv|cp|sx|tm|dv|xd|va)\b", " ", s)
+    return " ".join(s.split())
+
+
+def _khop_ncc(ds_ncc, ten_ai, email=None):
+    """Tìm NCC trong hồ sơ khớp tên AI đọc (đã bỏ dấu + từ pháp lý) hoặc tên miền
+    email riêng của NCC. Trả về id hoặc None; ds_ncc = list NhaCungCap query sẵn."""
+    dom = (email or "").split("@")[-1].strip().lower()
+    if dom and "." in dom and dom not in _DOMAIN_CHUNG:
+        for n in ds_ncc:
+            if (n.email or "").split("@")[-1].strip().lower() == dom:
+                return n.id
+    goc = _ten_goc_ncc(ten_ai)
+    if len(goc) < 4:
+        return None
+    tot, tot_diem = None, 0
+    w1 = set(goc.split())
+    for n in ds_ncc:
+        g2 = _ten_goc_ncc(n.ten)
+        if len(g2) < 4:
+            continue
+        if g2 == goc:
+            return n.id
+        w2 = set(g2.split())
+        # khớp khi 1 tên chứa tên kia (chuỗi), hoặc tập từ tên ngắn nằm trọn trong tên dài
+        khop = (g2 in goc) or (goc in g2) or (len(w1 & w2) >= 2 and (w1 <= w2 or w2 <= w1))
+        if khop:
+            diem = len(" ".join(w1 & w2))
+            if diem > tot_diem:
+                tot, tot_diem = n.id, diem
+    return tot
+
+
 # ============ 📥 HÓA ĐƠN MUA TỪ EMAIL — chờ xác nhận trước khi vào bảng Hóa đơn ============
 @router.post("/hoa-don-cho/quet")
 def quet_hoa_don_mua_email(tu_ngay: date | None = None, db: Session = Depends(get_db),
@@ -654,8 +701,9 @@ def quet_hoa_don_mua_email(tu_ngay: date | None = None, db: Session = Depends(ge
     except Exception as e:
         raise HTTPException(status.HTTP_400_BAD_REQUEST,
                             f"Không đọc được hộp thư ({prov.ten}): {str(e)[:150]}")
+    ds_ncc = db.query(NhaCungCap).all()
     tin_cay = {}
-    for n in db.query(NhaCungCap).all():
+    for n in ds_ncc:
         k = (n.email or "").strip().lower()
         if k and k not in tin_cay:
             tin_cay[k] = n.id
@@ -714,9 +762,11 @@ def quet_hoa_don_mua_email(tu_ngay: date | None = None, db: Session = Depends(ge
             tk_ai = "632" if any(w in nd_kd for w in
                                  ("hoa chat", "vat tu", "thiet bi", "hang hoa", "vat lieu",
                                   "pac", "naoh", "polymer", "loc", "bom")) else "642"
+        # 🏢 NCC: ưu tiên email trùng hồ sơ → khớp theo tên AI đọc / tên miền riêng
+        ncc_id = tin_cay.get(nguoi) or _khop_ncc(ds_ncc, str(info.get("ncc_ten") or ""), nguoi)
         db.add(KtHoaDonCho(
             tk_chi_phi=tk_ai,
-            nha_cung_cap_id=tin_cay.get(nguoi),
+            nha_cung_cap_id=ncc_id,
             tu_email=(m.get("tu_email") or "")[:160] or None,
             ncc_ten=(str(info.get("ncc_ten") or "")[:200]) or None,
             so_hoa_don=(str(info.get("so_hoa_don") or "")[:60]) or None,
@@ -726,6 +776,12 @@ def quet_hoa_don_mua_email(tu_ngay: date | None = None, db: Session = Depends(ge
             mo_ta=(str(info.get("mo_ta") or "")[:300]) or None,
             tieu_de=tieu_de or None, message_id=mid, tao_luc=gio_hien_tai()))
         them += 1
+    # 🔁 Khớp lại các hàng chờ cũ chưa gắn NCC (quét trước khi có tự khớp theo tên)
+    for r0 in db.query(KtHoaDonCho).filter_by(trang_thai="CHO_XAC_NHAN").all():
+        if r0.nha_cung_cap_id is None and (r0.ncc_ten or r0.tu_email):
+            m0 = _khop_ncc(ds_ncc, r0.ncc_ten or "", r0.tu_email)
+            if m0:
+                r0.nha_cung_cap_id = m0
     db.commit()
     return {"ok": True, "che_do": prov.ten, "thu_moi": len(thu), "tu_ngay": str(moc),
             "da_them": them, "trung_bo_qua": trung, "ai": dung_ai,
@@ -736,9 +792,14 @@ def quet_hoa_don_mua_email(tu_ngay: date | None = None, db: Session = Depends(ge
 def ds_hoa_don_cho(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
     from ..models import KtHoaDonCho, NhaCungCap
     out = []
+    ds_ncc = db.query(NhaCungCap).all()
     for r in db.query(KtHoaDonCho).order_by(KtHoaDonCho.id.desc()).limit(400).all():
         n = db.get(NhaCungCap, r.nha_cung_cap_id) if r.nha_cung_cap_id else None
+        goi_y = None
+        if r.nha_cung_cap_id is None and r.trang_thai == "CHO_XAC_NHAN":
+            goi_y = _khop_ncc(ds_ncc, r.ncc_ten or "", r.tu_email)
         out.append({"id": r.id, "nha_cung_cap_id": r.nha_cung_cap_id,
+                    "goi_y_ncc_id": goi_y,
                     "ncc_ho_so": n.ten if n else None,
                     "tu_email": r.tu_email, "ncc_ten": r.ncc_ten,
                     "so_hoa_don": r.so_hoa_don,
@@ -750,6 +811,37 @@ def ds_hoa_don_cho(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM
                     "tk_chi_phi": getattr(r, "tk_chi_phi", None),
                     "hoa_don_id": r.hoa_don_id, "trang_thai": r.trang_thai})
     return out
+
+
+@router.post("/hoa-don-cho/{hdc_id}/tao-ncc")
+def tao_ncc_tu_hoa_don_cho(hdc_id: int, db: Session = Depends(get_db),
+                           nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    """➕ Tạo nhanh hồ sơ Nhà cung cấp từ tên AI đọc + email người gửi, gắn vào hóa đơn chờ."""
+    from ..models import KtHoaDonCho, NhaCungCap
+    r = db.get(KtHoaDonCho, hdc_id)
+    if r is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy hóa đơn chờ")
+    if r.nha_cung_cap_id:
+        return {"ok": True, "nha_cung_cap_id": r.nha_cung_cap_id, "moi": False}
+    ten = (r.ncc_ten or "").strip()
+    if not ten:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "AI chưa đọc được tên NCC — vào mục Nhà cung cấp tạo hồ sơ thủ công")
+    ds_ncc = db.query(NhaCungCap).all()
+    m = _khop_ncc(ds_ncc, ten, r.tu_email)
+    if m:
+        r.nha_cung_cap_id = m
+        db.commit()
+        return {"ok": True, "nha_cung_cap_id": m, "moi": False}
+    n = NhaCungCap(ten=ten[:200], email=(r.tu_email or "")[:120] or None,
+                   ghi_chu=("Tạo tự động từ email hóa đơn " + (r.so_hoa_don or "")).strip())
+    db.add(n)
+    db.flush()
+    r.nha_cung_cap_id = n.id
+    ghi_audit(db, nd.id, "TAO_NCC_TU_EMAIL", "nha_cung_cap", n.id,
+              moi={"ten": ten, "email": r.tu_email, "hoa_don_cho_id": r.id})
+    db.commit()
+    return {"ok": True, "nha_cung_cap_id": n.id, "moi": True}
 
 
 from pydantic import BaseModel as _BM_hdc
