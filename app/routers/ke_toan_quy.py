@@ -852,6 +852,7 @@ def ds_hoa_don_cho(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM
                     "tk_chi_phi": getattr(r, "tk_chi_phi", None),
                     "link_tra_cuu": getattr(r, "link_tra_cuu", None),
                     "ma_tra_cuu": getattr(r, "ma_tra_cuu", None),
+                    "don_hang_id": getattr(r, "don_hang_id", None),
                     "hoa_don_id": r.hoa_don_id, "trang_thai": r.trang_thai})
     return out
 
@@ -952,6 +953,7 @@ class KtHdcSua(_BM_hdc):
     thue_suat: Decimal | None = None
     mo_ta: str | None = None
     tk_chi_phi: str | None = None
+    don_hang_id: int | None = None
 
 
 @router.put("/hoa-don-cho/{h_id}")
@@ -979,6 +981,8 @@ def sua_hoa_don_cho(h_id: int, data: KtHdcSua, db: Session = Depends(get_db),
         r.mo_ta = data.mo_ta.strip()[:300] or None
     if data.tk_chi_phi is not None and data.tk_chi_phi in ("632", "642", "641", "627"):
         r.tk_chi_phi = data.tk_chi_phi
+    if data.don_hang_id is not None:
+        r.don_hang_id = data.don_hang_id or None
     r.tong_tien = (Decimal(r.tien_truoc_thue or 0) *
                    (1 + Decimal(r.thue_suat or 0) / 100)).quantize(Decimal("1"))
     db.commit()
@@ -1005,6 +1009,7 @@ def ghi_hoa_don_cho(h_id: int, tao_cong_no: bool = True, hach_toan: bool = True,
                             f"Số hóa đơn '{r.so_hoa_don}' đã có trong bảng Hóa đơn — kiểm tra trùng.")
     data = HoaDonVao(loai="MUA", nha_cung_cap_id=r.nha_cung_cap_id,
                      so=r.so_hoa_don or None, ngay=r.ngay_hd,
+                     don_hang_id=getattr(r, "don_hang_id", None),
                      tk_chi_phi=(getattr(r, "tk_chi_phi", None) or None),
                      tien_truoc_thue=Decimal(r.tien_truoc_thue or 0),
                      thue_suat=Decimal(r.thue_suat or 8),
