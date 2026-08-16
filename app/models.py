@@ -1337,6 +1337,25 @@ class CtHoaDonDauVao(Base):
     tao_luc: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
+class KtHoaDonCho(Base):
+    __tablename__ = "kt_hoa_don_cho"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    nha_cung_cap_id: Mapped[int | None] = mapped_column(ForeignKey("nha_cung_cap.id", ondelete="SET NULL"), nullable=True)
+    tu_email: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    ncc_ten: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    so_hoa_don: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    ngay_hd: Mapped[date | None] = mapped_column(Date, nullable=True)
+    tien_truoc_thue: Mapped[Decimal] = mapped_column(Numeric(18, 0), default=0)
+    thue_suat: Mapped[Decimal] = mapped_column(Numeric(5, 2), default=8)
+    tong_tien: Mapped[Decimal] = mapped_column(Numeric(18, 0), default=0)
+    mo_ta: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    tieu_de: Mapped[str | None] = mapped_column(String(250), nullable=True)
+    message_id: Mapped[str | None] = mapped_column(String(250), unique=True, nullable=True)
+    trang_thai: Mapped[str] = mapped_column(String(16), default="CHO_XAC_NHAN")
+    hoa_don_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    tao_luc: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
 class DinhMucTieuHao(Base):
     __tablename__ = "dinh_muc_tieu_hao"
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
