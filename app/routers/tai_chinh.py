@@ -3,7 +3,7 @@ Module TÀI CHÍNH — tổng hợp dòng tiền & công nợ quá hạn (cảnh
 Đọc dữ liệu do Kế toán/Bán hàng sinh ra; không nhập liệu trùng.
 """
 from datetime import date, timedelta
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from ..database import get_db
@@ -1274,3 +1274,231 @@ def du_bao_dong_tien(so_tuan: int = 13, db: Session = Depends(get_db),
             "min_ton": min_ton, "tuan_thieu_dau": tuan_thieu_dau, "so_tuan_am": so_tuan_am,
             "chi_co_dinh_tuan": chi_co_dinh_tuan, "no_vay_trong_ky": vay_trong_ky,
             "ar_khong_han": ar_khong_han, "ap_khong_han": ap_khong_han, "canh_bao": canh_bao}
+
+
+# ============ 🧾 ĐỐI SOÁT SAO KÊ NGÂN HÀNG ============
+def _ske_so(v):
+    """Ép số AI trả về thành Decimal không âm."""
+    from decimal import Decimal as _D
+    try:
+        d = _D(str(int(float(str(v).replace(",", "").replace(".", "")
+                             if isinstance(v, str) else v))))
+        return d if d > 0 else _D(0)
+    except Exception:
+        return _D(0)
+
+
+def _ung_vien_sao_ke(db: Session, tu: date, den: date) -> list[dict]:
+    """Gom ứng viên đối soát từ 4 nguồn trong khoảng ngày [tu, den]:
+    ① phiếu thu-chi kế toán ĐÃ DUYỆT qua quỹ NGÂN HÀNG · ② thu công nợ BÁN HÀNG
+    ③ lệnh Duyệt chi Ngân hàng ĐÃ CHI (NCC) · ④ Bank record CEO tự ghi."""
+    from ..models import (PhieuThuChi, LenhChiBank, BankRecord, DonMua, NhaCungCap)
+    ung = []
+    quy_nh = {q.id for q in db.query(TaiKhoanQuy).filter(TaiKhoanQuy.loai == "NGAN_HANG").all()}
+    for p in db.query(PhieuThuChi).filter(PhieuThuChi.trang_thai == "DA_DUYET",
+                                          PhieuThuChi.ngay >= tu, PhieuThuChi.ngay <= den).all():
+        if p.quy_id not in quy_nh:
+            continue
+        ung.append({"loai": "PHIEU", "id": p.id, "ngay": p.ngay,
+                    "so_tien": float(p.so_tien or 0),
+                    "chieu": "VAO" if p.loai == "THU" else "RA",
+                    "mo_ta": f"Phiếu {p.so or p.id} — {(p.dien_giai or '')[:60]}"})
+    for tt, cn in (db.query(ThanhToan, CongNo).join(CongNo, ThanhToan.cong_no_id == CongNo.id)
+                   .filter(CongNo.loai == "PHAI_THU",
+                           ThanhToan.ngay >= tu, ThanhToan.ngay <= den).all()):
+        ung.append({"loai": "THU_CN_BAN", "id": tt.id, "ngay": tt.ngay,
+                    "so_tien": float(tt.so_tien or 0), "chieu": "VAO",
+                    "mo_ta": f"Thu công nợ bán hàng #CN{cn.id}"
+                             + (f" — HĐ {cn.so_ct}" if cn.so_ct else "")})
+    from ..models import LenhChiBank as _LCB2
+    for r in db.query(_LCB2).filter(_LCB2.trang_thai == "DA_CHI").all():
+        ng = r.ngay_tt or (r.chi_luc.date() if r.chi_luc else None)
+        if ng is None or ng < tu or ng > den:
+            continue
+        mo_ta = "Duyệt chi NCC"
+        if r.don_mua_id:
+            dm0 = db.get(DonMua, r.don_mua_id)
+            nc0 = db.get(NhaCungCap, dm0.nha_cung_cap_id) if dm0 else None
+            mo_ta = f"Duyệt chi PO {dm0.so if dm0 else r.don_mua_id}" + (f" — {nc0.ten[:40]}" if nc0 else "")
+        elif r.cong_no_id:
+            cn0 = db.get(CongNo, r.cong_no_id)
+            nc0 = db.get(NhaCungCap, cn0.nha_cung_cap_id) if (cn0 and cn0.nha_cung_cap_id) else None
+            mo_ta = f"Duyệt chi công nợ #CN{r.cong_no_id}" + (f" — {nc0.ten[:40]}" if nc0 else "")
+        ung.append({"loai": "LENH_CHI", "id": r.id, "ngay": ng,
+                    "so_tien": float(r.so_tien or 0), "chieu": "RA", "mo_ta": mo_ta})
+    from ..models import BankRecord as _BR2
+    for b in db.query(_BR2).filter(_BR2.ngay >= tu, _BR2.ngay <= den).all():
+        ung.append({"loai": "BANK_REC", "id": b.id, "ngay": b.ngay,
+                    "so_tien": float(b.so_tien or 0),
+                    "chieu": "VAO" if b.loai == "THU" else "RA",
+                    "mo_ta": f"Bank record — {(b.dien_giai or '')[:60]}"})
+    return ung
+
+
+def _thieu_tren_sao_ke(sk, ung, da_dung):
+    """Khoản có trong app (đúng kỳ sao kê) nhưng KHÔNG khớp dòng sao kê nào."""
+    thieu = [u for u in ung
+             if (u["loai"], u["id"]) not in da_dung and u["ngay"] is not None
+             and sk.tu_ngay and sk.den_ngay and sk.tu_ngay <= u["ngay"] <= sk.den_ngay]
+    thieu.sort(key=lambda x: str(x["ngay"]))
+    return [{"loai": u["loai"], "ngay": str(u["ngay"]), "so_tien": u["so_tien"],
+             "chieu": u["chieu"], "mo_ta": u["mo_ta"]} for u in thieu][:200]
+
+
+def _doi_soat_sao_ke(db: Session, sk_id: int) -> dict:
+    """So khớp từng dòng sao kê với ứng viên 4 nguồn: cùng chiều + đúng số tiền
+    + lệch ngày ≤3; mỗi bản ghi app chỉ khớp 1 dòng; ưu tiên phiếu/lệnh chi."""
+    from ..models import SaoKeBank, SaoKeDong
+    sk = db.get(SaoKeBank, sk_id)
+    dongs = (db.query(SaoKeDong).filter_by(sao_ke_id=sk_id)
+             .order_by(SaoKeDong.ngay, SaoKeDong.id).all())
+    if sk is None or not dongs:
+        return {"tong_dong": 0, "khop": 0, "chua_khop": 0, "app_thieu": []}
+    tu = (sk.tu_ngay or date.today()) - timedelta(days=5)
+    den = (sk.den_ngay or date.today()) + timedelta(days=5)
+    ung = _ung_vien_sao_ke(db, tu, den)
+    UU_TIEN = {"PHIEU": 0, "LENH_CHI": 0, "THU_CN_BAN": 1, "BANK_REC": 2}
+    da_dung, khop = set(), 0
+    for d in dongs:
+        d.khop_loai = None; d.khop_id = None; d.khop_mo_ta = None
+        so = float(d.tien_vao or 0) or float(d.tien_ra or 0)
+        if so <= 0:
+            continue
+        chieu = "VAO" if float(d.tien_vao or 0) > 0 else "RA"
+        tot, tot_key = None, None
+        for u in ung:
+            if (u["loai"], u["id"]) in da_dung or u["chieu"] != chieu:
+                continue
+            if abs(u["so_tien"] - so) > 0.5:
+                continue
+            lech = abs((u["ngay"] - d.ngay).days) if (d.ngay and u["ngay"]) else 99
+            if lech > 3:
+                continue
+            key = (lech, UU_TIEN.get(u["loai"], 9))
+            if tot is None or key < tot_key:
+                tot, tot_key = u, key
+        if tot is not None:
+            da_dung.add((tot["loai"], tot["id"]))
+            d.khop_loai = tot["loai"]; d.khop_id = tot["id"]
+            d.khop_mo_ta = tot["mo_ta"][:300]
+            khop += 1
+    return {"tong_dong": len(dongs), "khop": khop, "chua_khop": len(dongs) - khop,
+            "app_thieu": _thieu_tren_sao_ke(sk, ung, da_dung)}
+
+
+@router.post("/sao-ke", status_code=201)
+def tai_sao_ke(ngan_hang: str = "", file: UploadFile = File(...),
+               db: Session = Depends(get_db),
+               nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN", "KTT"))):
+    """📥 Tải file sao kê (PDF/ảnh/Excel/CSV) — AI đọc từng dòng, lưu lại, đối soát ngay."""
+    from ..models import SaoKeBank, SaoKeDong
+    from ..ai_gateway import doc_sao_ke_tep
+    from ..nhac_viec_service import gio_hien_tai
+    data = file.file.read()
+    if not data or len(data) > 15 * 1024 * 1024:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "File trống hoặc lớn hơn 15MB")
+    dong = doc_sao_ke_tep(data, file.content_type or "", file.filename or "")
+    if not dong:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "AI không đọc được sao kê từ file này — kiểm tra file / cấu hình AI")
+    sk = SaoKeBank(ten_file=(file.filename or "sao_ke")[:200],
+                   ngan_hang=(ngan_hang or "").strip()[:60] or None,
+                   nguoi_tao=nd.id, tao_luc=gio_hien_tai())
+    db.add(sk); db.flush()
+    n, ngays = 0, []
+    for d in dong[:500]:
+        vao, ra = _ske_so(d.get("tien_vao")), _ske_so(d.get("tien_ra"))
+        if not vao and not ra:
+            continue
+        ng = None
+        try:
+            if d.get("ngay"):
+                ng = date.fromisoformat(str(d["ngay"])[:10])
+        except Exception:
+            pass
+        sd = _ske_so(d.get("so_du")) if d.get("so_du") is not None else None
+        db.add(SaoKeDong(sao_ke_id=sk.id, ngay=ng,
+                         dien_giai=(str(d.get("dien_giai") or "")[:400]) or None,
+                         tien_vao=vao, tien_ra=ra, so_du=sd))
+        if ng:
+            ngays.append(ng)
+        n += 1
+    if not n:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Không thấy dòng giao dịch hợp lệ nào trong file")
+    sk.so_dong = n
+    sk.tu_ngay = min(ngays) if ngays else None
+    sk.den_ngay = max(ngays) if ngays else None
+    ghi_audit(db, nd.id, "TAI_SAO_KE", "sao_ke_bank", sk.id,
+              moi={"file": sk.ten_file, "ngan_hang": sk.ngan_hang, "so_dong": n})
+    db.flush()
+    kq = _doi_soat_sao_ke(db, sk.id)
+    db.commit()
+    return {"ok": True, "id": sk.id, "so_dong": n, "doi_soat": kq}
+
+
+@router.get("/sao-ke")
+def ds_sao_ke(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
+    from ..models import SaoKeBank, SaoKeDong
+    out = []
+    for sk in db.query(SaoKeBank).order_by(SaoKeBank.id.desc()).limit(50).all():
+        khop = db.query(func.count(SaoKeDong.id)).filter(
+            SaoKeDong.sao_ke_id == sk.id, SaoKeDong.khop_loai.isnot(None)).scalar() or 0
+        out.append({"id": sk.id, "ten_file": sk.ten_file, "ngan_hang": sk.ngan_hang,
+                    "tu_ngay": str(sk.tu_ngay) if sk.tu_ngay else None,
+                    "den_ngay": str(sk.den_ngay) if sk.den_ngay else None,
+                    "so_dong": sk.so_dong, "khop": int(khop),
+                    "chua_khop": int((sk.so_dong or 0) - khop),
+                    "tao_luc": str(sk.tao_luc)[:16] if sk.tao_luc else None})
+    return out
+
+
+@router.get("/sao-ke/{sk_id}")
+def chi_tiet_sao_ke(sk_id: int, db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
+    from ..models import SaoKeBank, SaoKeDong
+    sk = db.get(SaoKeBank, sk_id)
+    if sk is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy sao kê")
+    dongs = (db.query(SaoKeDong).filter_by(sao_ke_id=sk_id)
+             .order_by(SaoKeDong.ngay, SaoKeDong.id).all())
+    tu = (sk.tu_ngay or date.today()) - timedelta(days=5)
+    den = (sk.den_ngay or date.today()) + timedelta(days=5)
+    ung = _ung_vien_sao_ke(db, tu, den)
+    da_dung = {(d.khop_loai, d.khop_id) for d in dongs if d.khop_loai}
+    return {"id": sk.id, "ten_file": sk.ten_file, "ngan_hang": sk.ngan_hang,
+            "tu_ngay": str(sk.tu_ngay) if sk.tu_ngay else None,
+            "den_ngay": str(sk.den_ngay) if sk.den_ngay else None,
+            "dong": [{"id": d.id, "ngay": str(d.ngay) if d.ngay else None,
+                      "dien_giai": d.dien_giai,
+                      "tien_vao": float(d.tien_vao or 0), "tien_ra": float(d.tien_ra or 0),
+                      "so_du": float(d.so_du) if d.so_du is not None else None,
+                      "khop_loai": d.khop_loai, "khop_mo_ta": d.khop_mo_ta} for d in dongs],
+            "app_thieu": _thieu_tren_sao_ke(sk, ung, da_dung)}
+
+
+@router.post("/sao-ke/{sk_id}/doi-soat")
+def doi_soat_sao_ke(sk_id: int, db: Session = Depends(get_db),
+                    nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN", "KTT"))):
+    """🔁 Chạy lại đối soát (sau khi kế toán bổ sung phiếu / duyệt thêm lệnh chi)."""
+    from ..models import SaoKeBank
+    if db.get(SaoKeBank, sk_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy sao kê")
+    kq = _doi_soat_sao_ke(db, sk_id)
+    ghi_audit(db, nd.id, "DOI_SOAT_SAO_KE", "sao_ke_bank", sk_id,
+              moi={"khop": kq["khop"], "chua_khop": kq["chua_khop"]})
+    db.commit()
+    return kq
+
+
+@router.delete("/sao-ke/{sk_id}")
+def xoa_sao_ke(sk_id: int, db: Session = Depends(get_db),
+               nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
+    from ..models import SaoKeBank, SaoKeDong
+    sk = db.get(SaoKeBank, sk_id)
+    if sk is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy sao kê")
+    db.query(SaoKeDong).filter_by(sao_ke_id=sk_id).delete()
+    ghi_audit(db, nd.id, "XOA", "sao_ke_bank", sk_id,
+              cu={"file": sk.ten_file, "so_dong": sk.so_dong})
+    db.delete(sk)
+    db.commit()
+    return {"ok": True}

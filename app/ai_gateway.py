@@ -1231,3 +1231,28 @@ def doc_hoa_don_tep(data: bytes, content_type: str, filename: str,
         return ds[0] if ds else None
     except Exception:
         return None
+
+
+def doc_sao_ke_tep(data: bytes, content_type: str, filename: str) -> list | None:
+    """AI đọc FILE SAO KÊ ngân hàng (PDF / ảnh / Excel / CSV) → list dòng giao dịch
+    [{ngay, dien_giai, tien_vao, tien_ra, so_du}]. None khi AI tắt / không đọc được."""
+    if (settings.ai_provider or "").upper() != "ANTHROPIC" or not settings.anthropic_api_key:
+        return None
+    try:
+        khoi = _khoi_noi_dung_file(data, content_type, filename)
+    except Exception:
+        return None
+    sys_p = ("Bạn là kế toán ngân hàng Việt Nam. Đọc file SAO KÊ tài khoản ngân hàng và trả về "
+             "DUY NHẤT một JSON array các dòng giao dịch, mỗi dòng: "
+             '{"ngay": "YYYY-MM-DD", "dien_giai": string (nội dung giao dịch, ngắn gọn), '
+             '"tien_vao": number (ghi có / tiền vào, 0 nếu không), '
+             '"tien_ra": number (ghi nợ / tiền ra, 0 nếu không), '
+             '"so_du": number|null (số dư sau giao dịch nếu sao kê có)}. '
+             "CHỈ lấy dòng GIAO DỊCH thật — bỏ tiêu đề, dòng tổng cộng, số dư đầu/cuối kỳ. "
+             "Số tiền chỉ chữ số (VNĐ, bỏ dấu chấm phẩy). Tối đa 300 dòng.")
+    try:
+        txt = _goi_claude_json(khoi, sys_p, "Trích toàn bộ dòng giao dịch từ file sao kê trên.",
+                               max_tokens=8000, timeout=240)
+        return _vot_json_mang(txt)
+    except Exception:
+        return None

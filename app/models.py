@@ -1427,3 +1427,29 @@ class DichVuKtTaiLieu(Base):
     ghi_chu: Mapped[str | None] = mapped_column(Text, nullable=True)
     nguoi_tao: Mapped[str | None] = mapped_column(String(120), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class SaoKeBank(Base):
+    __tablename__ = "sao_ke_bank"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    ten_file: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    ngan_hang: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    tu_ngay: Mapped[date | None] = mapped_column(Date, nullable=True)
+    den_ngay: Mapped[date | None] = mapped_column(Date, nullable=True)
+    so_dong: Mapped[int] = mapped_column(default=0)
+    nguoi_tao: Mapped[int | None] = mapped_column(ForeignKey("nguoi_dung.id"), nullable=True)
+    tao_luc: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class SaoKeDong(Base):
+    __tablename__ = "sao_ke_dong"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    sao_ke_id: Mapped[int] = mapped_column(ForeignKey("sao_ke_bank.id", ondelete="CASCADE"))
+    ngay: Mapped[date | None] = mapped_column(Date, nullable=True)
+    dien_giai: Mapped[str | None] = mapped_column(String(400), nullable=True)
+    tien_vao: Mapped[Decimal] = mapped_column(Numeric(18, 0), default=0)
+    tien_ra: Mapped[Decimal] = mapped_column(Numeric(18, 0), default=0)
+    so_du: Mapped[Decimal | None] = mapped_column(Numeric(18, 0), nullable=True)
+    khop_loai: Mapped[str | None] = mapped_column(String(20), nullable=True)   # PHIEU|THU_CN_BAN|LENH_CHI|BANK_REC
+    khop_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    khop_mo_ta: Mapped[str | None] = mapped_column(String(300), nullable=True)
