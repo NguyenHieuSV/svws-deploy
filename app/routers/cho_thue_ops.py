@@ -1180,6 +1180,189 @@ def _ma_thang(prefix: str, thang: str) -> str:
     return f"{prefix}{thang[5:7]}{thang[2:4]}"
 
 
+def _rut_hd_email(tieu_de: str, noi_dung: str) -> dict:
+    """Bộ đọc dự phòng bằng regex khi AI chưa bật: số HĐ, ngày, số tiền lớn nhất."""
+    import re as _re
+    t = f"{tieu_de}\n{noi_dung or ''}"
+    so_hd = None
+    m = _re.search(r"(?:hóa đơn số|hoa don so|số hóa đơn|invoice|HĐ số|HD so|HĐ|inv)[:\s#]*([A-Za-z0-9\-/\.]{2,30})", t, _re.I)
+    if m:
+        so_hd = m.group(1)
+    ngay = None
+    m = _re.search(r"(\d{4})-(\d{2})-(\d{2})", t)
+    if m:
+        ngay = m.group(0)
+    else:
+        m = _re.search(r"(\d{1,2})[/-](\d{1,2})[/-](\d{4})", t)
+        if m:
+            ngay = f"{m.group(3)}-{int(m.group(2)):02d}-{int(m.group(1)):02d}"
+    tien = 0
+    for m in _re.finditer(r"\d[\d\.,]{3,}", t):
+        try:
+            n = int(_re.sub(r"[.,]", "", m.group(0)))
+            if 1000 <= n <= 10 ** 12 and n > tien:
+                tien = n
+        except Exception:
+            pass
+    return {"so_hoa_don": so_hd, "ngay": ngay, "so_tien": tien or None,
+            "ncc_ten": None, "mo_ta": None}
+
+
+@router.post("/hoa-don-dau-vao/quet")
+def quet_hoa_don_email(db: Session = Depends(get_db),
+                       nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    """🤖 Quét hộp thư công ty: thư mới của NCC được AI đọc (số HĐ · ngày · số tiền),
+    tự gắn dự án nếu tiêu đề/nội dung chứa MÃ DỰ ÁN → vào hàng CHỜ XÁC NHẬN."""
+    from ..inbound_gateway import lay_inbound_provider
+    from ..ai_gateway import doc_hoa_don_email
+    from ..models import CtHoaDonDauVao
+    from ..nhac_viec_service import gio_hien_tai
+    prov = lay_inbound_provider()
+    try:
+        thu = prov.lay_thu_moi()
+    except Exception as e:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            f"Không đọc được hộp thư ({prov.ten}): {str(e)[:150]} — "
+                            "kiểm tra INBOUND_PROVIDER=IMAP + IMAP_HOST/USER/PASS trên Render.")
+    ds_ts = db.query(TaiSanChoThue).all()
+    them = trung = dung_ai = 0
+    for m in thu:
+        mid = (m.get("message_id") or "").strip()[:250] or None
+        if mid and db.query(CtHoaDonDauVao).filter_by(message_id=mid).first():
+            trung += 1
+            continue
+        tieu_de = (m.get("tieu_de") or "")[:250]
+        nd_thu = m.get("noi_dung") or ""
+        tU = (tieu_de + "\n" + nd_thu).upper()
+        ts_id, ma_da, best = None, None, ""
+        for t in ds_ts:
+            for ma in {(t.ten_du_an or "").strip().upper(), (t.ma or "").strip().upper()}:
+                if ma and len(ma) >= 4 and ma in tU and len(ma) > len(best):
+                    best, ts_id, ma_da = ma, t.id, ma
+        info = doc_hoa_don_email(tieu_de, nd_thu)
+        if info:
+            dung_ai += 1
+        else:
+            info = _rut_hd_email(tieu_de, nd_thu)
+        ngay_hd = None
+        try:
+            if info.get("ngay"):
+                ngay_hd = date.fromisoformat(str(info["ngay"])[:10])
+        except Exception:
+            pass
+        try:
+            tien = Decimal(str(int(float(info.get("so_tien") or 0))))
+        except Exception:
+            tien = Decimal(0)
+        db.add(CtHoaDonDauVao(
+            tai_san_id=ts_id, ma_du_an=ma_da,
+            tu_email=(m.get("tu_email") or "")[:160] or None,
+            ncc_ten=(str(info.get("ncc_ten") or "")[:200]) or None,
+            so_hoa_don=(str(info.get("so_hoa_don") or "")[:60]) or None,
+            ngay_hd=ngay_hd, so_tien=tien,
+            mo_ta=(str(info.get("mo_ta") or "")[:300]) or None,
+            tieu_de=tieu_de or None, message_id=mid, tao_luc=gio_hien_tai()))
+        them += 1
+    db.commit()
+    return {"ok": True, "che_do": prov.ten, "thu_moi": len(thu),
+            "da_them": them, "trung_bo_qua": trung, "ai": dung_ai}
+
+
+@router.get("/hoa-don-dau-vao")
+def ds_hoa_don_dau_vao(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
+    from ..models import CtHoaDonDauVao
+    out = []
+    for r in (db.query(CtHoaDonDauVao).order_by(CtHoaDonDauVao.id.desc()).limit(400).all()):
+        ts = db.get(TaiSanChoThue, r.tai_san_id) if r.tai_san_id else None
+        out.append({"id": r.id, "tai_san_id": r.tai_san_id,
+                    "ten_du_an": (ts.ten_du_an or ts.ma) if ts else None,
+                    "ma_du_an": r.ma_du_an, "tu_email": r.tu_email, "ncc_ten": r.ncc_ten,
+                    "so_hoa_don": r.so_hoa_don,
+                    "ngay_hd": str(r.ngay_hd) if r.ngay_hd else None,
+                    "so_tien": float(r.so_tien or 0), "mo_ta": r.mo_ta,
+                    "tieu_de": r.tieu_de, "trang_thai": r.trang_thai})
+    return out
+
+
+class HdVaoSua(BaseModel):
+    tai_san_id: int | None = None
+    ncc_ten: str | None = None
+    so_hoa_don: str | None = None
+    ngay_hd: date | None = None
+    so_tien: Decimal | None = None
+    mo_ta: str | None = None
+
+
+@router.put("/hoa-don-dau-vao/{hd_id}")
+def sua_hoa_don_dau_vao(hd_id: int, data: HdVaoSua, db: Session = Depends(get_db),
+                        nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    from ..models import CtHoaDonDauVao
+    r = db.get(CtHoaDonDauVao, hd_id)
+    if r is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy hóa đơn")
+    if r.trang_thai == "DA_GHI":
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Hóa đơn đã ghi vào chi phí — không sửa được nữa")
+    if data.tai_san_id is not None:
+        r.tai_san_id = data.tai_san_id or None
+    if data.ncc_ten is not None:
+        r.ncc_ten = data.ncc_ten.strip()[:200] or None
+    if data.so_hoa_don is not None:
+        r.so_hoa_don = data.so_hoa_don.strip()[:60] or None
+    if data.ngay_hd is not None:
+        r.ngay_hd = data.ngay_hd
+    if data.so_tien is not None:
+        r.so_tien = data.so_tien
+    if data.mo_ta is not None:
+        r.mo_ta = data.mo_ta.strip()[:300] or None
+    db.commit()
+    return {"ok": True}
+
+
+@router.post("/hoa-don-dau-vao/{hd_id}/ghi")
+def ghi_hoa_don_dau_vao(hd_id: int, db: Session = Depends(get_db),
+                        nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    """XÁC NHẬN: ghi hóa đơn thành khoản Chi phí vận hành của dự án theo đúng ngày HĐ."""
+    from ..models import CtHoaDonDauVao
+    r = db.get(CtHoaDonDauVao, hd_id)
+    if r is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy hóa đơn")
+    if r.trang_thai == "DA_GHI":
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Hóa đơn này đã ghi rồi")
+    if not r.tai_san_id or db.get(TaiSanChoThue, r.tai_san_id) is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Chưa chọn dự án cho hóa đơn")
+    if float(r.so_tien or 0) <= 0:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Số tiền phải lớn hơn 0")
+    ts = db.get(TaiSanChoThue, r.tai_san_id)
+    ngay_hd = r.ngay_hd or date.today()
+    ma_bh = _ma_thang(ts.ten_du_an or ts.ma, ngay_hd.strftime("%Y-%m"))
+    cp = ChiPhiVanHanh(tai_san_id=r.tai_san_id, ma_ban_hang=ma_bh,
+                       loai_chi_phi="VAT_TU", so_tien=r.so_tien, ngay=ngay_hd,
+                       mo_ta=(f"HĐ {r.so_hoa_don or '—'} — {r.ncc_ten or r.tu_email or 'NCC'}")[:300],
+                       nguon="HD_EMAIL")
+    db.add(cp)
+    db.flush()
+    r.trang_thai = "DA_GHI"
+    r.chi_phi_id = cp.id
+    ghi_audit(db, nd.id, "GHI_HD_EMAIL", "ct_hoa_don_dau_vao", r.id,
+              moi={"chi_phi_id": cp.id, "so_tien": float(r.so_tien or 0), "ma": ma_bh})
+    db.commit()
+    return {"ok": True, "chi_phi_id": cp.id, "ma_ban_hang": ma_bh}
+
+
+@router.post("/hoa-don-dau-vao/{hd_id}/bo-qua")
+def bo_qua_hoa_don_dau_vao(hd_id: int, db: Session = Depends(get_db),
+                           nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    from ..models import CtHoaDonDauVao
+    r = db.get(CtHoaDonDauVao, hd_id)
+    if r is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy hóa đơn")
+    if r.trang_thai == "DA_GHI":
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Hóa đơn đã ghi — không bỏ qua được")
+    r.trang_thai = "BO_QUA"
+    db.commit()
+    return {"ok": True}
+
+
 @router.get("/tai-san/{ts_id}/chi-phi-van-hanh-tong-hop")
 def chi_phi_vh_tong_hop(ts_id: int, db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
     """Tổng hợp chi phí vận hành TỰ ĐỘNG từ mục vận hành: SL dùng hóa chất-vật tư

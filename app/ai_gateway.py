@@ -1160,3 +1160,24 @@ def phan_tich_thiet_ke(info):
         except Exception:
             pass
     return _phan_tich_heuristic(info)
+
+
+def doc_hoa_don_email(tieu_de: str, noi_dung: str) -> dict | None:
+    """AI đọc email hóa đơn của NCC → {ncc_ten, so_hoa_don, ngay, so_tien, mo_ta}.
+    Trả None khi AI chưa bật — nơi gọi tự rơi về bộ đọc regex."""
+    if (settings.ai_provider or "").upper() != "ANTHROPIC" or not settings.anthropic_api_key:
+        return None
+    khoi = {"type": "text", "text": f"TIÊU ĐỀ: {tieu_de}\n\nNỘI DUNG EMAIL:\n{(noi_dung or '')[:6000]}"}
+    sys_p = ("Bạn là kế toán Việt Nam. Đọc email hóa đơn/đề nghị thanh toán của nhà cung cấp "
+             "và trả về DUY NHẤT một JSON object: "
+             '{"ncc_ten": string|null (tên công ty NCC), "so_hoa_don": string|null, '
+             '"ngay": "YYYY-MM-DD"|null (ngày hóa đơn), '
+             '"so_tien": number|null (TỔNG TIỀN gồm VAT, đơn vị VNĐ, chỉ chữ số), '
+             '"mo_ta": string|null (tóm tắt hàng hóa/dịch vụ, ngắn gọn)}')
+    try:
+        txt = _goi_claude_json(khoi, sys_p, "Trích thông tin hóa đơn từ email trên.",
+                               max_tokens=500, timeout=60)
+        ds = _vot_json_mang(txt)
+        return ds[0] if ds else None
+    except Exception:
+        return None
