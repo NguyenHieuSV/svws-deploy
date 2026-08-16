@@ -4,6 +4,8 @@ Dev: FakeInboundProvider (vài thư mẫu). Prod: ImapInboundProvider (poll IMAP
 Mỗi thư là dict: tu_email, tieu_de, noi_dung, message_id, in_reply_to.
 """
 import email, imaplib
+import html as _html
+import re as _re
 from email.header import decode_header, make_header
 from email.utils import parseaddr
 from typing import Protocol
@@ -39,15 +41,53 @@ def _txt(v):
     except Exception: return v or ""
 
 
+def _bo_html(t: str) -> str:
+    """Bóc thẻ HTML/CSS ra chữ thường — thư HĐĐT (MISA/VNPT…) thường chỉ có thân HTML."""
+    t = _re.sub(r"(?is)<(style|script|head).*?</\1>", " ", t)
+    t = _re.sub(r"(?i)<br\s*/?>|</p>|</tr>|</div>|</li>|</h[1-6]>", "\n", t)
+    t = _re.sub(r"<[^>]+>", " ", t)
+    t = _html.unescape(t)
+    return "\n".join(" ".join(d.split()) for d in t.splitlines() if d.strip())
+
+
 def _body(m) -> str:
     if m.is_multipart():
+        van_html = ""
         for p in m.walk():
-            if p.get_content_type() == "text/plain":
+            ct = p.get_content_type()
+            if ct == "text/plain":
                 try: return p.get_payload(decode=True).decode(p.get_content_charset() or "utf-8", "ignore")
                 except Exception: continue
-        return ""
-    try: return m.get_payload(decode=True).decode(m.get_content_charset() or "utf-8", "ignore")
+            if ct == "text/html" and not van_html:
+                try: van_html = p.get_payload(decode=True).decode(p.get_content_charset() or "utf-8", "ignore")
+                except Exception: pass
+        return _bo_html(van_html) if van_html else ""
+    try: t = m.get_payload(decode=True).decode(m.get_content_charset() or "utf-8", "ignore")
     except Exception: return m.get_payload() or ""
+    return _bo_html(t) if m.get_content_type() == "text/html" else t
+
+
+def _thu_long(m) -> str:
+    """Ghép tiêu đề + thân các THƯ ĐÍNH KÈM (forward dạng .eml / message/rfc822)
+    để AI đọc được cả nội dung thư gốc bên trong."""
+    if not m.is_multipart():
+        return ""
+    ra = []
+    for p in m.walk():
+        m2 = None
+        if p.get_content_type() == "message/rfc822":
+            pl = p.get_payload()
+            m2 = pl[0] if isinstance(pl, list) and pl else (pl if hasattr(pl, "walk") else None)
+        elif str(p.get_filename() or "").lower().endswith(".eml"):
+            try:
+                m2 = email.message_from_bytes(p.get_payload(decode=True) or b"")
+            except Exception:
+                m2 = None
+        if m2 is not None:
+            ra.append(f"--- Thư đính kèm: {_txt(m2.get('Subject'))} ---\n{_body(m2)}")
+        if len(ra) >= 2:
+            break
+    return "\n\n".join(ra)
 
 
 class ImapInboundProvider:
@@ -77,18 +117,30 @@ class ImapInboundProvider:
         return out
 
 
-def _dinh_kem(m) -> list[dict]:
-    """Nhặt file đính kèm hóa đơn (PDF / XML / ảnh) — tối đa 3 file, mỗi file ≤ 8MB."""
+def _dinh_kem(m, mo_eml: bool = True) -> list[dict]:
+    """Nhặt file đính kèm hóa đơn (PDF / XML / ảnh) — tối đa 3 file, mỗi file ≤ 8MB.
+    Thư đính kèm dạng file .eml cũng được MỞ RA để nhặt PDF/XML nằm bên trong."""
     out = []
     if not m.is_multipart():
         return out
     for p in m.walk():
         cd = str(p.get("Content-Disposition") or "")
         fn = p.get_filename()
+        ct = (p.get_content_type() or "").lower()
+        # 📧 file .eml đính kèm (client lưu thư gốc thành file) → parse rồi nhặt tiếp 1 cấp
+        if mo_eml and str(fn or "").lower().endswith(".eml") and ct != "message/rfc822":
+            try:
+                m2 = email.message_from_bytes(p.get_payload(decode=True) or b"")
+                for f2 in _dinh_kem(m2, mo_eml=False):
+                    out.append(f2)
+                    if len(out) >= 3:
+                        break
+            except Exception:
+                pass
+            continue
         if not fn and "attachment" not in cd.lower():
             continue
         fn = _txt(fn or "dinh_kem")
-        ct = (p.get_content_type() or "").lower()
         low = fn.lower()
         if not (ct == "application/pdf" or low.endswith((".pdf", ".xml"))
                 or ct.startswith("image/") or low.endswith((".png", ".jpg", ".jpeg"))
@@ -122,9 +174,13 @@ def _imap_lay_thu(tu_ngay=None) -> list[dict]:
         if (m.get("Auto-Submitted", "no").lower() != "no"
                 or "bulk" in (m.get("Precedence", "").lower())):
             continue
+        nd = _body(m)
+        kem = _thu_long(m)
+        if kem:
+            nd = (nd + "\n\n" + kem).strip()
         out.append({"tu_email": parseaddr(m.get("From"))[1],
                     "tieu_de": _txt(m.get("Subject")),
-                    "noi_dung": _body(m),
+                    "noi_dung": nd,
                     "dinh_kem": _dinh_kem(m),
                     "message_id": m.get("Message-ID"),
                     "in_reply_to": m.get("In-Reply-To")})
