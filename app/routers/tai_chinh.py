@@ -463,7 +463,8 @@ def chi_so_tai_chinh(db: Session = Depends(get_db), nd=Depends(chi_vai_tro("CEO"
     from datetime import timedelta
     from ..models import DonHang, DonMua
     moc = date.today() - timedelta(days=90)
-    dt90 = float(db.query(func.coalesce(func.sum(DonHang.tong_tien), 0))
+    # doanh thu GỒM VAT — cùng cơ sở với công nợ phải thu (hóa đơn gồm VAT)
+    dt90 = float(db.query(func.coalesce(func.sum(DonHang.tong_tien + func.coalesce(DonHang.tien_thue, 0)), 0))
                  .filter(DonHang.ngay >= moc).scalar())
     mua90 = float(db.query(func.coalesce(func.sum(DonMua.tong_tien), 0))
                   .filter(DonMua.ngay >= moc).scalar())
@@ -726,11 +727,12 @@ def dashboard(db: Session = Depends(get_db), _=Depends(yeu_cau("dashboard", "XEM
     hom_nay = date.today()
 
     # --- Tài chính: tách rõ đã THU (từ khách) vs đã TRẢ (cho NCC) ---
-    da_thu = db.query(func.coalesce(func.sum(ThanhToan.so_tien), 0)) \
-               .join(CongNo, ThanhToan.cong_no_id == CongNo.id) \
+    # ĐÃ THU / ĐÃ TRẢ đọc từ CHÍNH CÔNG NỢ — gồm mọi đường tiền (💳, phiếu thu-chi
+    # cấn công nợ, cấn trừ tạm ứng); đếm theo bảng ThanhToan bị thiếu vì các đường
+    # sau không tạo bản ghi ThanhToan.
+    da_thu = db.query(func.coalesce(func.sum(CongNo.da_thanh_toan), 0)) \
                .filter(CongNo.loai == "PHAI_THU").scalar()
-    da_tra = db.query(func.coalesce(func.sum(ThanhToan.so_tien), 0)) \
-               .join(CongNo, ThanhToan.cong_no_id == CongNo.id) \
+    da_tra = db.query(func.coalesce(func.sum(CongNo.da_thanh_toan), 0)) \
                .filter(CongNo.loai == "PHAI_TRA").scalar()
     phai_thu = db.query(func.coalesce(func.sum(CongNo.so_tien - CongNo.da_thanh_toan), 0)) \
                  .filter(CongNo.loai == "PHAI_THU", CongNo.trang_thai != "THU_DU").scalar()
