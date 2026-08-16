@@ -1063,7 +1063,7 @@ def cap_nhat_thanh_toan_mua(dm_id: int, data: ThanhToanMuaVao, db: Session = Dep
                             nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
     """Ghi nhận đề nghị thanh toán của PO. Đề nghị = tổng → PO đánh dấu ĐÃ THANH
     TOÁN 100% (lưu ở tab Kiểm soát). Còn thiếu → phần còn lại nằm ở Công nợ phải trả."""
-    dm = db.get(DonMua, dm_id)
+    dm = db.query(DonMua).filter_by(id=dm_id).with_for_update().first()
     if dm is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đơn mua")
     if dm.trang_thai != "DA_DUYET" and not dm.tt_du and float(dm.de_nghi_tt or 0) <= 0:
@@ -1118,6 +1118,8 @@ def cap_nhat_thanh_toan_mua(dm_id: int, data: ThanhToanMuaVao, db: Session = Dep
         da_tt_100 = bool(dm.tt_du)
         cho_duyet_chi = False
     else:
+        if dm.da_duyet_tt is None:
+            dm.da_duyet_tt = da_cu    # chốt phần đã áp dụng trước đó làm mốc ĐÃ DUYỆT (PO cũ)
         dm.de_nghi_tt = dn
         _hang_cho_duyet_chi(db, dm, dn)
         da_tt_100 = False
@@ -1244,6 +1246,7 @@ def duyet_lenh_chi_bank(lcb_id: int, db: Session = Depends(get_db),
     dm = db.get(DonMua, r.don_mua_id) if r.don_mua_id else None
     if dm is not None:
         _ap_dung_tt_mua(db, dm, Decimal(r.so_tien or 0))
+        dm.da_duyet_tt = Decimal(r.so_tien or 0)   # báo cáo chi phí chỉ đếm số ĐÃ DUYỆT này
         dm.cho_lenh_bank = True
         dm.lenh_bank_tien = r.so_tien
         if not dm.lenh_bank_luc:
@@ -1331,7 +1334,11 @@ def ds_lenh_thanh_toan(db: Session = Depends(get_db), _=Depends(yeu_cau("ke_toan
                     "nha_cung_cap_id": dm.nha_cung_cap_id,
                     "ncc_ten": ncc.ten if ncc else None,
                     "tong_tien": float(dm.tong_tien or 0),
-                    "so_tien_chi": float(dm.lenh_bank_tien or 0),
+                    "so_tien_chi": max(float(dm.lenh_bank_tien or 0) - float(
+                        db.query(func.coalesce(func.sum(LenhChiBank.so_tien), 0))
+                        .filter(LenhChiBank.don_mua_id == dm.id,
+                                LenhChiBank.trang_thai == "DA_CHI").scalar() or 0), 0.0),
+                    "so_tien_luy_ke": float(dm.lenh_bank_tien or 0),
                     "con_lai": float((dm.tong_tien or 0) - (dm.de_nghi_tt or 0)),
                     "tt_du": bool(dm.tt_du)})
     return out
@@ -1488,15 +1495,21 @@ def xoa_don_mua(dm_id: int, db: Session = Depends(get_db),
     if dm is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đơn mua")
     ban = []
-    for ten_ref, bang in (("phiếu kho (đã nhận hàng)", "phieu_kho"), ("hóa đơn", "hoa_don"),
-                          ("công nợ phải trả", "cong_no")):
-        try:
-            n = db.execute(_sql(f"SELECT COUNT(*) FROM {bang} WHERE don_mua_id = :i"),
-                           {"i": dm_id}).scalar() or 0
-        except Exception:
-            n = 0
-        if n:
-            ban.append(f"{n} {ten_ref}")
+    from ..models import PhieuKho as _PK, LenhChiBank as _LCB
+    so_pk = db.query(func.count(_PK.id)).filter(_PK.don_mua_id == dm_id).scalar() or 0
+    if so_pk:
+        ban.append(f"{so_pk} phiếu kho (đã nhận hàng)")
+    so_hd = db.query(func.count(CongNo.id)).filter(CongNo.don_mua_id == dm_id,
+                                                   CongNo.hoa_don_id.isnot(None)).scalar() or 0
+    if so_hd:
+        ban.append(f"{so_hd} hóa đơn")
+    so_cn = db.query(func.count(CongNo.id)).filter(CongNo.don_mua_id == dm_id).scalar() or 0
+    if so_cn:
+        ban.append(f"{so_cn} công nợ phải trả")
+    so_chi = db.query(func.count(_LCB.id)).filter(_LCB.don_mua_id == dm_id,
+                                                  _LCB.trang_thai == "DA_CHI").scalar() or 0
+    if so_chi:
+        ban.append(f"{so_chi} lệnh chi ĐÃ CHI tiền thật")
     if ban:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
@@ -1882,6 +1895,12 @@ def nhan_hang(dm_id: int, data: NhanHangVao, db: Session = Depends(get_db),
             raise HTTPException(status.HTTP_400_BAD_REQUEST,
                                 f"Dòng {ct.id}: nhận {dong.so_luong} vượt phần còn lại {con_lai}")
         ct.so_luong_nhan = ct.so_luong_nhan + dong.so_luong
+        # 🏷 tự học GIÁ VỐN: giá mua PO gần nhất trở thành giá vốn mặt hàng (chi phí tự động dùng giá này)
+        if ct.don_gia and Decimal(str(ct.don_gia)) > 0:
+            from ..models import HangHoa as _HHgv
+            hh_gv = db.get(_HHgv, ct.hang_hoa_id)
+            if hh_gv is not None:
+                hh_gv.gia_von = Decimal(str(ct.don_gia))
         _bao_dam_ton(db, ct.hang_hoa_id)
         nhap_ton(db, ct.hang_hoa_id, dong.so_luong)
         db.add(PhieuKhoCt(phieu_kho_id=pk.id, hang_hoa_id=ct.hang_hoa_id, so_luong=dong.so_luong))
@@ -2008,7 +2027,7 @@ def chi_phi_theo_don(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "X
         doanh_thu = float(dh.tong_tien or 0) + float(dh.tien_thue or 0)
         po_ids = [i for (i,) in db.query(DonMua.id).filter(DonMua.don_hang_id == dh.id).all()]
         # 1) Thanh toán mua hàng = tổng đề nghị thanh toán của các PO gắn mã đơn bán
-        thanh_toan_mua = float(db.query(func.coalesce(func.sum(DonMua.de_nghi_tt), 0))
+        thanh_toan_mua = float(db.query(func.coalesce(func.sum(func.coalesce(DonMua.da_duyet_tt, DonMua.de_nghi_tt)), 0))
                                .filter(DonMua.don_hang_id == dh.id).scalar() or 0)
         # 2) Công nợ phải trả còn lại — của PO thuộc đơn + khoản nhập ngoài khớp mã đơn bán
         cn_po = 0.0
@@ -2075,7 +2094,7 @@ def chi_phi_chi_tiet_luu_kho(don_hang_id: int, db: Session = Depends(get_db),
     # 3) Tổng — đúng công thức bảng Chi phí theo Mã
     con_lai_expr = func.coalesce(func.sum(CongNo.so_tien - CongNo.da_thanh_toan), 0)
     po_ids = [i for (i,) in db.query(DonMua.id).filter(DonMua.don_hang_id == dh.id).all()]
-    thanh_toan_mua = float(db.query(func.coalesce(func.sum(DonMua.de_nghi_tt), 0))
+    thanh_toan_mua = float(db.query(func.coalesce(func.sum(func.coalesce(DonMua.da_duyet_tt, DonMua.de_nghi_tt)), 0))
                            .filter(DonMua.don_hang_id == dh.id).scalar() or 0)
     cn_po = float(db.query(con_lai_expr).filter(CongNo.loai == "PHAI_TRA",
                                                 CongNo.don_mua_id.in_(po_ids)).scalar() or 0) if po_ids else 0.0

@@ -88,6 +88,7 @@ class HangHoa(Base):
     loai: Mapped[str] = mapped_column(loai_hang_t)
     don_vi: Mapped[str | None] = mapped_column(String(20), nullable=True)
     gia_ban: Mapped[Decimal] = mapped_column(Numeric(18, 0), default=0)
+    gia_von: Mapped[Decimal | None] = mapped_column(Numeric(18, 0), nullable=True)  # tự học từ giá mua PO
     ngay_nhap: Mapped[date | None] = mapped_column(Date, nullable=True)   # ngày nhập kho (mig 64)
     ton: Mapped["TonKho"] = relationship(back_populates="hang_hoa", uselist=False, lazy="joined")
 
@@ -210,6 +211,7 @@ class DonMua(Base):
     lenh_bank_luc: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)  # mig 83
     ngay_dat_hang: Mapped[date | None] = mapped_column(Date, nullable=True)
     de_nghi_tt: Mapped[Decimal] = mapped_column(Numeric(18, 0), default=0)
+    da_duyet_tt: Mapped[Decimal | None] = mapped_column(Numeric(18, 0), nullable=True)  # lũy kế ĐÃ DUYỆT chi
     ngay_tt_tiep: Mapped[date | None] = mapped_column(Date, nullable=True)
     tt_du: Mapped[bool] = mapped_column(Boolean, default=False)
     ngay_tt_du: Mapped[date | None] = mapped_column(Date, nullable=True)

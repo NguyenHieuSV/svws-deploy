@@ -636,7 +636,7 @@ def _tinh_lai_lo_tong(db: Session) -> dict:
         # DOANH THU tính GỒM VAT — cùng cơ sở với chi phí (PO & công nợ đều gồm VAT)
         doanh_thu = float(dh.tong_tien or 0) + float(dh.tien_thue or 0)
         po_ids = [i for (i,) in db.query(DonMua.id).filter(DonMua.don_hang_id == dh.id).all()]
-        ttm = float(db.query(func.coalesce(func.sum(DonMua.de_nghi_tt), 0))
+        ttm = float(db.query(func.coalesce(func.sum(func.coalesce(DonMua.da_duyet_tt, DonMua.de_nghi_tt)), 0))
                     .filter(DonMua.don_hang_id == dh.id).scalar() or 0)
         cn_po = float(db.query(con_lai_expr).filter(CongNo.loai == "PHAI_TRA",
                       CongNo.don_mua_id.in_(po_ids)).scalar() or 0) if po_ids else 0.0
@@ -702,8 +702,7 @@ def lai_lo_record(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"
     """Lãi/Lỗ Record 3 phần: ① theo ngày · ② theo mã đơn hàng · ③ chốt cuối tháng."""
     from ..models import LaiLoRecord
     from ..nhac_viec_service import gio_hien_tai
-    t = luu_lai_lo_hom_nay(db)
-    db.commit()
+    t = _tinh_lai_lo_tong(db)     # CHỈ ĐỌC — bản ghi theo ngày do scheduler tự lưu mỗi giờ
     rows = db.query(LaiLoRecord).order_by(LaiLoRecord.ngay.desc()).limit(400).all()
     ser = lambda r: {"ngay": str(r.ngay), "doanh_thu": float(r.doanh_thu or 0),
                      "chi_phi_don": float(r.chi_phi_don or 0), "lai_gop": float(r.lai_gop or 0),

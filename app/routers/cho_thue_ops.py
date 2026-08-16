@@ -532,9 +532,12 @@ class BcKlBatch(BaseModel):
 
 
 @router.post("/tai-san/{ts_id}/bao-cao-kl", status_code=201)
-def luu_bao_cao_kl(ts_id: int, data: BcKlBatch, db: Session = Depends(get_db),
+def luu_bao_cao_kl(ts_id: int, data: BcKlBatch, cho_phep_giam: bool = False,
+                   db: Session = Depends(get_db),
                    nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
-    """Báo cáo khối lượng: ghi CHỈ SỐ NƯỚC theo từng hệ thống của dự án."""
+    """Báo cáo khối lượng: ghi CHỈ SỐ NƯỚC theo từng hệ thống của dự án.
+    Chỉ số NHỎ HƠN lần ghi trước bị chặn (khối lượng sẽ âm) trừ khi xác nhận
+    cho_phep_giam=true (thay đồng hồ / reset)."""
     if db.get(TaiSanChoThue, ts_id) is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy dự án cho thuê")
     ng = data.ngay or date.today()
@@ -543,6 +546,17 @@ def luu_bao_cao_kl(ts_id: int, data: BcKlBatch, db: Session = Depends(get_db),
     for d in data.dong:
         if d.chi_so is None:
             continue
+        if not cho_phep_giam:
+            truoc_kl = (db.query(CtBaoCaoVh)
+                        .filter_by(tai_san_id=ts_id, loai="KHOI_LUONG", noi_dung=d.he_thong)
+                        .filter(CtBaoCaoVh.ngay <= ng)
+                        .order_by(CtBaoCaoVh.ngay.desc(), CtBaoCaoVh.id.desc()).first())
+            if (truoc_kl is not None and truoc_kl.luong_ton is not None
+                    and Decimal(str(d.chi_so)) < Decimal(truoc_kl.luong_ton)):
+                raise HTTPException(status.HTTP_409_CONFLICT,
+                                    f"⚠GIẢM: hệ thống '{d.he_thong}' chỉ số {d.chi_so} NHỎ HƠN lần ghi trước "
+                                    f"({truoc_kl.luong_ton} — ngày {truoc_kl.ngay}) → khối lượng tháng sẽ ÂM. "
+                                    "Kiểm tra lại số; chỉ xác nhận khi thay đồng hồ / reset thật.")
         db.add(CtBaoCaoVh(tai_san_id=ts_id, loai="KHOI_LUONG", ngay=ng,
                           noi_dung=d.he_thong, luong_ton=d.chi_so,
                           don_vi=d.don_vi, ghi_chu=d.ghi_chu, nguoi_tao=nv_id))
@@ -714,6 +728,12 @@ def xoa_chi_phi(cp_id: int, db: Session = Depends(get_db),
     ghi_audit(db, nd.id, "XOA", "chi_phi_van_hanh", cp_id,
               cu={"ma_ban_hang": c.ma_ban_hang, "loai": c.loai_chi_phi,
                   "so_tien": float(c.so_tien or 0), "nguon": c.nguon})
+    # 🔁 mở lại hóa đơn email nguồn (nếu có) — tránh hóa đơn DA_GHI mồ côi, tiền "bốc hơi"
+    from ..models import CtHoaDonDauVao as _CTHD
+    hdv0 = db.query(_CTHD).filter_by(chi_phi_id=cp_id).first()
+    if hdv0 is not None:
+        hdv0.trang_thai = "CHO_XAC_NHAN"
+        hdv0.chi_phi_id = None
     db.delete(c)
     db.commit()
     return {"ok": True}
@@ -954,6 +974,9 @@ def bao_cao_van_hanh(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "X
     so = len(ts)
     dang_thue = theo_tt.get("DANG_THUE", 0)
     chi_phi = db.query(func.coalesce(func.sum(ChiPhiVanHanh.so_tien), 0)).scalar() or Decimal(0)
+    dau_thang = date.today().replace(day=1)
+    chi_phi_thang = db.query(func.coalesce(func.sum(ChiPhiVanHanh.so_tien), 0)) \
+        .filter(ChiPhiVanHanh.ngay >= dau_thang).scalar() or Decimal(0)
     dt_hoa_don = db.query(func.coalesce(func.sum(HoaDon.tong_tien), 0)) \
                    .filter(HoaDon.loai == "THUE").scalar() or Decimal(0)
     bt_den_han = db.query(func.count(KeHoachBaoTri.id)) \
@@ -965,7 +988,8 @@ def bao_cao_van_hanh(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "X
         "doanh_thu_thang_dk": float(dt_thang),
         "doanh_thu_hd_thue": float(dt_hoa_don),
         "chi_phi_van_hanh": float(chi_phi),
-        "loi_nhuan_uoc": float(dt_thang - chi_phi),
+        "chi_phi_thang_nay": float(chi_phi_thang),
+        "loi_nhuan_uoc": float(dt_thang - chi_phi_thang),
         "bao_tri_den_han": int(bt_den_han),
     }
 
@@ -975,7 +999,8 @@ def _hh_info(db, hid):
     h = db.get(HangHoa, hid)
     if h is None:
         return {"ma": None, "ten": "?", "don_vi": None, "gia_ban": 0.0}
-    return {"ma": h.ma, "ten": h.ten, "don_vi": h.don_vi, "gia_ban": float(h.gia_ban or 0)}
+    return {"ma": h.ma, "ten": h.ten, "don_vi": h.don_vi,
+            "gia_ban": float(getattr(h, "gia_von", None) or h.gia_ban or 0)}
 
 
 class DinhMucVao(BaseModel):
@@ -1050,7 +1075,7 @@ def ghi_tieu_hao(data: TieuHaoVao, db: Session = Depends(get_db),
             th = TieuHaoThucTe(tai_san_id=data.tai_san_id, hang_hoa_id=hid, thang=data.thang)
             db.add(th)
         th.so_luong = sl
-        th.don_gia = hh.gia_ban or Decimal(0)
+        th.don_gia = (getattr(hh, "gia_von", None) or hh.gia_ban or Decimal(0))
         n += 1
     ghi_audit(db, nd.id, "GHI", "tieu_hao_thuc_te", None, moi={"thang": data.thang, "so_dong": n})
     db.commit()
@@ -1521,7 +1546,7 @@ def chi_phi_vh_tong_hop(ts_id: int, db: Session = Depends(get_db), _=Depends(yeu
         k = _bo_dau(h.ten or "")
         if not k:
             continue
-        g0 = float(h.gia_ban or 0)
+        g0 = float(getattr(h, "gia_von", None) or 0) or float(h.gia_ban or 0)
         if k not in gia:
             gia[k] = g0
         kho.append((k, g0))

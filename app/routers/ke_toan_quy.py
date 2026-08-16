@@ -154,7 +154,7 @@ def tao_quy(data: QuyVao, db: Session = Depends(get_db),
 
 @router.put("/quy/{quy_id}")
 def sua_quy(quy_id: int, data: QuyVao, db: Session = Depends(get_db),
-            nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+            nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN", "KTT"))):
     """Sửa quỹ: tên, loại, số TK, TK kế toán, số dư đầu — số dư hiện tại tự điều
     chỉnh theo chênh lệch số dư đầu (các phiếu đã duyệt giữ nguyên)."""
     q = db.get(TaiKhoanQuy, quy_id)
@@ -796,9 +796,11 @@ def quet_hoa_don_mua_email(tu_ngay: date | None = None, db: Session = Depends(ge
         tong = float(info.get("so_tien") or 0)
         truoc = float(info.get("tien_truoc_thue") or 0)
         thue = float(info.get("tien_thue") or 0)
+        vat_uoc = False
         if not truoc and tong:
             truoc = round(tong / 1.08)
             thue = tong - truoc
+            vat_uoc = True
         ts = round(thue / truoc * 100) if truoc > 0 and thue > 0 else 8
         if not tong:
             tong = round(truoc * (1 + ts / 100)) if truoc else 0
@@ -826,7 +828,8 @@ def quet_hoa_don_mua_email(tu_ngay: date | None = None, db: Session = Depends(ge
             ngay_hd=ngay_hd,
             tien_truoc_thue=Decimal(str(int(truoc))), thue_suat=Decimal(str(int(ts))),
             tong_tien=Decimal(str(int(tong))),
-            mo_ta=(str(info.get("mo_ta") or "")[:300]) or None,
+            mo_ta=((("⚠ VAT ước 8% từ tổng — kiểm tra lại · " if vat_uoc else "")
+                    + str(info.get("mo_ta") or ""))[:300]) or None,
             link_tra_cuu=link_tc, ma_tra_cuu=ma_tc,
             tieu_de=tieu_de or None, message_id=mid, tao_luc=gio_hien_tai()))
         them += 1
@@ -1268,7 +1271,7 @@ def sua_hoa_don_mua(hd_id: int, data: HdMuaSua, db: Session = Depends(get_db),
 
 @router.post("/hoa-don/{hd_id}/tra-ve-cho")
 def tra_hoa_don_ve_cho(hd_id: int, db: Session = Depends(get_db),
-                       nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+                       nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN", "KTT"))):
     """↩ Trả hóa đơn MUA (tạo từ email) về bảng chờ xác nhận: hủy hóa đơn + công nợ
     + bút toán (chỉ khi chưa thanh toán đồng nào) rồi mở lại hàng chờ để sửa/Ghi lại."""
     from ..models import KtHoaDonCho, LenhChiBank
@@ -1353,7 +1356,7 @@ def tao_hoa_don(data: HoaDonVao, db: Session = Depends(get_db),
                         PhieuThuChi.la_tam_ung.is_(True), PhieuThuChi.loai == side,
                         PhieuThuChi.trang_thai == "DA_DUYET",
                         PhieuThuChi.so_tien > PhieuThuChi.da_can_tru)
-                .order_by(PhieuThuChi.id).all())
+                .order_by(PhieuThuChi.id).with_for_update().all())
         for adv in advs:
             con_cn = Decimal(cn.so_tien) - Decimal(cn.da_thanh_toan)
             if con_cn <= 0:
@@ -1399,12 +1402,12 @@ def hach_toan_hd(hd_id: int, db: Session = Depends(get_db),
 
 # ---------- TRUY VẾT THEO MÃ HÀNG BÁN ----------
 def _lai_lo_1(db, dh: DonHang):
-    doanh_thu = _f(dh.tong_tien)
+    doanh_thu = _f(dh.tong_tien) + _f(dh.tien_thue)   # GỒM VAT — cùng cơ sở với Lãi/Lỗ Record
     # ĐỒNG BỘ với bảng "Chi phí theo Mã Đơn hàng" (NCC → Kiểm soát):
     #   Giá vốn (Thanh toán mua) = đề nghị TT của các PO gắn mã đơn bán
     #   Chi phí khác (Công nợ phải trả) = công nợ phải trả CÒN LẠI của PO đó + khoản nhập ngoài khớp mã
     po_ids = [i for (i,) in db.query(DonMua.id).filter(DonMua.don_hang_id == dh.id).all()]
-    gia_von = _f(db.query(func.coalesce(func.sum(DonMua.de_nghi_tt), 0))
+    gia_von = _f(db.query(func.coalesce(func.sum(func.coalesce(DonMua.da_duyet_tt, DonMua.de_nghi_tt)), 0))
                  .filter(DonMua.don_hang_id == dh.id).scalar())
     _con = func.coalesce(func.sum(CongNo.so_tien - CongNo.da_thanh_toan), 0)
     cn_po = _f(db.query(_con).filter(CongNo.loai == "PHAI_TRA",
