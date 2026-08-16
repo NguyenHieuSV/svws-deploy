@@ -1187,18 +1187,43 @@ def chi_phi_vh_tong_hop(ts_id: int, db: Session = Depends(get_db), _=Depends(yeu
     Bảng thống kê để kiểm soát — không ghi sổ kế toán."""
     if db.get(TaiSanChoThue, ts_id) is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy dự án")
+    import unicodedata
+
+    def _bo_dau(s2: str) -> str:
+        s2 = unicodedata.normalize("NFD", s2 or "")
+        s2 = "".join(ch for ch in s2 if unicodedata.category(ch) != "Mn")
+        return s2.replace("đ", "d").replace("Đ", "D").lower().strip()
+
+    kho = []          # (ten_chuan, gia_ban) — dùng khớp gần đúng theo tên
     gia = {}
     for h in db.query(HangHoa).all():
-        k = (h.ten or "").strip().lower()
-        if k and k not in gia:
-            gia[k] = float(h.gia_ban or 0)
+        k = _bo_dau(h.ten or "")
+        if not k:
+            continue
+        g0 = float(h.gia_ban or 0)
+        if k not in gia:
+            gia[k] = g0
+        kho.append((k, g0))
+
+    def _tim_gia(ten: str):
+        k = _bo_dau(ten)
+        if not k:
+            return None
+        if k in gia and gia[k] > 0:
+            return gia[k]
+        # khớp gần đúng: tên kho CHỨA tên báo cáo (hoặc ngược lại) — ưu tiên mục có giá, tên ngắn nhất
+        ung = [(t, g0) for (t, g0) in kho
+               if g0 > 0 and ((len(k) >= 3 and k in t) or (len(t) >= 4 and t in k))]
+        if ung:
+            return sorted(ung, key=lambda x: len(x[0]))[0][1]
+        return gia.get(k)          # khớp đúng tên nhưng giá 0 → vẫn trả 0 để hiện cảnh báo
     out = []
     for r in (db.query(CtBaoCaoVh).filter_by(tai_san_id=ts_id, loai="HOA_CHAT_VT")
               .order_by(CtBaoCaoVh.ngay.desc(), CtBaoCaoVh.id.desc()).limit(1000).all()):
         sl = float(r.so_luong or 0)
         if sl <= 0:
             continue
-        g = gia.get((r.noi_dung or "").strip().lower())
+        g = _tim_gia(r.noi_dung or "")
         out.append({"ngay": str(r.ngay) if r.ngay else None, "nhom": "HOA_CHAT_VT",
                     "ten": r.noi_dung, "sl": sl, "don_vi": r.don_vi,
                     "don_gia": g or 0, "thanh_tien": round(sl * (g or 0)),
