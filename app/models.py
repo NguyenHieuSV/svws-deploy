@@ -1356,6 +1356,8 @@ class KtHoaDonCho(Base):
     message_id: Mapped[str | None] = mapped_column(String(250), unique=True, nullable=True)
     trang_thai: Mapped[str] = mapped_column(String(16), default="CHO_XAC_NHAN")
     tk_chi_phi: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    link_tra_cuu: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    ma_tra_cuu: Mapped[str | None] = mapped_column(String(40), nullable=True)
     hoa_don_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     tao_luc: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 

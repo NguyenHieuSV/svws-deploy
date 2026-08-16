@@ -7,7 +7,7 @@ Chỉ phiếu ĐÃ DUYỆT mới: chuyển tiền quỹ + sinh bút toán + cấ
 """
 from decimal import Decimal
 from datetime import date
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from ..database import get_db
@@ -628,6 +628,35 @@ def thong_ke_thu_chi(tu_ngay: str | None = None, den_ngay: str | None = None,
             "theo_quy": theo_quy, "theo_ma_ban": theo_ma_ban}
 
 
+def _rut_link_tra_cuu(nd):
+    """Tìm link tra cứu HĐĐT + mã tra cứu trong thân thư (MISA meInvoice/VNPT/Viettel…)."""
+    import re as _re
+    nd = nd or ""
+    url = None
+    for u in _re.findall(r"https?://[^\s<>\"')\]]+", nd):
+        if _re.search(r"tra-?cuu|invoice|hoa-?don|hddt", u, _re.I):
+            url = u.rstrip(".,;")[:300]
+            break
+    ma = None
+    m2 = _re.search(r"m[ãa]\s*(?:s[ốo](?!\s*thu[ếe])|tra\s*c[ứu]u)\s*[:：]?\s*([A-Za-z0-9_\-]{6,30})",
+                    nd, _re.I)
+    if m2:
+        ma = m2.group(1)[:40]
+    return url, ma
+
+
+def _rut_ngay_hd(nd):
+    """Bắt 'Ngày: dd/mm/yyyy' trong thân thư thông báo HĐĐT."""
+    import re as _re
+    m2 = _re.search(r"Ng[àa]y[^0-9]{0,5}(\d{1,2})[/-](\d{1,2})[/-](\d{4})", nd or "", _re.I)
+    if not m2:
+        return None
+    try:
+        return date(int(m2.group(3)), int(m2.group(2)), int(m2.group(1)))
+    except Exception:
+        return None
+
+
 # --- 🏢 Tự khớp hồ sơ NCC theo tên AI đọc / tên miền email ---
 _DOMAIN_CHUNG = {"gmail.com", "googlemail.com", "yahoo.com", "yahoo.com.vn",
                  "hotmail.com", "outlook.com", "icloud.com", "watersolutions.company"}
@@ -712,7 +741,17 @@ def quet_hoa_don_mua_email(tu_ngay: date | None = None, db: Session = Depends(ge
     GIOI_HAN = 25
     for m in thu:
         mid = (m.get("message_id") or "").strip()[:250] or None
-        if mid and db.query(KtHoaDonCho).filter_by(message_id=mid).first():
+        cu = db.query(KtHoaDonCho).filter_by(message_id=mid).first() if mid else None
+        if cu is not None:
+            # 🔗 bổ sung link tra cứu / ngày HĐ cho bản ghi cũ còn thiếu (không đụng số tiền)
+            if cu.trang_thai == "CHO_XAC_NHAN":
+                nd_cu = m.get("noi_dung") or ""
+                if not getattr(cu, "link_tra_cuu", None):
+                    l0, ma0 = _rut_link_tra_cuu(nd_cu)
+                    if l0 or ma0:
+                        cu.link_tra_cuu, cu.ma_tra_cuu = l0, ma0
+                if cu.ngay_hd is None:
+                    cu.ngay_hd = _rut_ngay_hd(nd_cu)
             trung += 1
             continue
         if them >= GIOI_HAN:
@@ -725,6 +764,7 @@ def quet_hoa_don_mua_email(tu_ngay: date | None = None, db: Session = Depends(ge
             khong_khop += 1
             continue
         nd_thu = m.get("noi_dung") or ""
+        link_tc, ma_tc = _rut_link_tra_cuu(nd_thu)
         info = doc_hoa_don_email(tieu_de, nd_thu)
         if info:
             dung_ai += 1
@@ -774,6 +814,7 @@ def quet_hoa_don_mua_email(tu_ngay: date | None = None, db: Session = Depends(ge
             tien_truoc_thue=Decimal(str(int(truoc))), thue_suat=Decimal(str(int(ts))),
             tong_tien=Decimal(str(int(tong))),
             mo_ta=(str(info.get("mo_ta") or "")[:300]) or None,
+            link_tra_cuu=link_tc, ma_tra_cuu=ma_tc,
             tieu_de=tieu_de or None, message_id=mid, tao_luc=gio_hien_tai()))
         them += 1
     # 🔁 Khớp lại các hàng chờ cũ chưa gắn NCC (quét trước khi có tự khớp theo tên)
@@ -809,8 +850,63 @@ def ds_hoa_don_cho(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM
                     "tong_tien": float(r.tong_tien or 0),
                     "mo_ta": r.mo_ta, "tieu_de": r.tieu_de,
                     "tk_chi_phi": getattr(r, "tk_chi_phi", None),
+                    "link_tra_cuu": getattr(r, "link_tra_cuu", None),
+                    "ma_tra_cuu": getattr(r, "ma_tra_cuu", None),
                     "hoa_don_id": r.hoa_don_id, "trang_thai": r.trang_thai})
     return out
+
+
+@router.post("/hoa-don-cho/{hdc_id}/doc-tep")
+def doc_tep_hoa_don_cho(hdc_id: int, file: UploadFile = File(...),
+                        db: Session = Depends(get_db),
+                        nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    """📎 Kế toán tải file hóa đơn (PDF/XML/ảnh) lấy từ link tra cứu — AI đọc, điền tiền."""
+    from ..models import KtHoaDonCho
+    from ..ai_gateway import doc_hoa_don_tep
+    r = db.get(KtHoaDonCho, hdc_id)
+    if r is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy hóa đơn chờ")
+    if r.trang_thai == "DA_GHI":
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Hóa đơn đã ghi — không sửa được nữa")
+    data = file.file.read()
+    if not data or len(data) > 8 * 1024 * 1024:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "File trống hoặc lớn hơn 8MB")
+    info = doc_hoa_don_tep(data, file.content_type or "", file.filename or "")
+    if not info:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "AI không đọc được file này — kiểm tra lại file hóa đơn")
+    tong = float(info.get("so_tien") or 0)
+    truoc = float(info.get("tien_truoc_thue") or 0)
+    thue = float(info.get("tien_thue") or 0)
+    if not truoc and tong:
+        truoc = round(tong / 1.08)
+        thue = tong - truoc
+    ts = round(thue / truoc * 100) if truoc > 0 and thue > 0 else int(float(r.thue_suat or 8))
+    if truoc > 0:
+        r.tien_truoc_thue = Decimal(str(int(truoc)))
+        r.thue_suat = Decimal(str(int(ts)))
+        r.tong_tien = Decimal(str(int(tong))) if tong else Decimal(str(round(truoc * (1 + ts / 100))))
+    if info.get("so_hoa_don") and not r.so_hoa_don:
+        r.so_hoa_don = str(info["so_hoa_don"])[:60]
+    if info.get("ncc_ten") and not r.ncc_ten:
+        r.ncc_ten = str(info["ncc_ten"])[:200]
+    if info.get("ngay"):
+        try:
+            r.ngay_hd = date.fromisoformat(str(info["ngay"])[:10])
+        except Exception:
+            pass
+    if info.get("mo_ta") and not r.mo_ta:
+        r.mo_ta = str(info["mo_ta"])[:300]
+    tk2 = str(info.get("tk_chi_phi") or "")
+    if tk2 in ("632", "642", "641", "627"):
+        r.tk_chi_phi = tk2
+    ghi_audit(db, nd.id, "AI_DOC_TEP_HDC", "kt_hoa_don_cho", r.id,
+              moi={"file": file.filename, "truoc": truoc, "tong": float(r.tong_tien or 0)})
+    db.commit()
+    return {"ok": True, "doc_duoc_tien": truoc > 0,
+            "tien_truoc_thue": float(r.tien_truoc_thue or 0),
+            "thue_suat": float(r.thue_suat or 8), "tong_tien": float(r.tong_tien or 0),
+            "so_hoa_don": r.so_hoa_don, "ngay_hd": str(r.ngay_hd) if r.ngay_hd else None}
 
 
 @router.post("/hoa-don-cho/{hdc_id}/tao-ncc")
