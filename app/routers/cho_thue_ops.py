@@ -239,6 +239,34 @@ def them_bao_cao_vh(ts_id: int, data: BcvhVao, db: Session = Depends(get_db),
     return {"id": r.id, "ok": True}
 
 
+@router.post("/tai-san/{ts_id}/chuyen-bcvh")
+def chuyen_bcvh(ts_id: int, den_ts_id: int, loai: str = "HOA_CHAT_VT",
+                db: Session = Depends(get_db),
+                nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
+    """Chuyển toàn bộ dữ liệu Báo cáo vận hành MỘT LOẠI (KY_THUAT | HOA_CHAT_VT |
+    KHOI_LUONG) kèm danh mục chỉ tiêu tương ứng từ dự án này sang dự án khác —
+    dùng khi nhập nhầm dự án. Chỉ CEO/ADMIN; có audit."""
+    if loai not in ("KY_THUAT", "HOA_CHAT_VT", "KHOI_LUONG"):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Loại không hợp lệ")
+    tu = db.get(TaiSanChoThue, ts_id)
+    den = db.get(TaiSanChoThue, den_ts_id)
+    if tu is None or den is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy dự án nguồn/đích")
+    if ts_id == den_ts_id:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Dự án nguồn và đích phải khác nhau")
+    so_bc = (db.query(CtBaoCaoVh).filter_by(tai_san_id=ts_id, loai=loai)
+             .update({"tai_san_id": den_ts_id}, synchronize_session=False))
+    so_ct = (db.query(CtBcvhChiTieu).filter_by(tai_san_id=ts_id, loai=loai)
+             .update({"tai_san_id": den_ts_id}, synchronize_session=False))
+    ghi_audit(db, nd.id, "CHUYEN_BCVH", "tai_san_cho_thue", ts_id,
+              moi={"den_ts_id": den_ts_id, "loai": loai,
+                   "so_bao_cao": so_bc, "so_chi_tieu": so_ct,
+                   "tu": tu.ten_du_an or tu.ma, "den": den.ten_du_an or den.ma})
+    db.commit()
+    return {"ok": True, "loai": loai, "so_bao_cao": so_bc, "so_chi_tieu": so_ct,
+            "tu": tu.ten_du_an or tu.ma, "den": den.ten_du_an or den.ma}
+
+
 # --- Bộ CHỈ TIÊU MẪU báo cáo kỹ thuật (lưu theo dự án, dùng lại mỗi ngày) ---
 class CtChiTieuVao(BaseModel):
     loai: str = Field(default="KY_THUAT", pattern="^(KY_THUAT|HOA_CHAT_VT|KHOI_LUONG)$")
