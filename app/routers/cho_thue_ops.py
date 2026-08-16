@@ -1192,10 +1192,20 @@ def du_an_cac_thang(ts_id: int, so_thang: int = 12, db: Session = Depends(get_db
     # chi phí theo tháng (theo ngày phát sinh) cho dự án này
     cps = db.query(ChiPhiVanHanh).filter_by(tai_san_id=ts_id).all()
     cp_thang: dict[str, float] = {}
+    cp_hc: dict[str, float] = {}     # 1. Hóa chất - Vật tư (loại VAT_TU)
+    cp_bt: dict[str, float] = {}     # 2. Bảo trì (nguồn BAO_TRI hoặc loại SUA_CHUA)
+    cp_khac: dict[str, float] = {}   # còn lại (nhân công, khác)
     for c in cps:
         mk = c.ngay.strftime("%Y-%m") if c.ngay else None
         if mk:
-            cp_thang[mk] = cp_thang.get(mk, 0.0) + float(c.so_tien or 0)
+            v = float(c.so_tien or 0)
+            cp_thang[mk] = cp_thang.get(mk, 0.0) + v
+            if (c.nguon or "") == "BAO_TRI" or (c.loai_chi_phi or "") == "SUA_CHUA":
+                cp_bt[mk] = cp_bt.get(mk, 0.0) + v
+            elif (c.loai_chi_phi or "") == "VAT_TU":
+                cp_hc[mk] = cp_hc.get(mk, 0.0) + v
+            else:
+                cp_khac[mk] = cp_khac.get(mk, 0.0) + v
     dt = float(ts.gia_thue_thang or 0)
     dang_thue = ts.tinh_trang == "DANG_THUE"
     # KHỐI LƯỢNG nước xử lý theo tháng = tổng chênh lệch chỉ số giữa các lần ghi
@@ -1227,6 +1237,9 @@ def du_an_cac_thang(ts_id: int, so_thang: int = 12, db: Session = Depends(get_db
                      "khoi_luong": kl,
                      "don_vi_kl": don_vi_kl or "m³",
                      "don_gia": dt, "don_vi_gia": ts.don_vi_gia or "VND/THANG",
+                     "cp_hoa_chat": round(cp_hc.get(m, 0.0)),
+                     "cp_bao_tri": round(cp_bt.get(m, 0.0)),
+                     "cp_khac": round(cp_khac.get(m, 0.0)),
                      "doanh_thu": doanh_thu, "chi_phi": cp, "loi_nhuan": doanh_thu - cp})
     return {"tai_san_id": ts_id, "ten_du_an": prefix, "gia_thue_thang": dt,
             "dang_thue": dang_thue, "cac_thang": rows}
