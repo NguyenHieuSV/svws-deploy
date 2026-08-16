@@ -241,6 +241,7 @@ def them_bao_cao_vh(ts_id: int, data: BcvhVao, db: Session = Depends(get_db),
 
 @router.post("/tai-san/{ts_id}/chuyen-bcvh")
 def chuyen_bcvh(ts_id: int, den_ts_id: int, loai: str = "HOA_CHAT_VT",
+                noi_dung: str | None = None,
                 db: Session = Depends(get_db),
                 nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
     """Chuyển toàn bộ dữ liệu Báo cáo vận hành MỘT LOẠI (KY_THUAT | HOA_CHAT_VT |
@@ -254,12 +255,19 @@ def chuyen_bcvh(ts_id: int, den_ts_id: int, loai: str = "HOA_CHAT_VT",
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy dự án nguồn/đích")
     if ts_id == den_ts_id:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Dự án nguồn và đích phải khác nhau")
-    so_bc = (db.query(CtBaoCaoVh).filter_by(tai_san_id=ts_id, loai=loai)
-             .update({"tai_san_id": den_ts_id}, synchronize_session=False))
-    so_ct = (db.query(CtBcvhChiTieu).filter_by(tai_san_id=ts_id, loai=loai)
-             .update({"tai_san_id": den_ts_id}, synchronize_session=False))
+    q_bc = db.query(CtBaoCaoVh).filter_by(tai_san_id=ts_id, loai=loai)
+    q_ct = db.query(CtBcvhChiTieu).filter_by(tai_san_id=ts_id, loai=loai)
+    if noi_dung:
+        # chuyển CHỌN LỌC theo tên hệ thống / chỉ tiêu — nhiều tên cách nhau '|',
+        # so khớp không phân biệt hoa thường; các tên khác giữ nguyên ở dự án nguồn
+        tens = [t.strip().lower() for t in noi_dung.split("|") if t.strip()]
+        if tens:
+            q_bc = q_bc.filter(func.lower(CtBaoCaoVh.noi_dung).in_(tens))
+            q_ct = q_ct.filter(func.lower(CtBcvhChiTieu.chi_tieu).in_(tens))
+    so_bc = q_bc.update({"tai_san_id": den_ts_id}, synchronize_session=False)
+    so_ct = q_ct.update({"tai_san_id": den_ts_id}, synchronize_session=False)
     ghi_audit(db, nd.id, "CHUYEN_BCVH", "tai_san_cho_thue", ts_id,
-              moi={"den_ts_id": den_ts_id, "loai": loai,
+              moi={"den_ts_id": den_ts_id, "loai": loai, "noi_dung": noi_dung,
                    "so_bao_cao": so_bc, "so_chi_tieu": so_ct,
                    "tu": tu.ten_du_an or tu.ma, "den": den.ten_du_an or den.ma})
     db.commit()
