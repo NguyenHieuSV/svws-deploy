@@ -743,7 +743,10 @@ def ds_hoa_don_cho(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM
     return out
 
 
-class KtHdcSua(BaseModel):
+from pydantic import BaseModel as _BM_hdc
+
+
+class KtHdcSua(_BM_hdc):
     nha_cung_cap_id: int | None = None
     ncc_ten: str | None = None
     so_hoa_don: str | None = None
