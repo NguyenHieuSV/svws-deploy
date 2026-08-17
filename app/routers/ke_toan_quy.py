@@ -1731,6 +1731,10 @@ def _sao_ke_doi_chieu_lo(db, sk, sk_id):
                                 "kh_id": cn.khach_hang_id,
                                 "khach": kh0.ten if kh0 else None, "han": cn.han})
     ds_ma = [dh.so for dh in db.query(DonHang).all() if dh.so and len(dh.so) >= 6]
+    # + mã "nhập ngoài" trên công nợ (không có đơn hàng trong app nhưng vẫn là mã hàng bán)
+    for (mn,) in db.query(CongNo.ma_ban_ngoai).filter(CongNo.ma_ban_ngoai.isnot(None)).distinct().all():
+        if mn and len(mn) >= 6 and mn not in ds_ma:
+            ds_ma.append(mn)
     ds_ma_kd = [(_kd(m0).upper(), m0) for m0 in ds_ma]
 
     def _to_hop(khoans, target):
