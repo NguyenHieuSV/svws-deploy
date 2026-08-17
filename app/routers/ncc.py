@@ -960,18 +960,9 @@ def _ap_dung_tt_mua(db: Session, dm: DonMua, dn: Decimal) -> bool:
 def _hang_cho_duyet_chi(db: Session, dm: DonMua, dn: Decimal):
     """Đưa đề nghị chi vào HÀNG CHỜ DUYỆT (tab Duyệt chi Ngân Hàng). KHÔNG phân bổ
     vào Công nợ/Kiểm soát ở bước này — phân bổ chỉ chạy khi CEO/KTT bấm Duyệt chi.
-    dn <= 0 nghĩa là RÚT đề nghị: gỡ lệnh chờ duyệt, KHÔNG đưa lệnh 0 đồng vào hàng chờ."""
+    dn = 0 VẪN tạo lệnh: đơn CÔNG NỢ 100% — duyệt xong TOÀN BỘ giá trị PO vào Công nợ phải trả."""
     from ..nhac_viec_service import gio_hien_tai
     from ..models import LenhChiBank
-    if Decimal(dn or 0) <= 0:
-        for lcb0 in db.query(LenhChiBank).filter(LenhChiBank.don_mua_id == dm.id,
-                                                 LenhChiBank.trang_thai == "CHO_DUYET").all():
-            lcb0.trang_thai = "TU_CHOI"
-            lcb0.ghi_chu = (((lcb0.ghi_chu or "") + " | rút đề nghị (về 0)").strip())[:200]
-        dm.cho_lenh_bank = False
-        dm.lenh_bank_tien = None
-        dm.lenh_bank_luc = None
-        return
     dm.cho_lenh_bank = True
     dm.lenh_bank_tien = dn
     dm.lenh_bank_luc = gio_hien_tai()
@@ -1117,8 +1108,10 @@ def cap_nhat_thanh_toan_mua(dm_id: int, data: ThanhToanMuaVao, db: Session = Dep
                            hinh_thuc=(data.hinh_thuc or "").strip()[:30] or None,
                            nguoi_tao=nhan_vien_id_cua(db, nd.id)))
     # KHÔNG phân bổ ngay: khoản chỉ vào Công nợ/Kiểm soát SAU KHI lệnh chi được DUYỆT
-    if dn == da_cu:
-        # số tiền không đổi (bổ sung chứng từ / hạn) → chỉ đồng bộ sang công nợ hiện có
+    from ..models import LenhChiBank as _LCBc
+    da_co_lenh = db.query(_LCBc.id).filter(_LCBc.don_mua_id == dm.id).first() is not None
+    if dn == da_cu and (da_co_lenh or dm.tt_du):
+        # số tiền không đổi & PO đã có lệnh / đã tất toán → chỉ đồng bộ chứng từ / hạn
         cn = db.query(CongNo).filter_by(don_mua_id=dm.id).first()
         if cn is not None:
             if dm.so_hoa_don:
@@ -1133,7 +1126,7 @@ def cap_nhat_thanh_toan_mua(dm_id: int, data: ThanhToanMuaVao, db: Session = Dep
         dm.de_nghi_tt = dn
         _hang_cho_duyet_chi(db, dm, dn)
         da_tt_100 = False
-        cho_duyet_chi = dn > 0
+        cho_duyet_chi = True
     ghi_audit(db, nd.id, "THANH_TOAN_MUA", "don_mua", dm.id,
               moi={"de_nghi_tt": float(dn), "tong": float(tong), "tt_du": da_tt_100,
                    "so_tien_dot": float(data.so_tien_dot) if data.so_tien_dot is not None else None,
@@ -1246,9 +1239,6 @@ def duyet_lenh_chi_bank(lcb_id: int, db: Session = Depends(get_db),
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy lệnh chi")
     if r.trang_thai != "CHO_DUYET":
         raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Lệnh chi đang ở trạng thái {r.trang_thai}")
-    if Decimal(r.so_tien or 0) <= 0:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST,
-                            "Lệnh chi 0 đồng — không có gì để duyệt; hãy Từ chối lệnh này")
     # TRẦN TIỀN NHIỀU CẤP: KTT duyệt theo hạn mức 'thu_chi' (bảng han_muc_duyet); CEO/ADMIN không trần
     if nd.vai_tro not in ("CEO", "ADMIN"):
         kiem_han_muc(db, nd, "thu_chi", Decimal(r.so_tien or 0))
