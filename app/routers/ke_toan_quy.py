@@ -1763,6 +1763,13 @@ def _sao_ke_doi_chieu_lo(db, sk, sk_id):
         # 🔎 suy mã từ SỐ HÓA ĐƠN trong diễn giải — CHỈ khi có bằng chứng phụ:
         #    tên đối tác khớp, HOẶC số tiền khớp đúng khoản, HOẶC số HĐ dài (≥3 số) duy nhất 1 mã.
         #    Số HĐ ngắn (1-2 chữ số) rất dễ trùng giữa các NCC — không đoán bừa.
+        r["hd_thieu"] = []
+        for grp0 in _re.findall(r"H[DĐ]\.?\s*([0-9][0-9\-/,\. ]{0,40})", (d.dien_giai or "").upper()):
+            for tk0 in _re.split(r"[\-/,\. ]+", grp0):
+                k00 = tk0.lstrip("0")
+                if k00 and k00 not in hd_map and k00 not in r["hd_thieu"]:
+                    r["hd_thieu"].append(k00)
+        r["hd_thieu"] = r["hd_thieu"][:5]
         if not r["ma_ban"]:
             doi_tac0 = (_khop_ncc(ds_ncc, d.dien_giai or "") if ra > 0
                         else _khop_ncc(ds_kh, d.dien_giai or ""))
@@ -1962,12 +1969,14 @@ def _sao_ke_doi_chieu_lo(db, sk, sk_id):
                     ks = [c for c in cn_tra_flat if c["ma_ban"] == r["ma_ban"]]
                     if ks:
                         tcl = sum(c["con_lai"] for c in ks)
-                        r["so_sanh_ma"] = {"loai": "PHAI_TRA", "con_lai": tcl, "lech": ra - tcl}
+                        r["so_sanh_ma"] = {"loai": "PHAI_TRA", "con_lai": tcl,
+                                           "lech": ra - tcl, "vuot": ra > tcl + 0.5}
                 elif vao > 0:
                     ks = [c for c in cn_thu_flat if c["ma_ban"] == r["ma_ban"]]
                     if ks:
                         tcl = sum(c["con_lai"] for c in ks)
-                        r["so_sanh_ma"] = {"loai": "PHAI_THU", "con_lai": tcl, "lech": vao - tcl}
+                        r["so_sanh_ma"] = {"loai": "PHAI_THU", "con_lai": tcl,
+                                           "lech": vao - tcl, "vuot": vao > tcl + 0.5}
         out.append(r)
     return {"id": sk.id, "ten_file": sk.ten_file, "ngan_hang": sk.ngan_hang,
             "tu_ngay": str(sk.tu_ngay) if sk.tu_ngay else None,
