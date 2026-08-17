@@ -1856,7 +1856,8 @@ def _sao_ke_doi_chieu_lo(db, sk, sk_id):
                             r["goi_y_chi_phan"] = {"cong_no_id": c["cong_no_id"], "con_lai": c["con_lai"],
                                                    "ncc_ten": c["ncc_ten"] or "", "so_ct": c["so_ct"],
                                                    "diem": diem}
-                        r["ma_ban"] = r["ma_ban"] or c["ma_ban"]
+                        if du_diem:
+                            r["ma_ban"] = r["ma_ban"] or c["ma_ban"]
             else:
                 kh_dg = _khop_ncc(ds_kh, d.dien_giai or "")
                 best, so_exact = None, 0
@@ -1886,7 +1887,8 @@ def _sao_ke_doi_chieu_lo(db, sk, sk_id):
                     elif du_diem:
                         r["goi_y_thu_phan"] = {"cong_no_id": c["cong_no_id"], "con_lai": c["con_lai"],
                                                "khach": c["khach"], "diem": diem}
-                    r["ma_ban"] = r["ma_ban"] or c["ma_ban"]
+                    if du_diem:
+                        r["ma_ban"] = r["ma_ban"] or c["ma_ban"]
             # fallback hiển thị SO SÁNH THEO MÃ khi vẫn chưa có gợi ý
             if (not r["goi_y_chi"] and not r["goi_y_chi_phan"] and not r["goi_y_thu"]
                     and not r["goi_y_thu_phan"] and r["ma_ban"]):
