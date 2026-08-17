@@ -1713,7 +1713,8 @@ def _sao_ke_doi_chieu_lo(db, sk, sk_id):
         k0 = _khoa_so(cn.so_ct)
         if k0:
             hd_map.setdefault(k0, []).append({"ma": ma0, "ncc_id": cn.nha_cung_cap_id,
-                                              "loai": cn.loai})
+                                              "kh_id": cn.khach_hang_id, "loai": cn.loai,
+                                              "tong": float(cn.so_tien or 0), "con_lai": con})
         if con <= 0:
             continue
         if cn.loai == "PHAI_TRA":
@@ -1759,22 +1760,42 @@ def _sao_ke_doi_chieu_lo(db, sk, sk_id):
             if ma_kd in dgU:
                 r["ma_ban"] = ma_goc
                 break
-        # 🔎 suy mã từ SỐ HÓA ĐƠN trong diễn giải ("TT HD 3485-3484 - ...") → công nợ → mã
+        # 🔎 suy mã từ SỐ HÓA ĐƠN trong diễn giải — CHỈ khi có bằng chứng phụ:
+        #    tên đối tác khớp, HOẶC số tiền khớp đúng khoản, HOẶC số HĐ dài (≥3 số) duy nhất 1 mã.
+        #    Số HĐ ngắn (1-2 chữ số) rất dễ trùng giữa các NCC — không đoán bừa.
         if not r["ma_ban"]:
-            ncc_dg0 = _khop_ncc(ds_ncc, d.dien_giai or "") if ra > 0 else None
+            doi_tac0 = (_khop_ncc(ds_ncc, d.dien_giai or "") if ra > 0
+                        else _khop_ncc(ds_kh, d.dien_giai or ""))
+            so_gd0 = ra if ra > 0 else vao
+            eps0 = max(0.5, so_gd0 * 0.005)
             for grp in _re.findall(r"H[DĐ]\.?\s*([0-9][0-9\-/,\. ]{0,40})", (d.dien_giai or "").upper()):
                 for tk3 in _re.split(r"[\-/,\. ]+", grp):
                     k0 = tk3.lstrip("0")
                     if not k0 or k0 not in hd_map:
                         continue
-                    hits = hd_map[k0]
-                    mas = sorted({h["ma"] for h in hits if h["ma"]})
-                    if len(mas) == 1:
-                        r["ma_ban"] = mas[0]
-                    elif len(mas) > 1 and ncc_dg0:
-                        ma_ncc = sorted({h["ma"] for h in hits if h["ma"] and h["ncc_id"] == ncc_dg0})
-                        if len(ma_ncc) == 1:
-                            r["ma_ban"] = ma_ncc[0]
+                    # đúng chiều: tiền ra → công nợ PHẢI TRẢ; tiền vào → PHẢI THU
+                    hits = [h for h in hd_map[k0]
+                            if h["loai"] == ("PHAI_TRA" if ra > 0 else "PHAI_THU")]
+                    if not hits:
+                        continue
+                    loc_dt = [h for h in hits if doi_tac0
+                              and (h["ncc_id"] == doi_tac0 if ra > 0 else h["kh_id"] == doi_tac0)]
+                    tien_ok = [h for h in hits
+                               if abs((h.get("tong") or 0) - so_gd0) <= eps0
+                               or abs((h.get("con_lai") or 0) - so_gd0) <= eps0]
+                    chon = None
+                    if loc_dt:
+                        chon = loc_dt
+                    elif tien_ok:
+                        chon = tien_ok
+                    elif len(k0) >= 3:
+                        mas_all = sorted({h["ma"] for h in hits if h["ma"]})
+                        if len(mas_all) == 1:
+                            chon = hits
+                    if chon:
+                        mas = sorted({h["ma"] for h in chon if h["ma"]})
+                        if len(mas) == 1:
+                            r["ma_ban"] = mas[0]
                     if r["ma_ban"]:
                         break
                 if r["ma_ban"]:
