@@ -1450,6 +1450,7 @@ class SaoKeDong(Base):
     tien_vao: Mapped[Decimal] = mapped_column(Numeric(18, 0), default=0)
     tien_ra: Mapped[Decimal] = mapped_column(Numeric(18, 0), default=0)
     so_du: Mapped[Decimal | None] = mapped_column(Numeric(18, 0), nullable=True)
-    khop_loai: Mapped[str | None] = mapped_column(String(20), nullable=True)   # PHIEU|THU_CN_BAN|LENH_CHI|BANK_REC
+    khop_loai: Mapped[str | None] = mapped_column(String(20), nullable=True)   # PHIEU|THU_CN_BAN|LENH_CHI|BANK_REC|DA_CHI_SK|GHI_THU_SK
     khop_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     khop_mo_ta: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    ghi_chu: Mapped[str | None] = mapped_column(String(300), nullable=True)
