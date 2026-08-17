@@ -1595,6 +1595,19 @@ def sao_ke_doi_chieu(sk_id: int, db: Session = Depends(get_db),
     sk = db.get(SaoKeBank, sk_id)
     if sk is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy sao kê")
+    import traceback as _tb
+    try:
+        return _sao_ke_doi_chieu_lo(db, sk, sk_id)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR,
+                            f"DBG {type(e).__name__}: {str(e)[:160]} | {_tb.format_exc().splitlines()[-3][:160]}")
+
+
+def _sao_ke_doi_chieu_lo(db, sk, sk_id):
+    from datetime import timedelta as _td
+    from ..models import (SaoKeDong, LenhChiBank, DonMua, DonHang, KhachHang)
     dongs = (db.query(SaoKeDong).filter_by(sao_ke_id=sk_id)
              .order_by(SaoKeDong.ngay, SaoKeDong.id).all())
     tu = (sk.tu_ngay or date.today()) - _td(days=5)
