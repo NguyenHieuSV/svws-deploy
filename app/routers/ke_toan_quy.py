@@ -1611,6 +1611,7 @@ def _sao_ke_doi_chieu_lo(db, sk, sk_id):
                           ThanhToan, CongNo, NhaCungCap)
     import itertools
     import unicodedata
+    import re as _re
     dongs = (db.query(SaoKeDong).filter_by(sao_ke_id=sk_id)
              .order_by(SaoKeDong.ngay, SaoKeDong.id).all())
     tu = (sk.tu_ngay or date.today()) - _td(days=5)
@@ -1639,8 +1640,12 @@ def _sao_ke_doi_chieu_lo(db, sk, sk_id):
             return "THUE"
         if (" phi " in k or k.strip().startswith("phi ") or "phi chuyen" in k
                 or "phi phat hanh" in k or "phi quan ly" in k or "bao lanh" in k
-                or "phi thuong nien" in k or "thu no tk" in k):
+                or "phi thuong nien" in k or "thu no tk" in k or "sao ke tin dung" in k):
             return "PHI_NH"
+        if ("tien dien" in k or "tien nuoc" in k or "internet" in k or "vien thong" in k
+                or "thue xuong" in k or "thue van phong" in k or "thue nha" in k
+                or "thue mat bang" in k):
+            return "CHI_CHUNG"
         return None
 
     # ---------- CÁC NGUỒN ----------
@@ -1693,16 +1698,26 @@ def _sao_ke_doi_chieu_lo(db, sk, sk_id):
     ds_kh = db.query(KhachHang).all()
     cn_tra_flat, cn_thu_flat = [], []
     cn_tra_ncc = {}
+
+    def _khoa_so(s0):
+        runs = _re.findall(r"\d+", str(s0 or ""))
+        return runs[-1].lstrip("0") if runs else None
+
+    hd_map = {}      # khóa số hóa đơn → [{ma, ncc_id, loai}] (MỌI trạng thái — để suy mã)
     for cn in db.query(CongNo).all():
         con = float(cn.so_tien or 0) - float(cn.da_thanh_toan or 0)
-        if con <= 0:
-            continue
         ma0 = _ma_dh(cn.don_hang_id) or cn.ma_ban_ngoai
         if not ma0 and cn.don_mua_id:
             dmx = db.get(DonMua, cn.don_mua_id)
             ma0 = _ma_dh(dmx.don_hang_id) if dmx else None
+        k0 = _khoa_so(cn.so_ct)
+        if k0:
+            hd_map.setdefault(k0, []).append({"ma": ma0, "ncc_id": cn.nha_cung_cap_id,
+                                              "loai": cn.loai})
+        if con <= 0:
+            continue
         if cn.loai == "PHAI_TRA":
-            nc0 = db.get(NhaCungCap, cn.nha_cung_cap_id) if cn.nha_cung_cap_id else None
+            nc0 = next((n for n in ds_ncc if n.id == cn.nha_cung_cap_id), None)
             muc = {"cong_no_id": cn.id, "con_lai": con, "so_ct": cn.so_ct, "ma_ban": ma0,
                    "ncc_id": cn.nha_cung_cap_id, "ncc_ten": nc0.ten if nc0 else None,
                    "han": cn.han}
@@ -1744,6 +1759,36 @@ def _sao_ke_doi_chieu_lo(db, sk, sk_id):
             if ma_kd in dgU:
                 r["ma_ban"] = ma_goc
                 break
+        # 🔎 suy mã từ SỐ HÓA ĐƠN trong diễn giải ("TT HD 3485-3484 - ...") → công nợ → mã
+        if not r["ma_ban"]:
+            ncc_dg0 = _khop_ncc(ds_ncc, d.dien_giai or "") if ra > 0 else None
+            for grp in _re.findall(r"H[DĐ]\.?\s*([0-9][0-9\-/,\. ]{0,40})", (d.dien_giai or "").upper()):
+                for tk3 in _re.split(r"[\-/,\. ]+", grp):
+                    k0 = tk3.lstrip("0")
+                    if not k0 or k0 not in hd_map:
+                        continue
+                    hits = hd_map[k0]
+                    mas = sorted({h["ma"] for h in hits if h["ma"]})
+                    if len(mas) == 1:
+                        r["ma_ban"] = mas[0]
+                    elif len(mas) > 1 and ncc_dg0:
+                        ma_ncc = sorted({h["ma"] for h in hits if h["ma"] and h["ncc_id"] == ncc_dg0})
+                        if len(ma_ncc) == 1:
+                            r["ma_ban"] = ma_ncc[0]
+                    if r["ma_ban"]:
+                        break
+                if r["ma_ban"]:
+                    break
+        # 🔎 khớp TIỀN TỐ mã (ngân hàng ghi mã cụt: "TM-SIC-0726" thay vì "TM-SIC-0726-02-LOC")
+        if not r["ma_ban"]:
+            for tok in _re.findall(r"[A-Z]{2,4}-[A-Z0-9]{2,8}-[0-9A-Z]{3,6}[A-Z0-9\-]*", dgU):
+                if len(tok) < 8:
+                    continue
+                cands = [m0 for _, m0 in ds_ma_kd
+                         if _kd(m0).upper().startswith(tok) or tok.startswith(_kd(m0).upper())]
+                if len(set(cands)) == 1:
+                    r["ma_ban"] = cands[0]
+                    break
 
         def _lech(ng):
             try:
