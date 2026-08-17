@@ -1717,13 +1717,36 @@ def _tinh_tien_po(dong):
 
 # ----- THAO_TAC: tạo đơn mua (nháp -> chờ duyệt). NV_MUA tạo được, chưa tự duyệt. -----
 @router.post("/don-mua", response_model=DonMuaRa, status_code=201)
-def tao_don_mua(data: DonMuaVao, db: Session = Depends(get_db),
+def tao_don_mua(data: DonMuaVao, bo_qua_trung: bool = False,
+                db: Session = Depends(get_db),
                 nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
     ncc = db.get(NhaCungCap, data.nha_cung_cap_id)
     if ncc is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy NCC")
     if ncc.blacklist:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "NCC đang trong blacklist")
+    # ⚠ NGHI TRÙNG PO: cùng NCC trong 14 ngày, giá trị xấp xỉ ±2% — xác nhận rõ mới tạo.
+    # Mua DỊCH VỤ ĐỊNH KỲ là hợp lệ: xác nhận xong đơn được gắn nhãn 🔁 Định kỳ.
+    if not bo_qua_trung:
+        from datetime import timedelta as _td14
+        _th0, _tt0, tong0 = _tinh_tien_po(data.chi_tiet)
+        moc14 = date.today() - _td14(days=14)
+        nghi = []
+        for d0 in (db.query(DonMua).filter(DonMua.nha_cung_cap_id == data.nha_cung_cap_id,
+                                           DonMua.ngay >= moc14,
+                                           DonMua.trang_thai != "TU_CHOI")
+                   .order_by(DonMua.id.desc()).limit(30).all()):
+            t0 = float(d0.tong_tien or 0)
+            if t0 <= 0 or float(tong0) <= 0:
+                continue
+            if abs(t0 - float(tong0)) / max(t0, float(tong0)) <= 0.02:
+                nghi.append(f"{d0.so or ('PO-' + str(d0.id))} · {d0.ngay} · {t0:,.0f}đ · {d0.trang_thai}")
+            if len(nghi) >= 3:
+                break
+        if nghi:
+            raise HTTPException(status.HTTP_409_CONFLICT,
+                                "⚠TRÙNGPO: NCC này đã có PO giá trị tương tự trong 14 ngày: "
+                                + " | ".join(nghi))
     da_xac_nhan = False
     if data.don_hang_id:
         da_xac_nhan = _chan_mua_trung(db, nd, [ct.hang_hoa_id for ct in data.chi_tiet],
@@ -1732,7 +1755,7 @@ def tao_don_mua(data: DonMuaVao, db: Session = Depends(get_db),
     dm = DonMua(so=data.so, nha_cung_cap_id=data.nha_cung_cap_id,
                 don_hang_id=data.don_hang_id, ngay_hen_giao=data.ngay_hen_giao,
                 ngay=date.today(), tien_hang=tien_hang, tien_thue=tien_thue,
-                tong_tien=tong, trang_thai="CHO_DUYET")
+                tong_tien=tong, trang_thai="CHO_DUYET", dinh_ky=bool(bo_qua_trung))
     db.add(dm)
     db.flush()
     if not dm.so:
@@ -1742,7 +1765,8 @@ def tao_don_mua(data: DonMuaVao, db: Session = Depends(get_db),
                         so_luong=ct.so_luong, don_gia=ct.don_gia, thue_suat=ct.thue_suat))
     ghi_audit(db, nd.id, "TAO", "don_mua", dm.id,
               moi={"tong_tien": float(tong), "tien_thue": float(tien_thue),
-                   "trang_thai": "CHO_DUYET", "mua_bo_sung_xac_nhan": da_xac_nhan})
+                   "trang_thai": "CHO_DUYET", "mua_bo_sung_xac_nhan": da_xac_nhan,
+                   "dinh_ky": bool(bo_qua_trung)})
     db.commit()
     db.refresh(dm)
     return dm

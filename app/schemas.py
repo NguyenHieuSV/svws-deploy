@@ -137,6 +137,7 @@ class DonMuaRa(BaseModel):
     ngay_hen_giao: date | None = None
     ngay_giao_thuc: date | None = None
     da_dat_hang: bool = False
+    dinh_ky: bool = False               # 🔁 mua định kỳ (xác nhận khi tạo đơn nghi trùng)
     hang_hoa: str | None = None         # tóm tắt tên mặt hàng của PO (danh sách)
 
 

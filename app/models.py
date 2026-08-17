@@ -209,6 +209,7 @@ class DonMua(Base):
     cho_lenh_bank: Mapped[bool] = mapped_column(Boolean, default=False)              # mig 83: chờ lệnh NH
     lenh_bank_tien: Mapped[Decimal] = mapped_column(Numeric(18, 0), default=0)       # mig 83
     lenh_bank_luc: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)  # mig 83
+    dinh_ky: Mapped[bool] = mapped_column(Boolean, default=False)                    # mig 105: mua định kỳ
     ngay_dat_hang: Mapped[date | None] = mapped_column(Date, nullable=True)
     de_nghi_tt: Mapped[Decimal] = mapped_column(Numeric(18, 0), default=0)
     da_duyet_tt: Mapped[Decimal | None] = mapped_column(Numeric(18, 0), nullable=True)  # lũy kế ĐÃ DUYỆT chi
