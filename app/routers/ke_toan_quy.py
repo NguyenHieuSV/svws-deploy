@@ -1643,8 +1643,8 @@ def _sao_ke_doi_chieu_lo(db, sk, sk_id):
             return "PHI_NH"
         return None
 
-    # ① lệnh ĐÃ DUYỆT chờ thực chi (số của ĐỢT) — hành động ✔ Đã chi
-    ra_ung = []
+    # ---------- CÁC NGUỒN ----------
+    ra_ung = []      # lệnh ĐÃ DUYỆT chờ thực chi (số đợt) — hành động ✔ Đã chi
     duyet_ids = {r.don_mua_id for r in db.query(LenhChiBank)
                  .filter(LenhChiBank.trang_thai == "DA_DUYET").all() if r.don_mua_id}
     for dm in db.query(DonMua).filter(DonMua.cho_lenh_bank.is_(True)).all():
@@ -1658,9 +1658,9 @@ def _sao_ke_doi_chieu_lo(db, sk, sk_id):
             continue
         ra_ung.append({"don_mua_id": dm.id, "so": dm.so or f"PO-{dm.id}",
                        "so_tien": so_dot, "ma_ban": _ma_dh(dm.don_hang_id),
+                       "ncc_id": dm.nha_cung_cap_id,
                        "ngay": dm.lenh_bank_luc.date() if dm.lenh_bank_luc else None})
-    # ② lệnh ĐÃ CHI trong kỳ — đã xử lý
-    ra_dachi = []
+    ra_dachi = []    # lệnh ĐÃ CHI trong kỳ — đã xử lý
     for r0 in db.query(LenhChiBank).filter(LenhChiBank.trang_thai == "DA_CHI").all():
         ng = r0.ngay_tt or (r0.chi_luc.date() if r0.chi_luc else None)
         if ng is None or ng < tu or ng > den:
@@ -1669,7 +1669,6 @@ def _sao_ke_doi_chieu_lo(db, sk, sk_id):
         ra_dachi.append({"id": r0.id, "ngay": ng, "so_tien": float(r0.so_tien or 0),
                          "mo_ta": f"Lệnh đã chi — {dm0.so if dm0 else ('CN' + str(r0.cong_no_id or ''))}",
                          "ma_ban": _ma_dh(dm0.don_hang_id) if dm0 else None})
-    # ③ phiếu thu-chi ĐÃ DUYỆT qua quỹ NGÂN HÀNG trong kỳ — đã xử lý
     quy_nh = {q.id for q in db.query(TaiKhoanQuy).filter(TaiKhoanQuy.loai == "NGAN_HANG").all()}
     phieu_ra, phieu_vao = [], []
     for p0 in db.query(PhieuThuChi).filter(PhieuThuChi.trang_thai == "DA_DUYET",
@@ -1680,8 +1679,7 @@ def _sao_ke_doi_chieu_lo(db, sk, sk_id):
                "mo_ta": f"Phiếu {p0.so or p0.id} — {(p0.dien_giai or '')[:45]}",
                "ma_ban": _ma_dh(p0.don_hang_id)}
         (phieu_ra if p0.loai == "CHI" else phieu_vao).append(it0)
-    # ④ thu công nợ bán đã ghi
-    vao_thu = []
+    vao_thu = []     # thu công nợ bán đã ghi
     for tt, cn in (db.query(ThanhToan, CongNo).join(CongNo, ThanhToan.cong_no_id == CongNo.id)
                    .filter(CongNo.loai == "PHAI_THU",
                            ThanhToan.ngay >= tu, ThanhToan.ngay <= den).all()):
@@ -1690,40 +1688,11 @@ def _sao_ke_doi_chieu_lo(db, sk, sk_id):
                         "so_tien": float(tt.so_tien or 0),
                         "ma_ban": _ma_dh(cn.don_hang_id) or cn.ma_ban_ngoai,
                         "khach": kh.ten if kh else None, "cong_no_id": cn.id})
-    # ⑤ công nợ còn lại: PHẢI THU (gợi ý thu) + PHẢI TRẢ gom theo NCC (khớp tên + gộp)
-    goi_y_cn = []
-    for cn in db.query(CongNo).filter(CongNo.loai == "PHAI_THU").all():
-        con = float(cn.so_tien or 0) - float(cn.da_thanh_toan or 0)
-        if con <= 0:
-            continue
-        kh = db.get(KhachHang, cn.khach_hang_id) if cn.khach_hang_id else None
-        goi_y_cn.append({"cong_no_id": cn.id, "con_lai": con,
-                         "ma_ban": _ma_dh(cn.don_hang_id) or cn.ma_ban_ngoai,
-                         "khach": kh.ten if kh else None})
+    # công nợ CÒN LẠI (flat, đủ thuộc tính cho chấm điểm 4 yếu tố)
     ds_ncc = db.query(NhaCungCap).all()
+    ds_kh = db.query(KhachHang).all()
+    cn_tra_flat, cn_thu_flat = [], []
     cn_tra_ncc = {}
-    for cn in db.query(CongNo).filter(CongNo.loai == "PHAI_TRA").all():
-        con = float(cn.so_tien or 0) - float(cn.da_thanh_toan or 0)
-        if con <= 0 or not cn.nha_cung_cap_id:
-            continue
-        cn_tra_ncc.setdefault(cn.nha_cung_cap_id, []).append(
-            {"cong_no_id": cn.id, "con_lai": con, "so_ct": cn.so_ct,
-             "ma_ban": _ma_dh(cn.don_hang_id) or cn.ma_ban_ngoai})
-
-    def _to_hop(khoans, target):
-        """Tìm 1–3 khoản công nợ cộng lại ≈ target (sai số ≤ max(1000đ, 0.5%))."""
-        eps = max(1000.0, target * 0.005)
-        ks = khoans[:12]
-        for r2 in (1, 2, 3):
-            for combo in itertools.combinations(ks, r2):
-                if abs(sum(c["con_lai"] for c in combo) - target) <= eps:
-                    return list(combo)
-        return None
-
-    # 🔎 danh mục MÃ ĐƠN HÀNG — quét thẳng trong diễn giải sao kê (NH thường ghi kèm mã)
-    ds_ma = [dh.so for dh in db.query(DonHang).all() if dh.so and len(dh.so) >= 6]
-    # công nợ CÒN LẠI gom theo MÃ — để so số tiền sao kê với công nợ/duyệt chi của đúng mã
-    cn_tra_ma, cn_thu_ma = {}, {}
     for cn in db.query(CongNo).all():
         con = float(cn.so_tien or 0) - float(cn.da_thanh_toan or 0)
         if con <= 0:
@@ -1732,11 +1701,31 @@ def _sao_ke_doi_chieu_lo(db, sk, sk_id):
         if not ma0 and cn.don_mua_id:
             dmx = db.get(DonMua, cn.don_mua_id)
             ma0 = _ma_dh(dmx.don_hang_id) if dmx else None
-        if not ma0:
-            continue
-        muc = {"cong_no_id": cn.id, "con_lai": con, "so_ct": cn.so_ct, "ma_ban": ma0}
-        (cn_tra_ma if cn.loai == "PHAI_TRA" else cn_thu_ma).setdefault(ma0, []).append(muc)
+        if cn.loai == "PHAI_TRA":
+            nc0 = db.get(NhaCungCap, cn.nha_cung_cap_id) if cn.nha_cung_cap_id else None
+            muc = {"cong_no_id": cn.id, "con_lai": con, "so_ct": cn.so_ct, "ma_ban": ma0,
+                   "ncc_id": cn.nha_cung_cap_id, "ncc_ten": nc0.ten if nc0 else None,
+                   "han": cn.han}
+            cn_tra_flat.append(muc)
+            if cn.nha_cung_cap_id:
+                cn_tra_ncc.setdefault(cn.nha_cung_cap_id, []).append(muc)
+        else:
+            kh0 = db.get(KhachHang, cn.khach_hang_id) if cn.khach_hang_id else None
+            cn_thu_flat.append({"cong_no_id": cn.id, "con_lai": con, "ma_ban": ma0,
+                                "kh_id": cn.khach_hang_id,
+                                "khach": kh0.ten if kh0 else None, "han": cn.han})
+    ds_ma = [dh.so for dh in db.query(DonHang).all() if dh.so and len(dh.so) >= 6]
     ds_ma_kd = [(_kd(m0).upper(), m0) for m0 in ds_ma]
+
+    def _to_hop(khoans, target):
+        eps = max(1000.0, target * 0.005)
+        ks = khoans[:12]
+        for r2 in (1, 2, 3):
+            for combo in itertools.combinations(ks, r2):
+                if abs(sum(c["con_lai"] for c in combo) - target) <= eps:
+                    return list(combo)
+        return None
+
     dung_ra, dung_vao, dung_dachi, dung_pra, dung_pvao = set(), set(), set(), set(), set()
     out = []
     for d in dongs:
@@ -1747,7 +1736,14 @@ def _sao_ke_doi_chieu_lo(db, sk, sk_id):
              "da_ghi": d.khop_loai in ("DA_CHI_SK", "GHI_THU_SK", "PHIEU_SK"),
              "khop_mo_ta": d.khop_mo_ta, "phan_loai": _phan_loai(d.dien_giai),
              "duyet_chi": None, "thu": None, "goi_y_thu": None, "goi_y_chi": None,
+             "goi_y_chi_phan": None, "goi_y_thu_phan": None,
              "da_xu_ly": None, "ma_ban": None, "so_sanh_ma": None}
+        # 🔎 quét MÃ trong diễn giải TRƯỚC — dùng làm 1 trong 4 yếu tố chấm điểm
+        dgU = _kd(d.dien_giai or "").upper()
+        for ma_kd, ma_goc in ds_ma_kd:
+            if ma_kd in dgU:
+                r["ma_ban"] = ma_goc
+                break
 
         def _lech(ng):
             try:
@@ -1756,21 +1752,20 @@ def _sao_ke_doi_chieu_lo(db, sk, sk_id):
                 return 99
 
         def _tim(pool, so, dung, gioi_han):
-            best = None
+            best0 = None
             for u in pool:
-                if u["id" if "id" in u else "thanh_toan_id"] in dung:
-                    continue
-                if abs(u["so_tien"] - so) > 0.5:
+                if u["id"] in dung or abs(u["so_tien"] - so) > 0.5:
                     continue
                 le = _lech(u.get("ngay"))
                 if le > gioi_han:
                     continue
-                if best is None or le < best[0]:
-                    best = (le, u)
-            return best[1] if best else None
+                if best0 is None or le < best0[0]:
+                    best0 = (le, u)
+            return best0[1] if best0 else None
 
+        so_gd = ra if ra > 0 else vao
+        # ---------- KHỚP CHẮC (chứng từ đã có, đúng tiền + gần ngày) ----------
         if ra > 0:
-            u = None
             best = None
             for u0 in ra_ung:
                 if u0["don_mua_id"] in dung_ra or abs(u0["so_tien"] - ra) > 0.5:
@@ -1783,7 +1778,7 @@ def _sao_ke_doi_chieu_lo(db, sk, sk_id):
             if best is not None:
                 dung_ra.add(best[1]["don_mua_id"])
                 r["duyet_chi"] = best[1]
-                r["ma_ban"] = best[1]["ma_ban"]
+                r["ma_ban"] = r["ma_ban"] or best[1]["ma_ban"]
             else:
                 u = _tim(ra_dachi, ra, dung_dachi, 3)
                 if u is None:
@@ -1794,20 +1789,7 @@ def _sao_ke_doi_chieu_lo(db, sk, sk_id):
                     dung_dachi.add(u["id"])
                 if u is not None:
                     r["da_xu_ly"] = {"mo_ta": u["mo_ta"]}
-                    r["ma_ban"] = u.get("ma_ban")
-                elif r["phan_loai"] is None:
-                    # 🔎 khớp theo TÊN NCC trong diễn giải + GỘP nhiều hóa đơn
-                    ncc_id = _khop_ncc(ds_ncc, d.dien_giai or "")
-                    if ncc_id and ncc_id in cn_tra_ncc:
-                        combo = _to_hop(cn_tra_ncc[ncc_id], ra)
-                        if combo:
-                            nc0 = next((n for n in ds_ncc if n.id == ncc_id), None)
-                            r["ma_ban"] = next((c.get("ma_ban") for c in combo if c.get("ma_ban")), None)
-                            r["goi_y_chi"] = {"ncc_id": ncc_id,
-                                              "ncc_ten": nc0.ten if nc0 else "",
-                                              "cong_no_ids": [c["cong_no_id"] for c in combo],
-                                              "so_hd": ", ".join(str(c["so_ct"] or ("CN" + str(c["cong_no_id"]))) for c in combo)[:80],
-                                              "tong": sum(c["con_lai"] for c in combo)}
+                    r["ma_ban"] = r["ma_ban"] or u.get("ma_ban")
         elif vao > 0:
             best = None
             for u0 in vao_thu:
@@ -1821,45 +1803,103 @@ def _sao_ke_doi_chieu_lo(db, sk, sk_id):
             if best is not None:
                 dung_vao.add(best[1]["thanh_toan_id"])
                 r["thu"] = best[1]
-                r["ma_ban"] = best[1]["ma_ban"]
+                r["ma_ban"] = r["ma_ban"] or best[1]["ma_ban"]
             else:
                 u = _tim(phieu_vao, vao, dung_pvao, 3)
                 if u is not None:
                     dung_pvao.add(u["id"])
                     r["da_xu_ly"] = {"mo_ta": u["mo_ta"]}
-                    r["ma_ban"] = u.get("ma_ban")
-                elif r["phan_loai"] is None:
-                    gy = next((g for g in goi_y_cn if abs(g["con_lai"] - vao) <= 0.5), None)
-                    if gy is not None:
-                        r["goi_y_thu"] = gy
-                        r["ma_ban"] = gy["ma_ban"]
-        if not r["ma_ban"] and d.dien_giai:
-            dgU = _kd(d.dien_giai).upper()
-            for ma_kd, ma_goc in ds_ma_kd:
-                if ma_kd in dgU:
-                    r["ma_ban"] = ma_goc
-                    break
-        # 🔗 SO SÁNH THEO MÃ: dòng đã có mã nhưng chưa khớp gì → đối chiếu với công nợ của đúng mã
-        if (r["ma_ban"] and not r["da_ghi"] and not r["duyet_chi"] and not r["thu"]
-                and not r["da_xu_ly"] and not r["goi_y_chi"] and not r["goi_y_thu"]):
-            if ra > 0 and r["ma_ban"] in cn_tra_ma:
-                combo = _to_hop(cn_tra_ma[r["ma_ban"]], ra)
-                if combo:
-                    r["goi_y_chi"] = {"ncc_id": None, "ncc_ten": f"theo mã {r['ma_ban']}",
-                                      "cong_no_ids": [c["cong_no_id"] for c in combo],
-                                      "so_hd": ", ".join(str(c["so_ct"] or ("CN" + str(c["cong_no_id"]))) for c in combo)[:80],
-                                      "tong": sum(c["con_lai"] for c in combo)}
-                else:
-                    tcl = sum(c["con_lai"] for c in cn_tra_ma[r["ma_ban"]])
-                    r["so_sanh_ma"] = {"loai": "PHAI_TRA", "con_lai": tcl, "lech": ra - tcl}
-            elif vao > 0 and r["ma_ban"] in cn_thu_ma:
-                kh1 = next((c for c in cn_thu_ma[r["ma_ban"]] if abs(c["con_lai"] - vao) <= 0.5), None)
-                if kh1 is not None:
-                    r["goi_y_thu"] = {"cong_no_id": kh1["cong_no_id"], "con_lai": kh1["con_lai"],
-                                      "khach": None, "ma_ban": r["ma_ban"]}
-                else:
-                    tcl = sum(c["con_lai"] for c in cn_thu_ma[r["ma_ban"]])
-                    r["so_sanh_ma"] = {"loai": "PHAI_THU", "con_lai": tcl, "lech": vao - tcl}
+                    r["ma_ban"] = r["ma_ban"] or u.get("ma_ban")
+
+        # ---------- 🎯 CHẤM ĐIỂM 4 YẾU TỐ trên CÔNG NỢ còn lại ----------
+        chua_khop = not (r["duyet_chi"] or r["thu"] or r["da_xu_ly"] or r["da_ghi"])
+        if chua_khop and so_gd > 0 and r["phan_loai"] is None:
+            if ra > 0:
+                ncc_dg = _khop_ncc(ds_ncc, d.dien_giai or "")
+                # GỘP nhiều hóa đơn của NCC nhận diện được (đúng tổng)
+                if ncc_dg and ncc_dg in cn_tra_ncc:
+                    combo = _to_hop(cn_tra_ncc[ncc_dg], ra)
+                    if combo and len(combo) > 1:
+                        nc0 = next((n for n in ds_ncc if n.id == ncc_dg), None)
+                        r["goi_y_chi"] = {"ncc_id": ncc_dg, "ncc_ten": nc0.ten if nc0 else "",
+                                          "cong_no_ids": [c["cong_no_id"] for c in combo],
+                                          "so_hd": ", ".join(str(c["so_ct"] or ("CN" + str(c["cong_no_id"]))) for c in combo)[:80],
+                                          "tong": sum(c["con_lai"] for c in combo)}
+                if not r["goi_y_chi"]:
+                    best, so_exact = None, 0
+                    for c in cn_tra_flat:
+                        exact = abs(c["con_lai"] - ra) <= max(0.5, ra * 0.005)
+                        phan = (not exact) and (ra < c["con_lai"] - 0.5)
+                        if not exact and not phan:
+                            continue
+                        diem = 40 if exact else 25
+                        if exact:
+                            so_exact += 1
+                        if ncc_dg:
+                            diem += 30 if c["ncc_id"] == ncc_dg else -15
+                        if r["ma_ban"] and c["ma_ban"]:
+                            diem += 10 if c["ma_ban"] == r["ma_ban"] else -5
+                        if c.get("han") and d.ngay and _lech(c["han"]) <= 7:
+                            diem += 8
+                        diem += 5
+                        if best is None or diem > best[0]:
+                            best = (diem, c, exact)
+                    if best is not None:
+                        diem, c, exact = best
+                        du_diem = diem >= 55 or (exact and so_exact == 1 and diem >= 45)
+                        if du_diem and exact:
+                            r["goi_y_chi"] = {"ncc_id": c["ncc_id"], "ncc_ten": c["ncc_ten"] or "",
+                                              "cong_no_ids": [c["cong_no_id"]],
+                                              "so_hd": str(c["so_ct"] or ("CN" + str(c["cong_no_id"]))),
+                                              "tong": c["con_lai"]}
+                        elif du_diem:
+                            r["goi_y_chi_phan"] = {"cong_no_id": c["cong_no_id"], "con_lai": c["con_lai"],
+                                                   "ncc_ten": c["ncc_ten"] or "", "so_ct": c["so_ct"],
+                                                   "diem": diem}
+                        r["ma_ban"] = r["ma_ban"] or c["ma_ban"]
+            else:
+                kh_dg = _khop_ncc(ds_kh, d.dien_giai or "")
+                best, so_exact = None, 0
+                for c in cn_thu_flat:
+                    exact = abs(c["con_lai"] - vao) <= max(0.5, vao * 0.005)
+                    phan = (not exact) and (vao < c["con_lai"] - 0.5)
+                    if not exact and not phan:
+                        continue
+                    diem = 40 if exact else 25
+                    if exact:
+                        so_exact += 1
+                    if kh_dg:
+                        diem += 30 if c["kh_id"] == kh_dg else -15
+                    if r["ma_ban"] and c["ma_ban"]:
+                        diem += 10 if c["ma_ban"] == r["ma_ban"] else -5
+                    if c.get("han") and d.ngay and _lech(c["han"]) <= 7:
+                        diem += 8
+                    diem += 5
+                    if best is None or diem > best[0]:
+                        best = (diem, c, exact)
+                if best is not None:
+                    diem, c, exact = best
+                    du_diem = diem >= 55 or (exact and so_exact == 1 and diem >= 45)
+                    if du_diem and exact:
+                        r["goi_y_thu"] = {"cong_no_id": c["cong_no_id"], "con_lai": c["con_lai"],
+                                          "khach": c["khach"], "ma_ban": c["ma_ban"]}
+                    elif du_diem:
+                        r["goi_y_thu_phan"] = {"cong_no_id": c["cong_no_id"], "con_lai": c["con_lai"],
+                                               "khach": c["khach"], "diem": diem}
+                    r["ma_ban"] = r["ma_ban"] or c["ma_ban"]
+            # fallback hiển thị SO SÁNH THEO MÃ khi vẫn chưa có gợi ý
+            if (not r["goi_y_chi"] and not r["goi_y_chi_phan"] and not r["goi_y_thu"]
+                    and not r["goi_y_thu_phan"] and r["ma_ban"]):
+                if ra > 0:
+                    ks = [c for c in cn_tra_flat if c["ma_ban"] == r["ma_ban"]]
+                    if ks:
+                        tcl = sum(c["con_lai"] for c in ks)
+                        r["so_sanh_ma"] = {"loai": "PHAI_TRA", "con_lai": tcl, "lech": ra - tcl}
+                elif vao > 0:
+                    ks = [c for c in cn_thu_flat if c["ma_ban"] == r["ma_ban"]]
+                    if ks:
+                        tcl = sum(c["con_lai"] for c in ks)
+                        r["so_sanh_ma"] = {"loai": "PHAI_THU", "con_lai": tcl, "lech": vao - tcl}
         out.append(r)
     return {"id": sk.id, "ten_file": sk.ten_file, "ngan_hang": sk.ngan_hang,
             "tu_ngay": str(sk.tu_ngay) if sk.tu_ngay else None,
@@ -2058,3 +2098,44 @@ def sao_ke_ghi_chi_gop(d_id: int, data: SkGhiGopVao, db: Session = Depends(get_d
               moi={"phieu": so_phieu, "tong": float(ra), "quy_id": data.quy_id})
     db.commit()
     return {"ok": True, "so_phieu": so_phieu}
+
+
+@router.post("/sao-ke-dong/{d_id}/ghi-chi-phan")
+def sao_ke_ghi_chi_phan(d_id: int, data: SkGhiVao, db: Session = Depends(get_db),
+                        nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    """✔ GHI CHI MỘT PHẦN: dòng sao kê trả MỘT PHẦN một khoản công nợ NCC —
+    tạo phiếu chi đúng số tiền dòng, cấn vào khoản công nợ đó (chờ duyệt)."""
+    from ..models import SaoKeDong, NhaCungCap
+    d = db.get(SaoKeDong, d_id)
+    if d is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy dòng sao kê")
+    if d.khop_loai in ("DA_CHI_SK", "GHI_THU_SK", "PHIEU_SK"):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Dòng này đã được ghi rồi")
+    if not data.cong_no_id:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Thiếu công nợ")
+    cn = db.query(CongNo).filter_by(id=data.cong_no_id).with_for_update().first()
+    if cn is None or cn.loai != "PHAI_TRA":
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Công nợ không hợp lệ (phải là PHẢI TRẢ)")
+    so_tien = Decimal(str(int(float(data.so_tien or 0))))
+    con_lai = Decimal(cn.so_tien or 0) - Decimal(cn.da_thanh_toan or 0)
+    if so_tien <= 0 or so_tien > con_lai:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            f"Số tiền phải > 0 và không vượt còn phải trả ({float(con_lai):,.0f}đ)")
+    nc0 = db.get(NhaCungCap, cn.nha_cung_cap_id) if cn.nha_cung_cap_id else None
+    p = PhieuThuChi(loai="CHI", quy_id=data.quy_id, so_tien=so_tien,
+                    ngay=(d.ngay or date.today()),
+                    dien_giai=(f"[Sao kê] trả một phần {nc0.ten if nc0 else 'NCC'}"
+                               + (f" — HĐ {cn.so_ct}" if cn.so_ct else f" — CN{cn.id}"))[:200],
+                    nha_cung_cap_id=cn.nha_cung_cap_id, cong_no_id=cn.id,
+                    don_hang_id=cn.don_hang_id, trang_thai="CHO_DUYET",
+                    nguoi_tao=nhan_vien_id_cua(db, nd.id))
+    db.add(p)
+    db.flush()
+    p.so = f"PC-{date.today():%Y%m%d}-{p.id}"
+    d.khop_loai = "PHIEU_SK"
+    d.khop_id = p.id
+    d.khop_mo_ta = (f"Phiếu {p.so} — trả một phần CN{cn.id} (chờ duyệt)")[:300]
+    ghi_audit(db, nd.id, "SAO_KE_GHI_CHI_PHAN", "phieu_thu_chi", p.id,
+              moi={"cong_no_id": cn.id, "so_tien": float(so_tien), "quy_id": data.quy_id})
+    db.commit()
+    return {"ok": True, "phieu_so": p.so}
