@@ -1607,7 +1607,8 @@ def sao_ke_doi_chieu(sk_id: int, db: Session = Depends(get_db),
 
 def _sao_ke_doi_chieu_lo(db, sk, sk_id):
     from datetime import timedelta as _td
-    from ..models import (SaoKeDong, LenhChiBank, DonMua, DonHang, KhachHang)
+    from ..models import (SaoKeDong, LenhChiBank, DonMua, DonHang, KhachHang,
+                          ThanhToan, CongNo)
     dongs = (db.query(SaoKeDong).filter_by(sao_ke_id=sk_id)
              .order_by(SaoKeDong.ngay, SaoKeDong.id).all())
     tu = (sk.tu_ngay or date.today()) - _td(days=5)
