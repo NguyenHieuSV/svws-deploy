@@ -1707,7 +1707,8 @@ def _sao_ke_doi_chieu_lo(db, sk, sk_id):
         if con <= 0 or not cn.nha_cung_cap_id:
             continue
         cn_tra_ncc.setdefault(cn.nha_cung_cap_id, []).append(
-            {"cong_no_id": cn.id, "con_lai": con, "so_ct": cn.so_ct})
+            {"cong_no_id": cn.id, "con_lai": con, "so_ct": cn.so_ct,
+             "ma_ban": _ma_dh(cn.don_hang_id) or cn.ma_ban_ngoai})
 
     def _to_hop(khoans, target):
         """Tìm 1–3 khoản công nợ cộng lại ≈ target (sai số ≤ max(1000đ, 0.5%))."""
@@ -1719,6 +1720,9 @@ def _sao_ke_doi_chieu_lo(db, sk, sk_id):
                     return list(combo)
         return None
 
+    # 🔎 danh mục MÃ ĐƠN HÀNG — quét thẳng trong diễn giải sao kê (NH thường ghi kèm mã)
+    ds_ma = [dh.so for dh in db.query(DonHang).all() if dh.so and len(dh.so) >= 6]
+    ds_ma_kd = [(_kd(m0).upper(), m0) for m0 in ds_ma]
     dung_ra, dung_vao, dung_dachi, dung_pra, dung_pvao = set(), set(), set(), set(), set()
     out = []
     for d in dongs:
@@ -1784,6 +1788,7 @@ def _sao_ke_doi_chieu_lo(db, sk, sk_id):
                         combo = _to_hop(cn_tra_ncc[ncc_id], ra)
                         if combo:
                             nc0 = next((n for n in ds_ncc if n.id == ncc_id), None)
+                            r["ma_ban"] = next((c.get("ma_ban") for c in combo if c.get("ma_ban")), None)
                             r["goi_y_chi"] = {"ncc_id": ncc_id,
                                               "ncc_ten": nc0.ten if nc0 else "",
                                               "cong_no_ids": [c["cong_no_id"] for c in combo],
@@ -1814,6 +1819,12 @@ def _sao_ke_doi_chieu_lo(db, sk, sk_id):
                     if gy is not None:
                         r["goi_y_thu"] = gy
                         r["ma_ban"] = gy["ma_ban"]
+        if not r["ma_ban"] and d.dien_giai:
+            dgU = _kd(d.dien_giai).upper()
+            for ma_kd, ma_goc in ds_ma_kd:
+                if ma_kd in dgU:
+                    r["ma_ban"] = ma_goc
+                    break
         out.append(r)
     return {"id": sk.id, "ten_file": sk.ten_file, "ngan_hang": sk.ngan_hang,
             "tu_ngay": str(sk.tu_ngay) if sk.tu_ngay else None,
