@@ -1722,6 +1722,20 @@ def _sao_ke_doi_chieu_lo(db, sk, sk_id):
 
     # 🔎 danh mục MÃ ĐƠN HÀNG — quét thẳng trong diễn giải sao kê (NH thường ghi kèm mã)
     ds_ma = [dh.so for dh in db.query(DonHang).all() if dh.so and len(dh.so) >= 6]
+    # công nợ CÒN LẠI gom theo MÃ — để so số tiền sao kê với công nợ/duyệt chi của đúng mã
+    cn_tra_ma, cn_thu_ma = {}, {}
+    for cn in db.query(CongNo).all():
+        con = float(cn.so_tien or 0) - float(cn.da_thanh_toan or 0)
+        if con <= 0:
+            continue
+        ma0 = _ma_dh(cn.don_hang_id) or cn.ma_ban_ngoai
+        if not ma0 and cn.don_mua_id:
+            dmx = db.get(DonMua, cn.don_mua_id)
+            ma0 = _ma_dh(dmx.don_hang_id) if dmx else None
+        if not ma0:
+            continue
+        muc = {"cong_no_id": cn.id, "con_lai": con, "so_ct": cn.so_ct, "ma_ban": ma0}
+        (cn_tra_ma if cn.loai == "PHAI_TRA" else cn_thu_ma).setdefault(ma0, []).append(muc)
     ds_ma_kd = [(_kd(m0).upper(), m0) for m0 in ds_ma]
     dung_ra, dung_vao, dung_dachi, dung_pra, dung_pvao = set(), set(), set(), set(), set()
     out = []
@@ -1733,7 +1747,7 @@ def _sao_ke_doi_chieu_lo(db, sk, sk_id):
              "da_ghi": d.khop_loai in ("DA_CHI_SK", "GHI_THU_SK", "PHIEU_SK"),
              "khop_mo_ta": d.khop_mo_ta, "phan_loai": _phan_loai(d.dien_giai),
              "duyet_chi": None, "thu": None, "goi_y_thu": None, "goi_y_chi": None,
-             "da_xu_ly": None, "ma_ban": None}
+             "da_xu_ly": None, "ma_ban": None, "so_sanh_ma": None}
 
         def _lech(ng):
             try:
@@ -1825,6 +1839,27 @@ def _sao_ke_doi_chieu_lo(db, sk, sk_id):
                 if ma_kd in dgU:
                     r["ma_ban"] = ma_goc
                     break
+        # 🔗 SO SÁNH THEO MÃ: dòng đã có mã nhưng chưa khớp gì → đối chiếu với công nợ của đúng mã
+        if (r["ma_ban"] and not r["da_ghi"] and not r["duyet_chi"] and not r["thu"]
+                and not r["da_xu_ly"] and not r["goi_y_chi"] and not r["goi_y_thu"]):
+            if ra > 0 and r["ma_ban"] in cn_tra_ma:
+                combo = _to_hop(cn_tra_ma[r["ma_ban"]], ra)
+                if combo:
+                    r["goi_y_chi"] = {"ncc_id": None, "ncc_ten": f"theo mã {r['ma_ban']}",
+                                      "cong_no_ids": [c["cong_no_id"] for c in combo],
+                                      "so_hd": ", ".join(str(c["so_ct"] or ("CN" + str(c["cong_no_id"]))) for c in combo)[:80],
+                                      "tong": sum(c["con_lai"] for c in combo)}
+                else:
+                    tcl = sum(c["con_lai"] for c in cn_tra_ma[r["ma_ban"]])
+                    r["so_sanh_ma"] = {"loai": "PHAI_TRA", "con_lai": tcl, "lech": ra - tcl}
+            elif vao > 0 and r["ma_ban"] in cn_thu_ma:
+                kh1 = next((c for c in cn_thu_ma[r["ma_ban"]] if abs(c["con_lai"] - vao) <= 0.5), None)
+                if kh1 is not None:
+                    r["goi_y_thu"] = {"cong_no_id": kh1["cong_no_id"], "con_lai": kh1["con_lai"],
+                                      "khach": None, "ma_ban": r["ma_ban"]}
+                else:
+                    tcl = sum(c["con_lai"] for c in cn_thu_ma[r["ma_ban"]])
+                    r["so_sanh_ma"] = {"loai": "PHAI_THU", "con_lai": tcl, "lech": vao - tcl}
         out.append(r)
     return {"id": sk.id, "ten_file": sk.ten_file, "ngan_hang": sk.ngan_hang,
             "tu_ngay": str(sk.tu_ngay) if sk.tu_ngay else None,
