@@ -1355,11 +1355,15 @@ def tao_hoa_don(data: HoaDonVao, db: Session = Depends(get_db),
     if data.tao_cong_no:
         from datetime import timedelta
         han = date.today() + timedelta(days=int(data.han_ngay or 30))
+        # chép SỐ HÓA ĐƠN + ngày chứng từ sang công nợ — để không rơi nhầm vào
+        # bảng "Phải trả chưa hóa đơn" và để đối chiếu thu-chi theo số HĐ
         if data.loai == "BAN":
             cn = CongNo(loai="PHAI_THU", hoa_don_id=hd.id, khach_hang_id=kh_id,
+                        so_ct=(hd.so or None), ngay_ct=hd.ngay,
                         so_tien=tong, da_thanh_toan=0, han=han, trang_thai="CHUA_THU")
         else:
             cn = CongNo(loai="PHAI_TRA", hoa_don_id=hd.id, nha_cung_cap_id=data.nha_cung_cap_id,
+                        so_ct=(hd.so or None), ngay_ct=hd.ngay,
                         so_tien=tong, da_thanh_toan=0, han=han, trang_thai="CHUA_TRA")
         db.add(cn); db.flush()
     # TỰ CẤN TRỪ TẠM ỨNG/TRẢ TRƯỚC cùng mã hàng bán vào công nợ vừa sinh
