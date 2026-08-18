@@ -1661,10 +1661,27 @@ def _sao_ke_doi_chieu_lo(db, sk, sk_id):
         so_dot = max(float(dm.lenh_bank_tien or 0) - da_chi, 0.0)
         if so_dot <= 0:
             continue
-        ra_ung.append({"don_mua_id": dm.id, "so": dm.so or f"PO-{dm.id}",
+        ra_ung.append({"key": f"po{dm.id}", "don_mua_id": dm.id, "so": dm.so or f"PO-{dm.id}",
                        "so_tien": so_dot, "ma_ban": _ma_dh(dm.don_hang_id),
                        "ncc_id": dm.nha_cung_cap_id,
                        "ngay": dm.lenh_bank_luc.date() if dm.lenh_bank_luc else None})
+    # Lệnh trả CÔNG NỢ đã duyệt — chờ ngân hàng thực chi (đồng nhất luồng với PO)
+    for r0 in db.query(LenhChiBank).filter(LenhChiBank.trang_thai == "DA_DUYET").all():
+        if r0.don_mua_id or not getattr(r0, "cong_no_id", None):
+            continue
+        cn0 = db.get(CongNo, r0.cong_no_id)
+        if cn0 is None:
+            continue
+        ma0 = _ma_dh(cn0.don_hang_id) or cn0.ma_ban_ngoai
+        if not ma0 and cn0.don_mua_id:
+            dmx0 = db.get(DonMua, cn0.don_mua_id)
+            ma0 = _ma_dh(dmx0.don_hang_id) if dmx0 else None
+        ra_ung.append({"key": f"cn{r0.id}", "lcb_id": r0.id, "don_mua_id": None,
+                       "cong_no_id": cn0.id,
+                       "so": ("CN-" + str(cn0.id) + ((" · " + cn0.so_ct) if cn0.so_ct else "")),
+                       "so_tien": float(r0.so_tien or 0), "ma_ban": ma0,
+                       "ncc_id": cn0.nha_cung_cap_id,
+                       "ngay": r0.ngay_tt or (r0.duyet_luc.date() if r0.duyet_luc else None)})
     ra_dachi = []    # lệnh ĐÃ CHI trong kỳ — đã xử lý
     for r0 in db.query(LenhChiBank).filter(LenhChiBank.trang_thai == "DA_CHI").all():
         ng = r0.ngay_tt or (r0.chi_luc.date() if r0.chi_luc else None)
@@ -1845,7 +1862,7 @@ def _sao_ke_doi_chieu_lo(db, sk, sk_id):
         if ra > 0:
             best = None
             for u0 in ra_ung:
-                if u0["don_mua_id"] in dung_ra or abs(u0["so_tien"] - ra) > 0.5:
+                if u0["key"] in dung_ra or abs(u0["so_tien"] - ra) > 0.5:
                     continue
                 le = _lech(u0["ngay"])
                 if u0["ngay"] is not None and le > 7:
@@ -1853,7 +1870,7 @@ def _sao_ke_doi_chieu_lo(db, sk, sk_id):
                 if best is None or le < best[0]:
                     best = (le, u0)
             if best is not None:
-                dung_ra.add(best[1]["don_mua_id"])
+                dung_ra.add(best[1]["key"])
                 r["duyet_chi"] = best[1]
                 r["ma_ban"] = r["ma_ban"] or best[1]["ma_ban"]
             else:

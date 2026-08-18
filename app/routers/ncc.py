@@ -1199,6 +1199,8 @@ def _lcb_dict(db, r):
                   .filter(_lcb.don_mua_id == dm.id, _lcb.trang_thai == "DA_CHI")
                   .scalar() or 0)
         dot_chi = max(float(dm.lenh_bank_tien or 0) - float(da_chi), 0.0)
+    elif cn is not None and r.trang_thai == "DA_DUYET":
+        dot_chi = float(r.so_tien or 0)      # lệnh công nợ: mỗi lệnh là một đợt
     return {"id": r.id, "don_mua_id": r.don_mua_id, "cong_no_id": getattr(r, "cong_no_id", None),
             "nguon": "PO" if dm is not None else ("CONG_NO" if cn is not None else "—"),
             "so": (dm.so if dm else None) or (f"CN-{cn.id}" if cn else None)
@@ -1263,7 +1265,9 @@ def duyet_lenh_chi_bank(lcb_id: int, db: Session = Depends(get_db),
         dm.lenh_bank_tien = r.so_tien
         if not dm.lenh_bank_luc:
             dm.lenh_bank_luc = gio_hien_tai()
-    # Lệnh trả CÔNG NỢ: duyệt = thực chi ngay (ghi lần trả + bút toán) → vào Lịch sử thực chi
+    # Lệnh trả CÔNG NỢ: duyệt xong KHÔNG chi ngay — lệnh nằm ở "Đã duyệt — chờ ngân hàng
+    # thực chi" (đồng nhất với lệnh PO); bấm ✔ Đã chi khi ngân hàng chi thật mới ghi lần trả
+    # + bút toán + giảm công nợ. Ở đây chỉ kiểm tra vượt để chặn sớm.
     cn = db.get(CongNo, r.cong_no_id) if getattr(r, "cong_no_id", None) else None
     if cn is not None:
         con_lai = Decimal(cn.so_tien or 0) - Decimal(cn.da_thanh_toan or 0)
@@ -1271,10 +1275,6 @@ def duyet_lenh_chi_bank(lcb_id: int, db: Session = Depends(get_db),
             raise HTTPException(status.HTTP_400_BAD_REQUEST,
                                 f"Số tiền lệnh ({float(r.so_tien or 0):,.0f}) vượt còn lại hiện tại "
                                 f"({float(con_lai):,.0f}) của khoản công nợ — từ chối lệnh và đề nghị lại.")
-        _thuc_hien_tra_ncc(db, nd, cn, Decimal(r.so_tien or 0), r.hinh_thuc,
-                           r.ngay_tt or date.today())
-        r.trang_thai = "DA_CHI"
-        r.chi_luc = gio_hien_tai()
     ghi_audit(db, nd.id, "DUYET_CHI_BANK", "lenh_chi_bank", r.id,
               moi={"don_mua_id": r.don_mua_id, "so_tien": float(r.so_tien or 0)})
     db.commit()
@@ -1299,6 +1299,47 @@ def duyet_lenh_chi_bank(lcb_id: int, db: Session = Depends(get_db),
     return kq
 
 
+@router.post("/lenh-chi-bank/{lcb_id}/da-chi")
+def da_chi_lenh_cong_no(lcb_id: int, sao_ke_dong_id: int | None = None,
+                        db: Session = Depends(get_db),
+                        nd: NguoiDung = Depends(yeu_cau("ke_toan", "THAO_TAC"))):
+    """✔ ĐÃ CHI lệnh trả CÔNG NỢ (ngân hàng đã thực chi thật): ghi lần trả + bút toán +
+    giảm công nợ, lệnh chuyển xuống Lịch sử thực chi. Lệnh PO đi đường tạo phiếu chi."""
+    from ..models import LenhChiBank, SaoKeDong
+    from ..nhac_viec_service import gio_hien_tai
+    r = db.get(LenhChiBank, lcb_id)
+    if r is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy lệnh chi")
+    if r.trang_thai != "DA_DUYET":
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            f"Lệnh đang ở trạng thái {r.trang_thai} — chỉ ✔ Đã chi được lệnh ĐÃ DUYỆT.")
+    if r.don_mua_id or not getattr(r, "cong_no_id", None):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Đây là lệnh PO — bấm ✔ Đã chi theo đường tạo phiếu chi, không dùng nút này.")
+    cn = db.query(CongNo).filter_by(id=r.cong_no_id).with_for_update().first()
+    if cn is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy công nợ của lệnh")
+    con_lai = Decimal(cn.so_tien or 0) - Decimal(cn.da_thanh_toan or 0)
+    if Decimal(r.so_tien or 0) > con_lai:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            f"Số tiền lệnh ({float(r.so_tien or 0):,.0f}) vượt còn lại hiện tại "
+                            f"({float(con_lai):,.0f}) của khoản công nợ — Rút lại lệnh và đề nghị lại.")
+    _thuc_hien_tra_ncc(db, nd, cn, Decimal(r.so_tien or 0), r.hinh_thuc,
+                       r.ngay_tt or date.today())
+    r.trang_thai = "DA_CHI"
+    r.chi_luc = gio_hien_tai()
+    if sao_ke_dong_id:
+        d0 = db.get(SaoKeDong, sao_ke_dong_id)
+        if d0 is not None:
+            d0.khop_loai = "DA_CHI_SK"
+            d0.khop_id = r.id
+            d0.khop_mo_ta = (f"Lệnh CN-{cn.id} đã thực chi {float(r.so_tien or 0):,.0f}")[:300]
+    ghi_audit(db, nd.id, "DA_CHI_LENH_CN", "lenh_chi_bank", r.id,
+              moi={"cong_no_id": cn.id, "so_tien": float(r.so_tien or 0)})
+    db.commit()
+    return _lcb_dict(db, r)
+
+
 @router.post("/lenh-chi-bank/{lcb_id}/tu-choi")
 def tu_choi_lenh_chi_bank(lcb_id: int, db: Session = Depends(get_db),
                           nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN", "KTT"))):
@@ -1308,12 +1349,14 @@ def tu_choi_lenh_chi_bank(lcb_id: int, db: Session = Depends(get_db),
     r = db.get(LenhChiBank, lcb_id)
     if r is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy lệnh chi")
-    if r.trang_thai != "CHO_DUYET":
+    la_cn_cho_chi = (r.trang_thai == "DA_DUYET" and getattr(r, "cong_no_id", None)
+                     and not r.don_mua_id)   # lệnh công nợ chờ thực chi — chưa trừ gì, gỡ an toàn
+    if r.trang_thai != "CHO_DUYET" and not la_cn_cho_chi:
         raise HTTPException(status.HTTP_400_BAD_REQUEST,
-                            f"Lệnh chi đang ở trạng thái {r.trang_thai} — chỉ từ chối được lệnh CHỜ DUYỆT. "
-                            "Lệnh đã duyệt đã phân bổ vào Công nợ/Kiểm soát (lệnh công nợ còn chi tiền thật) "
-                            "nên không thể gỡ bằng nút này; cần điều chỉnh hãy ghi đợt thanh toán điều chỉnh "
-                            "hoặc liên hệ ADMIN.")
+                            f"Lệnh chi đang ở trạng thái {r.trang_thai} — chỉ gỡ được lệnh CHỜ DUYỆT "
+                            "hoặc lệnh công nợ ĐÃ DUYỆT còn chờ ngân hàng thực chi (chưa trừ tiền). "
+                            "Lệnh PO đã duyệt đã phân bổ vào Công nợ/Kiểm soát nên không gỡ được ở đây; "
+                            "cần điều chỉnh hãy ghi đợt thanh toán điều chỉnh hoặc liên hệ ADMIN.")
     r.trang_thai = "TU_CHOI"
     r.duyet_luc = gio_hien_tai()
     r.nguoi_duyet = nd.id
@@ -3055,10 +3098,10 @@ def thanh_toan_ncc(cn_id: int, data: NccTraVao, db: Session = Depends(get_db),
     from ..nhac_viec_service import gio_hien_tai
     dang_cho = db.query(func.coalesce(func.sum(LenhChiBank.so_tien), 0)).filter(
         LenhChiBank.cong_no_id == cn.id,
-        LenhChiBank.trang_thai == "CHO_DUYET").scalar() or 0
+        LenhChiBank.trang_thai.in_(("CHO_DUYET", "DA_DUYET"))).scalar() or 0
     if float(data.so_tien) > float(con_lai) - float(dang_cho):
         raise HTTPException(status.HTTP_400_BAD_REQUEST,
-                            f"Khoản này đang có {float(dang_cho):,.0f} chờ duyệt chi — "
+                            f"Khoản này đang có {float(dang_cho):,.0f} chờ duyệt / chờ ngân hàng thực chi — "
                             f"chỉ còn đề nghị được tối đa {float(con_lai) - float(dang_cho):,.0f}.")
     db.add(LenhChiBank(cong_no_id=cn.id, so_tien=data.so_tien, de_nghi_luc=gio_hien_tai(),
                        hinh_thuc=(data.hinh_thuc or "").strip()[:30] or None,
