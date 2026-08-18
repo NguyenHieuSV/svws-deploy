@@ -1576,12 +1576,12 @@ def the_ma_ban(don_hang_id: int, db: Session = Depends(get_db), _=Depends(yeu_ca
 
 # ============ 🏦 SAO KÊ — DANH MỤC THANH TOÁN (Kế toán → Thống kê thu-chi) ============
 @router.post("/sao-ke", status_code=201)
-def tai_sao_ke_kt(ngan_hang: str = "", file: UploadFile = File(...),
+def tai_sao_ke_kt(ngan_hang: str = "", bo_qua_trung: bool = False, file: UploadFile = File(...),
                   db: Session = Depends(get_db),
                   nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
     """📥 Kế toán tải file sao kê — dùng chung lõi AI đọc với Overall Financial."""
     from .tai_chinh import tai_sao_ke as _core
-    return _core(ngan_hang=ngan_hang, file=file, db=db, nd=nd)
+    return _core(ngan_hang=ngan_hang, bo_qua_trung=bo_qua_trung, file=file, db=db, nd=nd)
 
 
 @router.get("/sao-ke-doi-chieu")

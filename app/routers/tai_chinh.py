@@ -1389,16 +1389,25 @@ def _doi_soat_sao_ke(db: Session, sk_id: int) -> dict:
 
 
 @router.post("/sao-ke", status_code=201)
-def tai_sao_ke(ngan_hang: str = "", file: UploadFile = File(...),
+def tai_sao_ke(ngan_hang: str = "", bo_qua_trung: bool = False, file: UploadFile = File(...),
                db: Session = Depends(get_db),
                nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN", "KTT"))):
-    """📥 Tải file sao kê (PDF/ảnh/Excel/CSV) — AI đọc từng dòng, lưu lại, đối soát ngay."""
+    """📥 Tải file sao kê (PDF/ảnh/Excel/CSV) — AI đọc từng dòng, lưu lại, đối soát ngay.
+    File CÙNG TÊN đã tải trước đó → hỏi xác nhận (tránh chồng nhiều bản trùng)."""
     from ..models import SaoKeBank, SaoKeDong
     from ..ai_gateway import doc_sao_ke_tep
     from ..nhac_viec_service import gio_hien_tai
     data = file.file.read()
     if not data or len(data) > 15 * 1024 * 1024:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "File trống hoặc lớn hơn 15MB")
+    if not bo_qua_trung:
+        cu = (db.query(SaoKeBank).filter(SaoKeBank.ten_file == (file.filename or "sao_ke")[:200])
+              .order_by(SaoKeBank.id.desc()).first())
+        if cu is not None:
+            raise HTTPException(status.HTTP_409_CONFLICT,
+                                f"⚠TRÙNGSK: file '{cu.ten_file}' đã tải trước đó (kỳ {cu.tu_ngay} → {cu.den_ngay}, "
+                                f"{cu.so_dong} dòng). Tải tiếp sẽ tạo BẢN MỚI trùng lặp — nên xóa bản cũ (nút 🗑) "
+                                "hoặc xác nhận nếu đây là sao kê KHÁC trùng tên file.")
     dong = doc_sao_ke_tep(data, file.content_type or "", file.filename or "")
     if not dong:
         raise HTTPException(status.HTTP_400_BAD_REQUEST,
