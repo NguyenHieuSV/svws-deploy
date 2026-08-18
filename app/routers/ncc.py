@@ -1191,6 +1191,14 @@ def _lcb_dict(db, r):
         else:
             ma_cn = cn.ma_ban_ngoai
     nguoi = db.get(NguoiDung, r.nguoi_duyet) if r.nguoi_duyet else None
+    # Số tiền ĐỢT còn phải thực chi (chỉ tính cho lệnh PO ĐÃ DUYỆT — dùng cho nút ✔ Đã chi)
+    dot_chi = None
+    if dm is not None and r.trang_thai == "DA_DUYET":
+        _lcb = type(r)
+        da_chi = (db.query(func.coalesce(func.sum(_lcb.so_tien), 0))
+                  .filter(_lcb.don_mua_id == dm.id, _lcb.trang_thai == "DA_CHI")
+                  .scalar() or 0)
+        dot_chi = max(float(dm.lenh_bank_tien or 0) - float(da_chi), 0.0)
     return {"id": r.id, "don_mua_id": r.don_mua_id, "cong_no_id": getattr(r, "cong_no_id", None),
             "nguon": "PO" if dm is not None else ("CONG_NO" if cn is not None else "—"),
             "so": (dm.so if dm else None) or (f"CN-{cn.id}" if cn else None)
@@ -1204,7 +1212,8 @@ def _lcb_dict(db, r):
             "trang_thai": r.trang_thai,
             "duyet_luc": str(r.duyet_luc)[:16] if r.duyet_luc else None,
             "nguoi_duyet": getattr(nguoi, "ho_ten", None) or (nguoi.email if nguoi else None),
-            "chi_luc": str(r.chi_luc)[:16] if r.chi_luc else None}
+            "chi_luc": str(r.chi_luc)[:16] if r.chi_luc else None,
+            "so_tien_chi": dot_chi}
 
 
 @router.get("/duyet-chi-bank")
