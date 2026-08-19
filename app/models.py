@@ -553,6 +553,7 @@ class PhieuThuChi(Base):
     ghi_chu: Mapped[str | None] = mapped_column(Text, nullable=True)
     la_tam_ung: Mapped[bool] = mapped_column(Boolean, default=False)
     da_can_tru: Mapped[Decimal] = mapped_column(Numeric(18, 0), default=0)
+    lenh_chi_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)  # mig 106: lệnh NH sinh phiếu (✔ Đã chi)
 
 
 # ---------- Module Nhân sự / Lương ----------

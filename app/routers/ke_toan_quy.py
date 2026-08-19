@@ -420,6 +420,27 @@ def duyet_phieu(pid: int, data: DuyetPhieuVao = DuyetPhieuVao(),
     return _phieu_dict(db, p)
 
 
+def _mo_lai_lenh_cua_phieu(db, p) -> None:
+    """Phiếu sinh từ ✔ Đã chi bị TỪ CHỐI/HỦY/XÓA → tiền chưa hề ra: mở lại lệnh về
+    'Đã duyệt — chờ ngân hàng thực chi', đưa PO về bảng chờ, gỡ vết trên dòng sao kê."""
+    if not getattr(p, "lenh_chi_id", None):
+        return
+    from ..models import LenhChiBank, DonMua, SaoKeDong
+    lcb = db.get(LenhChiBank, p.lenh_chi_id)
+    if lcb is not None and lcb.trang_thai == "DA_CHI":
+        lcb.trang_thai = "DA_DUYET"
+        lcb.chi_luc = None
+        if lcb.don_mua_id:
+            dmx = db.get(DonMua, lcb.don_mua_id)
+            if dmx is not None:
+                dmx.cho_lenh_bank = True
+    d0 = db.query(SaoKeDong).filter_by(khop_loai="DA_CHI_SK", khop_id=p.id).first()
+    if d0 is not None:
+        d0.khop_loai = None
+        d0.khop_id = None
+        d0.khop_mo_ta = None
+
+
 @router.post("/phieu/{pid}/tu-choi")
 def tu_choi_phieu(pid: int, data: DuyetPhieuVao = DuyetPhieuVao(),
                   db: Session = Depends(get_db),
@@ -430,6 +451,7 @@ def tu_choi_phieu(pid: int, data: DuyetPhieuVao = DuyetPhieuVao(),
     if p.trang_thai not in ("CHO_DUYET", "NHAP"):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Phiếu không ở trạng thái chờ duyệt")
     p.trang_thai = "TU_CHOI"
+    _mo_lai_lenh_cua_phieu(db, p)
     if data.ghi_chu:
         p.ghi_chu = (p.ghi_chu or "") + f" | Từ chối: {data.ghi_chu}"
     ghi_audit(db, nd.id, "TU_CHOI", "phieu_thu_chi", p.id)
@@ -450,6 +472,7 @@ def huy_phieu(pid: int, db: Session = Depends(get_db),
         raise HTTPException(status.HTTP_400_BAD_REQUEST,
                             "Chỉ người lập phiếu (hoặc KTT/CEO/ADMIN) mới hủy được phiếu này")
     p.trang_thai = "HUY"
+    _mo_lai_lenh_cua_phieu(db, p)
     ghi_audit(db, nd.id, "HUY", "phieu_thu_chi", p.id)
     db.commit(); db.refresh(p)
     return _phieu_dict(db, p)
@@ -466,6 +489,7 @@ def xoa_phieu(pid: int, db: Session = Depends(get_db),
         raise HTTPException(status.HTTP_400_BAD_REQUEST,
                             f"Phiếu '{p.so or pid}' ĐÃ DUYỆT (đã chuyển tiền quỹ, sinh bút toán) — không thể xóa để giữ vết kế toán.")
     so_cu = p.so
+    _mo_lai_lenh_cua_phieu(db, p)
     ghi_audit(db, nd.id, "XOA", "phieu_thu_chi", pid,
               cu={"so": so_cu, "loai": p.loai, "so_tien": _f(p.so_tien), "trang_thai": p.trang_thai})
     db.delete(p)
@@ -2062,6 +2086,7 @@ def sao_ke_ghi_chi(data: SkGhiVao, db: Session = Depends(get_db),
     if lcb is not None:
         lcb.trang_thai = "DA_CHI"
         lcb.chi_luc = gio_hien_tai()
+        p.lenh_chi_id = lcb.id           # nhớ lệnh — phiếu bị từ chối/hủy sẽ mở lại lệnh
     if d0 is not None:
         d0.khop_loai = "DA_CHI_SK"
         d0.khop_id = p.id
