@@ -420,6 +420,43 @@ def duyet_phieu(pid: int, data: DuyetPhieuVao = DuyetPhieuVao(),
     return _phieu_dict(db, p)
 
 
+@router.get("/viec-treo")
+def viec_ke_toan_treo(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
+    """🔔 Việc kế toán còn treo — các con số dễ bị bỏ quên; giao diện hiện thành dãy chip
+    đầu mục Kế toán, bấm chip nhảy thẳng đến bảng cần xử lý."""
+    from datetime import timedelta
+    from ..models import LenhChiBank, KtHoaDonCho, DonMua
+    moc7 = date.today() - timedelta(days=7)
+    hd_rows = db.query(HoaDon).filter(HoaDon.loai == "MUA",
+                                      HoaDon.da_hach_toan.is_(False)).all()
+    cn_rows = [c for c in db.query(CongNo).filter(CongNo.loai == "PHAI_TRA").all()
+               if float(c.so_tien or 0) - float(c.da_thanh_toan or 0) > 0
+               and not (c.so_ct or "").strip()]
+    lenh = [r for r in db.query(LenhChiBank).filter(LenhChiBank.trang_thai == "DA_DUYET").all()
+            if float(r.so_tien or 0) > 0]
+    lenh_qua7 = len([r for r in lenh
+                     if r.duyet_luc is not None and r.duyet_luc.date() < moc7])
+    phieu = db.query(PhieuThuChi).filter(PhieuThuChi.trang_thai == "CHO_DUYET").all()
+    po_qua_hen = (db.query(DonMua)
+                  .filter(DonMua.da_dat_hang.is_(True),
+                          DonMua.trang_thai_nhan != "DU",
+                          DonMua.ngay_hen_giao.isnot(None),
+                          DonMua.ngay_hen_giao < date.today()).count())
+    return {
+        "hdc_cho": db.query(KtHoaDonCho).filter(KtHoaDonCho.trang_thai == "CHO_XAC_NHAN").count(),
+        "hd_chua_ht": len(hd_rows),
+        "hd_chua_ht_tong": sum(float(h.tong_tien or 0) for h in hd_rows),
+        "phieu_cho": len(phieu),
+        "phieu_cho_tong": sum(float(p0.so_tien or 0) for p0 in phieu),
+        "cn_thieu_hd": len(cn_rows),
+        "cn_thieu_hd_tong": sum(float(c.so_tien or 0) - float(c.da_thanh_toan or 0) for c in cn_rows),
+        "lenh_cho": len(lenh),
+        "lenh_cho_tong": sum(float(r.so_tien or 0) for r in lenh),
+        "lenh_qua7": lenh_qua7,
+        "po_qua_hen": po_qua_hen,
+    }
+
+
 def _mo_lai_lenh_cua_phieu(db, p) -> None:
     """Phiếu sinh từ ✔ Đã chi bị TỪ CHỐI/HỦY/XÓA → tiền chưa hề ra: mở lại lệnh về
     'Đã duyệt — chờ ngân hàng thực chi', đưa PO về bảng chờ, gỡ vết trên dòng sao kê."""
