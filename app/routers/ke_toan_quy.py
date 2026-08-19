@@ -1025,11 +1025,13 @@ def sua_hoa_don_cho(h_id: int, data: KtHdcSua, db: Session = Depends(get_db),
 
 
 @router.post("/hoa-don-cho/{h_id}/ghi")
-def ghi_hoa_don_cho(h_id: int, tao_cong_no: bool = True, hach_toan: bool = True,
+def ghi_hoa_don_cho(h_id: int, tao_cong_no: bool = False, hach_toan: bool = True,
                     bo_qua_trung: bool = False,
                     db: Session = Depends(get_db),
                     nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
-    """XÁC NHẬN: chính thức tạo HÓA ĐƠN MUA (kèm công nợ + hạch toán như tạo tay).
+    """XÁC NHẬN: chính thức tạo HÓA ĐƠN MUA (chứng từ + hạch toán + chi phí theo mã).
+    🔒 KHÔNG sinh công nợ — công nợ phải trả đi 1 CHIỀU từ mục NCC (nhận hàng PO /
+    nhập ngoài) sang kế toán, tránh 'đã chi nhưng vẫn treo nợ'. tao_cong_no bị bỏ qua.
     Có chốt CHỐNG GHI TRÙNG chi phí: (a) cùng email đã ghi bên Chi phí vận hành cho thuê;
     (b) đã có hóa đơn MUA cùng NCC cùng số tiền (thường là hóa đơn tự sinh khi nhận hàng PO)."""
     from ..models import KtHoaDonCho, HoaDon as _HD, CtHoaDonDauVao as _CT
@@ -1072,7 +1074,7 @@ def ghi_hoa_don_cho(h_id: int, tao_cong_no: bool = True, hach_toan: bool = True,
                      tien_truoc_thue=Decimal(r.tien_truoc_thue or 0),
                      thue_suat=Decimal(r.thue_suat or 8),
                      dien_giai=(r.mo_ta or f"Hóa đơn email {r.tu_email or ''}")[:200] or None,
-                     tao_cong_no=tao_cong_no, hach_toan_luon=hach_toan)
+                     tao_cong_no=False, hach_toan_luon=hach_toan)
     r.trang_thai = "DA_GHI"          # đặt TRƯỚC khi tạo — cùng 1 commit với hóa đơn, hết khe hở ghi đúp
     kq = tao_hoa_don(data, db, nd)
     r.hoa_don_id = (kq or {}).get("id") if isinstance(kq, dict) else None
@@ -1350,21 +1352,17 @@ def tao_hoa_don(data: HoaDonVao, db: Session = Depends(get_db),
                 trang_thai="GHI_NHAN")
     db.add(hd); db.flush()
     hd.so = data.so or f"{'HDB' if data.loai == 'BAN' else 'HDM'}-{date.today():%Y%m%d}-{hd.id}"
-    # sinh công nợ
+    # sinh công nợ — 🔒 CHỈ hóa đơn BÁN (phải thu). Hóa đơn MUA KHÔNG sinh công nợ:
+    # phải trả đi 1 CHIỀU từ mục NCC (nhận hàng PO / nhập ngoài) sang kế toán,
+    # tránh 'đã chi nhưng vẫn treo nợ' khi ghi hóa đơn cho khoản đã thanh toán.
     cn = None
-    if data.tao_cong_no:
+    if data.tao_cong_no and data.loai == "BAN":
         from datetime import timedelta
         han = date.today() + timedelta(days=int(data.han_ngay or 30))
-        # chép SỐ HÓA ĐƠN + ngày chứng từ sang công nợ — để không rơi nhầm vào
-        # bảng "Phải trả chưa hóa đơn" và để đối chiếu thu-chi theo số HĐ
-        if data.loai == "BAN":
-            cn = CongNo(loai="PHAI_THU", hoa_don_id=hd.id, khach_hang_id=kh_id,
-                        so_ct=(hd.so or None), ngay_ct=hd.ngay,
-                        so_tien=tong, da_thanh_toan=0, han=han, trang_thai="CHUA_THU")
-        else:
-            cn = CongNo(loai="PHAI_TRA", hoa_don_id=hd.id, nha_cung_cap_id=data.nha_cung_cap_id,
-                        so_ct=(hd.so or None), ngay_ct=hd.ngay,
-                        so_tien=tong, da_thanh_toan=0, han=han, trang_thai="CHUA_TRA")
+        # chép SỐ HÓA ĐƠN + ngày chứng từ sang công nợ để đối chiếu thu-chi theo số HĐ
+        cn = CongNo(loai="PHAI_THU", hoa_don_id=hd.id, khach_hang_id=kh_id,
+                    so_ct=(hd.so or None), ngay_ct=hd.ngay,
+                    so_tien=tong, da_thanh_toan=0, han=han, trang_thai="CHUA_THU")
         db.add(cn); db.flush()
     # TỰ CẤN TRỪ TẠM ỨNG/TRẢ TRƯỚC cùng mã hàng bán vào công nợ vừa sinh
     da_cap_tru_tu_ung = Decimal(0)
