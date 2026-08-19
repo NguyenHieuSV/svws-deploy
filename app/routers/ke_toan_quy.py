@@ -383,6 +383,14 @@ def _hach_toan_phieu(db, p: PhieuThuChi):
                 cn.trang_thai = "THU_DU" if du else "THU_MOT_PHAN"
             else:
                 cn.trang_thai = "DA_TRA" if du else "TRA_MOT_PHAN"
+                # PO gắn khoản này trả đủ THẬT → tất toán, PO vào Kiểm soát
+                if du and getattr(cn, "don_mua_id", None):
+                    from ..models import DonMua as _DM
+                    dmx = db.get(_DM, cn.don_mua_id)
+                    if dmx is not None:
+                        dmx.tt_du = True
+                        if not dmx.ngay_tt_du:
+                            dmx.ngay_tt_du = date.today()
     return bt
 
 

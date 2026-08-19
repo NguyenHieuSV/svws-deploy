@@ -957,6 +957,28 @@ def _ap_dung_tt_mua(db: Session, dm: DonMua, dn: Decimal) -> bool:
     return da_tt_100
 
 
+def _dam_bao_cong_no_po(db: Session, dm: DonMua) -> None:
+    """Bảo đảm NGHĨA VỤ phải trả của PO có trong sổ công nợ (so_tien = TỔNG PO, hạn,
+    số hóa đơn) — 🔒 KHÔNG đụng phần ĐÃ TRẢ: tiền chỉ trừ công nợ + quỹ khi phiếu chi
+    được duyệt (✔ Đã chi khi ngân hàng chi thật), đúng nguyên tắc chi thật mới vào sổ."""
+    tong = Decimal(dm.tong_tien or 0)
+    cn = db.query(CongNo).filter_by(don_mua_id=dm.id).first()
+    if cn is None:
+        cn = CongNo(loai="PHAI_TRA", nha_cung_cap_id=dm.nha_cung_cap_id, don_mua_id=dm.id,
+                    so_tien=tong, da_thanh_toan=0, han=dm.ngay_tt_tiep,
+                    trang_thai="CHUA_TRA")
+        db.add(cn)
+    else:
+        cn.so_tien = tong
+        if dm.ngay_tt_tiep:
+            cn.han = dm.ngay_tt_tiep
+        _da = Decimal(cn.da_thanh_toan or 0)
+        cn.trang_thai = ("DA_TRA" if (tong > 0 and _da >= tong)
+                         else ("TRA_MOT_PHAN" if _da > 0 else "CHUA_TRA"))
+    if dm.so_hoa_don:
+        cn.so_ct = dm.so_hoa_don[:60]
+
+
 def _hang_cho_duyet_chi(db: Session, dm: DonMua, dn: Decimal):
     """Đưa đề nghị chi vào HÀNG CHỜ DUYỆT (tab Duyệt chi Ngân Hàng). KHÔNG phân bổ
     vào Công nợ/Kiểm soát ở bước này — phân bổ chỉ chạy khi CEO/KTT bấm Duyệt chi.
@@ -1256,10 +1278,13 @@ def duyet_lenh_chi_bank(lcb_id: int, db: Session = Depends(get_db),
     r.trang_thai = "DA_DUYET"
     r.duyet_luc = gio_hien_tai()
     r.nguoi_duyet = nd.id
-    # DUYỆT XONG mới PHÂN BỔ: đủ 100% → Kiểm soát; còn thiếu → Công nợ phải trả
+    # DUYỆT = xác nhận kế hoạch chi + ghi NGHĨA VỤ đủ TỔNG PO vào Công nợ phải trả.
+    # 🔒 KHÔNG ghi 'Đã trả' ở bước này — tiền chỉ trừ công nợ + quỹ khi phiếu chi được
+    # duyệt (✔ Đã chi lúc ngân hàng chi thật): sổ không bao giờ chạy trước thực tế.
     dm = db.get(DonMua, r.don_mua_id) if r.don_mua_id else None
     if dm is not None:
-        _ap_dung_tt_mua(db, dm, Decimal(r.so_tien or 0))
+        dm.de_nghi_tt = Decimal(r.so_tien or 0)    # lũy kế đã đề nghị (số quản trị)
+        _dam_bao_cong_no_po(db, dm)
         dm.da_duyet_tt = Decimal(r.so_tien or 0)   # báo cáo chi phí chỉ đếm số ĐÃ DUYỆT này
         dm.cho_lenh_bank = True
         dm.lenh_bank_tien = r.so_tien
@@ -1285,8 +1310,7 @@ def duyet_lenh_chi_bank(lcb_id: int, db: Session = Depends(get_db),
         if (settings.gchat_webhook_duyet_chi or "").strip():
             ten_nd = getattr(nd, "ho_ten", None) or nd.email
             tien = f"{float(r.so_tien or 0):,.0f}".replace(",", ".")
-            phan_bo = ("đủ 100% → PO vào Kiểm soát" if (dm is not None and dm.tt_du)
-                       else "phần còn lại vào Công nợ phải trả")
+            phan_bo = "nghĩa vụ PO ghi ở Công nợ phải trả — trừ dần khi ✔ Đã chi (ngân hàng chi thật)"
             gui_webhook_rieng(settings.gchat_webhook_duyet_chi,
                 "🏦 *DUYỆT CHI NGÂN HÀNG*\n"
                 f"• PO: {kq['so']} · NCC: {kq.get('ncc_ten') or '—'}\n"
@@ -3122,5 +3146,12 @@ def _thuc_hien_tra_ncc(db, nd, cn, so_tien, hinh_thuc, ngay_tra):
     from ..hach_toan import hach_toan_tra_ncc
     tien_mat = (hinh_thuc or "").upper() in ("TM", "TIEN_MAT", "MAT")
     hach_toan_tra_ncc(db, cn, so_tien, tien_mat=tien_mat)
+    # PO gắn khoản này đã trả đủ THẬT → tất toán (PO vào Kiểm soát)
+    if getattr(cn, "don_mua_id", None) and Decimal(cn.da_thanh_toan or 0) >= Decimal(cn.so_tien or 0):
+        dmx = db.get(DonMua, cn.don_mua_id)
+        if dmx is not None:
+            dmx.tt_du = True
+            if not dmx.ngay_tt_du:
+                dmx.ngay_tt_du = date.today()
     ghi_audit(db, nd.id, "THANH_TOAN", "cong_no", cn.id,
               moi={"so_tien": float(so_tien), "trang_thai": cn.trang_thai})
