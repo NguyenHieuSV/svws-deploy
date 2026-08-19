@@ -979,7 +979,7 @@ def _dam_bao_cong_no_po(db: Session, dm: DonMua) -> None:
         cn.so_ct = dm.so_hoa_don[:60]
 
 
-def _hang_cho_duyet_chi(db: Session, dm: DonMua, dn: Decimal):
+def _hang_cho_duyet_chi(db: Session, dm: DonMua, dn: Decimal, nd=None):
     """Đưa đề nghị chi vào HÀNG CHỜ DUYỆT (tab Duyệt chi Ngân Hàng). KHÔNG phân bổ
     vào Công nợ/Kiểm soát ở bước này — phân bổ chỉ chạy khi CEO/KTT bấm Duyệt chi.
     dn = 0 VẪN tạo lệnh: đơn CÔNG NỢ 100% — duyệt xong TOÀN BỘ giá trị PO vào Công nợ phải trả."""
@@ -993,10 +993,13 @@ def _hang_cho_duyet_chi(db: Session, dm: DonMua, dn: Decimal):
                    LenhChiBank.trang_thai.in_(["CHO_DUYET", "DA_DUYET"]))
            .order_by(LenhChiBank.id.desc()).first())
     if lcb is None:
-        db.add(LenhChiBank(don_mua_id=dm.id, so_tien=dn, de_nghi_luc=gio_hien_tai()))
+        db.add(LenhChiBank(don_mua_id=dm.id, so_tien=dn, de_nghi_luc=gio_hien_tai(),
+                           nguoi_tao=(nd.id if nd is not None else None)))
     else:
         lcb.so_tien = dn
         lcb.de_nghi_luc = gio_hien_tai()
+        if nd is not None:
+            lcb.nguoi_tao = nd.id            # người sửa đề nghị gần nhất là người đề nghị
         if lcb.trang_thai == "DA_DUYET":     # đổi số tiền sau khi đã duyệt → duyệt lại
             lcb.trang_thai = "CHO_DUYET"
             lcb.duyet_luc = None
@@ -1146,7 +1149,7 @@ def cap_nhat_thanh_toan_mua(dm_id: int, data: ThanhToanMuaVao, db: Session = Dep
         if dm.da_duyet_tt is None:
             dm.da_duyet_tt = da_cu    # chốt phần đã áp dụng trước đó làm mốc ĐÃ DUYỆT (PO cũ)
         dm.de_nghi_tt = dn
-        _hang_cho_duyet_chi(db, dm, dn)
+        _hang_cho_duyet_chi(db, dm, dn, nd)
         da_tt_100 = False
         cho_duyet_chi = True
     ghi_audit(db, nd.id, "THANH_TOAN_MUA", "don_mua", dm.id,
@@ -1188,7 +1191,7 @@ def chot_thanh_toan_mua(dm_id: int, db: Session = Depends(get_db),
     # KHÔNG phân bổ ở bước này — chỉ đưa lệnh chi vào hàng chờ DUYỆT (tab Duyệt chi
     # Ngân Hàng); CEO/KTT duyệt xong hệ thống mới phân bổ vào Công nợ / Kiểm soát.
     da_tt_100 = dn >= tong
-    _hang_cho_duyet_chi(db, dm, dn)
+    _hang_cho_duyet_chi(db, dm, dn, nd)
     ghi_audit(db, nd.id, "CHOT_TT_MUA", "don_mua", dm.id,
               moi={"de_nghi_tt": float(dn), "tong": float(tong), "tt_du": da_tt_100})
     from ..fin_snapshot import snapshot_financial
@@ -1275,6 +1278,11 @@ def duyet_lenh_chi_bank(lcb_id: int, db: Session = Depends(get_db),
     # TRẦN TIỀN NHIỀU CẤP: KTT duyệt theo hạn mức 'thu_chi' (bảng han_muc_duyet); CEO/ADMIN không trần
     if nd.vai_tro not in ("CEO", "ADMIN"):
         kiem_han_muc(db, nd, "thu_chi", Decimal(r.so_tien or 0))
+        # TÁCH VAI: người đề nghị không tự duyệt lệnh của chính mình (CEO/ADMIN miễn)
+        if getattr(r, "nguoi_tao", None) == nd.id:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                "Bạn là người ĐỀ NGHỊ lệnh này — cần người khác (CEO / KTT khác) "
+                                "duyệt để tách vai đề nghị / duyệt chi.")
     r.trang_thai = "DA_DUYET"
     r.duyet_luc = gio_hien_tai()
     r.nguoi_duyet = nd.id
@@ -1968,6 +1976,27 @@ def _cham_diem_giao_hang(db: Session, dm: DonMua, dat_qc: bool = True) -> dict:
         ncc.blacklist = True
     return {"diem_giao_hang": diem, "diem_danh_gia_moi": float(ncc.diem_danh_gia),
             "so_lan_danh_gia": len(diems), "dung_han": s_ot >= 2.0, "dat_qc": dat_qc}
+
+
+@router.post("/don-mua/{dm_id}/tu-choi")
+def tu_choi_don_mua(dm_id: int, data: LyDoVao, db: Session = Depends(get_db),
+                    nd: NguoiDung = Depends(yeu_cau(MODULE, "DUYET"))):
+    """❌ TỪ CHỐI PO (kèm lý do, lưu audit) — đơn không chạy sang Thanh toán mua hàng.
+    Người lập bấm ✏️ Sửa để chỉnh; lưu xong đơn tự quay lại CHỜ DUYỆT."""
+    dm = db.get(DonMua, dm_id)
+    if dm is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đơn mua")
+    if dm.trang_thai != "CHO_DUYET":
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            f"Đơn đang ở trạng thái {dm.trang_thai} — chỉ từ chối được đơn CHỜ DUYỆT")
+    ly_do = (data.ly_do or "").strip()
+    if not ly_do:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Nhập lý do từ chối để người lập biết đường sửa")
+    dm.trang_thai = "TU_CHOI"
+    ghi_audit(db, nd.id, "TU_CHOI_PO", "don_mua", dm.id,
+              moi={"so": dm.so, "ly_do": ly_do[:300]})
+    db.commit()
+    return {"ok": True, "so": dm.so, "ly_do": ly_do}
 
 
 @router.post("/don-mua/{dm_id}/nhan-hang")
@@ -3129,7 +3158,7 @@ def thanh_toan_ncc(cn_id: int, data: NccTraVao, db: Session = Depends(get_db),
                             f"chỉ còn đề nghị được tối đa {float(con_lai) - float(dang_cho):,.0f}.")
     db.add(LenhChiBank(cong_no_id=cn.id, so_tien=data.so_tien, de_nghi_luc=gio_hien_tai(),
                        hinh_thuc=(data.hinh_thuc or "").strip()[:30] or None,
-                       ngay_tt=data.ngay_thanh_toan))
+                       ngay_tt=data.ngay_thanh_toan, nguoi_tao=nd.id))
     ghi_audit(db, nd.id, "DE_NGHI_TRA_CN", "cong_no", cn.id,
               moi={"so_tien": float(data.so_tien), "hinh_thuc": data.hinh_thuc})
     db.commit()

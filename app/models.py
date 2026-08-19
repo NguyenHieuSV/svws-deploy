@@ -936,6 +936,7 @@ class LenhChiBank(Base):
     trang_thai: Mapped[str] = mapped_column(String(12), default="CHO_DUYET")
     duyet_luc: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     nguoi_duyet: Mapped[int | None] = mapped_column(ForeignKey("nguoi_dung.id"), nullable=True)
+    nguoi_tao: Mapped[int | None] = mapped_column(BigInteger, nullable=True)     # mig 107: người đề nghị
     chi_luc: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     ghi_chu: Mapped[str | None] = mapped_column(String(200), nullable=True)
 
