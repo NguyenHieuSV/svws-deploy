@@ -2084,7 +2084,7 @@ def sao_ke_dong_ghi_chu(d_id: int, ghi_chu: str = "", db: Session = Depends(get_
 
 
 class SkGhiVao(_BM_hdc):
-    quy_id: int
+    quy_id: int | None = None           # không cần khi lệnh 0 ₫ (công nợ 100%)
     don_mua_id: int | None = None
     cong_no_id: int | None = None
     sao_ke_dong_id: int | None = None
@@ -2105,7 +2105,26 @@ def sao_ke_ghi_chi(data: SkGhiVao, db: Session = Depends(get_db),
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đơn mua")
     so_tien = Decimal(str(int(float(data.so_tien or 0))))
     if so_tien <= 0:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Số tiền phải lớn hơn 0")
+        # 💳 CÔNG NỢ 100%: lệnh 0 ₫ — KHÔNG chi tiền, KHÔNG tạo phiếu. Đóng lệnh (xuống Lịch sử
+        # thực chi), gỡ PO khỏi bảng chờ, bảo đảm TOÀN BỘ giá trị PO nằm ở Công nợ phải trả.
+        lcb0 = (db.query(LenhChiBank).filter_by(don_mua_id=dm.id, trang_thai="DA_DUYET")
+                .order_by(LenhChiBank.id.desc()).first())
+        if lcb0 is None:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                "PO này không có lệnh đã duyệt đang chờ — không có gì để đóng")
+        from .ncc import _dam_bao_cong_no_po
+        _dam_bao_cong_no_po(db, dm)
+        dm.cho_lenh_bank = False
+        lcb0.trang_thai = "DA_CHI"
+        lcb0.chi_luc = gio_hien_tai()
+        lcb0.ghi_chu = "Công nợ 100% — không chi tiền, toàn bộ giá trị PO ở Công nợ phải trả"[:200]
+        ghi_audit(db, nd.id, "CONG_NO_100_DONG_LENH", "lenh_chi_bank", lcb0.id,
+                  moi={"po": dm.so, "tong_tien": float(dm.tong_tien or 0)})
+        db.commit()
+        return {"ok": True, "phieu_so": None, "cong_no_100": True,
+                "tong_cong_no": float(dm.tong_tien or 0)}
+    if not data.quy_id:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Chọn sổ quỹ ngân hàng phát sinh giao dịch")
     d0 = db.get(SaoKeDong, data.sao_ke_dong_id) if data.sao_ke_dong_id else None
     cn = db.query(CongNo).filter_by(don_mua_id=dm.id).first()
     p = PhieuThuChi(loai="CHI", quy_id=data.quy_id, so_tien=so_tien,
