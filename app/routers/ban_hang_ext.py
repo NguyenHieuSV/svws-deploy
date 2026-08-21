@@ -660,6 +660,51 @@ def dashboard(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
 
 
 # ============ (6) LÃI/LỖ theo mã đơn Bán hàng (liên kết Mua hàng) ============
+@router.get("/don-hang-tong-hop/tep")
+def ds_tep_tat_ca(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
+    """Tệp PO/HĐ của TẤT CẢ đơn hàng trong 1 lần gọi — tab Đơn hàng không còn bắn
+    hàng trăm request /tep riêng lẻ cùng lúc (nguyên nhân nghẽn máy chủ → 502)."""
+    out: dict[str, list] = {}
+    for t in (db.query(TepDinhKem).filter_by(doi_tuong="DON_HANG")
+              .order_by(TepDinhKem.id).all()):
+        out.setdefault(str(t.doi_tuong_id), []).append(
+            TepRa.model_validate(t).model_dump(mode="json"))
+    return out
+
+
+@router.get("/don-hang-tong-hop/lai-lo")
+def lai_lo_tat_ca(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
+    """Lãi/lỗ của TẤT CẢ đơn hàng trong 3 truy vấn (thay cho N lần gọi /lai-lo)."""
+    pos = db.query(DonMua).filter(DonMua.don_hang_id.isnot(None),
+                                  DonMua.trang_thai != "TU_CHOI").all()
+    po_theo_dh: dict[int, list] = {}
+    for p in pos:
+        po_theo_dh.setdefault(p.don_hang_id, []).append(p)
+    thuc_theo_po: dict[int, float] = {}
+    if pos:
+        for ct in db.query(DonMuaCt).filter(DonMuaCt.don_mua_id.in_([p.id for p in pos])).all():
+            thuc_theo_po[ct.don_mua_id] = (thuc_theo_po.get(ct.don_mua_id, 0.0)
+                                           + float(ct.so_luong_nhan or 0) * float(ct.don_gia or 0))
+    out = {}
+    for dh in db.query(DonHang).all():
+        ds = po_theo_dh.get(dh.id, [])
+        cam_ket = sum(float(p.tong_tien or 0) for p in ds)
+        thuc = sum(thuc_theo_po.get(p.id, 0.0) for p in ds)
+        doanh_thu = float(dh.tong_tien or 0)
+
+        def _rate(v, dt=doanh_thu):
+            return round((dt - v) / dt * 100, 1) if dt else 0.0
+        out[str(dh.id)] = {"don_hang_id": dh.id, "so": dh.so, "doanh_thu": doanh_thu,
+                           "gia_von_thuc": thuc, "gia_von_cam_ket": cam_ket,
+                           "lai_lo_thuc": doanh_thu - thuc, "lai_lo_dukien": doanh_thu - cam_ket,
+                           "ty_suat_thuc": _rate(thuc), "ty_suat_dukien": _rate(cam_ket),
+                           "so_po": len(ds),
+                           "danh_sach_po": [{"id": p.id, "so": p.so, "nha_cung_cap_id": p.nha_cung_cap_id,
+                                             "tong_tien": float(p.tong_tien or 0), "trang_thai": p.trang_thai,
+                                             "trang_thai_nhan": p.trang_thai_nhan} for p in ds]}
+    return out
+
+
 @router.get("/don-hang/{dh_id}/lai-lo")
 def lai_lo_don(dh_id: int, db: Session = Depends(get_db),
                _=Depends(yeu_cau(MODULE, "XEM"))):
