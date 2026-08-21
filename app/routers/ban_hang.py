@@ -186,7 +186,7 @@ def ds_cong_no_khach(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "X
             "don_hang_id": dh.id if dh else None,
             "khach_ten": kh.ten if kh else None,
             "dien_giai": (hd.dien_giai if hd else None) or cn.ghi_chu,
-            "so_hd": (hd.so if hd else None) or cn.so_ct,
+            "so_hd": cn.so_ct or (hd.so if hd else None),
             # Giá trị đơn hàng: lấy từ tab Đơn hàng & PO/Hợp đồng (thiếu đơn thì dùng công nợ)
             "gia_tri_don": float(dh.tong_tien or 0) if dh else None,
             # Tách VAT theo hóa đơn của khoản công nợ (chưa VAT / VAT / tổng)
@@ -1564,9 +1564,11 @@ def chi_tiet_don_hang(dh_id: int, db: Session = Depends(get_db),
                        "so_luong": float(ct.so_luong), "don_gia": float(ct.don_gia),
                        "thue_suat": float(ct.thue_suat or 0)})
     co_hd = db.query(HoaDon).filter_by(don_hang_id=dh_id).first() is not None
+    cn0 = _cong_no_cua_don(db, dh_id)
     return {"id": dh.id, "so": dh.so, "khach_hang_id": dh.khach_hang_id,
             "ngay": str(dh.ngay) if dh.ngay else None, "tong_tien": float(dh.tong_tien or 0),
             "tien_thue": float(dh.tien_thue or 0),
+            "so_hoa_don": dh.so_hoa_don or (cn0.so_ct if cn0 else None),
             "trang_thai": dh.trang_thai, "co_hoa_don": co_hd,
             "thanh_toan_coc": float(dh.thanh_toan_coc or 0),
             # khóa sửa nội dung đơn (vẫn đổi được TRẠNG THÁI + CỌC) khi đã xuất kho / có hóa đơn
@@ -1592,7 +1594,7 @@ def _dam_bao_cong_no_don(db: Session, dh: DonHang, so_hoa_don, nd: NguoiDung, xo
         tong = truoc + thue
         if tong <= 0:
             return None                          # đơn chưa có giá trị → không tạo công nợ rỗng
-        so_hd = (str(so_hoa_don or "").strip() or dh.so or f"DH-{dh.id}")[:60]
+        so_hd = (str(so_hoa_don or "").strip() or dh.so_hoa_don or dh.so or f"DH-{dh.id}")[:60]
         coc = Decimal(dh.thanh_toan_coc or 0)
         if coc > tong:
             coc = tong
@@ -1638,6 +1640,34 @@ def doi_trang_thai_don_hang(dh_id: int, data: TrangThaiDonVao, db: Session = Dep
               cu={"trang_thai": cu}, moi={"trang_thai": tt})
     db.commit()
     return {"id": dh.id, "trang_thai": dh.trang_thai, "cong_no_id": cn.id if cn else None}
+
+
+class SoHdDonVao(_CNBase):
+    so_hoa_don: str | None = None
+
+
+@router.put("/don-hang/{dh_id}/so-hoa-don")
+def dat_so_hoa_don(dh_id: int, data: SoHdDonVao, db: Session = Depends(get_db),
+                   nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    """Ghi SỐ HÓA ĐƠN xuất cho khách lên đơn hàng (cho phép cả khi đơn đã xuất kho / có hóa đơn)
+    và đồng bộ sang khoản công nợ phải thu của đơn — bảng Công nợ khách hàng theo dõi theo số này."""
+    dh = db.get(DonHang, dh_id)
+    if dh is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đơn hàng")
+    so_hd = (str(data.so_hoa_don or "").strip() or None)
+    if so_hd:
+        so_hd = so_hd[:60]
+    cu = dh.so_hoa_don
+    if cu == so_hd:
+        return {"id": dh.id, "so_hoa_don": dh.so_hoa_don, "doi": False}
+    dh.so_hoa_don = so_hd
+    cn = _cong_no_cua_don(db, dh_id)
+    if cn is not None and so_hd:
+        cn.so_ct = so_hd
+    ghi_audit(db, nd.id, "CAP_NHAT", "don_hang", dh.id,
+              cu={"so_hoa_don": cu}, moi={"so_hoa_don": so_hd, "cong_no_id": cn.id if cn else None})
+    db.commit()
+    return {"id": dh.id, "so_hoa_don": dh.so_hoa_don, "doi": True, "cong_no_id": cn.id if cn else None}
 
 
 class TtCocVao(_CNBase):

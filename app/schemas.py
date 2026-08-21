@@ -426,6 +426,7 @@ class DonHangRa(BaseModel):
     tong_tien: Decimal
     trang_thai: str
     thanh_toan_coc: Decimal = Decimal(0)
+    so_hoa_don: str | None = None        # số HĐ xuất cho khách (theo dõi công nợ)
 
 
 # ---------- Kế toán & Tài chính ----------
