@@ -471,6 +471,23 @@ def _mo_lai_lenh_cua_phieu(db, p) -> None:
             dmx = db.get(DonMua, lcb.don_mua_id)
             if dmx is not None:
                 dmx.cho_lenh_bank = True
+                # phiếu kiểu mới (không gắn cong_no_id): công nợ đã cấn lúc ✔ Đã chi → HOÀN LẠI
+                if not getattr(p, "cong_no_id", None):
+                    from ..models import ThanhToan as _TT
+                    cnx = db.query(CongNo).filter_by(don_mua_id=dmx.id).with_for_update().first()
+                    if cnx is not None:
+                        tt0 = (db.query(_TT).filter_by(cong_no_id=cnx.id, so_tien=p.so_tien)
+                               .order_by(_TT.id.desc()).first())
+                        if tt0 is not None:
+                            db.delete(tt0)
+                        cnx.da_thanh_toan = max(Decimal(cnx.da_thanh_toan or 0) - Decimal(p.so_tien or 0),
+                                                Decimal(0))
+                        _da = Decimal(cnx.da_thanh_toan or 0)
+                        cnx.trang_thai = ("DA_TRA" if (Decimal(cnx.so_tien or 0) > 0 and _da >= Decimal(cnx.so_tien or 0))
+                                          else ("TRA_MOT_PHAN" if _da > 0 else "CHUA_TRA"))
+                        if _da < Decimal(cnx.so_tien or 0):
+                            dmx.tt_du = False
+                            dmx.ngay_tt_du = None
     d0 = db.query(SaoKeDong).filter_by(khop_loai="DA_CHI_SK", khop_id=p.id).first()
     if d0 is not None:
         d0.khop_loai = None
@@ -2126,11 +2143,12 @@ def sao_ke_ghi_chi(data: SkGhiVao, db: Session = Depends(get_db),
     if not data.quy_id:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Chọn sổ quỹ ngân hàng phát sinh giao dịch")
     d0 = db.get(SaoKeDong, data.sao_ke_dong_id) if data.sao_ke_dong_id else None
-    cn = db.query(CongNo).filter_by(don_mua_id=dm.id).first()
+    cn = db.query(CongNo).filter_by(don_mua_id=dm.id).with_for_update().first()
     p = PhieuThuChi(loai="CHI", quy_id=data.quy_id, so_tien=so_tien,
                     ngay=(d0.ngay if (d0 is not None and d0.ngay) else date.today()),
                     dien_giai=(f"Chi ngân hàng theo sao kê — PO {dm.so or dm.id}")[:200],
-                    nha_cung_cap_id=dm.nha_cung_cap_id, cong_no_id=(cn.id if cn else None),
+                    nha_cung_cap_id=dm.nha_cung_cap_id,
+                    cong_no_id=None,   # công nợ cấn NGAY bên dưới — phiếu chỉ ghi quỹ + bút toán khi duyệt
                     don_hang_id=dm.don_hang_id, trang_thai="CHO_DUYET",
                     nguoi_tao=nhan_vien_id_cua(db, nd.id))
     db.add(p)
@@ -2143,6 +2161,23 @@ def sao_ke_ghi_chi(data: SkGhiVao, db: Session = Depends(get_db),
         lcb.trang_thai = "DA_CHI"
         lcb.chi_luc = gio_hien_tai()
         p.lenh_chi_id = lcb.id           # nhớ lệnh — phiếu bị từ chối/hủy sẽ mở lại lệnh
+    # ✔ NGÂN HÀNG ĐÃ CHI THẬT → cập nhật NGAY công nợ (Đã trả ↑, Còn lại ↓) và tất toán PO
+    # khi đủ 100% (PO sang Kiểm soát). Sổ quỹ + bút toán ghi khi kế toán duyệt phiếu.
+    if cn is not None:
+        from ..models import ThanhToan as _TT
+        con_lai_cn = Decimal(cn.so_tien or 0) - Decimal(cn.da_thanh_toan or 0)
+        ap = min(so_tien, con_lai_cn) if con_lai_cn > 0 else Decimal(0)
+        if ap > 0:
+            db.add(_TT(cong_no_id=cn.id, so_tien=ap,
+                       ngay=(d0.ngay if (d0 is not None and d0.ngay) else date.today()),
+                       hinh_thuc="CK"))
+            cn.da_thanh_toan = Decimal(cn.da_thanh_toan or 0) + ap
+            du_cn = Decimal(cn.da_thanh_toan) >= Decimal(cn.so_tien or 0)
+            cn.trang_thai = "DA_TRA" if du_cn else "TRA_MOT_PHAN"
+            if du_cn:
+                dm.tt_du = True
+                if not dm.ngay_tt_du:
+                    dm.ngay_tt_du = date.today()
     if d0 is not None:
         d0.khop_loai = "DA_CHI_SK"
         d0.khop_id = p.id
