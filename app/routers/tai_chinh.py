@@ -631,22 +631,12 @@ def _tinh_lai_lo_tong(db: Session) -> dict:
     from sqlalchemy import func
     from ..models import DonHang, DonMua, CongNo, ChiCoDinh
     from ..nhac_viec_service import gio_hien_tai
-    con_lai_expr = func.coalesce(func.sum(CongNo.so_tien - CongNo.da_thanh_toan), 0)
+    from ..lai_lo_ma import chi_phi_ma          # CÔNG THỨC CHUNG theo mã (app/lai_lo_ma.py)
     theo_ma, tong_dt, tong_cp = [], 0.0, 0.0
     for dh in db.query(DonHang).order_by(DonHang.id.desc()).all():
-        # DOANH THU tính GỒM VAT — cùng cơ sở với chi phí (PO & công nợ đều gồm VAT)
-        doanh_thu = float(dh.tong_tien or 0) + float(dh.tien_thue or 0)
-        po_ids = [i for (i,) in db.query(DonMua.id).filter(DonMua.don_hang_id == dh.id).all()]
-        ttm = float(db.query(func.coalesce(func.sum(func.coalesce(DonMua.da_duyet_tt, DonMua.de_nghi_tt)), 0))
-                    .filter(DonMua.don_hang_id == dh.id).scalar() or 0)
-        cn_po = float(db.query(con_lai_expr).filter(CongNo.loai == "PHAI_TRA",
-                      CongNo.don_mua_id.in_(po_ids)).scalar() or 0) if po_ids else 0.0
-        cn_ngoai = 0.0
-        if dh.so:
-            cn_ngoai = float(db.query(con_lai_expr).filter(CongNo.loai == "PHAI_TRA",
-                             CongNo.don_mua_id.is_(None),
-                             func.lower(CongNo.ma_ban_ngoai) == dh.so.lower()).scalar() or 0)
-        chi_phi = ttm + max(cn_po, 0.0) + max(cn_ngoai, 0.0)
+        cp = chi_phi_ma(db, dh)
+        doanh_thu = cp["doanh_thu"]          # GỒM VAT — cùng cơ sở với chi phí
+        chi_phi = cp["tong_chi_phi"]         # PO đã duyệt + nhập ngoài + hóa đơn mua ngoài PO gắn mã
         if doanh_thu == 0 and chi_phi == 0:
             continue
         tong_dt += doanh_thu
@@ -666,7 +656,8 @@ def _tinh_lai_lo_tong(db: Session) -> dict:
                 .filter(CongNo.don_mua_id.isnot(None), CongNo.hoa_don_id.isnot(None)).all()}
     chi_hd_mua = 0.0
     for (hid, htong, hdg) in db.query(HoaDon.id, HoaDon.tong_tien, HoaDon.dien_giai) \
-                               .filter(HoaDon.loai == "MUA").all():
+                               .filter(HoaDon.loai == "MUA", HoaDon.don_hang_id.is_(None)).all():
+        # chỉ hóa đơn KHÔNG gắn mã (hóa đơn gắn mã đã nằm trong chi phí theo mã ở trên)
         # bỏ hóa đơn tự sinh khi nhận hàng PO — chi phí PO đã tính ở trên
         if hid in po_cn_hd or str(hdg or "").startswith("Nhận hàng PO"):
             continue

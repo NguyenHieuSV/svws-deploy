@@ -1505,24 +1505,13 @@ def hach_toan_hd(hd_id: int, db: Session = Depends(get_db),
 
 # ---------- TRUY VẾT THEO MÃ HÀNG BÁN ----------
 def _lai_lo_1(db, dh: DonHang):
-    doanh_thu = _f(dh.tong_tien) + _f(dh.tien_thue)   # GỒM VAT — cùng cơ sở với Lãi/Lỗ Record
-    # ĐỒNG BỘ với bảng "Chi phí theo Mã Đơn hàng" (NCC → Kiểm soát):
-    #   Giá vốn (Thanh toán mua) = đề nghị TT của các PO gắn mã đơn bán
-    #   Chi phí khác (Công nợ phải trả) = công nợ phải trả CÒN LẠI của PO đó + khoản nhập ngoài khớp mã
-    po_ids = [i for (i,) in db.query(DonMua.id).filter(DonMua.don_hang_id == dh.id).all()]
-    gia_von = _f(db.query(func.coalesce(func.sum(func.coalesce(DonMua.da_duyet_tt, DonMua.de_nghi_tt)), 0))
-                 .filter(DonMua.don_hang_id == dh.id).scalar())
-    _con = func.coalesce(func.sum(CongNo.so_tien - CongNo.da_thanh_toan), 0)
-    cn_po = _f(db.query(_con).filter(CongNo.loai == "PHAI_TRA",
-                                     CongNo.don_mua_id.in_(po_ids)).scalar()) if po_ids else 0.0
-    cn_ngoai = 0.0
-    if dh.so:
-        cn_ngoai = _f(db.query(_con).filter(CongNo.loai == "PHAI_TRA", CongNo.don_mua_id.is_(None),
-                                            func.lower(CongNo.ma_ban_ngoai) == dh.so.lower()).scalar())
-    chi_phi = max(cn_po, 0.0) + max(cn_ngoai, 0.0)
-    da_thu = _f(db.query(func.coalesce(func.sum(PhieuThuChi.so_tien), 0))
-                .filter(PhieuThuChi.don_hang_id == dh.id, PhieuThuChi.loai == "THU",
-                        PhieuThuChi.trang_thai == "DA_DUYET").scalar())
+    # CÔNG THỨC CHUNG (app/lai_lo_ma.py) — cùng con số với Kiểm soát, Overall Financial, Bán hàng
+    from ..lai_lo_ma import chi_phi_ma
+    cp = chi_phi_ma(db, dh)
+    doanh_thu = cp["doanh_thu"]          # GỒM VAT — cùng cơ sở với chi phí
+    gia_von = cp["gia_von_po"]           # Σ tổng PO đã duyệt (nghĩa vụ cam kết)
+    chi_phi = cp["chi_phi_khac"]         # nhập ngoài + hóa đơn mua ngoài PO gắn mã
+    da_thu = cp["da_thu"]
     # Tạm ứng/trả trước theo mã hàng bán
     tu_thu = _f(db.query(func.coalesce(func.sum(PhieuThuChi.so_tien), 0))
                 .filter(PhieuThuChi.don_hang_id == dh.id, PhieuThuChi.loai == "THU",
@@ -1542,7 +1531,7 @@ def _lai_lo_1(db, dh: DonHang):
                             PhieuThuChi.trang_thai == "DA_DUYET").scalar())
     hd_ban = _f(db.query(func.coalesce(func.sum(HoaDon.tong_tien), 0))
                 .filter(HoaDon.don_hang_id == dh.id, HoaDon.loai == "BAN").scalar())
-    loi_nhuan = doanh_thu - gia_von - chi_phi
+    loi_nhuan = cp["loi_nhuan"]
     # Cam kết đặt cọc (khách hàng) vs đã ứng
     ty = float(dh.ty_le_dat_coc or 0)
     dc_dk = round(doanh_thu * ty / 100)
@@ -1557,9 +1546,12 @@ def _lai_lo_1(db, dh: DonHang):
     return {"don_hang_id": dh.id, "ma_ban": dh.so or f"DH-{dh.id}",
             "doanh_thu": doanh_thu, "gia_von": gia_von, "chi_phi_khac": chi_phi,
             "thanh_toan_mua": gia_von, "cong_no_phai_tra": chi_phi,
-            "tong_chi_phi": gia_von + chi_phi, "loi_nhuan": loi_nhuan,
-            "ty_suat": round(loi_nhuan / doanh_thu * 100, 1) if doanh_thu else None,
-            "da_thu": da_thu, "con_phai_thu": max(doanh_thu - da_thu, 0),
+            "gia_von_thuc": cp["gia_von_thuc"], "po_cho_duyet": cp["po_cho_duyet"],
+            "chi_ngoai_cn": cp["chi_ngoai_cn"], "chi_hd_ngoai_po": cp["chi_hd_ngoai_po"],
+            "da_tra_ncc": cp["da_tra_ncc"], "con_phai_tra": cp["con_phai_tra"],
+            "tong_chi_phi": cp["tong_chi_phi"], "loi_nhuan": loi_nhuan,
+            "ty_suat": cp["ty_suat"],
+            "da_thu": da_thu, "con_phai_thu": cp["con_phai_thu"],
             "tam_ung_thu": tu_thu, "tam_ung_thu_con_lai": tu_thu_clt,
             "tam_ung_chi": tu_chi, "tam_ung_chi_con_lai": tu_chi_clt,
             "da_xuat_hd_ban": hd_ban,

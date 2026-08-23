@@ -674,35 +674,8 @@ def ds_tep_tat_ca(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"
 
 @router.get("/don-hang-tong-hop/lai-lo")
 def lai_lo_tat_ca(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
-    """Lãi/lỗ của TẤT CẢ đơn hàng trong 3 truy vấn (thay cho N lần gọi /lai-lo)."""
-    pos = db.query(DonMua).filter(DonMua.don_hang_id.isnot(None),
-                                  DonMua.trang_thai != "TU_CHOI").all()
-    po_theo_dh: dict[int, list] = {}
-    for p in pos:
-        po_theo_dh.setdefault(p.don_hang_id, []).append(p)
-    thuc_theo_po: dict[int, float] = {}
-    if pos:
-        for ct in db.query(DonMuaCt).filter(DonMuaCt.don_mua_id.in_([p.id for p in pos])).all():
-            thuc_theo_po[ct.don_mua_id] = (thuc_theo_po.get(ct.don_mua_id, 0.0)
-                                           + float(ct.so_luong_nhan or 0) * float(ct.don_gia or 0))
-    out = {}
-    for dh in db.query(DonHang).all():
-        ds = po_theo_dh.get(dh.id, [])
-        cam_ket = sum(float(p.tong_tien or 0) for p in ds)
-        thuc = sum(thuc_theo_po.get(p.id, 0.0) for p in ds)
-        doanh_thu = float(dh.tong_tien or 0)
-
-        def _rate(v, dt=doanh_thu):
-            return round((dt - v) / dt * 100, 1) if dt else 0.0
-        out[str(dh.id)] = {"don_hang_id": dh.id, "so": dh.so, "doanh_thu": doanh_thu,
-                           "gia_von_thuc": thuc, "gia_von_cam_ket": cam_ket,
-                           "lai_lo_thuc": doanh_thu - thuc, "lai_lo_dukien": doanh_thu - cam_ket,
-                           "ty_suat_thuc": _rate(thuc), "ty_suat_dukien": _rate(cam_ket),
-                           "so_po": len(ds),
-                           "danh_sach_po": [{"id": p.id, "so": p.so, "nha_cung_cap_id": p.nha_cung_cap_id,
-                                             "tong_tien": float(p.tong_tien or 0), "trang_thai": p.trang_thai,
-                                             "trang_thai_nhan": p.trang_thai_nhan} for p in ds]}
-    return out
+    """Lãi/lỗ của TẤT CẢ đơn hàng trong 1 request — CÔNG THỨC CHUNG (app/lai_lo_ma.py)."""
+    return {str(dh.id): _pnl_don(db, dh) for dh in db.query(DonHang).all()}
 
 
 @router.get("/don-hang/{dh_id}/lai-lo")
@@ -713,21 +686,23 @@ def lai_lo_don(dh_id: int, db: Session = Depends(get_db),
     dh = db.get(DonHang, dh_id)
     if dh is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đơn hàng")
-    pos = db.query(DonMua).filter(DonMua.don_hang_id == dh_id,
-                                  DonMua.trang_thai != "TU_CHOI").all()
-    gia_von_cam_ket = sum(float(p.tong_tien or 0) for p in pos)
-    po_ids = [p.id for p in pos]
-    gia_von_thuc = 0.0
-    if po_ids:
-        for ct in db.query(DonMuaCt).filter(DonMuaCt.don_mua_id.in_(po_ids)).all():
-            gia_von_thuc += float(ct.so_luong_nhan or 0) * float(ct.don_gia or 0)
-    doanh_thu = float(dh.tong_tien or 0)
+    return _pnl_don(db, dh)
+
+
+def _pnl_don(db: Session, dh: DonHang) -> dict:
+    """Lãi/lỗ 1 đơn theo CÔNG THỨC CHUNG (app/lai_lo_ma.py) — cùng số với Kế toán/Kiểm soát/OF.
+    'cam kết' = PO đã duyệt + chi phí ngoài PO; 'thực' = giá trị hàng đã nhận (thông tin phụ)."""
+    from ..lai_lo_ma import chi_phi_ma
+    cp = chi_phi_ma(db, dh)
+    doanh_thu = cp["doanh_thu"]
+    gia_von_thuc = cp["gia_von_thuc"]
+    gia_von_cam_ket = cp["tong_chi_phi"]
     rate = lambda v: round((doanh_thu - v) / doanh_thu * 100, 1) if doanh_thu else 0.0
     return {"don_hang_id": dh.id, "so": dh.so, "doanh_thu": doanh_thu,
             "gia_von_thuc": gia_von_thuc, "gia_von_cam_ket": gia_von_cam_ket,
-            "lai_lo_thuc": doanh_thu - gia_von_thuc, "lai_lo_dukien": doanh_thu - gia_von_cam_ket,
+            "gia_von_po": cp["gia_von_po"], "chi_phi_khac": cp["chi_phi_khac"],
+            "da_tra_ncc": cp["da_tra_ncc"], "con_phai_tra": cp["con_phai_tra"],
+            "da_thu": cp["da_thu"], "con_phai_thu": cp["con_phai_thu"],
+            "lai_lo_thuc": doanh_thu - gia_von_thuc, "lai_lo_dukien": cp["loi_nhuan"],
             "ty_suat_thuc": rate(gia_von_thuc), "ty_suat_dukien": rate(gia_von_cam_ket),
-            "so_po": len(pos),
-            "danh_sach_po": [{"id": p.id, "so": p.so, "nha_cung_cap_id": p.nha_cung_cap_id,
-                              "tong_tien": float(p.tong_tien or 0), "trang_thai": p.trang_thai,
-                              "trang_thai_nhan": p.trang_thai_nhan} for p in pos]}
+            "so_po": cp["so_po"], "danh_sach_po": cp["danh_sach_po"]}

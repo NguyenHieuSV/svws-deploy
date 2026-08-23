@@ -2148,39 +2148,23 @@ def ds_cong_no(nha_cung_cap_id: int | None = None, chua_tra: bool = False,
 
 @router.get("/chi-phi-theo-don")
 def chi_phi_theo_don(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
-    """Tổng hợp theo TỪNG MÃ ĐƠN HÀNG BÁN. Tổng chi phí = THANH TOÁN MUA HÀNG
-    (đề nghị TT của các PO gắn mã đơn bán) + CÔNG NỢ PHẢI TRẢ còn lại (của các PO đó
-    + khoản nhập ngoài có mã khớp mã đơn bán). Lợi nhuận = doanh thu − tổng chi phí."""
+    """Tổng hợp theo TỪNG MÃ ĐƠN HÀNG BÁN — CÔNG THỨC CHUNG (app/lai_lo_ma.py):
+    Tổng chi phí = Σ tổng PO ĐÃ DUYỆT gắn mã (nghĩa vụ cam kết) + công nợ nhập ngoài khớp mã
+    + hóa đơn mua gắn mã không qua PO. Lợi nhuận = doanh thu (gồm VAT) − tổng chi phí.
+    Đã trả / Còn phải trả là dòng tiền, không ảnh hưởng lợi nhuận."""
     from ..models import DonHang
-    con_lai_expr = func.coalesce(func.sum(CongNo.so_tien - CongNo.da_thanh_toan), 0)
+    from ..lai_lo_ma import chi_phi_ma
     out = []
     for dh in db.query(DonHang).order_by(DonHang.id.desc()).all():
-        # DOANH THU tính GỒM VAT — cùng cơ sở với chi phí (PO & công nợ đều gồm VAT)
-        doanh_thu = float(dh.tong_tien or 0) + float(dh.tien_thue or 0)
-        po_ids = [i for (i,) in db.query(DonMua.id).filter(DonMua.don_hang_id == dh.id).all()]
-        # 1) Thanh toán mua hàng = tổng đề nghị thanh toán của các PO gắn mã đơn bán
-        thanh_toan_mua = float(db.query(func.coalesce(func.sum(func.coalesce(DonMua.da_duyet_tt, DonMua.de_nghi_tt)), 0))
-                               .filter(DonMua.don_hang_id == dh.id).scalar() or 0)
-        # 2) Công nợ phải trả còn lại — của PO thuộc đơn + khoản nhập ngoài khớp mã đơn bán
-        cn_po = 0.0
-        if po_ids:
-            cn_po = float(db.query(con_lai_expr)
-                          .filter(CongNo.loai == "PHAI_TRA", CongNo.don_mua_id.in_(po_ids)).scalar() or 0)
-        cn_ngoai = 0.0
-        if dh.so:
-            cn_ngoai = float(db.query(con_lai_expr)
-                             .filter(CongNo.loai == "PHAI_TRA", CongNo.don_mua_id.is_(None),
-                                     func.lower(CongNo.ma_ban_ngoai) == dh.so.lower()).scalar() or 0)
-        cong_no_pt = max(cn_po, 0.0) + max(cn_ngoai, 0.0)
-        tong_chi_phi = thanh_toan_mua + cong_no_pt
-        if doanh_thu == 0 and tong_chi_phi == 0:
+        cp = chi_phi_ma(db, dh)
+        if cp["doanh_thu"] == 0 and cp["tong_chi_phi"] == 0:
             continue                      # bỏ đơn rỗng (chưa có doanh thu lẫn chi phí)
-        loi_nhuan = doanh_thu - tong_chi_phi
         out.append({"don_hang_id": dh.id, "ma_ban": dh.so or f"DH-{dh.id}",
-                    "doanh_thu": doanh_thu,
-                    "thanh_toan_mua": thanh_toan_mua, "cong_no_phai_tra": cong_no_pt,
-                    "tong_chi_phi": tong_chi_phi, "loi_nhuan": loi_nhuan,
-                    "ty_suat": round(loi_nhuan / doanh_thu * 100, 1) if doanh_thu else None})
+                    "doanh_thu": cp["doanh_thu"],
+                    "gia_von_po": cp["gia_von_po"], "chi_phi_khac": cp["chi_phi_khac"],
+                    "thanh_toan_mua": cp["da_tra_ncc"], "cong_no_phai_tra": cp["con_phai_tra"],
+                    "tong_chi_phi": cp["tong_chi_phi"], "loi_nhuan": cp["loi_nhuan"],
+                    "ty_suat": cp["ty_suat"]})
     return out
 
 
