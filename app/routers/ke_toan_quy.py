@@ -2140,7 +2140,7 @@ def _sao_ke_ghi_chi_lo(data: SkGhiVao, db: Session, nd: NguoiDung):
         lcb0.trang_thai = "DA_CHI"
         lcb0.chi_luc = gio_hien_tai()
         lcb0.ghi_chu = "Công nợ 100% — không chi tiền, toàn bộ giá trị PO ở Công nợ phải trả"[:200]
-        ghi_audit(db, nd.id, "CONG_NO_100_DONG_LENH", "lenh_chi_bank", lcb0.id,
+        ghi_audit(db, nd.id, "CONG_NO_100", "lenh_chi_bank", lcb0.id,
                   moi={"po": dm.so, "tong_tien": float(dm.tong_tien or 0)})
         db.commit()
         return {"ok": True, "phieu_so": None, "cong_no_100": True,
