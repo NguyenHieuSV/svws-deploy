@@ -2103,6 +2103,19 @@ class SkGhiVao(_BM_hdc):
 @router.post("/sao-ke/ghi-chi")
 def sao_ke_ghi_chi(data: SkGhiVao, db: Session = Depends(get_db),
                    nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    """Vỏ bắt lỗi tạm — lỗi thật hiện rõ trong thông báo thay vì 500 câm."""
+    try:
+        return _sao_ke_ghi_chi_lo(data, db, nd)
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        tb = traceback.format_exc().strip().splitlines()
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR,
+                            f"DBG {type(e).__name__}: {e} | " + " | ".join(tb[-3:]))
+
+
+def _sao_ke_ghi_chi_lo(data: SkGhiVao, db: Session, nd: NguoiDung):
     """✔ ĐÃ CHI: tạo PHIẾU CHI chờ duyệt (qua hạn mức + quỹ như mọi phiếu) + đánh dấu
     lệnh ngân hàng ĐÃ CHI + gắn vết vào dòng sao kê (nếu ghi từ Danh mục thanh toán)."""
     from ..models import DonMua, LenhChiBank, SaoKeDong
