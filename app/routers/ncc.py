@@ -1266,7 +1266,7 @@ def gui_thu_duyet_chi_chat(db: Session = Depends(get_db),
 
 @router.post("/lenh-chi-bank/{lcb_id}/duyet")
 def duyet_lenh_chi_bank(lcb_id: int, db: Session = Depends(get_db),
-                        nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN", "KTT"))):
+                        nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN", "KTT", "TP_QLNB"))):
     """DUYỆT lệnh chi ngân hàng — sau bước này lệnh mới đổ về Kế toán để thực chi."""
     from ..models import LenhChiBank
     from ..nhac_viec_service import gio_hien_tai
@@ -1374,7 +1374,7 @@ def da_chi_lenh_cong_no(lcb_id: int, sao_ke_dong_id: int | None = None,
 
 @router.post("/lenh-chi-bank/{lcb_id}/tu-choi")
 def tu_choi_lenh_chi_bank(lcb_id: int, db: Session = Depends(get_db),
-                          nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN", "KTT"))):
+                          nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN", "KTT", "TP_QLNB"))):
     """TỪ CHỐI lệnh chi — lệnh bị gỡ, PO quay về Thanh toán mua hàng để kế toán chỉnh lại."""
     from ..models import LenhChiBank
     from ..nhac_viec_service import gio_hien_tai
