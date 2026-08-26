@@ -234,12 +234,13 @@ def tinh_luong_thang(data: TinhLuongVao, db: Session = Depends(get_db),
         bl = db.query(BangLuong).filter_by(nhan_vien_id=nv.id, thang=data.thang).first()
         if bl and bl.trang_thai == "DA_DUYET":
             continue  # đã chốt, không tính lại
-        kq = tinh_luong(nv.luong_co_ban)
         if bl is None:
             bl = BangLuong(nhan_vien_id=nv.id, thang=data.thang)
+            # PHÂN BỔ mặc định theo hồ sơ NV (mẫu): thưởng chuyên cần + PC độc hại
+            bl.thuong_chuyen_can = getattr(nv, "thuong_chuyen_can", 0) or 0
+            bl.pc_doc_hai = getattr(nv, "pc_doc_hai", 0) or 0
             db.add(bl)
-        for k, v in kq.items():
-            setattr(bl, k, v)
+        kq = _ap_dung_tinh(db, nv, bl)
         bl.trang_thai = "CHO_DUYET"
         bl.nguoi_duyet_ktt = None
         bl.nguoi_ky_ceo = None
@@ -326,6 +327,7 @@ def _cfg_luong(db):
         "giam_tru_ban_than": ts.giam_tru_ban_than, "giam_tru_phu_thuoc": ts.giam_tru_phu_thuoc,
         "mien_thue_an": ts.mien_thue_an, "hs_ot_thuong": ts.hs_ot_thuong,
         "hs_ot_cuoi_tuan": ts.hs_ot_cuoi_tuan, "hs_ot_le": ts.hs_ot_le,
+        "tru_bh_nv": bool(getattr(ts, "tru_bh_nv", False) or False),
         "bac_thue": bac,
     }
 
@@ -337,7 +339,10 @@ def _ap_dung_tinh(db, nv: NhanVien, bl: BangLuong, cfg=None):
                     nv.phu_cap_an, nv.phu_cap_di_lai, nv.phu_cap_dien_thoai, nv.phu_cap_trach_nhiem,
                     nv.so_phu_thuoc, bl.tam_ung,
                     (bl.phu_cap_khac or 0) + (bl.thuong_kpi or 0), bl.ngay_nghi_kpep, bl.so_phut_di_tre, bl.khau_tru_khac,
-                    nv.loai_hop_dong, bool(nv.cam_ket_08), cfg)
+                    nv.loai_hop_dong, bool(nv.cam_ket_08),
+                    thuong_chuyen_can=bl.thuong_chuyen_can or 0, pc_doc_hai=bl.pc_doc_hai or 0,
+                    pc_cong_tac=bl.pc_cong_tac or 0, thuong_htcv=bl.thuong_htcv or 0,
+                    loai_luong=getattr(nv, "loai_luong", "THANG") or "THANG", cfg=cfg)
     bl.luong_co_ban = nv.luong_co_ban
     for k in ("luong_thuc_te", "ot", "phu_cap", "bhxh", "bhyt", "bhtn",
               "bhxh_dn", "bhyt_dn", "bhtn_dn", "kpcd_dn", "thu_nhap_chiu_thue",
@@ -349,7 +354,9 @@ def _ap_dung_tinh(db, nv: NhanVien, bl: BangLuong, cfg=None):
 
 def _pl_dict(db, bl: BangLuong, nv: NhanVien = None):
     nv = nv or db.get(NhanVien, bl.nhan_vien_id)
-    tong_thu_nhap = _f(bl.luong_thuc_te) + _f(bl.phu_cap) + _f(bl.ot)
+    tong_thu_nhap = (_f(bl.luong_thuc_te) + _f(bl.phu_cap) + _f(bl.ot)
+                     + _f(getattr(bl, "thuong_chuyen_can", 0)) + _f(getattr(bl, "pc_doc_hai", 0))
+                     + _f(getattr(bl, "pc_cong_tac", 0)) + _f(getattr(bl, "thuong_htcv", 0)))
     return {
         "id": bl.id, "nhan_vien_id": bl.nhan_vien_id, "ho_ten": nv.ho_ten if nv else "",
         "chuc_danh": nv.chuc_danh if nv else "", "thang": bl.thang,
@@ -360,6 +367,14 @@ def _pl_dict(db, bl: BangLuong, nv: NhanVien = None):
         "gio_ot_thuong": _f(bl.gio_ot_thuong), "gio_ot_cuoi_tuan": _f(bl.gio_ot_cuoi_tuan),
         "gio_ot_le": _f(bl.gio_ot_le),
         "luong_co_ban": _f(bl.luong_co_ban), "luong_thuc_te": _f(bl.luong_thuc_te),
+        "nghi_huong_luong": _f(getattr(bl, "nghi_huong_luong", 0)),
+        "thuong_chuyen_can": _f(getattr(bl, "thuong_chuyen_can", 0)),
+        "pc_doc_hai": _f(getattr(bl, "pc_doc_hai", 0)), "pc_cong_tac": _f(getattr(bl, "pc_cong_tac", 0)),
+        "thuong_htcv": _f(getattr(bl, "thuong_htcv", 0)),
+        "loai_luong": getattr(nv, "loai_luong", "THANG") if nv else "THANG",
+        "pc_an": _f(nv.phu_cap_an) if nv else 0, "pc_di_lai": _f(nv.phu_cap_di_lai) if nv else 0,
+        "pc_dien_thoai": _f(nv.phu_cap_dien_thoai) if nv else 0,
+        "pc_trach_nhiem": _f(nv.phu_cap_trach_nhiem) if nv else 0,
         "phu_cap": _f(bl.phu_cap), "phu_cap_khac": _f(bl.phu_cap_khac), "thuong_kpi": _f(bl.thuong_kpi), "ot": _f(bl.ot),
         "ngay_nghi_kpep": _f(bl.ngay_nghi_kpep), "so_phut_di_tre": int(bl.so_phut_di_tre or 0),
         "khau_tru_nghi": _f(bl.khau_tru_nghi), "khau_tru_tre": _f(bl.khau_tru_tre),
@@ -2010,11 +2025,15 @@ def cham_cong_phieu(bl_id: int, data: ChamCongLuongVao, db: Session = Depends(ge
         raise HTTPException(status.HTTP_400_BAD_REQUEST,
                             "Kỳ lương đã chốt — hãy bấm “Mở lại kỳ” (CEO/Admin) để điều chỉnh, rồi chốt lại.")
     for k in ("cong_thuc_te", "gio_ot_thuong", "gio_ot_cuoi_tuan", "gio_ot_le", "tam_ung",
-              "phu_cap_khac", "ngay_nghi_kpep", "so_phut_di_tre", "khau_tru_khac"):
+              "phu_cap_khac", "ngay_nghi_kpep", "so_phut_di_tre", "khau_tru_khac",
+              "nghi_huong_luong", "thuong_chuyen_can", "pc_doc_hai", "pc_cong_tac", "thuong_htcv"):
         v = getattr(data, k)
         if v is not None:
             setattr(bl, k, v)
     nv = db.get(NhanVien, bl.nhan_vien_id)
+    if data.luu_mac_dinh:   # ghi nhớ phân bổ cho các kỳ sau
+        nv.thuong_chuyen_can = bl.thuong_chuyen_can or 0
+        nv.pc_doc_hai = bl.pc_doc_hai or 0
     _ap_dung_tinh(db, nv, bl)
     ky = db.get(KyLuong, bl.thang)
     if ky:

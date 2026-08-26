@@ -525,6 +525,12 @@ class KyLuongVao(BaseModel):
 
 class ChamCongLuongVao(BaseModel):
     cong_thuc_te: Decimal | None = None
+    nghi_huong_luong: Decimal | None = None
+    thuong_chuyen_can: Decimal | None = None
+    pc_doc_hai: Decimal | None = None
+    pc_cong_tac: Decimal | None = None
+    thuong_htcv: Decimal | None = None
+    luu_mac_dinh: bool | None = None    # lưu chuyên cần + PC độc hại làm mặc định các kỳ sau
     gio_ot_thuong: Decimal | None = None
     gio_ot_cuoi_tuan: Decimal | None = None
     gio_ot_le: Decimal | None = None

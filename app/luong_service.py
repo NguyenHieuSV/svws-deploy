@@ -56,6 +56,8 @@ def tinh_luong(luong_co_ban, luong_dong_bh=0, cong_chuan=26, cong_thuc_te=26,
                so_phu_thuoc=0, tam_ung=0,
                phu_cap_khac=0, ngay_nghi_kpep=0, so_phut_di_tre=0, khau_tru_khac=0,
                loai_hop_dong="CHINH_THUC", cam_ket_08=False,
+               thuong_chuyen_can=0, pc_doc_hai=0, pc_cong_tac=0, thuong_htcv=0,
+               loai_luong="THANG",
                cfg=None) -> dict:
     # Tham số theo luật — lấy từ cfg (cấu hình cập nhật được), thiếu thì dùng mặc định
     c = cfg or {}
@@ -75,10 +77,14 @@ def tinh_luong(luong_co_ban, luong_dong_bh=0, cong_chuan=26, cong_thuc_te=26,
     ctt = D(cong_thuc_te)
     ldbh = D(luong_dong_bh) or lcb              # 0 → lấy lương cơ bản
     # Lương theo công thực tế (số công được trả)
-    luong_theo_cong = _r(lcb * ctt / cc)
-    # Đơn giá ngày / phút (theo lương cơ bản tháng)
-    don_gia_ngay = lcb / cc
-    don_gia_gio = lcb / cc / GIO_CONG_NGAY
+    if str(loai_luong or "THANG").upper() == "NGAY":
+        # CÔNG NHẬT (theo mẫu: mức lương CB là ĐƠN GIÁ NGÀY): lương = đơn giá × số công
+        luong_theo_cong = _r(lcb * ctt)
+        don_gia_ngay = lcb
+    else:
+        luong_theo_cong = _r(lcb * ctt / cc)
+        don_gia_ngay = lcb / cc
+    don_gia_gio = don_gia_ngay / GIO_CONG_NGAY
     don_gia_phut = don_gia_gio / Decimal(60)
     # Khấu trừ nghỉ không phép & đi làm trễ (giảm thu nhập trước thuế — coi như không có thu nhập phần đó)
     khau_tru_nghi = _r(D(ngay_nghi_kpep) * don_gia_ngay)
@@ -94,7 +100,10 @@ def tinh_luong(luong_co_ban, luong_dong_bh=0, cong_chuan=26, cong_thuc_te=26,
     pc_khac = D(phu_cap_khac)
     pc = pc_co_dinh + pc_khac
     an_mien_thue = min(pc_an, mien_an_max)
-    tong_thu_nhap = luong_thuc_te + tien_ot + pc
+    # Các khoản theo MẪU phân bổ: chuyên cần + PC độc hại + thưởng HTCV (chịu thuế),
+    # PC công tác (khoán công tác phí — MIỄN thuế TNCN)
+    tcc = D(thuong_chuyen_can); pdh = D(pc_doc_hai); pct = D(pc_cong_tac); thtcv = D(thuong_htcv)
+    tong_thu_nhap = luong_thuc_te + tien_ot + pc + tcc + pdh + pct + thtcv
 
     # Bảo hiểm — áp trần đóng
     base_xhyt = min(ldbh, tran_xhyt)
@@ -107,7 +116,7 @@ def tinh_luong(luong_co_ban, luong_dong_bh=0, cong_chuan=26, cong_thuc_te=26,
 
     # Thuế TNCN
     giam_tru = gt_bt + gt_pt * D(so_phu_thuoc)
-    thu_nhap_chiu_thue = tong_thu_nhap - an_mien_thue - ot_mien_thue   # phần miễn thuế trừ ra
+    thu_nhap_chiu_thue = tong_thu_nhap - an_mien_thue - ot_mien_thue - pct   # phần miễn thuế trừ ra
     thu_nhap_tinh_thue = thu_nhap_chiu_thue - bh_nv - giam_tru
     thue = tinh_tncn(thu_nhap_tinh_thue, bieu)
 
@@ -122,7 +131,10 @@ def tinh_luong(luong_co_ban, luong_dong_bh=0, cong_chuan=26, cong_thuc_te=26,
 
     tu = D(tam_ung)
     ktkhac = D(khau_tru_khac)
-    khau_tru = bh_nv + thue + tu + ktkhac
+    # Theo MẪU phân bổ: mặc định KHÔNG trừ BH vào lương NV (doanh nghiệp gánh phần NLĐ);
+    # bật tru_bh_nv trong Tham số lương nếu muốn trừ đúng luật vào thực nhận.
+    tru_bh = bool(c.get("tru_bh_nv") or False)
+    khau_tru = (bh_nv if tru_bh else Decimal(0)) + thue + tu + ktkhac
     thuc_linh = tong_thu_nhap - khau_tru
     chi_phi_dn = tong_thu_nhap + bh_dn + kpcd_dn      # tổng chi phí lương cho DN (gồm KPCĐ 2%)
 
@@ -137,6 +149,7 @@ def tinh_luong(luong_co_ban, luong_dong_bh=0, cong_chuan=26, cong_thuc_te=26,
         "bhxh": bhxh, "bhyt": bhyt, "bhtn": bhtn,
         "bhxh_dn": bhxh_dn, "bhyt_dn": bhyt_dn, "bhtn_dn": bhtn_dn, "kpcd_dn": kpcd_dn,
         "thu_nhap_chiu_thue": _r(max(Decimal(0), thu_nhap_tinh_thue)),
+        "thuong_chuyen_can": tcc, "pc_doc_hai": pdh, "pc_cong_tac": pct, "thuong_htcv": thtcv,
         "thue_tncn": thue, "tam_ung": tu,
         "khau_tru": khau_tru, "thuc_linh": thuc_linh, "chi_phi_dn": chi_phi_dn,
     }

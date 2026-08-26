@@ -66,6 +66,9 @@ class NhanVien(Base):
     phu_cap_di_lai: Mapped[Decimal] = mapped_column(Numeric(18, 0), default=0)
     phu_cap_dien_thoai: Mapped[Decimal] = mapped_column(Numeric(18, 0), default=0)
     phu_cap_trach_nhiem: Mapped[Decimal] = mapped_column(Numeric(18, 0), default=0)
+    loai_luong: Mapped[str] = mapped_column(String(8), default="THANG")            # mig 112: THANG | NGAY (công nhật)
+    thuong_chuyen_can: Mapped[Decimal] = mapped_column(Numeric(18, 0), default=0)  # mig 112: phân bổ cố định
+    pc_doc_hai: Mapped[Decimal] = mapped_column(Numeric(18, 0), default=0)         # mig 112: phân bổ cố định
     ma_so_thue: Mapped[str | None] = mapped_column(String(20), nullable=True)
     so_tai_khoan: Mapped[str | None] = mapped_column(String(30), nullable=True)
     ngan_hang: Mapped[str | None] = mapped_column(String(80), nullable=True)
@@ -676,6 +679,11 @@ class BangLuong(Base):
     gio_ot_thuong: Mapped[Decimal] = mapped_column(Numeric(6, 1), default=0)
     gio_ot_cuoi_tuan: Mapped[Decimal] = mapped_column(Numeric(6, 1), default=0)
     gio_ot_le: Mapped[Decimal] = mapped_column(Numeric(6, 1), default=0)
+    nghi_huong_luong: Mapped[Decimal] = mapped_column(Numeric(5, 1), default=0)    # mig 112 (hiển thị theo mẫu)
+    thuong_chuyen_can: Mapped[Decimal] = mapped_column(Numeric(18, 0), default=0)  # mig 112
+    pc_doc_hai: Mapped[Decimal] = mapped_column(Numeric(18, 0), default=0)         # mig 112
+    pc_cong_tac: Mapped[Decimal] = mapped_column(Numeric(18, 0), default=0)        # mig 112 (miễn thuế - khoán CT phí)
+    thuong_htcv: Mapped[Decimal] = mapped_column(Numeric(18, 0), default=0)        # mig 112 (thưởng hoàn thành CV)
     luong_thuc_te: Mapped[Decimal] = mapped_column(Numeric(18, 0), default=0)
     tam_ung: Mapped[Decimal] = mapped_column(Numeric(18, 0), default=0)
     thu_nhap_chiu_thue: Mapped[Decimal] = mapped_column(Numeric(18, 0), default=0)
@@ -996,6 +1004,7 @@ class ThamSoLuong(Base):
     tl_bhxh_nv: Mapped[Decimal] = mapped_column(Numeric(6, 4), default=Decimal("0.08"))
     tl_bhyt_nv: Mapped[Decimal] = mapped_column(Numeric(6, 4), default=Decimal("0.015"))
     tl_bhtn_nv: Mapped[Decimal] = mapped_column(Numeric(6, 4), default=Decimal("0.01"))
+    tru_bh_nv: Mapped[bool] = mapped_column(Boolean, default=False)  # mig 112: False = KHÔNG trừ BH vào lương NV (theo mẫu)
     tl_bhxh_dn: Mapped[Decimal] = mapped_column(Numeric(6, 4), default=Decimal("0.175"))
     tl_bhyt_dn: Mapped[Decimal] = mapped_column(Numeric(6, 4), default=Decimal("0.03"))
     tl_bhtn_dn: Mapped[Decimal] = mapped_column(Numeric(6, 4), default=Decimal("0.01"))
