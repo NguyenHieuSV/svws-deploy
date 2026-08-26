@@ -275,13 +275,26 @@ def gui_nhac_bcvh_tuan(db: Session) -> dict:
         tong_ngay += len(ds)
     dong.append("👉 NVVH vào *Cho thuê → mở dự án → Báo cáo vận hành*, chọn đúng Ngày báo cáo và bổ sung dữ liệu.")
     noi_dung = "\n".join(dong)
+    # ƯU TIÊN nhóm "Coats Operation - Report" (webhook riêng GCHAT_WEBHOOK_BCVH);
+    # chưa cấu hình thì lùi về phòng chung để lời nhắc không bị mất.
+    url = (settings.gchat_webhook_bcvh or "").strip()
+    if url:
+        from ..chat_gateway import gui_webhook_rieng
+        try:
+            gui_webhook_rieng(url, noi_dung)
+        except Exception as e:
+            return {"da_gui": False, "ly_do": f"webhook BCVH lỗi {type(e).__name__}: {e}",
+                    "tong_ngay": tong_ngay}
+        return {"da_gui": True, "kenh": "Coats Operation - Report",
+                "so_du_an": len(thieu), "tong_ngay": tong_ngay}
     if not dang_bat():
         return {"da_gui": False, "ly_do": "chưa cấu hình Google Chat", "tong_ngay": tong_ngay}
     try:
         lay_chat_provider().gui_phong(noi_dung)
     except Exception as e:
         return {"da_gui": False, "ly_do": f"{type(e).__name__}: {e}", "tong_ngay": tong_ngay}
-    return {"da_gui": True, "so_du_an": len(thieu), "tong_ngay": tong_ngay}
+    return {"da_gui": True, "kenh": "phòng chung (chưa đặt GCHAT_WEBHOOK_BCVH)",
+            "so_du_an": len(thieu), "tong_ngay": tong_ngay}
 
 
 @router.get("/tai-san/{ts_id}/bao-cao")
