@@ -14,6 +14,7 @@ from .database import SessionLocal
 _CHU_KY = 300          # 5 phút quét một lần
 _luong: threading.Thread | None = None
 _GIO_LAI_LO = ""       # mốc giờ đã chốt Lãi/Lỗ Record gần nhất
+_TUAN_BCVH = ""        # tuần đã gửi nhắc Báo cáo vận hành (thứ Bảy 14h)
 
 
 def _vong_lap():
@@ -41,6 +42,19 @@ def _vong_lap():
                     from .routers.tai_chinh import luu_lai_lo_hom_nay
                     luu_lai_lo_hom_nay(db)
                     db.commit()
+                finally:
+                    db.close()
+            # 📋 Nhắc Báo cáo vận hành thiếu dữ liệu: 14h THỨ BẢY hàng tuần → group Google Chat
+            global _TUAN_BCVH
+            g2 = gio_hien_tai()
+            tuan_nay = g2.strftime("%G-W%V")
+            if g2.weekday() == 5 and g2.hour == 14 and _TUAN_BCVH != tuan_nay:
+                _TUAN_BCVH = tuan_nay
+                db = SessionLocal()
+                try:
+                    from .routers.cho_thue_ops import gui_nhac_bcvh_tuan
+                    kq2 = gui_nhac_bcvh_tuan(db)
+                    print(f"[SCHEDULER] Nhắc BCVH tuần: {kq2}")
                 finally:
                     db.close()
         except Exception as e:                     # không bao giờ để luồng nền chết

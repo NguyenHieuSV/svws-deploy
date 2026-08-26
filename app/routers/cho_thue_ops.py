@@ -204,6 +204,86 @@ class BcvhVao(BaseModel):
     ghi_chu: str | None = None
 
 
+_BCVH_LOAI = [("KY_THUAT", "Báo cáo kỹ thuật"), ("HOA_CHAT_VT", "Hóa chất - Vật tư"),
+              ("KHOI_LUONG", "Khối lượng")]
+
+
+def tinh_ngay_thieu_bcvh(db: Session, ts_id: int | None = None, so_ngay_toi_da: int = 45) -> dict:
+    """📅 Các NGÀY CHƯA CÓ DỮ LIỆU của 3 bảng Báo cáo vận hành, tính theo từng dự án.
+    Ngày D chỉ bị 'chốt thiếu' SAU 12h trưa ngày D+1 (giờ VN). Phạm vi xét: từ ngày có
+    báo cáo đầu tiên của dự án (tối đa 45 ngày gần nhất). Chỉ xét dự án đã từng có báo cáo."""
+    from ..nhac_viec_service import gio_hien_tai
+    gio = gio_hien_tai()
+    moc = gio.date() - timedelta(days=1 if gio.hour >= 12 else 2)   # ngày mới nhất đủ điều kiện chốt
+    q = db.query(CtBaoCaoVh.tai_san_id, CtBaoCaoVh.loai, CtBaoCaoVh.ngay)
+    if ts_id:
+        q = q.filter(CtBaoCaoVh.tai_san_id == ts_id)
+    co, min_ngay = {}, {}
+    for t, l, ng in q.all():
+        if not ng:
+            continue
+        co.setdefault((t, str(ng)), set()).add(l)
+        if t not in min_ngay or ng < min_ngay[t]:
+            min_ngay[t] = ng
+    out = {}
+    for t, bat_dau in min_ngay.items():
+        d = max(bat_dau, moc - timedelta(days=so_ngay_toi_da - 1))
+        ds = []
+        while d <= moc:
+            k = co.get((t, str(d)), set())
+            thieu = [nhan for (ma, nhan) in _BCVH_LOAI if ma not in k]
+            if thieu:
+                ds.append({"ngay": str(d), "thieu": thieu})
+            d += timedelta(days=1)
+        if ds:
+            out[t] = ds
+    return out
+
+
+@router.get("/tai-san/{ts_id}/ngay-thieu-bc")
+def ds_ngay_thieu_bc(ts_id: int, db: Session = Depends(get_db),
+                     _=Depends(yeu_cau(MODULE, "XEM"))):
+    """Danh sách ngày CHƯA CÓ DỮ LIỆU (liệt kê theo bảng) của một dự án cho thuê."""
+    if db.get(TaiSanChoThue, ts_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy dự án cho thuê")
+    return tinh_ngay_thieu_bcvh(db, ts_id).get(ts_id, [])
+
+
+def gui_nhac_bcvh_tuan(db: Session) -> dict:
+    """📨 14h THỨ BẢY hàng tuần (scheduler gọi): tổng hợp mọi dự án còn ngày thiếu dữ liệu
+    BCVH và nhắn vào GROUP Google Chat chung. Nuốt lỗi gửi — không làm hỏng luồng nền."""
+    from ..chat_gateway import lay_chat_provider, dang_bat
+    thieu = tinh_ngay_thieu_bcvh(db)
+    if not thieu:
+        return {"da_gui": False, "ly_do": "không có ngày thiếu dữ liệu"}
+    ts_map = {t.id: t for t in db.query(TaiSanChoThue)
+              .filter(TaiSanChoThue.id.in_(list(thieu.keys()))).all()}
+    vnN = lambda n: f"{n[8:10]}/{n[5:7]}"
+    dong = ["📋 *NHẮC BÁO CÁO VẬN HÀNH — tổng hợp tuần*",
+            "Các ngày CHƯA CÓ DỮ LIỆU (chốt sau 12h trưa hôm sau, tối đa 45 ngày gần nhất):", ""]
+    tong_ngay = 0
+    for tid, ds in thieu.items():
+        ts = ts_map.get(tid)
+        ten = ((ts.ten_du_an or ts.ma or f"DA#{tid}") + (f" — {ts.ten}" if ts and ts.ten else "")) if ts else f"DA#{tid}"
+        dong.append(f"*{ten}* — {len(ds)} ngày thiếu:")
+        for x in ds[:14]:
+            du3 = len(x["thieu"]) >= len(_BCVH_LOAI)
+            dong.append(f"  • {vnN(x['ngay'])}: " + ("thiếu CẢ 3 bảng" if du3 else "thiếu " + ", ".join(x["thieu"])))
+        if len(ds) > 14:
+            dong.append(f"  … và {len(ds) - 14} ngày khác")
+        dong.append("")
+        tong_ngay += len(ds)
+    dong.append("👉 NVVH vào *Cho thuê → mở dự án → Báo cáo vận hành*, chọn đúng Ngày báo cáo và bổ sung dữ liệu.")
+    noi_dung = "\n".join(dong)
+    if not dang_bat():
+        return {"da_gui": False, "ly_do": "chưa cấu hình Google Chat", "tong_ngay": tong_ngay}
+    try:
+        lay_chat_provider().gui_phong(noi_dung)
+    except Exception as e:
+        return {"da_gui": False, "ly_do": f"{type(e).__name__}: {e}", "tong_ngay": tong_ngay}
+    return {"da_gui": True, "so_du_an": len(thieu), "tong_ngay": tong_ngay}
+
+
 @router.get("/tai-san/{ts_id}/bao-cao")
 def ds_bao_cao_vh(ts_id: int, loai: str | None = None, db: Session = Depends(get_db),
                   _=Depends(yeu_cau(MODULE, "XEM"))):
