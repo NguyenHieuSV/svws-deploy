@@ -2245,3 +2245,47 @@ def gui_email_luong(thang: str, db: Session = Depends(get_db),
     db.commit()
     return {"thang": thang, "da_gui": da_gui, "bo_qua_thieu_email": bo_qua,
             "tre_han": tre_han, "han_chot": str(ky.ngay_chot) if ky.ngay_chot else None}
+
+
+# ---- ➕ Thêm MỘT nhân sự vào kỳ lương đang mở (NV mới vào / bị sót khi sinh bảng) ----
+from pydantic import BaseModel as _TnkBase
+
+
+class ThemNvKyVao(_TnkBase):
+    nhan_vien_id: int
+    cong_thuc_te: float | None = None
+
+
+@router.post("/ky-luong/{thang}/them-nv")
+def them_nv_vao_ky(thang: str, data: ThemNvKyVao, db: Session = Depends(get_db),
+                   nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    ky = db.get(KyLuong, thang)
+    if ky is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Kỳ chưa tạo — bấm Sinh/cập nhật bảng lương trước.")
+    if ky.trang_thai == "DA_CHOT":
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Kỳ đã chốt — bấm 🔓 Mở lại kỳ trước khi thêm nhân sự.")
+    nv = db.get(NhanVien, data.nhan_vien_id)
+    if nv is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy nhân viên")
+    if db.query(BangLuong).filter_by(nhan_vien_id=nv.id, thang=thang).first():
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            f"{nv.ho_ten} đã có trong bảng lương kỳ này")
+    bl = BangLuong(nhan_vien_id=nv.id, thang=thang, cong_chuan=ky.cong_chuan or 26,
+                   cong_thuc_te=(data.cong_thuc_te if data.cong_thuc_te is not None
+                                 else (ky.cong_chuan or 26)),
+                   trang_thai="CHO_DUYET")
+    # PHÂN BỔ mặc định theo hồ sơ NV (mẫu): thưởng chuyên cần + PC độc hại
+    bl.thuong_chuyen_can = getattr(nv, "thuong_chuyen_can", 0) or 0
+    bl.pc_doc_hai = getattr(nv, "pc_doc_hai", 0) or 0
+    db.add(bl); db.flush()
+    wt = _wt_so_lieu_luong(db, nv.id, thang)
+    if wt is not None:
+        bl.gio_ot_thuong = wt["gio_ot_thuong"]; bl.gio_ot_cuoi_tuan = wt["gio_ot_cuoi_tuan"]
+        bl.gio_ot_le = wt["gio_ot_le"]; bl.ngay_nghi_kpep = wt["ngay_nghi_kpep"]
+    _ap_dung_tinh(db, nv, bl)
+    _cap_nhat_tong_ky(db, ky)
+    ghi_audit(db, nd.id, "THEM_NV_KY", "bang_luong", bl.id, moi={"thang": thang, "nv": nv.id})
+    db.commit()
+    return {"ok": True, "id": bl.id, "ho_ten": nv.ho_ten}
