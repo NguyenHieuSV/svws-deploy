@@ -1470,3 +1470,26 @@ class SaoKeDong(Base):
     khop_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     khop_mo_ta: Mapped[str | None] = mapped_column(String(300), nullable=True)
     ghi_chu: Mapped[str | None] = mapped_column(String(300), nullable=True)
+
+
+class DuToanBan(Base):
+    """Dự toán hàng bán — nơi MÃ HÀNG BÁN được tạo đầu tiên (mig 114)."""
+    __tablename__ = "du_toan_ban"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    ma: Mapped[str] = mapped_column(String(60))
+    khach_hang: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    mo_ta: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ngay: Mapped[date | None] = mapped_column(Date, nullable=True)
+    nguoi_tao: Mapped[str | None] = mapped_column(String(120), nullable=True)
+
+
+class DuToanBanMuc(Base):
+    __tablename__ = "du_toan_ban_muc"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    du_toan_id: Mapped[int] = mapped_column(ForeignKey("du_toan_ban.id", ondelete="CASCADE"))
+    ten: Mapped[str] = mapped_column(String(250))
+    quy_cach: Mapped[str | None] = mapped_column(Text, nullable=True)
+    don_vi: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    so_luong: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=0)
+    don_gia: Mapped[Decimal] = mapped_column(Numeric(18, 0), default=0)
+    ghi_chu: Mapped[str | None] = mapped_column(Text, nullable=True)

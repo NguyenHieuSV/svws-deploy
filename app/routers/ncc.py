@@ -3168,3 +3168,175 @@ def _thuc_hien_tra_ncc(db, nd, cn, so_tien, hinh_thuc, ngay_tra):
                 dmx.ngay_tt_du = date.today()
     ghi_audit(db, nd.id, "THANH_TOAN", "cong_no", cn.id,
               moi={"so_tien": float(so_tien), "trang_thai": cn.trang_thai})
+
+
+# ---------------------------------------------------------------------------
+#  DỰ TOÁN HÀNG BÁN — nơi MÃ HÀNG BÁN được tạo ĐẦU TIÊN (trước báo giá/đơn hàng).
+#  Header: mã · khách hàng · mô tả yêu cầu · ngày tạo · người tạo (tự ghi theo tài khoản).
+#  Bên dưới: danh mục sản phẩm lập dự toán (thêm/sửa/xóa). Quyền dùng khuôn "ncc".
+# ---------------------------------------------------------------------------
+from ..models import DuToanBan, DuToanBanMuc, NhanVien as _DtbNhanVien
+
+
+class DuToanBanVao(_NccCnBase):
+    ma: str | None = None
+    khach_hang: str | None = None
+    mo_ta: str | None = None
+    ngay: str | None = None
+
+
+class DtbMucVao(_NccCnBase):
+    ten: str | None = None
+    quy_cach: str | None = None
+    don_vi: str | None = None
+    so_luong: float | None = None
+    don_gia: float | None = None
+    ghi_chu: str | None = None
+
+
+def _dtb_ten_nguoi(db: Session, nd: NguoiDung) -> str:
+    try:
+        nv_id = nhan_vien_id_cua(db, nd)
+        if nv_id:
+            nv = db.get(_DtbNhanVien, nv_id)
+            if nv and nv.ho_ten:
+                return nv.ho_ten
+    except Exception:
+        pass
+    return nd.email
+
+
+@router.get("/du-toan-ban")
+def dtb_danh_sach(db: Session = Depends(get_db), _=Depends(yeu_cau("ncc", "XEM"))):
+    tong_map = {}
+    for dt_id, sl, dg in db.query(DuToanBanMuc.du_toan_id, DuToanBanMuc.so_luong, DuToanBanMuc.don_gia).all():
+        t, n = tong_map.get(dt_id, (0.0, 0))
+        tong_map[dt_id] = (t + float(sl or 0) * float(dg or 0), n + 1)
+    out = []
+    for d in db.query(DuToanBan).order_by(DuToanBan.id.desc()).all():
+        t, n = tong_map.get(d.id, (0.0, 0))
+        out.append({"id": d.id, "ma": d.ma, "khach_hang": d.khach_hang, "mo_ta": d.mo_ta,
+                    "ngay": str(d.ngay) if d.ngay else None, "nguoi_tao": d.nguoi_tao,
+                    "tong": t, "so_muc": n})
+    return out
+
+
+@router.post("/du-toan-ban")
+def dtb_tao(data: DuToanBanVao, db: Session = Depends(get_db),
+            nd: NguoiDung = Depends(yeu_cau("ncc", "THAO_TAC"))):
+    ma = (data.ma or "").strip()
+    if not ma:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Nhập Mã hàng bán")
+    if db.query(DuToanBan).filter(func.lower(DuToanBan.ma) == ma.lower()).first():
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Mã hàng bán '{ma}' đã có dự toán")
+    d = DuToanBan(ma=ma, khach_hang=(data.khach_hang or "").strip() or None,
+                  mo_ta=(data.mo_ta or "").strip() or None,
+                  ngay=date.fromisoformat(data.ngay) if data.ngay else date.today(),
+                  nguoi_tao=_dtb_ten_nguoi(db, nd))
+    db.add(d); db.flush()
+    ghi_audit(db, nd.id, "TAO", "du_toan_ban", d.id, moi={"ma": ma})
+    db.commit()
+    return {"id": d.id, "ma": d.ma}
+
+
+# LƯU Ý thứ tự route: các đường /du-toan-ban/muc/{...} phải khai TRƯỚC /du-toan-ban/{dt_id}
+# để "muc" không bị bắt nhầm vào tham số số nguyên dt_id.
+@router.put("/du-toan-ban/muc/{muc_id}")
+def dtb_sua_muc(muc_id: int, data: DtbMucVao, db: Session = Depends(get_db),
+                nd: NguoiDung = Depends(yeu_cau("ncc", "THAO_TAC"))):
+    m = db.get(DuToanBanMuc, muc_id)
+    if m is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy sản phẩm trong dự toán")
+    if data.ten is not None and data.ten.strip():
+        m.ten = data.ten.strip()
+    if data.quy_cach is not None:
+        m.quy_cach = data.quy_cach.strip() or None
+    if data.don_vi is not None:
+        m.don_vi = data.don_vi.strip() or None
+    if data.ghi_chu is not None:
+        m.ghi_chu = data.ghi_chu.strip() or None
+    if data.so_luong is not None:
+        m.so_luong = Decimal(str(data.so_luong))
+    if data.don_gia is not None:
+        m.don_gia = Decimal(str(data.don_gia))
+    db.commit()
+    return {"ok": True}
+
+
+@router.delete("/du-toan-ban/muc/{muc_id}")
+def dtb_xoa_muc(muc_id: int, db: Session = Depends(get_db),
+                nd: NguoiDung = Depends(yeu_cau("ncc", "THAO_TAC"))):
+    m = db.get(DuToanBanMuc, muc_id)
+    if m is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy sản phẩm trong dự toán")
+    db.delete(m); db.commit()
+    return {"ok": True}
+
+
+@router.post("/du-toan-ban/{dt_id}/muc")
+def dtb_them_muc(dt_id: int, data: DtbMucVao, db: Session = Depends(get_db),
+                 nd: NguoiDung = Depends(yeu_cau("ncc", "THAO_TAC"))):
+    if db.get(DuToanBan, dt_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy dự toán")
+    if not (data.ten or "").strip():
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Nhập tên sản phẩm / hạng mục")
+    m = DuToanBanMuc(du_toan_id=dt_id, ten=data.ten.strip(),
+                     quy_cach=(data.quy_cach or "").strip() or None,
+                     don_vi=(data.don_vi or "").strip() or None,
+                     so_luong=Decimal(str(data.so_luong or 0)),
+                     don_gia=Decimal(str(data.don_gia or 0)),
+                     ghi_chu=(data.ghi_chu or "").strip() or None)
+    db.add(m); db.flush()
+    muc_id = m.id
+    db.commit()
+    return {"id": muc_id}
+
+
+@router.get("/du-toan-ban/{dt_id}")
+def dtb_chi_tiet(dt_id: int, db: Session = Depends(get_db), _=Depends(yeu_cau("ncc", "XEM"))):
+    d = db.get(DuToanBan, dt_id)
+    if d is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy dự toán")
+    items = [{"id": r.id, "ten": r.ten, "quy_cach": r.quy_cach, "don_vi": r.don_vi,
+              "so_luong": float(r.so_luong or 0), "don_gia": float(r.don_gia or 0),
+              "thanh_tien": float(r.so_luong or 0) * float(r.don_gia or 0), "ghi_chu": r.ghi_chu}
+             for r in db.query(DuToanBanMuc).filter_by(du_toan_id=dt_id).order_by(DuToanBanMuc.id).all()]
+    return {"id": d.id, "ma": d.ma, "khach_hang": d.khach_hang, "mo_ta": d.mo_ta,
+            "ngay": str(d.ngay) if d.ngay else None, "nguoi_tao": d.nguoi_tao,
+            "items": items, "tong": sum(x["thanh_tien"] for x in items)}
+
+
+@router.put("/du-toan-ban/{dt_id}")
+def dtb_sua(dt_id: int, data: DuToanBanVao, db: Session = Depends(get_db),
+            nd: NguoiDung = Depends(yeu_cau("ncc", "THAO_TAC"))):
+    d = db.get(DuToanBan, dt_id)
+    if d is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy dự toán")
+    if data.ma and data.ma.strip():
+        ma = data.ma.strip()
+        trung = db.query(DuToanBan).filter(func.lower(DuToanBan.ma) == ma.lower(),
+                                           DuToanBan.id != dt_id).first()
+        if trung:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Mã '{ma}' đã dùng ở dự toán khác")
+        d.ma = ma
+    if data.khach_hang is not None:
+        d.khach_hang = data.khach_hang.strip() or None
+    if data.mo_ta is not None:
+        d.mo_ta = data.mo_ta.strip() or None
+    if data.ngay:
+        d.ngay = date.fromisoformat(data.ngay)
+    ghi_audit(db, nd.id, "SUA", "du_toan_ban", d.id, moi={"ma": d.ma})
+    db.commit()
+    return {"ok": True}
+
+
+@router.delete("/du-toan-ban/{dt_id}")
+def dtb_xoa(dt_id: int, db: Session = Depends(get_db),
+            nd: NguoiDung = Depends(yeu_cau("ncc", "DUYET"))):
+    d = db.get(DuToanBan, dt_id)
+    if d is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy dự toán")
+    db.query(DuToanBanMuc).filter_by(du_toan_id=dt_id).delete()
+    ghi_audit(db, nd.id, "XOA", "du_toan_ban", dt_id, moi={"ma": d.ma})
+    db.delete(d); db.commit()
+    return {"ok": True}
