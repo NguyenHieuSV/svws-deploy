@@ -687,6 +687,9 @@ class BangLuong(Base):
     luong_thuc_te: Mapped[Decimal] = mapped_column(Numeric(18, 0), default=0)
     tam_ung: Mapped[Decimal] = mapped_column(Numeric(18, 0), default=0)
     thu_nhap_chiu_thue: Mapped[Decimal] = mapped_column(Numeric(18, 0), default=0)
+    mien_thue: Mapped[Decimal] = mapped_column(Numeric(18, 0), default=0)          # mig 113: ăn ca + OT vượt + PC công tác
+    giam_tru_gia_canh: Mapped[Decimal] = mapped_column(Numeric(18, 0), default=0)  # mig 113: bản thân + phụ thuộc, chốt tại kỳ
+    so_phu_thuoc_tinh: Mapped[int] = mapped_column(Integer, default=0)             # mig 113: số phụ thuộc dùng khi tính
     bhxh_dn: Mapped[Decimal] = mapped_column(Numeric(18, 0), default=0)
     bhyt_dn: Mapped[Decimal] = mapped_column(Numeric(18, 0), default=0)
     bhtn_dn: Mapped[Decimal] = mapped_column(Numeric(18, 0), default=0)

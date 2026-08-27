@@ -347,8 +347,9 @@ def _ap_dung_tinh(db, nv: NhanVien, bl: BangLuong, cfg=None):
     for k in ("luong_thuc_te", "ot", "phu_cap", "bhxh", "bhyt", "bhtn",
               "bhxh_dn", "bhyt_dn", "bhtn_dn", "kpcd_dn", "thu_nhap_chiu_thue",
               "thue_tncn", "khau_tru", "thuc_linh", "chi_phi_dn",
-              "khau_tru_nghi", "khau_tru_tre"):
+              "khau_tru_nghi", "khau_tru_tre", "mien_thue", "giam_tru_gia_canh"):
         setattr(bl, k, kq[k])
+    bl.so_phu_thuoc_tinh = kq["so_phu_thuoc"]      # snapshot để phiếu diễn giải đúng số đã dùng
     return kq
 
 
@@ -383,6 +384,9 @@ def _pl_dict(db, bl: BangLuong, nv: NhanVien = None):
         "bhxh_dn": _f(bl.bhxh_dn), "bhyt_dn": _f(bl.bhyt_dn), "bhtn_dn": _f(bl.bhtn_dn),
         "kpcd_dn": _f(bl.kpcd_dn), "loai_hop_dong": ((nv.loai_hop_dong or "CHINH_THUC") if nv else None),
         "thu_nhap_chiu_thue": _f(bl.thu_nhap_chiu_thue), "thue_tncn": _f(bl.thue_tncn),
+        "mien_thue": _f(getattr(bl, "mien_thue", 0)),
+        "giam_tru_gia_canh": _f(getattr(bl, "giam_tru_gia_canh", 0)),
+        "so_phu_thuoc_tinh": int(getattr(bl, "so_phu_thuoc_tinh", 0) or 0),
         "tam_ung": _f(bl.tam_ung), "khau_tru": _f(bl.khau_tru), "thuc_linh": _f(bl.thuc_linh),
         "chi_phi_dn": _f(bl.chi_phi_dn), "trang_thai": bl.trang_thai,
         "email_sent": bool(bl.email_sent),
