@@ -100,8 +100,10 @@ def tinh_luong(luong_co_ban, luong_dong_bh=0, cong_chuan=26, cong_thuc_te=26,
     pc_khac = D(phu_cap_khac)
     pc = pc_co_dinh + pc_khac
     an_mien_thue = min(pc_an, mien_an_max)
-    # Các khoản theo MẪU phân bổ: chuyên cần + PC độc hại + thưởng HTCV (chịu thuế),
-    # PC công tác (khoán công tác phí — MIỄN thuế TNCN)
+    # Khoán điện thoại theo quy chế (QĐ phụ cấp) — miễn TNCN toàn bộ mức khoán (CV 1166/TCT-TNCN)
+    dt_mien_thue = D(phu_cap_dien_thoai)
+    # Các khoản theo MẪU phân bổ: chuyên cần + thưởng HTCV (chịu thuế);
+    # PC công tác (khoán công tác phí) & PC độc hại (TT111 Đ2.2.b.11) — MIỄN thuế TNCN
     tcc = D(thuong_chuyen_can); pdh = D(pc_doc_hai); pct = D(pc_cong_tac); thtcv = D(thuong_htcv)
     tong_thu_nhap = luong_thuc_te + tien_ot + pc + tcc + pdh + pct + thtcv
 
@@ -116,7 +118,8 @@ def tinh_luong(luong_co_ban, luong_dong_bh=0, cong_chuan=26, cong_thuc_te=26,
 
     # Thuế TNCN
     giam_tru = gt_bt + gt_pt * D(so_phu_thuoc)
-    thu_nhap_chiu_thue = tong_thu_nhap - an_mien_thue - ot_mien_thue - pct   # phần miễn thuế trừ ra
+    thu_nhap_chiu_thue = (tong_thu_nhap - an_mien_thue - ot_mien_thue - pct
+                          - dt_mien_thue - pdh)   # phần miễn thuế trừ ra
     thu_nhap_tinh_thue = thu_nhap_chiu_thue - bh_nv - giam_tru
     thue = tinh_tncn(thu_nhap_tinh_thue, bieu)
 
@@ -149,7 +152,7 @@ def tinh_luong(luong_co_ban, luong_dong_bh=0, cong_chuan=26, cong_thuc_te=26,
         "bhxh": bhxh, "bhyt": bhyt, "bhtn": bhtn,
         "bhxh_dn": bhxh_dn, "bhyt_dn": bhyt_dn, "bhtn_dn": bhtn_dn, "kpcd_dn": kpcd_dn,
         "thu_nhap_chiu_thue": _r(max(Decimal(0), thu_nhap_tinh_thue)),
-        "mien_thue": _r(an_mien_thue + ot_mien_thue + pct),
+        "mien_thue": _r(an_mien_thue + ot_mien_thue + pct + dt_mien_thue + pdh),
         "giam_tru_gia_canh": _r(giam_tru), "so_phu_thuoc": int(so_phu_thuoc or 0),
         "thuong_chuyen_can": tcc, "pc_doc_hai": pdh, "pc_cong_tac": pct, "thuong_htcv": thtcv,
         "thue_tncn": thue, "tam_ung": tu,
