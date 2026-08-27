@@ -2289,3 +2289,31 @@ def them_nv_vao_ky(thang: str, data: ThemNvKyVao, db: Session = Depends(get_db),
     ghi_audit(db, nd.id, "THEM_NV_KY", "bang_luong", bl.id, moi={"thang": thang, "nv": nv.id})
     db.commit()
     return {"ok": True, "id": bl.id, "ho_ten": nv.ho_ten}
+
+
+# ---- 🔄 Đồng bộ CHỨC DANH nhân viên theo VAI TRÒ tài khoản (mục Cấu hình) ----
+@router.post("/dong-bo-chuc-danh")
+def dong_bo_chuc_danh(db: Session = Depends(get_db),
+                      nd: NguoiDung = Depends(yeu_cau(MODULE, "DUYET"))):
+    """Khi Cấu hình đổi vai trò tài khoản (thăng chức, chuyển vị trí...), bấm nút này để
+    chức danh trong Hồ sơ lương / JD-KPI / bảng lương khớp lại. Hồ sơ chưa gắn tài khoản
+    (khớp qua nguoi_dung_id hoặc email) thì giữ nguyên và được liệt kê ra."""
+    thay_doi, khong_tk = [], []
+    for nv in db.query(NhanVien).order_by(NhanVien.id).all():
+        user = None
+        if getattr(nv, "nguoi_dung_id", None):
+            user = db.get(NguoiDung, nv.nguoi_dung_id)
+        if user is None and nv.email:
+            user = db.query(NguoiDung).filter(func.lower(NguoiDung.email) == nv.email.lower()).first()
+        if user is None or user.vai_tro is None:
+            khong_tk.append(nv.ho_ten)
+            continue
+        ten_moi = (user.vai_tro.ten or "").strip()
+        if ten_moi and (nv.chuc_danh or "").strip() != ten_moi:
+            thay_doi.append({"id": nv.id, "ho_ten": nv.ho_ten,
+                             "cu": nv.chuc_danh, "moi": ten_moi})
+            nv.chuc_danh = ten_moi
+    if thay_doi:
+        ghi_audit(db, nd.id, "DONG_BO_CD", "nhan_vien", None, moi={"so_thay_doi": len(thay_doi)})
+        db.commit()
+    return {"thay_doi": thay_doi, "khong_tai_khoan": khong_tk}
