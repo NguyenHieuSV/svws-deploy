@@ -976,7 +976,15 @@ def de_xuat_mua_tu_du_toan(dt_id: int, db: Session = Depends(get_db),
         hh_moi = True
     sl = x.so_luong or 1
     ly_do = f"Dự toán dự án {(da.ma or da.ten) if da else ('#' + str(x.du_an_id))}"[:200]
-    ycm = YeuCauMua(hang_hoa_id=hh.id, so_luong=sl, ly_do=ly_do,
+    # Mã dự án lấy theo số báo giá nên thường trùng SỐ ĐƠN HÀNG bán — tự gắn để
+    # hàng đợi Đề xuất mua hiện đúng Mã đơn hàng và PO tạo ra nối liền tới giá vốn.
+    dh_id = None
+    if da and da.ma:
+        from ..models import DonHang as _DxDh
+        _dh = db.query(_DxDh).filter(func.lower(func.trim(_DxDh.so)) == da.ma.strip().lower()).first()
+        if _dh:
+            dh_id = _dh.id
+    ycm = YeuCauMua(hang_hoa_id=hh.id, so_luong=sl, ly_do=ly_do, don_hang_id=dh_id,
                     don_gia=x.don_gia or None, ghi_chu=(x.quy_cach or None),
                     nguoi_tao=nhan_vien_id_cua(db, nd.id), trang_thai="MOI")
     db.add(ycm); db.flush()
