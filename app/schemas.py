@@ -867,6 +867,7 @@ class ThamSoLuongVao(BaseModel):
     hs_ot_le: Decimal | None = None
     luong_co_so: Decimal | None = None
     luong_toi_thieu_vung: Decimal | None = None
+    tru_bh_nv: bool | None = None
     bac_thue: list | None = None
 
 

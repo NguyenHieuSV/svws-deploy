@@ -408,7 +408,8 @@ def lay_tham_so_luong_ep(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE
         "tl_bhxh_nv", "tl_bhyt_nv", "tl_bhtn_nv", "tl_bhxh_dn", "tl_bhyt_dn", "tl_bhtn_dn", "tl_kpcd_dn",
         "tran_bhxh_bhyt", "tran_bhtn", "giam_tru_ban_than", "giam_tru_phu_thuoc",
         "mien_thue_an", "hs_ot_thuong", "hs_ot_cuoi_tuan", "hs_ot_le",
-        "luong_co_so", "luong_toi_thieu_vung")} | {"bac_thue": bac}
+        "luong_co_so", "luong_toi_thieu_vung")} | {
+        "bac_thue": bac, "tru_bh_nv": bool(ts.tru_bh_nv)}
 
 
 @router.put("/tham-so-luong")
@@ -424,6 +425,9 @@ def cap_nhat_tham_so_luong(data: ThamSoLuongVao, db: Session = Depends(get_db),
             setattr(ts, k, v)
     if data.bac_thue is not None:
         ts.bac_thue = _json.dumps(data.bac_thue)
+    if data.tru_bh_nv is not None:
+        # Công tắc CHÍNH SÁCH: chỉ đổi khi người dùng chủ động lưu từ màn Tham số lương.
+        ts.tru_bh_nv = bool(data.tru_bh_nv)
     ghi_audit(db, nd.id, "CAP_NHAT", "tham_so_luong", 1, moi={"cap_nhat": True})
     db.commit()
     return lay_tham_so_luong_ep(db)
