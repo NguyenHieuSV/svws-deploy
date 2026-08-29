@@ -1,0 +1,565 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SVWS 3D Design — Chuẩn & Sổ Đăng Ký Thiết Kế (Server)</title>
+<style>
+  :root{
+    --navy:#0B2545; --navy-2:#13315C; --cyan:#00B4D8; --cyan-dark:#0096B7;
+    --bg:#F4F7FA; --paper:#FFFFFF; --ink:#1C2B3A; --muted:#5A6B7D;
+    --line:#D8E1EA; --ok:#1B8A5A; --new:#C0571A; --danger:#B3392E;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{font-family:"IBM Plex Sans","Segoe UI",Roboto,Arial,sans-serif;background:var(--bg);color:var(--ink);font-size:14px;line-height:1.55;}
+  header{background:linear-gradient(135deg,var(--navy) 0%,var(--navy-2) 78%,#1A4A7A 100%);color:#fff;padding:14px 22px;display:flex;align-items:center;gap:16px;border-bottom:4px solid var(--cyan);}
+  #logoBox{width:80px;height:52px;flex:0 0 auto;background:#fff;border-radius:4px;display:flex;align-items:center;justify-content:center;overflow:hidden;}
+  #logoBox img{max-width:100%;max-height:100%;display:block;}
+  .head-txt h1{font-size:17px;font-weight:600;}
+  .head-txt .sub{font-size:11.5px;opacity:.85;margin-top:2px;}
+  .head-meta{margin-left:auto;text-align:right;font-size:11px;opacity:.95;}
+  .head-meta b{color:var(--cyan);}
+  .tabbar{background:var(--navy-2);padding:0 22px;display:flex;gap:4px;align-items:flex-end;}
+  .tabbar button{border:none;border-radius:6px 6px 0 0;background:rgba(255,255,255,.12);color:#D6E4F0;padding:9px 20px;font-size:13px;font-weight:600;cursor:pointer;}
+  .tabbar button:hover{background:rgba(255,255,255,.22);color:#fff;}
+  .tabbar button.active{background:var(--bg);color:var(--navy);}
+  .tabbar .save-ind{margin-left:auto;color:#9FE8F5;font-size:11px;padding:8px 4px;}
+  .toolbar{position:sticky;top:0;z-index:50;background:var(--paper);border-bottom:1px solid var(--line);padding:8px 22px;display:flex;flex-wrap:wrap;gap:8px;align-items:center;box-shadow:0 2px 8px rgba(11,37,69,.06);}
+  .toolbar .spacer{flex:1;}
+  button{font-family:inherit;font-size:12.5px;font-weight:600;border:1px solid var(--navy-2);background:#fff;color:var(--navy-2);padding:6px 13px;border-radius:4px;cursor:pointer;transition:background .15s,color .15s;}
+  button:hover{background:var(--navy-2);color:#fff;}
+  button.primary{background:var(--navy-2);color:#fff;}
+  button.primary:hover{background:var(--cyan-dark);border-color:var(--cyan-dark);}
+  button.accent{border-color:var(--cyan-dark);color:var(--cyan-dark);}
+  button.accent:hover{background:var(--cyan-dark);color:#fff;}
+  button.ai{border-color:var(--new);color:var(--new);}
+  button.ai:hover{background:var(--new);color:#fff;}
+  button.warn{border-color:var(--danger);color:var(--danger);}
+  button.warn:hover{background:var(--danger);color:#fff;}
+  button:disabled{opacity:.5;cursor:wait;}
+  .count-note{font-size:11.5px;color:var(--muted);}
+  .user-tag{font-size:11.5px;color:var(--navy-2);border:1px dashed #B9C7D4;border-radius:99px;padding:3px 10px;cursor:pointer;}
+  .user-tag:hover{border-color:var(--cyan-dark);color:var(--cyan-dark);}
+  main{max-width:1040px;margin:20px auto 90px;padding:0 18px;}
+  .intro{background:#EAF3F9;border:1px solid #C9DFEC;border-left:4px solid var(--cyan);border-radius:4px;padding:9px 13px;font-size:12.5px;color:#2C4A63;margin-bottom:18px;}
+  .tab-hidden{display:none!important;}
+  .section{background:var(--paper);border:1px solid var(--line);border-radius:6px;margin-bottom:16px;overflow:hidden;}
+  .sec-head{display:flex;align-items:center;gap:10px;background:linear-gradient(90deg,var(--navy) 0%,var(--navy-2) 100%);color:#fff;padding:8px 13px;}
+  .sec-num{flex:0 0 auto;width:28px;height:28px;border-radius:4px;background:var(--cyan);color:var(--navy);display:flex;align-items:center;justify-content:center;font-weight:700;}
+  .sec-title{flex:1;background:transparent;border:none;color:#fff;font:inherit;font-size:14.5px;font-weight:600;outline:none;border-bottom:1px solid transparent;padding:2px 4px;}
+  .sec-title:focus{border-bottom-color:var(--cyan);}
+  .sec-actions{display:flex;gap:4px;}
+  .sec-actions button{padding:3px 8px;font-size:11px;background:rgba(255,255,255,.1);border-color:rgba(255,255,255,.35);color:#fff;}
+  .sec-actions button:hover{background:var(--cyan);border-color:var(--cyan);color:var(--navy);}
+  .items{padding:5px 0;}
+  .item{display:flex;align-items:flex-start;gap:8px;padding:7px 13px;border-bottom:1px dashed var(--line);}
+  .item:last-child{border-bottom:none;}
+  .item-idx{flex:0 0 auto;min-width:36px;padding-top:7px;font-size:11px;font-weight:700;color:var(--cyan-dark);}
+  .item-text{flex:1;font:inherit;font-size:13px;line-height:1.55;border:1px solid transparent;border-radius:4px;padding:6px 8px;resize:none;overflow:hidden;background:transparent;outline:none;color:var(--ink);}
+  .item-text:hover{border-color:var(--line);background:#FAFCFE;}
+  .item-text:focus{border-color:var(--cyan);background:#fff;box-shadow:0 0 0 2px rgba(0,180,216,.15);}
+  .item-tools{display:flex;flex-direction:column;gap:3px;padding-top:4px;}
+  .item-tools .row{display:flex;gap:3px;}
+  .item-tools button{padding:2px 7px;font-size:10.5px;border-color:var(--line);color:var(--muted);background:#fff;}
+  .item-tools button:hover{border-color:var(--navy-2);color:#fff;background:var(--navy-2);}
+  .item-tools button.del:hover{background:var(--danger);border-color:var(--danger);}
+  .chip{flex:0 0 auto;margin-top:6px;font-size:9.5px;font-weight:700;letter-spacing:.3px;padding:3px 8px;border-radius:99px;cursor:pointer;user-select:none;border:1px solid;white-space:nowrap;}
+  .chip.std{color:var(--ok);border-color:var(--ok);background:#EAF6F0;}
+  .chip.new{color:var(--new);border-color:var(--new);background:#FBF0E7;}
+  .add-item-row{padding:7px 13px 11px;}
+  .add-item-row button,.add-wide{width:100%;border-style:dashed;border-color:#B9C7D4;color:var(--muted);background:#FAFCFE;font-weight:500;}
+  .add-item-row button:hover,.add-wide:hover{border-color:var(--cyan-dark);color:var(--cyan-dark);background:#F0FAFD;}
+  .add-sec-wrap{display:flex;gap:8px;margin:22px 0 8px;}
+  .dcard{background:var(--paper);border:1px solid var(--line);border-left:5px solid var(--cyan);border-radius:6px;margin-bottom:14px;overflow:hidden;}
+  .dcard-head{display:flex;align-items:center;gap:10px;background:#EAF1F7;border-bottom:1px solid var(--line);padding:7px 13px;flex-wrap:wrap;}
+  .dcard-code{font-weight:700;font-size:14px;color:var(--navy);background:transparent;border:none;border-bottom:1px dashed #B9C7D4;outline:none;font-family:inherit;min-width:160px;padding:2px 4px;}
+  .dcard-code:focus{border-bottom-color:var(--cyan);}
+  .dstatus{font-family:inherit;font-size:11px;font-weight:700;border-radius:99px;padding:3px 10px;border:1px solid var(--navy-2);color:var(--navy-2);background:#fff;cursor:pointer;}
+  .dcard-head .tools{margin-left:auto;display:flex;gap:4px;}
+  .dcard-head .tools button{padding:2px 8px;font-size:11px;border-color:#B9C7D4;color:var(--muted);}
+  .dcard-head .tools button:hover{background:var(--navy-2);border-color:var(--navy-2);color:#fff;}
+  .dcard-head .tools button.del:hover{background:var(--danger);border-color:var(--danger);}
+  .dgrid{display:grid;grid-template-columns:1fr 1fr;gap:9px 14px;padding:11px 13px 4px;}
+  .dfield{display:flex;flex-direction:column;gap:3px;}
+  .dfield.full{grid-column:1/-1;}
+  .dfield label{font-size:10px;font-weight:700;letter-spacing:.4px;color:var(--muted);text-transform:uppercase;}
+  .dfield input,.dfield textarea{font:inherit;font-size:12.5px;border:1px solid var(--line);border-radius:4px;padding:6px 8px;outline:none;background:#FAFCFE;resize:none;overflow:hidden;}
+  .dfield input:focus,.dfield textarea:focus{border-color:var(--cyan);background:#fff;box-shadow:0 0 0 2px rgba(0,180,216,.15);}
+  .dcard-actions{display:flex;gap:8px;padding:9px 13px 13px;flex-wrap:wrap;}
+  .modal-bg{position:fixed;inset:0;background:rgba(11,37,69,.55);z-index:200;display:flex;align-items:center;justify-content:center;padding:20px;}
+  .modal{background:#fff;border-radius:8px;max-width:860px;width:100%;max-height:90vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 12px 40px rgba(0,0,0,.35);}
+  .modal-head{background:var(--navy);color:#fff;padding:11px 16px;display:flex;align-items:center;gap:10px;}
+  .modal-head h3{font-size:14.5px;font-weight:600;flex:1;}
+  .modal-head button{background:transparent;border-color:rgba(255,255,255,.4);color:#fff;padding:3px 10px;}
+  .modal-body{padding:13px 16px;overflow:auto;display:flex;flex-direction:column;gap:11px;}
+  .ai-block{border:1px solid var(--line);border-left:4px solid var(--new);border-radius:4px;padding:10px 12px;background:#FFFDF9;}
+  .ai-block h4{font-size:12px;color:var(--new);margin-bottom:6px;text-transform:uppercase;letter-spacing:.4px;}
+  .ai-block ul{padding-left:18px;font-size:12.5px;}
+  .ai-block li{margin-bottom:4px;}
+  .modal-body label{font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;}
+  .modal-body textarea{width:100%;font:inherit;font-size:12.5px;line-height:1.5;border:1px solid var(--line);border-radius:4px;padding:9px;background:#FAFCFE;resize:vertical;}
+  .modal-body textarea:focus{border-color:var(--cyan);background:#fff;outline:none;}
+  #finalPrompt{font-family:"IBM Plex Mono",Consolas,monospace;font-size:11px;height:34vh;}
+  .modal-note{font-size:12px;color:var(--muted);}
+  .btn-row{display:flex;gap:8px;flex-wrap:wrap;}
+  .hist-row{display:flex;gap:10px;align-items:center;border-bottom:1px dashed var(--line);padding:7px 2px;font-size:12.5px;}
+  .hist-row .t{color:var(--muted);min-width:150px;}
+  .hist-row .who{font-weight:600;min-width:110px;}
+  .hist-row .note{flex:1;color:var(--muted);}
+  .hist-row button{padding:2px 9px;font-size:11px;}
+  .spin{display:inline-block;width:12px;height:12px;border:2px solid rgba(0,0,0,.2);border-top-color:var(--new);border-radius:50%;animation:sp 1s linear infinite;vertical-align:-2px;margin-right:5px;}
+  @keyframes sp{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+
+<header>
+  <div id="logoBox"></div>
+  <div class="head-txt">
+    <h1>SVWS 3D DESIGN — CHUẨN &amp; SỔ ĐĂNG KÝ THIẾT KẾ</h1>
+    <div class="sub">Hệ thống nội bộ SVWS · một nguồn chuẩn duy nhất · lịch sử chỉnh sửa · AI soạn đề bài</div>
+  </div>
+  <div class="head-meta">
+    <div><b id="mCode"></b> · <span id="mRev"></span></div>
+    <div>Lưu gần nhất: <span id="mWhen"></span> — <span id="mWho"></span></div>
+  </div>
+</header>
+
+<div class="tabbar">
+  <button id="tabBtnReq" class="active" onclick="switchTab('req')">📋 Chuẩn yêu cầu</button>
+  <button id="tabBtnDes" onclick="switchTab('des')">🗂 Các thiết kế</button>
+  <span class="save-ind" id="saveInd">·</span>
+</div>
+
+<div class="toolbar">
+  <button class="accent" onclick="openHistory()">🕘 Lịch sử</button>
+  <button onclick="exportJSON()">⬇ Xuất JSON</button>
+  <button onclick="document.getElementById('jsonInput').click()">⬆ Nhập JSON</button>
+  <input type="file" id="jsonInput" accept=".json" style="display:none">
+  <span class="spacer"></span>
+  <span class="user-tag" id="userTag" onclick="changeUser()" title="Bấm để đổi tên">👤 …</span>
+  <span class="count-note" id="countNote"></span>
+</div>
+
+<main>
+  <div id="tabReq">
+    <div class="intro">
+      <b>Chuẩn yêu cầu:</b> mọi chỉnh sửa <b>tự lưu lên server</b> — cả công ty luôn thấy bản mới nhất. Nhãn <b style="color:var(--ok)">CHUẨN HIỆN HÀNH</b> / <b style="color:var(--new)">ĐỀ XUẤT MỚI</b>: kỹ sư thêm mục mới sẽ mang nhãn cam, Giám đốc bấm nhãn để duyệt sang xanh.
+    </div>
+    <div id="sections"></div>
+    <div class="add-sec-wrap"><button class="add-wide" onclick="addSection()">＋ Thêm nhóm yêu cầu mới</button></div>
+  </div>
+
+  <div id="tabDes" class="tab-hidden">
+    <div class="intro">
+      <b>Sổ đăng ký thiết kế:</b> bấm <b>🤖 AI soạn đề bài</b> — server gọi Claude phân tích phiếu, hỏi thông tin thiếu, chuẩn hóa mô tả rồi ghép với toàn bộ chuẩn thành đề bài. <b>📄 Đề bài nhanh</b> ghép trực tiếp không cần AI.
+    </div>
+    <div id="designs"></div>
+    <div class="add-sec-wrap">
+      <button class="add-wide" onclick="addDesign()">＋ Thêm thiết kế mới</button>
+      <button class="add-wide" onclick="document.getElementById('desInput').click()">📂 Nhập phiếu thiết kế (JSON)</button>
+      <input type="file" id="desInput" accept=".json" style="display:none">
+    </div>
+  </div>
+</main>
+
+<div class="modal-bg tab-hidden" id="modalBg">
+  <div class="modal">
+    <div class="modal-head">
+      <h3 id="modalTitle"></h3>
+      <button onclick="closeModal()">✕ Đóng</button>
+    </div>
+    <div class="modal-body" id="modalBody"></div>
+  </div>
+</div>
+
+<script>
+const API = '/registry/api';
+const STATUSES = ["Ý tưởng","Đang thiết kế","Đã có tool","Đã duyệt"];
+let data = null;
+let baseUpdatedAt = '';   // thời điểm bản mình đang cầm — chống ghi đè lẫn nhau
+let activeTab = 'req';
+let curDesign = -1;
+let lastAI = null;
+
+/* ================= USER ================= */
+function userName(){
+  let u = localStorage.getItem('svws_user') || '';
+  if(!u){
+    u = (prompt('Tên anh/chị (để ghi vào lịch sử chỉnh sửa):') || '').trim() || 'không rõ';
+    localStorage.setItem('svws_user', u);
+  }
+  return u;
+}
+function changeUser(){
+  const u = (prompt('Đổi tên người dùng:', localStorage.getItem('svws_user')||'') || '').trim();
+  if(u){ localStorage.setItem('svws_user', u); renderUser(); }
+}
+function renderUser(){ document.getElementById('userTag').textContent = '👤 ' + (localStorage.getItem('svws_user')||'…'); }
+
+/* ================= SERVER SYNC ================= */
+function setInd(t){document.getElementById('saveInd').textContent = t;}
+async function loadDoc(){
+  setInd('Đang tải…');
+  const r = await fetch(API);
+  if(!r.ok){ setInd('⚠ Không tải được từ server'); throw new Error('load failed'); }
+  const j = await r.json();
+  data = j.data; if(!data.designs) data.designs = [];
+  baseUpdatedAt = j.updated_at;
+  renderServerMeta(j.updated_at, j.updated_by);
+  setInd('✓ Đồng bộ');
+}
+let saveTimer = null;
+function touch(){
+  setInd('Đang lưu…');
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(doSave, 800);
+}
+async function doSave(){
+  try{
+    const r = await fetch(API, {
+      method:'PUT',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({data, updated_by:userName(), base_updated_at: baseUpdatedAt})
+    });
+    if(!r.ok){ setInd('⚠ Lỗi lưu ('+r.status+')'); return; }
+    const j = await r.json();
+    if(j.conflict){
+      alert('⚠ ' + j.updated_by + ' vừa lưu một bản mới hơn ('+fmtTime(j.updated_at)+').\n' +
+            'Trang sẽ tải bản mới nhất — vui lòng thao tác lại thay đổi vừa rồi.');
+      data = j.data; if(!data.designs) data.designs=[];
+      baseUpdatedAt = j.updated_at;
+      renderServerMeta(j.updated_at, j.updated_by);
+      renderMeta(); render(); renderDesigns();
+      setInd('↺ Đã tải bản mới nhất');
+      return;
+    }
+    baseUpdatedAt = j.updated_at;
+    renderServerMeta(j.updated_at, j.updated_by);
+    setInd('✓ Đã lưu');
+  }catch(e){ setInd('⚠ Mất kết nối — thử lại sau'); }
+}
+function fmtTime(iso){
+  try{ const d = new Date(iso); return d.toLocaleString('vi-VN'); }catch(e){ return iso; }
+}
+function renderServerMeta(when, who){
+  document.getElementById('mWhen').textContent = fmtTime(when);
+  document.getElementById('mWho').textContent = who || '';
+}
+
+/* ================= TABS / META ================= */
+function switchTab(t){
+  activeTab = t;
+  document.getElementById('tabReq').classList.toggle('tab-hidden', t!=='req');
+  document.getElementById('tabDes').classList.toggle('tab-hidden', t!=='des');
+  document.getElementById('tabBtnReq').classList.toggle('active', t==='req');
+  document.getElementById('tabBtnDes').classList.toggle('active', t==='des');
+}
+function renderMeta(){
+  document.getElementById('mCode').textContent = data.meta.code||'';
+  document.getElementById('mRev').textContent = data.meta.rev||'';
+  document.getElementById('logoBox').innerHTML = data.meta.logo ? `<img src="${data.meta.logo}">` : '';
+}
+
+/* ================= REQUIREMENTS ================= */
+const secWrap = document.getElementById('sections');
+function esc(s){return String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');}
+function autoGrow(t){t.style.height='auto';t.style.height=(t.scrollHeight)+'px';}
+function render(){
+  secWrap.innerHTML = '';
+  data.sections.forEach((sec,si)=>{
+    const el = document.createElement('div');
+    el.className = 'section';
+    el.innerHTML = `
+      <div class="sec-head">
+        <div class="sec-num">${si+1}</div>
+        <input class="sec-title" value="${esc(sec.title)}" onchange="data.sections[${si}].title=this.value;touch()">
+        <div class="sec-actions">
+          <button onclick="moveSec(${si},-1)">↑</button>
+          <button onclick="moveSec(${si},1)">↓</button>
+          <button onclick="delSec(${si})">✕</button>
+        </div>
+      </div>
+      <div class="items">
+        ${sec.items.map((it,ii)=>`
+          <div class="item">
+            <div class="item-idx">${si+1}.${ii+1}</div>
+            <textarea class="item-text" rows="1"
+              oninput="autoGrow(this);data.sections[${si}].items[${ii}].t=this.value;touch()">${esc(it.t)}</textarea>
+            <span class="chip ${it.s}" onclick="toggleStatus(${si},${ii})">${it.s==='std'?'CHUẨN HIỆN HÀNH':'ĐỀ XUẤT MỚI'}</span>
+            <div class="item-tools">
+              <div class="row"><button onclick="moveItem(${si},${ii},-1)">↑</button><button onclick="moveItem(${si},${ii},1)">↓</button></div>
+              <div class="row"><button class="del" onclick="delItem(${si},${ii})">✕</button></div>
+            </div>
+          </div>`).join('')}
+      </div>
+      <div class="add-item-row"><button onclick="addItem(${si})">＋ Thêm yêu cầu vào nhóm này</button></div>`;
+    secWrap.appendChild(el);
+  });
+  document.querySelectorAll('#sections .item-text').forEach(autoGrow);
+  updateCount();
+}
+function updateCount(){
+  const nItem=data.sections.reduce((a,s)=>a+s.items.length,0);
+  const nNew=data.sections.reduce((a,s)=>a+s.items.filter(i=>i.s==='new').length,0);
+  document.getElementById('countNote').textContent =
+    `${data.sections.length} nhóm · ${nItem} yêu cầu` + (nNew?` · ${nNew} đề xuất mới`:``) + ` · ${data.designs.length} thiết kế`;
+}
+function addItem(si){data.sections[si].items.push({t:"(Nhập nội dung yêu cầu mới…)",s:"new"});touch();render();
+  const its=secWrap.children[si].querySelectorAll('.item-text');const l=its[its.length-1];l.focus();l.select();}
+function delItem(si,ii){if(confirm('Xóa yêu cầu này?')){data.sections[si].items.splice(ii,1);touch();render();}}
+function moveItem(si,ii,d){const a=data.sections[si].items,j=ii+d;if(j<0||j>=a.length)return;[a[ii],a[j]]=[a[j],a[ii]];touch();render();}
+function toggleStatus(si,ii){const it=data.sections[si].items[ii];it.s=it.s==='std'?'new':'std';touch();render();}
+function addSection(){data.sections.push({title:"Nhóm yêu cầu mới",items:[{t:"(Nhập nội dung yêu cầu mới…)",s:"new"}]});touch();render();
+  secWrap.lastElementChild.scrollIntoView({behavior:'smooth',block:'center'});}
+function delSec(si){if(confirm('Xóa cả nhóm "'+data.sections[si].title+'"?')){data.sections.splice(si,1);touch();render();}}
+function moveSec(si,d){const j=si+d;if(j<0||j>=data.sections.length)return;
+  [data.sections[si],data.sections[j]]=[data.sections[j],data.sections[si]];touch();render();}
+
+/* ================= DESIGNS ================= */
+const desWrap = document.getElementById('designs');
+function renderDesigns(){
+  desWrap.innerHTML = '';
+  data.designs.forEach((d,di)=>{
+    const el = document.createElement('div');
+    el.className = 'dcard';
+    el.innerHTML = `
+      <div class="dcard-head">
+        <input class="dcard-code" value="${esc(d.code)}" placeholder="Mã thiết kế" onchange="data.designs[${di}].code=this.value;touch()">
+        <select class="dstatus" onchange="data.designs[${di}].status=this.value;touch()">
+          ${STATUSES.map(s=>`<option ${d.status===s?'selected':''}>${s}</option>`).join('')}
+        </select>
+        <div class="tools">
+          <button onclick="moveDesign(${di},-1)">↑</button>
+          <button onclick="moveDesign(${di},1)">↓</button>
+          <button class="del" onclick="delDesign(${di})">✕</button>
+        </div>
+      </div>
+      <div class="dgrid">
+        <div class="dfield full"><label>Tên thiết kế</label><input value="${esc(d.name)}" onchange="data.designs[${di}].name=this.value;touch()"></div>
+        <div class="dfield"><label>Công nghệ</label><input value="${esc(d.tech)}" onchange="data.designs[${di}].tech=this.value;touch()"></div>
+        <div class="dfield"><label>Công suất</label><input value="${esc(d.capacity)}" onchange="data.designs[${di}].capacity=this.value;touch()"></div>
+        <div class="dfield full"><label>Dự án / Khách hàng</label><input value="${esc(d.project)}" onchange="data.designs[${di}].project=this.value;touch()"></div>
+        <div class="dfield full"><label>Thông số chính</label><textarea rows="2" oninput="autoGrow(this);data.designs[${di}].params=this.value;touch()">${esc(d.params)}</textarea></div>
+        <div class="dfield full"><label>Yêu cầu riêng của thiết kế này</label><textarea rows="2" oninput="autoGrow(this);data.designs[${di}].notes=this.value;touch()">${esc(d.notes)}</textarea></div>
+      </div>
+      <div class="dcard-actions">
+        <button class="ai" onclick="openAI(${di})">🤖 AI soạn đề bài</button>
+        <button onclick="quickPrompt(${di})">📄 Đề bài nhanh (không AI)</button>
+        <button onclick="saveDesign(${di})">💾 Lưu riêng (JSON)</button>
+      </div>`;
+    desWrap.appendChild(el);
+  });
+  document.querySelectorAll('#designs textarea').forEach(autoGrow);
+  updateCount();
+}
+function addDesign(){data.designs.push({code:"SVWS-XXX",name:"",tech:"",capacity:"",project:"",params:"",notes:"",status:"Ý tưởng"});touch();renderDesigns();
+  desWrap.lastElementChild.scrollIntoView({behavior:'smooth',block:'center'});
+  desWrap.lastElementChild.querySelector('.dcard-code').focus();}
+function delDesign(di){if(confirm('Xóa phiếu "'+data.designs[di].code+'"?')){data.designs.splice(di,1);touch();renderDesigns();}}
+function moveDesign(di,d){const j=di+d;if(j<0||j>=data.designs.length)return;
+  [data.designs[di],data.designs[j]]=[data.designs[j],data.designs[di]];touch();renderDesigns();}
+function saveDesign(di){
+  const d = data.designs[di];
+  dl(JSON.stringify({type:"svws-design-card",design:d},null,2),
+     (d.code||'SVWS-Design').replace(/[^\w\-\.]+/g,'_')+'.json');
+}
+document.getElementById('desInput').addEventListener('change',e=>{
+  const f=e.target.files[0];if(!f)return;
+  const r=new FileReader();
+  r.onload=()=>{try{
+      const d=JSON.parse(r.result);
+      if(d.type==='svws-design-card'&&d.design){data.designs.push(d.design);}
+      else if(d.code!==undefined){data.designs.push(d);}
+      else throw new Error('Không phải file phiếu thiết kế');
+      touch();renderDesigns();
+    }catch(err){alert('File không hợp lệ: '+err.message);}};
+  r.readAsText(f);e.target.value='';
+});
+
+/* ================= PROMPT COMPOSE ================= */
+function standardText(){
+  const L=[];
+  data.sections.forEach((sec,si)=>{
+    L.push((si+1)+'. '+sec.title.toUpperCase());
+    sec.items.forEach((it,ii)=>L.push((si+1)+'.'+(ii+1)+'  '+it.t));
+    L.push('');
+  });
+  return L.join('\n');
+}
+function designText(d){
+  return ['• Mã thiết kế: '+(d.code||'—'),
+    '• Tên thiết kế: '+(d.name||'—'),
+    '• Công nghệ: '+(d.tech||'—'),
+    '• Công suất: '+(d.capacity||'—'),
+    '• Dự án / Khách hàng: '+(d.project||'—'),
+    '• Thông số chính:\n'+(d.params||'—').split('\n').map(x=>'    '+x).join('\n'),
+    '• Yêu cầu riêng:\n'+(d.notes||'—').split('\n').map(x=>'    '+x).join('\n')].join('\n');
+}
+function composeFinal(partA){
+  return ['ĐỀ BÀI: TẠO TOOL THIẾT KẾ THEO CHUẨN SVWS "3D DESIGN"',
+    '(Xuất từ '+(data.meta.code||'')+' '+(data.meta.rev||'')+' — hệ thống Design Registry SVWS)','',
+    '========== PHẦN A — MÔ TẢ THIẾT KẾ CẦN TẠO ==========', partA, '',
+    '========== PHẦN B — CHUẨN "3D DESIGN" BẮT BUỘC ÁP DỤNG ==========','',
+    standardText(),
+    '========== YÊU CẦU THỰC HIỆN ==========',
+    'Hãy tạo MỘT file HTML duy nhất (single-file) thực hiện thiết kế mô tả ở Phần A,',
+    'tuân thủ ĐẦY ĐỦ toàn bộ chuẩn ở Phần B (không bỏ sót yêu cầu nào).',
+    'Nếu thiếu thông tin để thiết kế, hãy hỏi lại trước khi thực hiện.'].join('\n');
+}
+
+/* ================= MODAL ================= */
+const modalBg=document.getElementById('modalBg'), modalBody=document.getElementById('modalBody');
+function closeModal(){modalBg.classList.add('tab-hidden');}
+modalBg.addEventListener('click',e=>{if(e.target===modalBg)closeModal();});
+function showFinal(promptText, titleSuffix){
+  document.getElementById('modalTitle').textContent='Đề bài hoàn chỉnh — '+titleSuffix;
+  modalBody.innerHTML = `
+    <div class="modal-note">Bấm <b>Copy</b> rồi dán vào chat với Claude để tạo tool.</div>
+    <textarea id="finalPrompt" spellcheck="false"></textarea>
+    <div class="btn-row"><button class="primary" onclick="copyFinal()">📋 Copy đề bài</button></div>`;
+  document.getElementById('finalPrompt').value = promptText;
+  modalBg.classList.remove('tab-hidden');
+}
+function copyFinal(){
+  const ta=document.getElementById('finalPrompt');
+  ta.select();ta.setSelectionRange(0,ta.value.length);
+  let ok=false;
+  try{ok=document.execCommand('copy');}catch(e){}
+  if(navigator.clipboard){navigator.clipboard.writeText(ta.value).catch(()=>{});ok=true;}
+  alert(ok?'Đã copy đề bài.':'Copy bị chặn — bôi đen nội dung và Ctrl+C.');
+}
+function quickPrompt(di){
+  showFinal(composeFinal(designText(data.designs[di])), data.designs[di].code||'');
+}
+
+/* ================= AI (qua backend) ================= */
+function openAI(di){
+  curDesign = di; lastAI = null;
+  document.getElementById('modalTitle').textContent='🤖 AI soạn đề bài — '+(data.designs[di].code||'');
+  modalBody.innerHTML = `
+    <div class="modal-note">Server sẽ gọi Claude đọc phiếu thiết kế, đối chiếu với chuẩn, chỉ ra <b>thông tin còn thiếu</b> và <b>chuẩn hóa mô tả</b>.</div>
+    <div class="btn-row"><button class="ai" id="btnAnalyze" onclick="runAI('')">▶ Bắt đầu phân tích</button></div>
+    <div id="aiResult"></div>`;
+  modalBg.classList.remove('tab-hidden');
+}
+async function runAI(extraAnswers){
+  const btn = document.getElementById('btnAnalyze');
+  if(btn){btn.disabled=true;btn.innerHTML='<span class="spin"></span>AI đang phân tích…';}
+  const res = document.getElementById('aiResult');
+  res.innerHTML = '<div class="modal-note"><span class="spin"></span>Đang gửi phiếu cho AI qua server…</div>';
+  try{
+    const r = await fetch(API + '/ai', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({design: data.designs[curDesign], extra_answers: extraAnswers})
+    });
+    if(!r.ok){
+      const err = await r.json().catch(()=>({detail:r.status}));
+      throw new Error(err.detail || r.status);
+    }
+    lastAI = await r.json();
+    renderAIResult();
+  }catch(err){
+    res.innerHTML = `<div class="ai-block"><h4>Lỗi</h4>
+      <div style="font-size:12.5px">${esc(err.message)}</div>
+      <div style="font-size:12px;color:var(--muted);margin-top:5px">Kiểm tra ANTHROPIC_API_KEY trên Render, hoặc dùng "📄 Đề bài nhanh (không AI)".</div></div>`;
+    if(btn){btn.disabled=false;btn.textContent='▶ Thử lại';}
+  }
+}
+function renderAIResult(){
+  const res = document.getElementById('aiResult');
+  const btn = document.getElementById('btnAnalyze');
+  if(btn){btn.disabled=false;btn.textContent='↻ Phân tích lại';}
+  const qs = (lastAI.questions||[]).filter(Boolean);
+  res.innerHTML = `
+    ${qs.length?`<div class="ai-block"><h4>Thông tin còn thiếu — AI hỏi anh</h4>
+      <ul>${qs.map(q=>`<li>${esc(q)}</li>`).join('')}</ul></div>`
+      :`<div class="ai-block" style="border-left-color:var(--ok)"><h4 style="color:var(--ok)">AI đánh giá: mô tả đã đủ thông tin</h4></div>`}
+    ${lastAI.notes?`<div class="ai-block"><h4>Lưu ý kỹ thuật</h4><div style="font-size:12.5px">${esc(lastAI.notes)}</div></div>`:''}
+    ${qs.length?`<label>Trả lời bổ sung (mỗi ý một dòng)</label>
+      <textarea id="aiAnswers" rows="4" placeholder="VD: Lưu lượng 500 L/h; nguồn nước giếng khoan; đặt trong nhà..."></textarea>
+      <div class="btn-row"><button class="ai" onclick="runAI(document.getElementById('aiAnswers').value)">↻ Cập nhật với AI theo trả lời</button></div>`:''}
+    <label>Mô tả thiết kế đã chuẩn hóa (Phần A) — sửa được</label>
+    <textarea id="refinedA" rows="9">${esc(lastAI.refined_A||'')}</textarea>
+    <div class="btn-row">
+      <button class="primary" onclick="finishAI()">📄 Ghép đề bài hoàn chỉnh (A + chuẩn B)</button>
+      <button onclick="applyRefined()">↩ Cập nhật phiếu theo mô tả chuẩn hóa</button>
+    </div>`;
+}
+function finishAI(){
+  showFinal(composeFinal(document.getElementById('refinedA').value), data.designs[curDesign].code||'');
+}
+function applyRefined(){
+  data.designs[curDesign].params = document.getElementById('refinedA').value;
+  touch(); renderDesigns();
+  alert('Đã cập nhật "Thông số chính" của phiếu.');
+}
+
+/* ================= HISTORY ================= */
+async function openHistory(){
+  document.getElementById('modalTitle').textContent='🕘 Lịch sử chỉnh sửa';
+  modalBody.innerHTML = '<div class="modal-note"><span class="spin"></span>Đang tải…</div>';
+  modalBg.classList.remove('tab-hidden');
+  try{
+    const r = await fetch(API + '/history?limit=40');
+    const rows = await r.json();
+    modalBody.innerHTML = rows.length
+      ? rows.map(h=>`
+        <div class="hist-row">
+          <span class="t">${fmtTime(h.updated_at)}</span>
+          <span class="who">${esc(h.updated_by)}</span>
+          <span class="note">${esc(h.note||'')} · ${h.n_items} yêu cầu · ${h.n_designs} thiết kế</span>
+          <button onclick="restoreRev(${h.id})">↺ Khôi phục</button>
+        </div>`).join('')
+      : '<div class="modal-note">Chưa có lịch sử.</div>';
+  }catch(e){
+    modalBody.innerHTML = '<div class="modal-note">Không tải được lịch sử.</div>';
+  }
+}
+async function restoreRev(rid){
+  if(!confirm('Khôi phục toàn bộ dữ liệu về bản #'+rid+'?')) return;
+  const r = await fetch(API + '/restore/' + rid, {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({updated_by:userName()})
+  });
+  if(r.ok){ closeModal(); await loadDoc(); renderMeta(); render(); renderDesigns(); }
+  else alert('Khôi phục thất bại.');
+}
+
+/* ================= EXPORT / IMPORT ================= */
+function dl(text, name){
+  const blob = new Blob([text],{type:'application/json'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = name; a.click();
+  URL.revokeObjectURL(a.href);
+}
+function exportJSON(){
+  dl(JSON.stringify(data,null,2), (data.meta.code||'SVWS-3D-REQ')+'_'+(data.meta.rev||'Rev')+'.json');
+}
+document.getElementById('jsonInput').addEventListener('change',e=>{
+  const f=e.target.files[0];if(!f)return;
+  const r=new FileReader();
+  r.onload=()=>{try{
+      const d=JSON.parse(r.result);
+      if(!d.sections) throw new Error('Thiếu trường "sections"');
+      if(!d.designs) d.designs=[];
+      if(!confirm('Thay toàn bộ dữ liệu trên server bằng file này?')) return;
+      data=d; touch(); renderMeta(); render(); renderDesigns();
+    }catch(err){alert('File JSON không hợp lệ: '+err.message);}};
+  r.readAsText(f);e.target.value='';
+});
+
+/* ================= INIT ================= */
+(async ()=>{
+  renderUser();
+  try{
+    await loadDoc();
+    renderMeta(); render(); renderDesigns(); switchTab('req');
+  }catch(e){
+    document.querySelector('main').innerHTML =
+      '<div class="intro">⚠ Không kết nối được server. Kiểm tra dịch vụ đang chạy rồi tải lại trang.</div>';
+  }
+})();
+</script>
+</body>
+</html>
