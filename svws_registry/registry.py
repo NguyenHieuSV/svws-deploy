@@ -322,6 +322,21 @@ def ai_execute(payload: dict = Body(...)):
                 "ngay trong giao diện tool.")
 
     def gen():
+        # Model suy nghĩ (adaptive thinking) có thể vài phút trước khi viết chữ
+        # đầu tiên; Render cắt stream im lặng quá lâu → phải bơm "nhịp tim" (dấu
+        # chấm) trong pha suy nghĩ. Client chỉ lấy từ <!DOCTYPE trở đi nên các
+        # byte này tự bị loại khi ghép file.
+        started_text = False
+        last_beat = [datetime.datetime.now(datetime.timezone.utc)]
+
+        def beat():
+            """Trả về '.' tối đa 1 lần/2 giây khi chưa có nội dung HTML."""
+            now = datetime.datetime.now(datetime.timezone.utc)
+            if (now - last_beat[0]).total_seconds() >= 2.0:
+                last_beat[0] = now
+                return "."
+            return ""
+
         try:
             with httpx.stream(
                 "POST", _ANTHROPIC_URL,
@@ -336,6 +351,7 @@ def ai_execute(payload: dict = Body(...)):
                     body = resp.read().decode("utf-8", "replace")
                     yield f"\n[SVWS-LỖI] Anthropic API {resp.status_code}: {body[:300]}"
                     return
+                yield "."  # mở stream ngay để proxy không buffer/timeout
                 for line in resp.iter_lines():
                     if not line.startswith("data: "):
                         continue
@@ -343,16 +359,27 @@ def ai_execute(payload: dict = Body(...)):
                         ev = json.loads(line[6:])
                     except json.JSONDecodeError:
                         continue
-                    if ev.get("type") == "content_block_delta":
+                    etype = ev.get("type")
+                    if etype == "content_block_delta":
                         delta = ev.get("delta", {})
                         if delta.get("type") == "text_delta":
+                            started_text = True
                             yield delta.get("text", "")
-                    elif ev.get("type") == "error":
+                        elif not started_text:  # thinking_delta… trong pha suy nghĩ
+                            hb = beat()
+                            if hb:
+                                yield hb
+                    elif etype == "error":
                         yield f"\n[SVWS-LỖI] {json.dumps(ev.get('error', {}), ensure_ascii=False)[:300]}"
                         return
+                    elif not started_text:  # ping / content_block_start…
+                        hb = beat()
+                        if hb:
+                            yield hb
         except httpx.HTTPError as e:
             yield f"\n[SVWS-LỖI] Không gọi được Anthropic API: {e}"
 
+    # no-transform: chặn Cloudflare nén gzip (nén sẽ gom buffer làm trễ stream)
     return StreamingResponse(gen(), media_type="text/plain; charset=utf-8",
-                             headers={"Cache-Control": "no-cache",
+                             headers={"Cache-Control": "no-cache, no-transform",
                                       "X-Accel-Buffering": "no"})

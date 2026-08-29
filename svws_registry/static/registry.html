@@ -445,8 +445,9 @@ async function execDesign(){
   const out = document.getElementById('execResult');
   const prompt = document.getElementById('finalPrompt').value;
   btn.disabled = true; btn.innerHTML = '<span class="spin"></span>AI đang thiết kế…';
-  out.innerHTML = '<div class="modal-note"><span class="spin"></span>Đã gửi đề bài — AI đang viết tool (có thể mất vài phút)… <b id="execCnt">0</b> ký tự</div>';
+  out.innerHTML = '<div class="modal-note"><span class="spin"></span><span id="execPhase">Đã gửi đề bài — AI đang đọc và suy nghĩ (có thể vài phút)…</span> <b id="execCnt"></b></div>';
   let full = '';
+  const t0 = Date.now();
   try{
     const r = await fetch(API + '/execute', {
       method:'POST', headers:{'Content-Type':'application/json'},
@@ -462,8 +463,12 @@ async function execDesign(){
       const {done, value} = await reader.read();
       if(done) break;
       full += dec.decode(value, {stream:true});
-      const c = document.getElementById('execCnt');
-      if(c) c.textContent = full.length.toLocaleString('vi-VN');
+      const c = document.getElementById('execCnt'), p = document.getElementById('execPhase');
+      const started = full.indexOf('<!DOCTYPE') >= 0 || /<html[\s>]/i.test(full);
+      if(p) p.textContent = started ? 'AI đang viết tool…' : 'AI đang suy nghĩ về thiết kế…';
+      if(c) c.textContent = started
+        ? (full.length.toLocaleString('vi-VN') + ' ký tự')
+        : (Math.round((Date.now()-t0)/1000) + ' giây');
     }
     full += dec.decode();
     const errPos = full.indexOf('[SVWS-LỖI]');
