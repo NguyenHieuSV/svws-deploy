@@ -311,7 +311,10 @@ def ai_execute(payload: dict = Body(...)):
         raise HTTPException(503, "Server chưa cấu hình ANTHROPIC_API_KEY "
                                  "(Render → Environment → thêm biến này)")
     model = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-5")
-    max_tokens = int(os.getenv("ANTHROPIC_MAX_TOKENS", "32000"))
+    # Token suy nghĩ (adaptive thinking) ĐƯỢC TÍNH VÀO max_tokens — để 32000 thì
+    # model nghĩ hết phần lớn hạn mức rồi bị cắt giữa chừng khi đang viết file.
+    max_tokens = int(os.getenv("ANTHROPIC_MAX_TOKENS", "64000"))
+    effort = os.getenv("ANTHROPIC_EFFORT", "medium")  # đặt "" để bỏ tham số
     prompt = (payload.get("prompt") or "").strip()
     if not prompt:
         raise HTTPException(422, 'Body thiếu "prompt"')
@@ -337,14 +340,18 @@ def ai_execute(payload: dict = Body(...)):
                 return "."
             return ""
 
+        body_json = {"model": model, "max_tokens": max_tokens, "stream": True,
+                     "messages": [{"role": "user", "content": user_msg}]}
+        if effort:
+            body_json["output_config"] = {"effort": effort}
+
         try:
             with httpx.stream(
                 "POST", _ANTHROPIC_URL,
                 headers={"x-api-key": api_key,
                          "anthropic-version": "2023-06-01",
                          "content-type": "application/json"},
-                json={"model": model, "max_tokens": max_tokens, "stream": True,
-                      "messages": [{"role": "user", "content": user_msg}]},
+                json=body_json,
                 timeout=httpx.Timeout(1800.0, connect=30.0),
             ) as resp:
                 if resp.status_code != 200:
@@ -369,6 +376,16 @@ def ai_execute(payload: dict = Body(...)):
                             hb = beat()
                             if hb:
                                 yield hb
+                    elif etype == "message_delta":
+                        # Báo rõ khi model bị cắt vì chạm trần token, thay vì
+                        # lặng lẽ giao file HTML dở dang cho người dùng.
+                        stop = (ev.get("delta") or {}).get("stop_reason")
+                        if stop == "max_tokens":
+                            used = (ev.get("usage") or {}).get("output_tokens", "?")
+                            yield (f"\n[SVWS-LỖI] File bị cắt vì chạm trần {max_tokens:,} token "
+                                   f"(đã dùng {used}). Tăng ANTHROPIC_MAX_TOKENS trên Render, "
+                                   f"hoặc chia đề bài thành phần nhỏ hơn.")
+                            return
                     elif etype == "error":
                         yield f"\n[SVWS-LỖI] {json.dumps(ev.get('error', {}), ensure_ascii=False)[:300]}"
                         return

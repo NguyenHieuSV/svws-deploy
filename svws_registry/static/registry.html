@@ -476,6 +476,9 @@ async function execDesign(){
     const html = extractHTML(full);
     if(html.length < 200 || !/<html[\s>]/i.test(html))
       throw new Error('AI không trả về file HTML hợp lệ — thử lại hoặc dùng Copy đề bài.');
+    if(!/<\/html>\s*$/i.test(html))
+      throw new Error('File bị cắt giữa chừng (thiếu thẻ đóng </html>) — tool sẽ không chạy được. '
+        + 'Bấm thử lại; nếu vẫn cắt thì rút gọn đề bài hoặc tăng ANTHROPIC_MAX_TOKENS trên Render.');
     if(execBlobUrl) URL.revokeObjectURL(execBlobUrl);
     execBlobUrl = URL.createObjectURL(new Blob([html], {type:'text/html;charset=utf-8'}));
     const fname = curCode.replace(/[^\w\-\.]+/g,'_') + '_tool.html';
