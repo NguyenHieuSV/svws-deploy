@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from .routers import (auth, kho, ncc, du_an, ban_hang, ke_toan, tai_chinh,
                       nhan_su, cho_thue, crm, ban_hang_ext, ke_toan_quy, vay, quy_trich_lap,
                       cau_hinh, nhan_su_kpi, cho_thue_ops, dich_vu_kt)
+from svws_registry import registry
 
 app = FastAPI(title="SVWS — Backend hợp nhất (9 module nghiệp vụ)")
 app.add_middleware(
@@ -13,6 +14,7 @@ app.add_middleware(
 )
 for r in (auth, kho, ncc, du_an, ban_hang, ke_toan, tai_chinh, nhan_su, cho_thue, crm, ban_hang_ext, ke_toan_quy, vay, quy_trich_lap, cau_hinh, nhan_su_kpi, cho_thue_ops, dich_vu_kt):
     app.include_router(r.router)
+app.include_router(registry.router)
 
 
 @app.on_event("startup")
@@ -23,6 +25,15 @@ def _bat_scheduler():
         khoi_dong()
     except Exception as e:
         print(f"[SCHEDULER] Không bật được: {type(e).__name__}: {e}")
+
+
+@app.on_event("startup")
+def _init_registry():
+    """Tạo bảng + nạp seed Rev.E cho Design Registry. Lỗi KHÔNG chặn app khởi động."""
+    try:
+        registry.init_db()
+    except Exception as e:
+        print(f"[REGISTRY] Không khởi tạo được DB: {type(e).__name__}: {e}")
 
 
 _HTML = os.path.join(os.path.dirname(__file__), "..", "svws_app.html")
