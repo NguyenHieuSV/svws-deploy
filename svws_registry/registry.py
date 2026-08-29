@@ -30,7 +30,7 @@ from typing import Optional
 
 import httpx
 from fastapi import APIRouter, HTTPException, Body
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 from sqlalchemy import Column, JSON, Text
 from sqlmodel import SQLModel, Field, Session, create_engine, select
 
@@ -296,3 +296,63 @@ CHỈ trả về JSON hợp lệ, không markdown, không giải thích:
         "refined_A": parsed.get("refined_A") or "",
         "notes": parsed.get("notes") or "",
     }
+
+
+@router.post("/api/execute")
+def ai_execute(payload: dict = Body(...)):
+    """AI THỰC HIỆN đề bài — tạo tool HTML, stream từng đoạn text về client.
+
+    Body: {prompt: "đề bài hoàn chỉnh"}
+    Trả về: text/plain stream (toàn bộ trả lời của Claude, client tự tách HTML).
+    Stream giữ kết nối sống liên tục nên không vướng timeout proxy của Render.
+    """
+    api_key = os.getenv("ANTHROPIC_API_KEY", "")
+    if not api_key:
+        raise HTTPException(503, "Server chưa cấu hình ANTHROPIC_API_KEY "
+                                 "(Render → Environment → thêm biến này)")
+    model = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-5")
+    max_tokens = int(os.getenv("ANTHROPIC_MAX_TOKENS", "32000"))
+    prompt = (payload.get("prompt") or "").strip()
+    if not prompt:
+        raise HTTPException(422, 'Body thiếu "prompt"')
+
+    user_msg = (prompt + "\n\nQUAN TRỌNG: Trả về TRỰC TIẾP file HTML hoàn chỉnh "
+                "(bắt đầu bằng <!DOCTYPE html>), không lời dẫn, không markdown fence. "
+                "Nếu đề bài thiếu thông tin thì tự chọn giá trị hợp lý và ghi chú "
+                "ngay trong giao diện tool.")
+
+    def gen():
+        try:
+            with httpx.stream(
+                "POST", _ANTHROPIC_URL,
+                headers={"x-api-key": api_key,
+                         "anthropic-version": "2023-06-01",
+                         "content-type": "application/json"},
+                json={"model": model, "max_tokens": max_tokens, "stream": True,
+                      "messages": [{"role": "user", "content": user_msg}]},
+                timeout=httpx.Timeout(1800.0, connect=30.0),
+            ) as resp:
+                if resp.status_code != 200:
+                    body = resp.read().decode("utf-8", "replace")
+                    yield f"\n[SVWS-LỖI] Anthropic API {resp.status_code}: {body[:300]}"
+                    return
+                for line in resp.iter_lines():
+                    if not line.startswith("data: "):
+                        continue
+                    try:
+                        ev = json.loads(line[6:])
+                    except json.JSONDecodeError:
+                        continue
+                    if ev.get("type") == "content_block_delta":
+                        delta = ev.get("delta", {})
+                        if delta.get("type") == "text_delta":
+                            yield delta.get("text", "")
+                    elif ev.get("type") == "error":
+                        yield f"\n[SVWS-LỖI] {json.dumps(ev.get('error', {}), ensure_ascii=False)[:300]}"
+                        return
+        except httpx.HTTPError as e:
+            yield f"\n[SVWS-LỖI] Không gọi được Anthropic API: {e}"
+
+    return StreamingResponse(gen(), media_type="text/plain; charset=utf-8",
+                             headers={"Cache-Control": "no-cache",
+                                      "X-Accel-Buffering": "no"})
