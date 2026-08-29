@@ -320,9 +320,13 @@ def ai_execute(payload: dict = Body(...)):
         raise HTTPException(422, 'Body thiếu "prompt"')
 
     user_msg = (prompt + "\n\nQUAN TRỌNG: Trả về TRỰC TIẾP file HTML hoàn chỉnh "
-                "(bắt đầu bằng <!DOCTYPE html>), không lời dẫn, không markdown fence. "
-                "Nếu đề bài thiếu thông tin thì tự chọn giá trị hợp lý và ghi chú "
-                "ngay trong giao diện tool.")
+                "(bắt đầu bằng <!DOCTYPE html>, kết thúc bằng </html>), không lời dẫn, "
+                "không markdown fence. Nếu đề bài thiếu thông tin thì tự chọn giá trị "
+                "hợp lý và ghi chú ngay trong giao diện tool.\n"
+                "JavaScript phải đúng cú pháp và chạy được ngay khi mở file bằng trình "
+                "duyệt — rà lại trước khi kết thúc: khóa đối tượng động phải bọc ngoặc "
+                "vuông ({['Màng '+t]: x} chứ không phải {'Màng '+t: x}), đóng đủ ngoặc "
+                "và dấu nháy, không để hàm nào chưa định nghĩa.")
 
     def gen():
         # Model suy nghĩ (adaptive thinking) có thể vài phút trước khi viết chữ

@@ -429,7 +429,17 @@ function showFinal(promptText, titleSuffix){
 }
 
 /* ====== AI THỰC HIỆN — stream tạo tool HTML ====== */
-let execBlobUrl = null;
+let execBlobUrl = null, brokenHTML = null, brokenErr = '';
+function repairDesign(){
+  // Gửi lại chính file lỗi kèm thông báo lỗi, xin bản đã sửa (rẻ hơn và
+  // đúng hướng hơn là làm lại từ đầu — giữ nguyên phần đã viết đúng).
+  const p = 'File HTML dưới đây bị LỖI CÚ PHÁP JavaScript nên mở ra trang trắng.\n'
+    + 'Trình duyệt báo: ' + brokenErr + '\n\n'
+    + 'Hãy sửa lỗi cú pháp đó (và mọi lỗi cú pháp khác nếu có), GIỮ NGUYÊN toàn bộ '
+    + 'giao diện, nội dung và chức năng còn lại. Lưu ý khóa đối tượng động phải bọc '
+    + "ngoặc vuông: {['Màng '+t]: x} chứ không phải {'Màng '+t: x}.\n\n" + brokenHTML;
+  execDesign(p);
+}
 function extractHTML(text){
   // bỏ fence markdown nếu AI lỡ bọc; lấy từ <!DOCTYPE hoặc <html trở đi
   let t = text.replace(/```html\s*/gi,'').replace(/```/g,'').trim();
@@ -440,10 +450,25 @@ function extractHTML(text){
   if(end>=0) t = t.slice(0, end+7);
   return t;
 }
-async function execDesign(){
+function jsSyntaxError(html){
+  // Bắt lỗi cú pháp JS trước khi giao file: new Function() chỉ PHÂN TÍCH mã,
+  // không chạy, nên an toàn. Bỏ qua module (cú pháp import/export khác).
+  const re = /<script\b([^>]*)>([\s\S]*?)<\/script>/gi;
+  let m;
+  while((m = re.exec(html))){
+    if(/type\s*=\s*["']?module/i.test(m[1])) continue;
+    if(/\bsrc\s*=/i.test(m[1])) continue;
+    const src = m[2];
+    if(!src.trim()) continue;
+    try{ new Function(src); }
+    catch(e){ if(e instanceof SyntaxError) return e.message; }
+  }
+  return null;
+}
+async function execDesign(promptOverride){
   const btn = document.getElementById('btnExec');
   const out = document.getElementById('execResult');
-  const prompt = document.getElementById('finalPrompt').value;
+  const prompt = promptOverride || document.getElementById('finalPrompt').value;
   btn.disabled = true; btn.innerHTML = '<span class="spin"></span>AI đang thiết kế…';
   out.innerHTML = '<div class="modal-note"><span class="spin"></span><span id="execPhase">Đã gửi đề bài — AI đang đọc và suy nghĩ (có thể vài phút)…</span> <b id="execCnt"></b></div>';
   let full = '';
@@ -482,9 +507,26 @@ async function execDesign(){
     if(execBlobUrl) URL.revokeObjectURL(execBlobUrl);
     execBlobUrl = URL.createObjectURL(new Blob([html], {type:'text/html;charset=utf-8'}));
     const fname = curCode.replace(/[^\w\-\.]+/g,'_') + '_tool.html';
+    const syntaxErr = jsSyntaxError(html);
+    if(syntaxErr){
+      // File đủ nhưng JS sai cú pháp → mở ra sẽ trắng trang. Không giao thẳng.
+      brokenHTML = html; brokenErr = syntaxErr;
+      out.innerHTML = `
+        <div class="ai-block">
+          <h4>⚠ Tool có lỗi cú pháp JavaScript</h4>
+          <div style="font-size:12.5px">AI viết sai: <b>${esc(syntaxErr)}</b><br>
+            Mở file này sẽ ra trang trắng vì script không chạy được.</div>
+          <div class="btn-row" style="margin-top:7px">
+            <button class="ai" id="btnFix" onclick="repairDesign()">🔧 Nhờ AI sửa lỗi này</button>
+            <a href="${execBlobUrl}" download="${fname}"><button>⬇ Tải file lỗi (để xem mã)</button></a>
+          </div>
+        </div>`;
+      btn.disabled = false; btn.textContent = '↻ Làm lại từ đầu';
+      return;
+    }
     out.innerHTML = `
       <div class="ai-block" style="border-left-color:var(--ok)">
-        <h4 style="color:var(--ok)">✔ Hoàn tất — tool ${(html.length/1024).toFixed(0)} KB</h4>
+        <h4 style="color:var(--ok)">✔ Hoàn tất — tool ${(html.length/1024).toFixed(0)} KB, JavaScript hợp lệ</h4>
         <div class="btn-row" style="margin-top:6px">
           <button class="primary" onclick="window.open(execBlobUrl,'_blank')">👁 Mở xem thử</button>
           <a href="${execBlobUrl}" download="${fname}"><button>⬇ Tải file ${fname}</button></a>
