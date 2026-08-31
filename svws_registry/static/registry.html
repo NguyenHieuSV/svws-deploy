@@ -157,8 +157,10 @@
     <div id="designs"></div>
     <div class="add-sec-wrap">
       <button class="add-wide" onclick="addDesign()">＋ Thêm thiết kế mới</button>
+      <button class="add-wide" onclick="document.getElementById('sowInput').click()">📄 Upload file SOW — AI đọc &amp; soạn phiếu</button>
       <button class="add-wide" onclick="document.getElementById('desInput').click()">📂 Nhập phiếu thiết kế (JSON)</button>
       <input type="file" id="desInput" accept=".json" style="display:none">
+      <input type="file" id="sowInput" accept=".pdf,.docx,.xlsx,.xlsm,.txt,.csv,.md,.png,.jpg,.jpeg,.webp" style="display:none">
     </div>
   </div>
 </main>
@@ -376,6 +378,91 @@ document.getElementById('desInput').addEventListener('change',e=>{
     }catch(err){alert('File không hợp lệ: '+err.message);}};
   r.readAsText(f);e.target.value='';
 });
+
+/* ================= SOW → PHIẾU THIẾT KẾ ================= */
+let sowKetQua = null;
+document.getElementById('sowInput').addEventListener('change', e=>{
+  const f = e.target.files[0]; e.target.value = '';
+  if(f) docSOW(f);
+});
+async function docSOW(f){
+  document.getElementById('modalTitle').textContent = '📄 Đọc SOW — ' + f.name;
+  modalBody.innerHTML = `<div class="modal-note"><span class="spin"></span>
+    AI đang đọc <b>${esc(f.name)}</b> (${(f.size/1024).toFixed(0)} KB) và soạn phiếu thiết kế…
+    File dài có thể mất một hai phút.</div>`;
+  modalBg.classList.remove('tab-hidden');
+  try{
+    const fd = new FormData(); fd.append('file', f);
+    const r = await fetch(API + '/sow', {method:'POST', body: fd});
+    if(!r.ok){
+      const e = await r.json().catch(()=>({detail:'HTTP '+r.status}));
+      throw new Error(e.detail || ('HTTP '+r.status));
+    }
+    sowKetQua = await r.json();
+    renderSOW();
+  }catch(err){
+    modalBody.innerHTML = `<div class="ai-block"><h4>Không đọc được SOW</h4>
+      <div style="font-size:12.5px">${esc(err.message)}</div>
+      <div style="font-size:12px;color:var(--muted);margin-top:5px">
+        Nhận PDF, Word (.docx), Excel (.xlsx), ảnh và TXT/CSV. File scan mờ hoặc ảnh chụp
+        nghiêng thì AI đọc kém — chụp lại rõ hoặc dùng bản PDF gốc.</div></div>`;
+  }
+}
+function _sowO(nhan, val, dai){
+  return `<div class="dfield${dai?' full':''}"><label>${nhan}</label>${
+    dai ? `<textarea rows="3" data-sow="${nhan}">${esc(val)}</textarea>`
+        : `<input value="${esc(val)}" data-sow="${nhan}">`}</div>`;
+}
+function renderSOW(){
+  const d = sowKetQua.design, qs = sowKetQua.questions || [];
+  modalBody.innerHTML = `
+    ${sowKetQua.tom_tat?`<div class="ai-block"><h4>Tóm tắt phạm vi công việc</h4>
+      <div style="font-size:12.5px">${esc(sowKetQua.tom_tat)}</div></div>`:''}
+    ${qs.length?`<div class="ai-block"><h4>Thông tin SOW còn thiếu — cần hỏi lại chủ đầu tư</h4>
+      <ul>${qs.map(q=>`<li>${esc(q)}</li>`).join('')}</ul></div>`
+     :`<div class="ai-block" style="border-left-color:var(--ok)">
+        <h4 style="color:var(--ok)">SOW đã đủ thông tin để lập phiếu</h4></div>`}
+    <div class="modal-note">Xem lại và sửa trực tiếp bên dưới trước khi thêm vào sổ:</div>
+    <div class="dgrid" style="padding:0">
+      ${_sowO('Mã thiết kế', d.code)}
+      ${_sowO('Công nghệ', d.tech)}
+      ${_sowO('Tên thiết kế', d.name, 1)}
+      ${_sowO('Công suất', d.capacity)}
+      ${_sowO('Dự án / Khách hàng', d.project)}
+      ${_sowO('Thông số chính', d.params, 1)}
+      ${_sowO('Yêu cầu riêng', d.notes, 1)}
+    </div>
+    <div class="btn-row">
+      <button class="primary" onclick="themPhieuSOW()">✔ Thêm phiếu vào sổ</button>
+      <button onclick="closeModal()">✕ Bỏ qua</button>
+    </div>`;
+  modalBody.querySelectorAll('textarea').forEach(autoGrow);
+}
+function themPhieuSOW(){
+  const lay = n => {
+    const el = modalBody.querySelector(`[data-sow="${n}"]`);
+    return el ? el.value.trim() : '';
+  };
+  const d = {
+    code: lay('Mã thiết kế') || 'SVWS-SOW',
+    name: lay('Tên thiết kế'), tech: lay('Công nghệ'),
+    capacity: lay('Công suất'), project: lay('Dự án / Khách hàng'),
+    params: lay('Thông số chính'), notes: lay('Yêu cầu riêng'),
+    status: 'Ý tưởng'
+  };
+  if(data.designs.some(x => (x.code||'') === d.code)){
+    let i = 2, base = d.code;
+    while(data.designs.some(x => (x.code||'') === base+'-'+i)) i++;
+    d.code = base + '-' + i;   // trùng mã thì tự đánh số, đừng chặn người dùng
+  }
+  data.designs.push(d);
+  touch(); renderDesigns(); closeModal(); switchTab('des');
+  const el = desWrap.lastElementChild;
+  el.scrollIntoView({behavior:'smooth', block:'center'});
+  el.style.transition = 'box-shadow .4s';
+  el.style.boxShadow = '0 0 0 3px var(--cyan)';
+  setTimeout(()=>{ el.style.boxShadow = ''; }, 1800);
+}
 
 /* ================= PROMPT COMPOSE ================= */
 function standardText(){

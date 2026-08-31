@@ -23,13 +23,14 @@ Biến môi trường:
 URL sau khi deploy:  https://<app>.onrender.com/registry
 """
 import os
+import re
 import json
 import datetime
 from pathlib import Path
 from typing import Optional
 
 import httpx
-from fastapi import APIRouter, HTTPException, Body, Response
+from fastapi import APIRouter, HTTPException, Body, Response, UploadFile, File
 from fastapi.responses import HTMLResponse, StreamingResponse
 from sqlalchemy import Column, JSON, Text
 from sqlmodel import SQLModel, Field, Session, create_engine, select
@@ -435,6 +436,155 @@ def ai_execute(payload: dict = Body(...)):
     return StreamingResponse(gen(), media_type="text/plain; charset=utf-8",
                              headers={"Cache-Control": "no-cache, no-transform",
                                       "X-Accel-Buffering": "no"})
+
+
+MAX_SOW_MB = 20
+
+
+def _docx_text(data: bytes) -> str:
+    """Rút chữ từ file .docx (là file zip chứa word/document.xml) — không cần thư viện."""
+    import io, zipfile
+    from html import unescape
+    try:
+        with zipfile.ZipFile(io.BytesIO(data)) as z:
+            xml = z.read("word/document.xml").decode("utf-8", "replace")
+    except Exception as e:
+        raise ValueError(f"Không mở được file .docx: {e}")
+    xml = re.sub(r"<w:tab[^>]*/>", "\t", xml)
+    xml = re.sub(r"</w:p>", "\n", xml)
+    xml = re.sub(r"<w:br[^>]*/>", "\n", xml)
+    txt = unescape(re.sub(r"<[^>]+>", "", xml))
+    return re.sub(r"\n{3,}", "\n\n", txt).strip()
+
+
+def _xlsx_text(data: bytes) -> str:
+    """Đổ bảng Excel thành text để AI đọc (SOW hay kèm bảng thiết bị/thông số)."""
+    import io
+    from openpyxl import load_workbook
+    wb = load_workbook(io.BytesIO(data), data_only=True, read_only=True)
+    out = []
+    for ws in wb.worksheets:
+        out.append(f"--- SHEET: {ws.title} ---")
+        for row in ws.iter_rows(values_only=True):
+            cells = ["" if c is None else str(c).strip() for c in row]
+            if any(cells):
+                out.append(" | ".join(cells))
+    return "\n".join(out)[:120000]
+
+
+def _khoi_file(data: bytes, content_type: str, filename: str) -> dict:
+    """Dựng khối nội dung gửi Claude từ file người dùng tải lên."""
+    import base64
+    ct = (content_type or "").lower()
+    fn = (filename or "").lower()
+    if ct == "application/pdf" or fn.endswith(".pdf"):
+        return {"type": "document",
+                "source": {"type": "base64", "media_type": "application/pdf",
+                           "data": base64.b64encode(data).decode()}}
+    if ct.startswith("image/") or fn.endswith((".png", ".jpg", ".jpeg", ".webp", ".gif")):
+        mt = ct if ct.startswith("image/") else ("image/png" if fn.endswith(".png") else "image/jpeg")
+        return {"type": "image",
+                "source": {"type": "base64", "media_type": mt,
+                           "data": base64.b64encode(data).decode()}}
+    if fn.endswith(".docx"):
+        return {"type": "text", "text": _docx_text(data)[:120000]}
+    if fn.endswith((".xlsx", ".xlsm")):
+        return {"type": "text", "text": _xlsx_text(data)}
+    if ct.startswith("text/") or fn.endswith((".txt", ".csv", ".md")):
+        return {"type": "text", "text": data.decode("utf-8", errors="replace")[:120000]}
+    if fn.endswith(".doc"):
+        raise ValueError("File .doc là Word đời cũ — mở bằng Word rồi lưu lại thành .docx "
+                         "(hoặc in ra PDF) là đọc được.")
+    raise ValueError("Định dạng chưa hỗ trợ — dùng PDF, Word (.docx), Excel (.xlsx), "
+                     "ảnh (PNG/JPG) hoặc TXT/CSV.")
+
+
+@router.post("/api/sow")
+async def ai_sow(file: UploadFile = File(...)):
+    """Đọc file SOW (phạm vi công việc) → soạn sẵn PHIẾU THIẾT KẾ.
+
+    Trả: {design: {...}, questions: [...], tom_tat: "..."}
+    Người dùng xem lại rồi mới bấm thêm vào sổ.
+    """
+    api_key = os.getenv("ANTHROPIC_API_KEY", "")
+    if not api_key:
+        raise HTTPException(503, "Server chưa cấu hình ANTHROPIC_API_KEY "
+                                 "(Render → Environment → thêm biến này)")
+    model = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-5")
+
+    data = await file.read()
+    if not data:
+        raise HTTPException(422, "File rỗng")
+    if len(data) > MAX_SOW_MB * 1024 * 1024:
+        raise HTTPException(413, f"File nặng quá {MAX_SOW_MB}MB — nén lại hoặc tách bớt phần phụ lục.")
+    try:
+        khoi = _khoi_file(data, file.content_type or "", file.filename or "")
+    except ValueError as e:
+        raise HTTPException(415, str(e))
+
+    with Session(engine) as s:
+        doc = s.get(RegistryDoc, 1)
+        d = doc.data if doc else {}
+        summary = _sections_summary(d)
+        ma_cu = ", ".join((x.get("code") or "") for x in (d.get("designs") or [])[:20])
+
+    sys_msg = (
+        "Bạn là kỹ sư trưởng của SVWS (công ty EPC xử lý nước / nước thải / khí thải, TP.HCM). "
+        "Người dùng gửi một file SOW (Scope of Work — phạm vi công việc) của dự án. "
+        "Hãy ĐỌC KỸ và soạn sẵn một PHIẾU THIẾT KẾ để đưa vào Sổ đăng ký thiết kế.\n\n"
+        f"TÓM TẮT CHUẨN 3D DESIGN CỦA CÔNG TY:\n{summary}\n\n"
+        f"CÁC MÃ THIẾT KẾ ĐÃ CÓ (đừng trùng): {ma_cu or '(chưa có)'}\n\n"
+        "CHỈ trả về JSON hợp lệ, không markdown, không giải thích ngoài JSON:\n"
+        '{"design":{"code":"<mã ngắn gọn theo kiểu SVWS-XXX, tự đặt từ nội dung SOW>",'
+        '"name":"<tên thiết kế>","tech":"<công nghệ chính>","capacity":"<công suất kèm đơn vị>",'
+        '"project":"<tên dự án / khách hàng>",'
+        '"params":"<thông số chính, mỗi ý một dòng, gạch đầu dòng>",'
+        '"notes":"<yêu cầu riêng / ràng buộc / tiêu chuẩn đầu ra, mỗi ý một dòng>"},'
+        '"questions":["<tối đa 6 câu hỏi về thông tin SOW còn thiếu để thiết kế được>"],'
+        '"tom_tat":"<2-3 câu tóm tắt phạm vi công việc>"}\n\n'
+        "QUY TẮC: KHÔNG bịa số liệu không có trong SOW — thiếu thì để chuỗi rỗng và "
+        "nêu thành câu hỏi trong \"questions\". Viết tiếng Việt, ngắn gọn, đúng kỹ thuật."
+    )
+
+    try:
+        resp = httpx.post(
+            _ANTHROPIC_URL,
+            headers={"x-api-key": api_key, "anthropic-version": "2023-06-01",
+                     "content-type": "application/json"},
+            json={"model": model, "max_tokens": 4000, "system": sys_msg,
+                  "messages": [{"role": "user", "content": [
+                      khoi,
+                      {"type": "text",
+                       "text": "Đọc SOW này và soạn phiếu thiết kế theo đúng định dạng JSON đã nêu."}]}]},
+            timeout=300.0,
+        )
+    except httpx.HTTPError as e:
+        raise HTTPException(502, f"Không gọi được Anthropic API: {e}")
+    if resp.status_code != 200:
+        raise HTTPException(502, f"Anthropic API lỗi {resp.status_code}: {resp.text[:300]}")
+
+    out = resp.json()
+    text = "\n".join(b.get("text", "") for b in out.get("content", [])
+                     if b.get("type") == "text")
+    clean = text.replace("```json", "").replace("```", "").strip()
+    try:
+        parsed = json.loads(clean)
+    except json.JSONDecodeError:
+        raise HTTPException(502, "AI đọc được file nhưng trả lời sai định dạng — thử lại, "
+                                 "hoặc kiểm tra file SOW có chữ đọc được (không phải ảnh scan mờ).")
+    dsg = parsed.get("design") or {}
+    if not isinstance(dsg, dict) or not (dsg.get("name") or dsg.get("tech")):
+        raise HTTPException(502, "AI không rút được nội dung thiết kế từ file này — "
+                                 "kiểm tra đúng file SOW chưa.")
+    design = {k: str(dsg.get(k) or "") for k in
+              ("code", "name", "tech", "capacity", "project", "params", "notes")}
+    design["status"] = "Ý tưởng"
+    if not design["code"]:
+        design["code"] = "SVWS-SOW"
+    return {"design": design,
+            "questions": [q for q in (parsed.get("questions") or []) if q][:6],
+            "tom_tat": parsed.get("tom_tat") or "",
+            "nguon": file.filename or ""}
 
 
 @router.post("/api/fix")
