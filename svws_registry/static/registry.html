@@ -531,9 +531,10 @@ async function injectThree(html){
     return {html, injected:false, already:true};   // AI đã tự nhúng, đừng nhúng đôi
   try{
     if(threeCache === null){
-      const r = await fetch('/registry/three.js');
-      if(!r.ok) throw new Error('HTTP '+r.status);
-      threeCache = await r.text();
+      const [a,b] = await Promise.all([fetch('/registry/three.js'), fetch('/registry/svws3d.js')]);
+      if(!a.ok) throw new Error('three.js HTTP '+a.status);
+      if(!b.ok) throw new Error('svws3d.js HTTP '+b.status);
+      threeCache = (await a.text()) + '\n;\n' + (await b.text());
     }
   }catch(e){ return {html, injected:false, err:e.message}; }
   // PHẢI dùng dạng hàm: mã thư viện chứa ký tự $ nên replace kiểu chuỗi sẽ hỏng
@@ -555,7 +556,7 @@ async function finalizeTool(html, headline, extraNote){
       <h4 style="color:var(--ok)">${headline} — ${(html.length/1024).toFixed(0)} KB</h4>
       ${extraNote?`<div style="font-size:12.5px">${esc(extraNote)}</div>`:''}
       <div style="font-size:12px;color:var(--muted);margin-top:4px">
-        ${res.injected ? '✔ Đã nhúng Three.js r128 — bản vẽ 3D chạy WebGL thật, file vẫn mở offline.'
+        ${res.injected ? '✔ Đã nhúng Three.js r128 + bộ dựng hình SVWS3D — bản vẽ 3D chạy WebGL thật, file vẫn mở offline.'
           : res.already ? '✔ Tool tự mang sẵn Three.js.'
           : res.err ? '⚠ Không nạp được Three.js ('+esc(res.err)+') — bản vẽ 3D có thể không hiện.'
           : 'Tool này không dùng Three.js.'}

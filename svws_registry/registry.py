@@ -48,6 +48,7 @@ _HERE = Path(__file__).resolve().parent
 _SEED = _HERE / "registry_seed.json"
 _PAGE = _HERE / "static" / "registry.html"
 _THREE = _HERE / "static" / "three.min.js"   # Three.js r128 (MIT) — chuẩn Rev.E
+_SVWS3D = _HERE / "static" / "svws3d.js"     # bộ dựng hình chuẩn của SVWS
 
 MAX_REVISIONS = 300  # giữ tối đa bao nhiêu bản lịch sử
 
@@ -124,6 +125,20 @@ def three_js():
     return Response(_THREE.read_text(encoding="utf-8"),
                     media_type="application/javascript; charset=utf-8",
                     headers={"Cache-Control": "public, max-age=31536000, immutable"})
+
+
+@router.get("/svws3d.js", include_in_schema=False)
+def svws3d_js():
+    """Bộ dựng hình chuẩn: bố cục theo hàng, ống vuông góc, camera tự căn khung.
+
+    AI gõ toạ độ mà không nhìn thấy kết quả nên bố cục hay hỏng. Thư viện này
+    nhận phần đó; AI chỉ khai báo danh sách thiết bị và đường nối.
+    """
+    if not _SVWS3D.exists():
+        raise HTTPException(500, "Thiếu static/svws3d.js trong module")
+    return Response(_SVWS3D.read_text(encoding="utf-8"),
+                    media_type="application/javascript; charset=utf-8",
+                    headers={"Cache-Control": "no-cache"})
 
 
 @router.get("/api")
@@ -386,10 +401,33 @@ def ai_execute(payload: dict = Body(...)):
                 "  <script>/*__SVWS_THREE__*/</script>\n"
                 "- Rồi dùng THREE bình thường: THREE.Scene, THREE.WebGLRenderer, "
                 "THREE.PerspectiveCamera, THREE.BoxGeometry, THREE.CylinderGeometry…\n"
-                "- OrbitControls KHÔNG có trong bản lõi — tự viết xoay/zoom bằng sự kiện "
-                "chuột (mousedown/mousemove/wheel), khoảng 15 dòng.\n"
-                "- Vì không phải gõ thư viện, hãy dồn công sức vào dựng cảnh 3D chi tiết: "
-                "bể, bơm, vessel màng, khung skid, đường ống đi theo trục, nhãn thiết bị.\n\n"
+                "- Kèm theo là thư viện SVWS3D (bộ dựng hình chuẩn của công ty). "
+                "DÙNG NÓ, ĐỪNG tự gõ hình học — tự gõ toạ độ sẽ ra bố cục một đường "
+                "thẳng, ống đi chéo xuyên thiết bị, tỷ lệ và màu lộn xộn.\n"
+                "  Cách dùng (đơn vị mm, trục Y hướng lên):\n"
+                "    const S = SVWS3D.scene(document.getElementById('view3d'));\n"
+                "    const pos = SVWS3D.layout(EQUIP);   // tự xếp thành hàng có lối đi\n"
+                "    EQUIP.forEach(e => S.addEquip(SVWS3D.build(e), pos[e.id], e));\n"
+                "    PIPES.forEach(p => S.addPipe(p, pos, EQUIP));\n"
+                "    S.fit();                            // camera tự căn, không cắt mép\n"
+                "  Bạn CHỈ khai báo dữ liệu, thư viện lo phần vẽ:\n"
+                "    EQUIP = [{id,type,tag,name,...kích thước}] — type nhận: tank(d,h,"
+                "service,level) · vessel(d,h,material,media,mediaColor) · cartridge(d,h) · "
+                "pump · roskid(vessels,memPerVessel,size,rows) · edi · panel(W,H,D) · "
+                "dosing(d,h) · uv(d,L) · mixedbed\n"
+                "    PIPES = [{from,to,dn,service}] — service nhận: raw · filtered · ro · "
+                "di · chem · air · waste · steam · drain (màu tự theo lưu chất, ống tự đi "
+                "vuông góc và tự chạy cao hơn thiết bị cao nhất)\n"
+                "  Thư viện có sẵn: S.setView('iso'|'front'|'side'|'top'), "
+                "S.layer('pipe'|'label'|'equip'|'ground', true/false), S.clear(), "
+                "SVWS3D.PALETTE. Vòng lặp vẽ tự chạy — không cần tự viết render loop.\n"
+                "  Khi người dùng đổi thông số: gọi S.clear() rồi dựng lại từ EQUIP/PIPES "
+                "mới và S.fit() — đó là cách giữ tính parametric.\n"
+                "  CHỈ tự viết Three.js thô cho chi tiết mà thư viện chưa có; phần bố cục "
+                "và đường ống thì luôn dùng SVWS3D.\n"
+                "- Dồn công sức vào MÔ TẢ ĐÚNG dây chuyền: đủ thiết bị theo Phần A, "
+                "đúng thứ tự dòng công nghệ, tag thiết bị chuẩn (T-101, P-101, F-101…), "
+                "kích thước suy từ thông số thiết kế.\n\n"
                 'NÚT "CHỈNH BẢN VẼ BẰNG AI" (mục 3.3 của chuẩn) — làm ĐÚNG như sau:\n'
                 "- TUYỆT ĐỐI KHÔNG hỏi người dùng nhập API key và KHÔNG gọi "
                 "https://api.anthropic.com (trình duyệt chặn CORS, và để khóa trong file "
