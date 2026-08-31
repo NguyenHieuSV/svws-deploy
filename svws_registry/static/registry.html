@@ -430,6 +430,56 @@ function showFinal(promptText, titleSuffix){
 
 /* ====== AI THỰC HIỆN — stream tạo tool HTML ====== */
 let execBlobUrl = null, brokenHTML = null, brokenErr = '';
+// khoan dung: AI có thể viết thẻ kèm thuộc tính hoặc thừa khoảng trắng
+const THREE_MARK = /<script[^>]*>\s*\/\*\s*__SVWS_THREE__\s*\*\/\s*<\/script>/i;
+let threeCache = null;
+
+/* Nhúng Three.js r128 vào tool: AI không thể gõ tay 600KB thư viện (vượt xa
+   trần token) nên trước đây nó tự hạ cấp xuống canvas 2D. Nay nó chỉ để chỗ
+   trống, ta chèn thư viện thật vào → tool vẫn là 1 file chạy offline. */
+async function injectThree(html){
+  if(!THREE_MARK.test(html) && !/\bTHREE\s*\./.test(html))
+    return {html, injected:false};                 // tool không dùng 3D
+  if(/Three\.js Authors|THREE\s*=\s*\{\}/.test(html))
+    return {html, injected:false, already:true};   // AI đã tự nhúng, đừng nhúng đôi
+  try{
+    if(threeCache === null){
+      const r = await fetch('/registry/three.js');
+      if(!r.ok) throw new Error('HTTP '+r.status);
+      threeCache = await r.text();
+    }
+  }catch(e){ return {html, injected:false, err:e.message}; }
+  // PHẢI dùng dạng hàm: mã thư viện chứa ký tự $ nên replace kiểu chuỗi sẽ hỏng
+  const tag = () => '<script>' + threeCache + '<\/script>';
+  if(THREE_MARK.test(html)) return {html: html.replace(THREE_MARK, tag), injected:true};
+  if(/<\/head>/i.test(html)) return {html: html.replace(/<\/head>/i, () => tag()+'</head>'), injected:true};
+  return {html: html.replace(/<body[^>]*>/i, m => m + tag()), injected:true};
+}
+
+/* Dùng chung cho cả tạo mới lẫn sau khi sửa lỗi: nhúng thư viện rồi giao file. */
+async function finalizeTool(html, headline, extraNote){
+  const res = await injectThree(html);
+  html = res.html;
+  if(execBlobUrl) URL.revokeObjectURL(execBlobUrl);
+  execBlobUrl = URL.createObjectURL(new Blob([html], {type:'text/html;charset=utf-8'}));
+  const fname = curCode.replace(/[^\w\-\.]+/g,'_') + '_tool.html';
+  document.getElementById('execResult').innerHTML = `
+    <div class="ai-block" style="border-left-color:var(--ok)">
+      <h4 style="color:var(--ok)">${headline} — ${(html.length/1024).toFixed(0)} KB</h4>
+      ${extraNote?`<div style="font-size:12.5px">${esc(extraNote)}</div>`:''}
+      <div style="font-size:12px;color:var(--muted);margin-top:4px">
+        ${res.injected ? '✔ Đã nhúng Three.js r128 — bản vẽ 3D chạy WebGL thật, file vẫn mở offline.'
+          : res.already ? '✔ Tool tự mang sẵn Three.js.'
+          : res.err ? '⚠ Không nạp được Three.js ('+esc(res.err)+') — bản vẽ 3D có thể không hiện.'
+          : 'Tool này không dùng Three.js.'}
+      </div>
+      <div class="btn-row" style="margin-top:7px">
+        <button class="primary" onclick="window.open(execBlobUrl,'_blank')">👁 Mở xem thử</button>
+        <a href="${execBlobUrl}" download="${fname}"><button>⬇ Tải file ${fname}</button></a>
+      </div>
+      <div class="modal-note" style="margin-top:6px">Xem thử đạt thì tải file về lưu vào thư mục tool của công ty; chưa đạt thì sửa đề bài rồi bấm thực hiện lại.</div>
+    </div>`;
+}
 async function repairDesign(){
   // Sửa TẠI CHỖ bằng phép thay thế chuỗi: AI chỉ trả vài trăm ký tự thay vì
   // chép lại cả file (chép lại 50KB rất dễ đứt giữa chừng).
@@ -454,19 +504,8 @@ async function repairDesign(){
     if(!applied) throw new Error('Không khớp được đoạn cần sửa trong file — hãy bấm "↻ Làm lại từ đầu".');
     const still = jsSyntaxError(html);
     if(still) throw new Error('Sửa xong vẫn còn lỗi: ' + still + ' — hãy bấm "↻ Làm lại từ đầu".');
-    if(execBlobUrl) URL.revokeObjectURL(execBlobUrl);
-    execBlobUrl = URL.createObjectURL(new Blob([html], {type:'text/html;charset=utf-8'}));
-    const fname = curCode.replace(/[^\w\-\.]+/g,'_') + '_tool.html';
-    out.innerHTML = `
-      <div class="ai-block" style="border-left-color:var(--ok)">
-        <h4 style="color:var(--ok)">✔ Đã sửa xong — JavaScript hợp lệ</h4>
-        <div style="font-size:12.5px">${esc(j.note || ('Đã sửa '+applied+' chỗ.'))}</div>
-        ${missed.length?`<div style="font-size:12px;color:var(--muted);margin-top:4px">Bỏ qua ${missed.length} đoạn không khớp.</div>`:''}
-        <div class="btn-row" style="margin-top:7px">
-          <button class="primary" onclick="window.open(execBlobUrl,'_blank')">👁 Mở xem thử</button>
-          <a href="${execBlobUrl}" download="${fname}"><button>⬇ Tải file ${fname}</button></a>
-        </div>
-      </div>`;
+    await finalizeTool(html, '✔ Đã sửa xong — JavaScript hợp lệ',
+      (j.note || ('Đã sửa '+applied+' chỗ.')) + (missed.length?` (bỏ qua ${missed.length} đoạn không khớp)`:''));
   }catch(err){
     if(btn){ btn.disabled = false; btn.textContent = '↻ Thử sửa lại'; }
     const box = document.createElement('div');
@@ -542,13 +581,13 @@ async function execDesign(promptOverride){
       throw new Error('File bị cắt giữa chừng (thiếu thẻ đóng </html>) — tool sẽ không chạy được. '
         + 'Bấm thử lại; nếu vẫn cắt thì rút gọn đề bài hoặc tăng ANTHROPIC_MAX_TOKENS trên Render. '
         + ket);
-    if(execBlobUrl) URL.revokeObjectURL(execBlobUrl);
-    execBlobUrl = URL.createObjectURL(new Blob([html], {type:'text/html;charset=utf-8'}));
-    const fname = curCode.replace(/[^\w\-\.]+/g,'_') + '_tool.html';
     const syntaxErr = jsSyntaxError(html);
     if(syntaxErr){
       // File đủ nhưng JS sai cú pháp → mở ra sẽ trắng trang. Không giao thẳng.
       brokenHTML = html; brokenErr = syntaxErr;
+      if(execBlobUrl) URL.revokeObjectURL(execBlobUrl);
+      execBlobUrl = URL.createObjectURL(new Blob([html], {type:'text/html;charset=utf-8'}));
+      const fn = curCode.replace(/[^\w\-\.]+/g,'_') + '_tool_LOI.html';
       out.innerHTML = `
         <div class="ai-block">
           <h4>⚠ Tool có lỗi cú pháp JavaScript</h4>
@@ -556,21 +595,13 @@ async function execDesign(promptOverride){
             Mở file này sẽ ra trang trắng vì script không chạy được.</div>
           <div class="btn-row" style="margin-top:7px">
             <button class="ai" id="btnFix" onclick="repairDesign()">🔧 Nhờ AI sửa lỗi này</button>
-            <a href="${execBlobUrl}" download="${fname}"><button>⬇ Tải file lỗi (để xem mã)</button></a>
+            <a href="${execBlobUrl}" download="${fn}"><button>⬇ Tải file lỗi (để xem mã)</button></a>
           </div>
         </div>`;
       btn.disabled = false; btn.textContent = '↻ Làm lại từ đầu';
       return;
     }
-    out.innerHTML = `
-      <div class="ai-block" style="border-left-color:var(--ok)">
-        <h4 style="color:var(--ok)">✔ Hoàn tất — tool ${(html.length/1024).toFixed(0)} KB, JavaScript hợp lệ</h4>
-        <div class="btn-row" style="margin-top:6px">
-          <button class="primary" onclick="window.open(execBlobUrl,'_blank')">👁 Mở xem thử</button>
-          <a href="${execBlobUrl}" download="${fname}"><button>⬇ Tải file ${fname}</button></a>
-        </div>
-        <div class="modal-note" style="margin-top:6px">Xem thử đạt thì tải file về lưu vào thư mục tool của công ty; chưa đạt thì sửa đề bài rồi bấm thực hiện lại.</div>
-      </div>`;
+    await finalizeTool(html, '✔ Hoàn tất — JavaScript hợp lệ');
     btn.disabled = false; btn.textContent = '↻ Thực hiện lại';
   }catch(err){
     out.innerHTML = `<div class="ai-block"><h4>Lỗi</h4>

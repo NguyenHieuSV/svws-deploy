@@ -29,7 +29,7 @@ from pathlib import Path
 from typing import Optional
 
 import httpx
-from fastapi import APIRouter, HTTPException, Body
+from fastapi import APIRouter, HTTPException, Body, Response
 from fastapi.responses import HTMLResponse, StreamingResponse
 from sqlalchemy import Column, JSON, Text
 from sqlmodel import SQLModel, Field, Session, create_engine, select
@@ -46,6 +46,7 @@ engine = create_engine(_DB_URL, pool_pre_ping=True)
 _HERE = Path(__file__).resolve().parent
 _SEED = _HERE / "registry_seed.json"
 _PAGE = _HERE / "static" / "registry.html"
+_THREE = _HERE / "static" / "three.min.js"   # Three.js r128 (MIT) — chuẩn Rev.E
 
 MAX_REVISIONS = 300  # giữ tối đa bao nhiêu bản lịch sử
 
@@ -103,6 +104,21 @@ def page() -> str:
     if not _PAGE.exists():
         raise HTTPException(500, "Thiếu file static/registry.html trong module")
     return _PAGE.read_text(encoding="utf-8")
+
+
+@router.get("/three.js", include_in_schema=False)
+def three_js():
+    """Three.js r128 để nhúng vào tool sinh ra.
+
+    AI không thể gõ tay 600KB thư viện (vượt xa trần token) nên trước đây nó tự
+    hạ cấp xuống canvas 2D. Nay AI chỉ viết phần cảnh, chỗ thư viện để trống
+    bằng dấu hiệu, client nạp file này chèn vào → tool vẫn single-file offline.
+    """
+    if not _THREE.exists():
+        raise HTTPException(500, "Thiếu static/three.min.js trong module")
+    return Response(_THREE.read_text(encoding="utf-8"),
+                    media_type="application/javascript; charset=utf-8",
+                    headers={"Cache-Control": "public, max-age=31536000, immutable"})
 
 
 @router.get("/api")
@@ -326,7 +342,20 @@ def ai_execute(payload: dict = Body(...)):
                 "JavaScript phải đúng cú pháp và chạy được ngay khi mở file bằng trình "
                 "duyệt — rà lại trước khi kết thúc: khóa đối tượng động phải bọc ngoặc "
                 "vuông ({['Màng '+t]: x} chứ không phải {'Màng '+t: x}), đóng đủ ngoặc "
-                "và dấu nháy, không để hàm nào chưa định nghĩa.")
+                "và dấu nháy, không để hàm nào chưa định nghĩa.\n\n"
+                "THƯ VIỆN 3D — ĐỌC KỸ: Three.js r128 bản ĐẦY ĐỦ (biến toàn cục THREE) "
+                "SẼ ĐƯỢC HỆ THỐNG TỰ ĐỘNG NHÚNG vào file sau khi bạn viết xong. Vì vậy:\n"
+                "- TUYỆT ĐỐI KHÔNG tự viết mã thư viện Three.js, KHÔNG dùng CDN, và "
+                "KHÔNG được hạ cấp xuống canvas 2D/isometric giả lập với lý do 'giới hạn "
+                "offline' — WebGL 3D THẬT là bắt buộc theo chuẩn.\n"
+                "- Đặt ĐÚNG một dòng sau vào trong <head>, hệ thống sẽ thay bằng thư viện thật:\n"
+                "  <script>/*__SVWS_THREE__*/</script>\n"
+                "- Rồi dùng THREE bình thường: THREE.Scene, THREE.WebGLRenderer, "
+                "THREE.PerspectiveCamera, THREE.BoxGeometry, THREE.CylinderGeometry…\n"
+                "- OrbitControls KHÔNG có trong bản lõi — tự viết xoay/zoom bằng sự kiện "
+                "chuột (mousedown/mousemove/wheel), khoảng 15 dòng.\n"
+                "- Vì không phải gõ thư viện, hãy dồn công sức vào dựng cảnh 3D chi tiết: "
+                "bể, bơm, vessel màng, khung skid, đường ống đi theo trục, nhãn thiết bị.")
 
     def gen():
         # Model suy nghĩ (adaptive thinking) có thể vài phút trước khi viết chữ
