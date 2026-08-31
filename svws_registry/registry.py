@@ -239,6 +239,45 @@ def restore(rid: int, payload: dict = Body(default={})):
 _ANTHROPIC_URL = "https://api.anthropic.com/v1/messages"
 
 
+def _loi_ai_vn(status: int, body: str) -> str:
+    """Dịch lỗi của Anthropic sang tiếng Việt kèm CHỖ SỬA.
+
+    Nguyên văn tiếng Anh dán lên màn hình thì người dùng không biết phải làm gì
+    — mấy lỗi hay gặp đều là chuyện tài khoản, sửa ở Console chứ không phải lỗi app.
+    """
+    b = (body or "")
+    low = b.lower()
+    khi_nao = ""
+    m = re.search(r"regain access on ([0-9]{4}-[0-9]{2}-[0-9]{2}) at ([0-9]{2}:[0-9]{2})", b)
+    if m:
+        try:  # giờ UTC → giờ Việt Nam cho dễ hình dung
+            t = datetime.datetime.fromisoformat(m.group(1) + "T" + m.group(2) + ":00+00:00")
+            vn = t.astimezone(datetime.timezone(datetime.timedelta(hours=7)))
+            khi_nao = f" Hạn mức tự mở lại lúc {vn:%H:%M ngày %d/%m/%Y} (giờ Việt Nam)."
+        except ValueError:
+            khi_nao = f" Mở lại lúc {m.group(2)} UTC ngày {m.group(1)}."
+
+    if "usage limit" in low or "spend limit" in low:
+        return ("Tài khoản Anthropic đã CHẠM HẠN MỨC CHI TIÊU do chính mình đặt "
+                "(không phải hết tiền, cũng không phải lỗi app)." + khi_nao +
+                " Muốn dùng ngay thì vào console.anthropic.com → Settings → Limits "
+                "để nâng hạn mức. Trong lúc chờ, nút '📄 Đề bài nhanh (không AI)' và "
+                "'📋 Copy đề bài' vẫn dùng bình thường.")
+    if "credit balance" in low:
+        return ("Tài khoản Anthropic đã HẾT CREDIT. Vào console.anthropic.com → "
+                "Plans & Billing để nạp thêm. Trong lúc chờ, nút '📄 Đề bài nhanh "
+                "(không AI)' vẫn dùng được.")
+    if status == 429 or "rate_limit" in low:
+        return "Gọi AI quá nhanh (quá giới hạn số lượt/phút). Chờ khoảng một phút rồi thử lại."
+    if status == 401 or "authentication" in low or "invalid x-api-key" in low:
+        return ("Khóa ANTHROPIC_API_KEY sai hoặc đã bị thu hồi. Kiểm tra lại trong "
+                "Render → Environment.")
+    if "model" in low and ("not found" in low or "does not exist" in low):
+        return ("Mã model trong ANTHROPIC_MODEL không còn phục vụ — đổi sang model "
+                "hiện hành trong Render → Environment.")
+    return f"Anthropic API lỗi {status}: {b[:300]}"
+
+
 def _goi_ai_json(api_key: str, model: str, content, max_tokens: int,
                  system: str = "", timeout: float = 300.0, tra_tho: bool = False):
     """Gọi Claude và ép câu trả lời về JSON.
@@ -266,7 +305,7 @@ def _goi_ai_json(api_key: str, model: str, content, max_tokens: int,
     except httpx.HTTPError as e:
         raise HTTPException(502, f"Không gọi được Anthropic API: {e}")
     if resp.status_code != 200:
-        raise HTTPException(502, f"Anthropic API lỗi {resp.status_code}: {resp.text[:300]}")
+        raise HTTPException(502, _loi_ai_vn(resp.status_code, resp.text))
 
     out = resp.json()
     text = "\n".join(b.get("text", "") for b in out.get("content", [])
@@ -687,7 +726,7 @@ def claude_proxy(payload: dict = Body(...)):
     except httpx.HTTPError as e:
         raise HTTPException(502, f"Không gọi được Anthropic API: {e}")
     if resp.status_code != 200:
-        raise HTTPException(502, f"Anthropic API lỗi {resp.status_code}: {resp.text[:300]}")
+        raise HTTPException(502, _loi_ai_vn(resp.status_code, resp.text))
     return resp.json()
 
 
