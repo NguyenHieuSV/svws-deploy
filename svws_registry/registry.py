@@ -48,7 +48,8 @@ _HERE = Path(__file__).resolve().parent
 _SEED = _HERE / "registry_seed.json"
 _PAGE = _HERE / "static" / "registry.html"
 _THREE = _HERE / "static" / "three.min.js"   # Three.js r128 (MIT) — chuẩn Rev.E
-_SVWS3D = _HERE / "static" / "svws3d.js"     # bộ dựng hình chuẩn của SVWS
+_SVWS3D = _HERE / "static" / "svws3d.js"     # bộ dựng hình 3D chuẩn của SVWS
+_SVWSPID = _HERE / "static" / "svwspid.js"   # bộ dựng sơ đồ P&ID chuẩn
 
 MAX_REVISIONS = 300  # giữ tối đa bao nhiêu bản lịch sử
 
@@ -137,6 +138,21 @@ def svws3d_js():
     if not _SVWS3D.exists():
         raise HTTPException(500, "Thiếu static/svws3d.js trong module")
     return Response(_SVWS3D.read_text(encoding="utf-8"),
+                    media_type="application/javascript; charset=utf-8",
+                    headers={"Cache-Control": "no-cache"})
+
+
+@router.get("/svwspid.js", include_in_schema=False)
+def svwspid_js():
+    """Bộ dựng P&ID: đo ký hiệu và đo chữ, tự né chồng lấn, nối ống vuông góc.
+
+    AI gõ toạ độ SVG mà không nhìn thấy nên tự đặt hai con số mâu thuẫn (ký hiệu
+    cao 38px mà khoảng cách xếp để 30px → chồng thành vệt đen). Thư viện nhận
+    phần bố cục; AI chỉ khai báo dây chuyền.
+    """
+    if not _SVWSPID.exists():
+        raise HTTPException(500, "Thiếu static/svwspid.js trong module")
+    return Response(_SVWSPID.read_text(encoding="utf-8"),
                     media_type="application/javascript; charset=utf-8",
                     headers={"Cache-Control": "no-cache"})
 
@@ -480,6 +496,24 @@ def ai_execute(payload: dict = Body(...)):
                 "mới và S.fit() — đó là cách giữ tính parametric.\n"
                 "  CHỈ tự viết Three.js thô cho chi tiết mà thư viện chưa có; phần bố cục "
                 "và đường ống thì luôn dùng SVWS3D.\n"
+                "- Tab 2 (P&ID): dùng thư viện SVWSPID, ĐỪNG tự gõ toạ độ SVG — tự gõ sẽ "
+                "ra ký hiệu chồng lên nhau và nhãn đè lên thiết bị.\n"
+                "    const D = SVWSPID.to({w:1560,h:980, ma:'<mã>', ten:'<tên>', dong2:'<cân bằng lưu lượng>'});\n"
+                "    const h1 = D.hang(200);           // mỗi hàng là một mạch công nghệ\n"
+                "    h1.nguon({nhan:'Nước cấp L-01 DN50'}); h1.van({});\n"
+                "    h1.bon({tag:'TK-101', ghi:'9 m³ SS304'});\n"
+                "    h1.bom({tag:'P-101A/B', ghi:'3 kW', dup:true});   // dup = 1 chạy 1 dự phòng\n"
+                "    h1.cot({tag:'MMF-101', qty:2, ghi:'Ø1067'});      // qty = số cột song song\n"
+                "    h1.loc({tag:'CF-101', ghi:'5 µm'});\n"
+                "    h1.ro ({tag:'RO-101', vessels:5, ghi:'5×2 8040'});\n"
+                "    h1.uv ({tag:'UV-101', ghi:'≥40 mJ/cm²'});\n"
+                "    D.dungCu('TK-101','LIT-101');        // bầu đo, tự tìm chỗ trống\n"
+                "    D.ghiChu('TK-101','LSL/LSH','duoi');\n"
+                "    D.noi('RO-101','TK-101',{dong:'conc', nhan:'L-06 Conc RO1', phia:'duoi'});\n"
+                "    el.innerHTML = D.ve();  console.log(D.kiemTra());\n"
+                "  Thư viện tự đo ký hiệu và đo chữ, tự đẩy nhãn cho khỏi đè, tự nhảy con trỏ "
+                "theo bề rộng thật, tự tìm làn trống khi nối. dong nhận: raw · di · conc · "
+                "chem · cip. kiemTra() trả về danh sách chỗ còn đè nhau — phải rỗng.\n"
                 "- Dồn công sức vào MÔ TẢ ĐÚNG dây chuyền: đủ thiết bị theo Phần A, "
                 "đúng thứ tự dòng công nghệ, tag thiết bị chuẩn (T-101, P-101, F-101…), "
                 "kích thước suy từ thông số thiết kế.\n\n"
