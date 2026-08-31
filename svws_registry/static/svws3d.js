@@ -108,6 +108,49 @@
     return s;
   }
 
+  // ------------------------------------------------------------- đầu nối
+  /* Mỗi đầu nối có VỊ TRÍ và HƯỚNG RA. Có hướng thì ống rời thiết bị vuông góc
+     với mặt bích rồi mới lên giá — nhìn đúng kiểu đấu nối thật, thay vì cắm
+     thẳng vào giữa thân bồn như trước. */
+  function P(x, y, z, dx, dy, dz, dn) {
+    return { p: [x, y, z], dir: [dx || 0, dy || 0, dz || 0], dn: dn || 0 };
+  }
+  /** Chấp nhận cả dạng cũ [x,y,z] lẫn dạng mới {p,dir}. */
+  function chuanPort(v) {
+    if (!v) return null;
+    if (Array.isArray(v)) return { p: v.slice(), dir: [0, 1, 0], dn: 0 };
+    return { p: (v.p || [0, 0, 0]).slice(), dir: (v.dir || [0, 1, 0]).slice(), dn: v.dn || 0 };
+  }
+  /** Vẽ cổ ống + mặt bích tại đầu nối, để nhìn là biết ống cắm vào đâu. */
+  function veNozzle(g, port, dn) {
+    const q = chuanPort(port); if (!q) return;
+    dn = Math.max(40, q.dn || dn || 80);
+    const L = dn * 1.6 + 90;
+    const d = new THREE.Vector3().fromArray(q.dir);
+    if (d.lengthSq() < 1e-6) d.set(0, 1, 0);
+    d.normalize();
+    const a = new THREE.Vector3().fromArray(q.p);
+    const b = a.clone().addScaledVector(d, L);
+    const m = mat('ss', { color: 0xb9c4cb });
+    const co = tube(a.toArray(), b.toArray(), dn * 1.15, m);
+    if (co) g.add(co);
+    const bich = new THREE.Mesh(new THREE.CylinderGeometry(dn * 0.95, dn * 0.95, 26, 18), m);
+    bich.position.copy(b);
+    bich.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), d);
+    g.add(bich);
+    q.p = b.toArray();          // ống nối vào MẶT BÍCH, không phải vào vỏ
+    return q;
+  }
+  /** Vẽ hết các đầu nối đã khai báo và dời điểm nối ra mặt bích. */
+  function veCacNozzle(g, dnMacDinh) {
+    const ra = {};
+    Object.keys(g.userData.ports || {}).forEach(function (k) {
+      ra[k] = veNozzle(g, g.userData.ports[k], dnMacDinh) || chuanPort(g.userData.ports[k]);
+    });
+    g.userData.ports = ra;
+    return g;
+  }
+
   /** Nhãn chữ luôn quay về phía camera (sprite), cỡ chữ theo mm thực. */
   function label(text, hmm) {
     hmm = hmm || 260;
@@ -155,7 +198,13 @@
     var base = cyl(d + 120, 120, mat('frame'), 32); base.position.y = 60; g.add(base);
     g.userData.foot = { w: d + 160, d: d + 160 };
     g.userData.h = h;
-    g.userData.ports = { in: [0, h * 0.9, 0], out: [0, 200, d / 2] };
+    g.userData.ports = {
+      in:   P(0, h + 40, 0, 0, 1, 0),                 // vào: đỉnh
+      out:  P(0, 260, d / 2, 0, 0, 1),                // ra: thành, cách đáy 260
+      tran: P(0, h - 300, -d / 2, 0, 0, -1),          // tràn: dưới đỉnh 300
+      xa:   P(d * 0.3, 60, 0, 0, -1, 0)               // xả đáy
+    };
+    veCacNozzle(g, 80);
     return g;
   }
 
@@ -179,7 +228,14 @@
     var hh = skirt + body + d / 2;
     g.userData.foot = { w: d + 120, d: d + 120 };
     g.userData.h = hh;
-    g.userData.ports = { in: [0, hh, 0], out: [0, skirt * 0.6, d / 2] };
+    g.userData.ports = {
+      in:    P(0, hh + 30, 0, 0, 1, 0),               // nước vào: đỉnh, tâm
+      out:   P(0, skirt * 0.55, 0, 0, -1, 0),         // nước ra: đáy, qua đầu thu
+      bw_in: P(0, skirt * 0.8, d / 2, 0, 0, 1),       // rửa ngược vào: đáy bên
+      bw_out:P(0, hh - d * 0.45, -d / 2, 0, 0, -1),   // rửa ngược ra: đỉnh bên
+      xa:    P(d * 0.28, skirt * 0.35, 0, 0, -1, 0)   // xả đáy
+    };
+    veCacNozzle(g, 80);
     return g;
   }
 
@@ -192,7 +248,12 @@
     var leg = box(d * 0.7, 250, d * 0.7, mat('frame')); leg.position.y = 125; g.add(leg);
     g.userData.foot = { w: d + 200, d: d + 200 };
     g.userData.h = h + 250 + d / 2;
-    g.userData.ports = { in: [0, 350, d / 2], out: [0, h + 200, 0] };
+    g.userData.ports = {
+      in:  P(0, 400, d / 2, 0, 0, 1),                 // vào: đáy bên
+      out: P(0, h + 250 + d / 2, 0, 0, 1, 0),         // ra: đỉnh
+      xa:  P(0, 260, -d / 2, 0, 0, -1)                // xả
+    };
+    veCacNozzle(g, 65);
     return g;
   }
 
@@ -206,7 +267,11 @@
     cs.rotation.z = Math.PI / 2; cs.position.set(-L * 0.28, 90 + H / 2, 0); g.add(cs);
     g.userData.foot = { w: L + 250, d: W + 250 };
     g.userData.h = 90 + H;
-    g.userData.ports = { in: [-L / 2, 90 + H / 2, 0], out: [-L * 0.28, 90 + H, 0] };
+    g.userData.ports = {
+      in:  P(-L * 0.28 - W * 0.32, 90 + H / 2, 0, -1, 0, 0),   // hút: đầu trục
+      out: P(-L * 0.28, 90 + H * 0.95, 0, 0, 1, 0)             // đẩy: đỉnh buồng bơm
+    };
+    veCacNozzle(g, 80);
     return g;
   }
 
@@ -248,7 +313,14 @@
     }
     g.userData.foot = { w: W + 300, d: D + 300 };
     g.userData.h = H;
-    g.userData.ports = { in: [-W / 2, 320, 0], out: [W / 2, 320 + (rows - 1) * (vd + 130), 0] };
+    var yTren = 320 + (rows - 1) * (vd + 130);
+    g.userData.ports = {
+      in:   P(-vl / 2 - 120, 320, -D / 2 + 180, -1, 0, 0),     // nước cấp: một đầu vỏ
+      out:  P(vl / 2 + 120, yTren, -D / 2 + 180, 1, 0, 0),     // nước thấm: nắp đầu kia
+      conc: P(vl / 2 + 120, 320, D / 2 - 180, 1, 0, 0),        // nước cô đặc
+      cip:  P(-vl / 2 - 120, yTren, D / 2 - 180, -1, 0, 0)     // đường CIP
+    };
+    veCacNozzle(g, 65);
     return g;
   }
 
@@ -263,7 +335,11 @@
     hmi.position.set(0, H * 0.78 + 100, D / 2 + 12); g.add(hmi);
     g.userData.foot = { w: W + 300, d: D + 500 };
     g.userData.h = H + 100;
-    g.userData.ports = { in: [0, 200, -D / 2], out: [0, 200, D / 2] };
+    g.userData.ports = {
+      in:  P(-W * 0.25, 120, -D / 2, 0, 0, -1),       // cáp vào: đáy sau
+      out: P(W * 0.25, 120, -D / 2, 0, 0, -1)         // cáp ra: đáy sau
+    };
+    veCacNozzle(g, 50);
     return g;
   }
 
@@ -278,7 +354,11 @@
     var pmp = box(340, 300, 240, mat('paint')); pmp.position.set(d * 0.75, 300, 0); g.add(pmp);
     g.userData.foot = { w: d + 700, d: d + 400 };
     g.userData.h = h + 150;
-    g.userData.ports = { in: [0, h + 150, 0], out: [d * 0.75, 450, 0] };
+    g.userData.ports = {
+      in:  P(0, h + 190, 0, 0, 1, 0),                 // nạp hoá chất: đỉnh
+      out: P(d * 0.75, 470, 0, 0, 1, 0)              // ra: đầu đẩy bơm định lượng
+    };
+    veCacNozzle(g, 32);
     return g;
   }
 
@@ -293,7 +373,11 @@
     });
     g.userData.foot = { w: L + 300, d: d + 400 };
     g.userData.h = 700 + d / 2;
-    g.userData.ports = { in: [-L / 2, 700, 0], out: [L / 2, 700, 0] };
+    g.userData.ports = {
+      in:  P(-L / 2 - 20, 700, 0, -1, 0, 0),
+      out: P(L / 2 + 20, 700, 0, 1, 0, 0)
+    };
+    veCacNozzle(g, 65);
     return g;
   }
 
@@ -359,18 +443,71 @@
    * Đi ống VUÔNG GÓC (Manhattan): lên cao trình → chạy X → chạy Z → xuống đích.
    * Chuẩn Rev.E bắt ống rẽ 90°; trước đây AI kéo ống chéo xuyên qua thiết bị.
    */
-  function routeOrtho(a, b, elev) {
-    var y = elev;
-    return [
-      [a[0], a[1], a[2]],
-      [a[0], y, a[2]],
-      [b[0], y, a[2]],
-      [b[0], y, b[2]],
-      [b[0], b[1], b[2]]
-    ].filter(function (p, i, arr) {                 // bỏ điểm trùng
+  function bo1(pts) {                               // bỏ điểm trùng liền kề
+    return pts.filter(function (p, i, arr) {
       return i === 0 || Math.abs(p[0] - arr[i - 1][0]) > 1 ||
         Math.abs(p[1] - arr[i - 1][1]) > 1 || Math.abs(p[2] - arr[i - 1][2]) > 1;
     });
+  }
+  function routeOrtho(a, b, elev) {                 // giữ cho tương thích ngược
+    return bo1([[a[0], a[1], a[2]], [a[0], elev, a[2]],
+                [b[0], elev, a[2]], [b[0], elev, b[2]], [b[0], b[1], b[2]]]);
+  }
+
+  /* ---------------------------------------------------- GIÁ ĐỠ ỐNG (pipe rack)
+     Trước đây MỌI đường ống đều nằm ở cùng một cao trình, nên ống nào cùng chạy
+     theo một trục là lồng vào nhau. Nhà máy thật giải quyết bằng giá đỡ nhiều
+     TẦNG, và hai hướng chạy khác nhau thì đặt ở tầng khác nhau. Làm y như vậy:
+
+       - đoạn chạy theo X ở cao trình  base + i*BUOC
+       - đoạn chạy theo Z ở cao trình  base + i*BUOC + BUOC/2   (lệch nửa tầng)
+         → ống ngang và ống dọc không bao giờ cùng mặt phẳng
+       - trong cùng một tầng, chỉ xếp thêm ống nếu KHÔNG đè lên ống đã có
+         (song song, cùng toạ độ vuông góc, và khoảng chạy giao nhau)
+  */
+  var BUOC_TANG = 320;
+
+  function _giao(a1, a2, b1, b2, ho) {              // hai khoảng có giao nhau?
+    return Math.min(a2, b2) - Math.max(a1, b1) > -(ho || 0);
+  }
+  function xepGia(tuyen, base) {
+    var tang = [];                                  // tầng i: {ngang:[], doc:[]}
+    return tuyen.map(function (t) {
+      var x1 = Math.min(t.ax, t.bx), x2 = Math.max(t.ax, t.bx);
+      var z1 = Math.min(t.az, t.bz), z2 = Math.max(t.az, t.bz);
+      for (var i = 0; ; i++) {
+        if (!tang[i]) tang[i] = { ngang: [], doc: [] };
+        var T = tang[i];
+        var ho = t.dn + 140;                        // khoảng hở tối thiểu giữa 2 ống
+        var dungNgang = T.ngang.some(function (o) {
+          return Math.abs(o.z - t.az) < ho && _giao(o.x1, o.x2, x1, x2);
+        });
+        var dungDoc = T.doc.some(function (o) {
+          return Math.abs(o.x - t.bx) < ho && _giao(o.z1, o.z2, z1, z2);
+        });
+        if (!dungNgang && !dungDoc) {
+          T.ngang.push({ z: t.az, x1: x1, x2: x2 });
+          T.doc.push({ x: t.bx, z1: z1, z2: z2 });
+          return { yX: base + i * BUOC_TANG, yZ: base + i * BUOC_TANG + BUOC_TANG / 2, tang: i };
+        }
+      }
+    });
+  }
+
+  /** Ống rời mặt bích theo đúng hướng nozzle rồi mới lên giá. */
+  function routeRack(pa, pb, yX, yZ) {
+    var STUB = 260;
+    var a = pa.p, b = pb.p;
+    var a2 = [a[0] + pa.dir[0] * STUB, a[1] + pa.dir[1] * STUB, a[2] + pa.dir[2] * STUB];
+    var b2 = [b[0] + pb.dir[0] * STUB, b[1] + pb.dir[1] * STUB, b[2] + pb.dir[2] * STUB];
+    return bo1([
+      a, a2,
+      [a2[0], yX, a2[2]],          // lên tầng ngang
+      [b2[0], yX, a2[2]],          // chạy theo X
+      [b2[0], yZ, a2[2]],          // đổi sang tầng dọc
+      [b2[0], yZ, b2[2]],          // chạy theo Z
+      [b2[0], b2[1], b2[2]], b     // hạ xuống mặt bích đích
+    ]);
   }
 
   function pipeMesh(pts, dn, service) {
@@ -417,6 +554,7 @@
     };
     Object.keys(groups).forEach(function (k) { sc.add(groups[k]); });
 
+    var canhBao = [], soTang = 0;
     var st = {
       target: new THREE.Vector3(0, 800, 0),
       radius: 20000, theta: Math.PI * 0.28, phi: Math.PI * 0.34,
@@ -466,29 +604,86 @@
         return g;
       },
 
-      /** Nối 2 thiết bị: tự lấy cổng ra/vào, tự đi vuông góc trên cao trình. */
-      addPipe: function (p, pos, items) {
-        var A = groups.equip.children.filter(function (g) {
-          return g.userData.decl && g.userData.decl.id === p.from;
+      /** Tìm thiết bị theo id và lấy toạ độ THẬT của một đầu nối. */
+      _port: function (id, ten, pos) {
+        var G = groups.equip.children.filter(function (g) {
+          return g.userData.decl && g.userData.decl.id === id;
         })[0];
-        var B = groups.equip.children.filter(function (g) {
-          return g.userData.decl && g.userData.decl.id === p.to;
-        })[0];
-        if (!A || !B) return null;
-        var pa = pos[p.from], pb = pos[p.to];
-        var oa = A.userData.ports.out, ob = B.userData.ports.in;
-        var a = [pa.x + oa[0], oa[1], pa.z + oa[2]];
-        var b = [pb.x + ob[0], ob[1], pb.z + ob[2]];
-        // Cao trình ống phải VƯỢT thiết bị cao nhất, nếu không ống sẽ xuyên qua
-        // bồn — lỗi này chuẩn cấm (đường ống không được cắt qua thiết bị khác).
+        if (!G) return null;
+        var ports = G.userData.ports || {};
+        var q = chuanPort(ports[ten] || ports[ten === 'in' ? 'out' : 'in'] ||
+                          ports[Object.keys(ports)[0]]);
+        if (!q) return null;
+        var o = pos[id] || { x: 0, z: 0 };
+        return { p: [o.x + q.p[0], q.p[1], o.z + q.p[2]], dir: q.dir, thietBi: G };
+      },
+
+      /**
+       * Vẽ TẤT CẢ đường ống một lượt — phải làm cả loạt mới xếp được giá đỡ
+       * (biết hết các tuyến mới chia tầng/làn cho khỏi đè nhau).
+       * p: {from, to, fromPort, toPort, dn, service}
+       */
+      addPipes: function (pipes, pos) {
+        var self = this;
         var top = 0;
         groups.equip.children.forEach(function (g) { top = Math.max(top, g.userData.h || 0); });
-        var base = top + 600;
-        var elev = p.elev != null ? p.elev :
-          base + (p.service === 'chem' ? 700 : p.service === 'air' ? 1100 : 0);
-        var g = pipeMesh(routeOrtho(a, b, elev), p.dn, p.service);
-        groups.pipe.add(g);
-        return g;
+        var base = top + 700;                       // chạy trên đầu mọi thiết bị
+
+        var tuyen = [], hopLe = [];
+        (pipes || []).forEach(function (p) {
+          var A = self._port(p.from, p.fromPort || 'out', pos);
+          var B = self._port(p.to, p.toPort || 'in', pos);
+          if (!A || !B) { canhBao.push('Không tìm thấy thiết bị: ' + p.from + ' → ' + p.to); return; }
+          hopLe.push({ p: p, A: A, B: B });
+          tuyen.push({ ax: A.p[0], az: A.p[2], bx: B.p[0], bz: B.p[2],
+                       dn: Math.max(40, p.dn || 80) });
+        });
+        var gia = xepGia(tuyen, base);
+        var ra = [];
+        hopLe.forEach(function (h, i) {
+          var g = pipeMesh(routeRack(h.A, h.B, gia[i].yX, gia[i].yZ), h.p.dn, h.p.service);
+          g.userData.tuyen = h.p.from + '→' + h.p.to;
+          g.userData.noi = [h.p.from, h.p.to];      // bỏ qua khi tự kiểm va chạm
+          groups.pipe.add(g); ra.push(g);
+        });
+        soTang = gia.reduce(function (m, x) { return Math.max(m, x.tang + 1); }, 0);
+        return ra;
+      },
+
+      /** Giữ cho tương thích ngược: gọi từng ống một (không xếp được giá). */
+      addPipe: function (p, pos) { return (this.addPipes([p], pos) || [])[0]; },
+
+      /**
+       * Tự kiểm: ống có cắt qua thiết bị nào không. Bắt lỗi trước khi giao file
+       * thay vì để người dùng phát hiện lúc mở tool.
+       */
+      kiemTra: function () {
+        var loi = canhBao.slice();
+        var hop = groups.equip.children.map(function (g) {
+          return { id: (g.userData.decl || {}).id || '?',
+                   box: new THREE.Box3().setFromObject(g) };
+        });
+        groups.pipe.children.forEach(function (pg) {
+          // Ống LUÔN đi xuyên hộp bao của chính hai thiết bị nó nối vào (cổ ống
+          // nằm trong đó) — không bỏ qua thì báo nhầm hết, che mất lỗi thật.
+          var boQua = pg.userData.noi || [];
+          var pts = pg.userData.pts || [];
+          for (var i = 0; i < pts.length - 1; i++) {
+            var a = new THREE.Vector3().fromArray(pts[i]);
+            var b = new THREE.Vector3().fromArray(pts[i + 1]);
+            for (var k = 1; k < 6; k++) {            // lấy vài điểm giữa đoạn
+              var m2 = a.clone().lerp(b, k / 6);
+              for (var j = 0; j < hop.length; j++) {
+                if (boQua.indexOf(hop[j].id) >= 0) continue;
+                if (hop[j].box.containsPoint(m2)) {
+                  var t = 'Ống ' + (pg.userData.tuyen || '?') + ' cắt qua ' + hop[j].id;
+                  if (loi.indexOf(t) < 0) loi.push(t);
+                }
+              }
+            }
+          }
+        });
+        return { loi: loi, soTang: soTang };
       },
 
       /** Camera tự căn khung: tính hộp bao rồi lùi đủ xa — hết cảnh "vệt chéo". */
@@ -533,6 +728,7 @@
       layer: function (name, on) { if (groups[name]) groups[name].visible = !!on; },
       clear: function () {
         ['equip', 'pipe', 'label', 'fx'].forEach(function (k) { groups[k].clear(); });
+        canhBao = []; soTang = 0;
       },
       render: function () { rd.render(sc, cam); },
       resize: resize,
@@ -593,6 +789,7 @@
     scene: scene, build: build, layout: layout, label: label,
     tank: tank, vessel: vessel, cartridge: cartridge, pump: pump,
     roSkid: roSkid, panel: panel, dosing: dosing, uv: uvUnit,
-    pipeMesh: pipeMesh, routeOrtho: routeOrtho, mat: mat, glass: glass
+    pipeMesh: pipeMesh, routeOrtho: routeOrtho, routeRack: routeRack,
+    xepGia: xepGia, P: P, mat: mat, glass: glass
   };
 })(window);
