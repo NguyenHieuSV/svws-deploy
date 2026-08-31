@@ -51,6 +51,10 @@ _THREE = _HERE / "static" / "three.min.js"   # Three.js r128 (MIT) — chuẩn R
 
 MAX_REVISIONS = 300  # giữ tối đa bao nhiêu bản lịch sử
 
+# Địa chỉ công khai của app — tool tải về gọi ngược lại đây để dùng AI mà không
+# phải ôm API key. Đổi được qua env nếu sau này dời tên miền.
+_PUBLIC_URL = os.getenv("SVWS_PUBLIC_URL", "https://svws-app-iit7.onrender.com").rstrip("/")
+
 
 def _now() -> str:
     return datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="microseconds")
@@ -385,7 +389,19 @@ def ai_execute(payload: dict = Body(...)):
                 "- OrbitControls KHÔNG có trong bản lõi — tự viết xoay/zoom bằng sự kiện "
                 "chuột (mousedown/mousemove/wheel), khoảng 15 dòng.\n"
                 "- Vì không phải gõ thư viện, hãy dồn công sức vào dựng cảnh 3D chi tiết: "
-                "bể, bơm, vessel màng, khung skid, đường ống đi theo trục, nhãn thiết bị.")
+                "bể, bơm, vessel màng, khung skid, đường ống đi theo trục, nhãn thiết bị.\n\n"
+                'NÚT "CHỈNH BẢN VẼ BẰNG AI" (mục 3.3 của chuẩn) — làm ĐÚNG như sau:\n'
+                "- TUYỆT ĐỐI KHÔNG hỏi người dùng nhập API key và KHÔNG gọi "
+                "https://api.anthropic.com (trình duyệt chặn CORS, và để khóa trong file "
+                "là lộ khóa cho bất kỳ ai mở file).\n"
+                f"- Gọi CỬA NGÕ của công ty: POST {_PUBLIC_URL}/registry/api/claude\n"
+                '  Body y hệt dạng Anthropic: {"max_tokens":2000,"messages":[{"role":"user",'
+                '"content":"<yêu cầu người dùng + JSON thông số hiện tại + mô tả các trường>"}]}\n'
+                "  KHÔNG gửi header x-api-key, KHÔNG gửi anthropic-version — server tự lo khóa.\n"
+                "  Đáp án trả về đúng dạng Anthropic: đọc content[0].text (bảo AI trả JSON "
+                "thông số đã cập nhật, rồi gán lại vào state và vẽ lại mọi tab).\n"
+                "- Lỗi mạng thì báo: 'Cần kết nối mạng để chỉnh bằng AI — các chức năng "
+                "còn lại vẫn chạy offline 100%.'")
 
     def gen():
         # Model suy nghĩ (adaptive thinking) có thể vài phút trước khi viết chữ
@@ -593,6 +609,48 @@ async def ai_sow(file: UploadFile = File(...)):
             "questions": [q for q in (parsed.get("questions") or []) if q][:6],
             "tom_tat": parsed.get("tom_tat") or "",
             "nguon": file.filename or ""}
+
+
+@router.post("/api/claude")
+def claude_proxy(payload: dict = Body(...)):
+    """Cửa ngõ gọi Claude cho các TOOL sinh ra (nút "Chỉnh bản vẽ bằng AI").
+
+    Tool tải về KHÔNG được ôm API key (lộ khóa cho bất kỳ ai mở file) và cũng
+    không gọi thẳng api.anthropic.com được (trình duyệt chặn CORS). Endpoint này
+    nhận ĐÚNG dạng body của Anthropic và trả NGUYÊN VĂN đáp án, nên tool chỉ cần
+    đổi URL là chạy — không đổi gì khác.
+    """
+    api_key = os.getenv("ANTHROPIC_API_KEY", "")
+    if not api_key:
+        raise HTTPException(503, "Server chưa cấu hình ANTHROPIC_API_KEY")
+    msgs = payload.get("messages")
+    if not isinstance(msgs, list) or not msgs:
+        raise HTTPException(422, 'Body thiếu "messages"')
+
+    # CỐ TÌNH bỏ qua "model" do tool gửi lên: tool cũ hay ghim mã model đời cũ đã
+    # ngừng phục vụ. Server luôn dùng model hiện hành → tool cũ tự sống lại.
+    body = {"model": os.getenv("ANTHROPIC_MODEL", "claude-sonnet-5"),
+            "max_tokens": max(256, min(int(payload.get("max_tokens") or 4000), 8000)),
+            "messages": msgs}
+    if payload.get("system"):
+        body["system"] = payload["system"]
+    effort = os.getenv("ANTHROPIC_EFFORT", "medium")
+    if effort:
+        body["output_config"] = {"effort": effort}
+    if len(json.dumps(body)) > 400_000:      # chặn gửi cả file khổng lồ qua đây
+        raise HTTPException(413, "Yêu cầu quá lớn — chỉ gửi thông số cần chỉnh, "
+                                 "đừng gửi cả nội dung tool.")
+    try:
+        resp = httpx.post(_ANTHROPIC_URL,
+                          headers={"x-api-key": api_key,
+                                   "anthropic-version": "2023-06-01",
+                                   "content-type": "application/json"},
+                          json=body, timeout=300.0)
+    except httpx.HTTPError as e:
+        raise HTTPException(502, f"Không gọi được Anthropic API: {e}")
+    if resp.status_code != 200:
+        raise HTTPException(502, f"Anthropic API lỗi {resp.status_code}: {resp.text[:300]}")
+    return resp.json()
 
 
 @router.post("/api/fix")
