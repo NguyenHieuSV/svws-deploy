@@ -220,6 +220,61 @@ def restore(rid: int, payload: dict = Body(default={})):
 _ANTHROPIC_URL = "https://api.anthropic.com/v1/messages"
 
 
+def _goi_ai_json(api_key: str, model: str, content, max_tokens: int,
+                 system: str = "", timeout: float = 300.0, tra_tho: bool = False):
+    """Gọi Claude và ép câu trả lời về JSON.
+
+    BẪY: token SUY NGHĨ (adaptive thinking) TÍNH VÀO max_tokens. Để trần thấp thì
+    model nghĩ hết hạn mức rồi JSON bị cắt giữa chừng, parse hỏng — và thông báo
+    lỗi lại đổ oan cho "file khó đọc". Vì vậy: trần rộng, hãm mức suy nghĩ, và
+    khi chạm trần thì nói đúng bệnh.
+
+    tra_tho=True: parse hỏng thì trả {"__tho__": <văn bản>} thay vì ném lỗi.
+    """
+    body = {"model": model, "max_tokens": max_tokens,
+            "messages": [{"role": "user", "content": content}]}
+    if system:
+        body["system"] = system
+    effort = os.getenv("ANTHROPIC_EFFORT", "medium")
+    if effort:
+        body["output_config"] = {"effort": effort}
+    try:
+        resp = httpx.post(_ANTHROPIC_URL,
+                          headers={"x-api-key": api_key,
+                                   "anthropic-version": "2023-06-01",
+                                   "content-type": "application/json"},
+                          json=body, timeout=timeout)
+    except httpx.HTTPError as e:
+        raise HTTPException(502, f"Không gọi được Anthropic API: {e}")
+    if resp.status_code != 200:
+        raise HTTPException(502, f"Anthropic API lỗi {resp.status_code}: {resp.text[:300]}")
+
+    out = resp.json()
+    text = "\n".join(b.get("text", "") for b in out.get("content", [])
+                     if b.get("type") == "text")
+    stop = out.get("stop_reason")
+    used = (out.get("usage") or {}).get("output_tokens", "?")
+    clean = text.replace("```json", "").replace("```", "").strip()
+    try:
+        return json.loads(clean)
+    except json.JSONDecodeError:
+        pass
+    m = re.search(r"[\{\[][\s\S]*[\}\]]", clean)   # vớt khối JSON lẫn trong lời dẫn
+    if m:
+        try:
+            return json.loads(m.group(0))
+        except json.JSONDecodeError:
+            pass
+    if tra_tho:
+        return {"__tho__": clean}
+    if stop == "max_tokens":
+        raise HTTPException(502, f"AI bị cắt giữa chừng vì chạm trần {max_tokens:,} token "
+                                 f"(đã dùng {used}) nên câu trả lời không đọc được. "
+                                 f"Rút gọn file rồi thử lại, hoặc tăng trần token.")
+    raise HTTPException(502, f"AI trả lời sai định dạng (stop={stop}, {used} token). "
+                             f"Nội dung nhận được: {clean[:200] or '(rỗng)'}")
+
+
 def _sections_summary(data: dict) -> str:
     lines = []
     for si, sec in enumerate(data.get("sections", []), 1):
@@ -277,36 +332,10 @@ NHIỆM VỤ: (1) liệt kê tối đa 6 câu hỏi về thông tin CÒN THIẾU
 CHỈ trả về JSON hợp lệ, không markdown, không giải thích:
 {{"questions":["..."],"refined_A":"...","notes":"..."}}"""
 
-    try:
-        resp = httpx.post(
-            _ANTHROPIC_URL,
-            headers={
-                "x-api-key": api_key,
-                "anthropic-version": "2023-06-01",
-                "content-type": "application/json",
-            },
-            json={
-                "model": model,
-                "max_tokens": 1500,
-                "messages": [{"role": "user", "content": user_msg}],
-            },
-            timeout=90.0,
-        )
-    except httpx.HTTPError as e:
-        raise HTTPException(502, f"Không gọi được Anthropic API: {e}")
-
-    if resp.status_code != 200:
-        raise HTTPException(502, f"Anthropic API lỗi {resp.status_code}: {resp.text[:300]}")
-
-    out = resp.json()
-    text = "\n".join(b.get("text", "") for b in out.get("content", [])
-                     if b.get("type") == "text")
-    clean = text.replace("```json", "").replace("```", "").strip()
-    try:
-        parsed = json.loads(clean)
-    except json.JSONDecodeError:
+    parsed = _goi_ai_json(api_key, model, user_msg, 8000, timeout=180.0, tra_tho=True)
+    if "__tho__" in parsed:
         # AI trả không đúng JSON — vẫn đưa nội dung về cho người dùng đọc
-        parsed = {"questions": [], "refined_A": clean,
+        parsed = {"questions": [], "refined_A": parsed["__tho__"],
                   "notes": "AI trả lời không đúng định dạng JSON — nội dung thô ở trên."}
     return {
         "questions": parsed.get("questions") or [],
@@ -546,32 +575,11 @@ async def ai_sow(file: UploadFile = File(...)):
         "nêu thành câu hỏi trong \"questions\". Viết tiếng Việt, ngắn gọn, đúng kỹ thuật."
     )
 
-    try:
-        resp = httpx.post(
-            _ANTHROPIC_URL,
-            headers={"x-api-key": api_key, "anthropic-version": "2023-06-01",
-                     "content-type": "application/json"},
-            json={"model": model, "max_tokens": 4000, "system": sys_msg,
-                  "messages": [{"role": "user", "content": [
-                      khoi,
-                      {"type": "text",
-                       "text": "Đọc SOW này và soạn phiếu thiết kế theo đúng định dạng JSON đã nêu."}]}]},
-            timeout=300.0,
-        )
-    except httpx.HTTPError as e:
-        raise HTTPException(502, f"Không gọi được Anthropic API: {e}")
-    if resp.status_code != 200:
-        raise HTTPException(502, f"Anthropic API lỗi {resp.status_code}: {resp.text[:300]}")
-
-    out = resp.json()
-    text = "\n".join(b.get("text", "") for b in out.get("content", [])
-                     if b.get("type") == "text")
-    clean = text.replace("```json", "").replace("```", "").strip()
-    try:
-        parsed = json.loads(clean)
-    except json.JSONDecodeError:
-        raise HTTPException(502, "AI đọc được file nhưng trả lời sai định dạng — thử lại, "
-                                 "hoặc kiểm tra file SOW có chữ đọc được (không phải ảnh scan mờ).")
+    parsed = _goi_ai_json(
+        api_key, model,
+        [khoi, {"type": "text",
+                "text": "Đọc SOW này và soạn phiếu thiết kế theo đúng định dạng JSON đã nêu."}],
+        16000, system=sys_msg, timeout=420.0)
     dsg = parsed.get("design") or {}
     if not isinstance(dsg, dict) or not (dsg.get("name") or dsg.get("tech")):
         raise HTTPException(502, "AI không rút được nội dung thiết kế từ file này — "
@@ -622,29 +630,7 @@ CHỈ trả JSON hợp lệ, không markdown, không giải thích ngoài JSON:
 ===== FILE =====
 {html}"""
 
-    try:
-        resp = httpx.post(
-            _ANTHROPIC_URL,
-            headers={"x-api-key": api_key, "anthropic-version": "2023-06-01",
-                     "content-type": "application/json"},
-            json={"model": model, "max_tokens": 4000,
-                  "messages": [{"role": "user", "content": user_msg}]},
-            timeout=300.0,
-        )
-    except httpx.HTTPError as e:
-        raise HTTPException(502, f"Không gọi được Anthropic API: {e}")
-    if resp.status_code != 200:
-        raise HTTPException(502, f"Anthropic API lỗi {resp.status_code}: {resp.text[:300]}")
-
-    out = resp.json()
-    text = "\n".join(b.get("text", "") for b in out.get("content", [])
-                     if b.get("type") == "text")
-    clean = text.replace("```json", "").replace("```", "").strip()
-    try:
-        parsed = json.loads(clean)
-    except json.JSONDecodeError:
-        raise HTTPException(502, "AI trả lời không đúng định dạng JSON — thử lại "
-                                 "hoặc làm lại tool từ đầu.")
+    parsed = _goi_ai_json(api_key, model, user_msg, 12000, timeout=300.0)
     reps = [r for r in (parsed.get("replacements") or [])
             if isinstance(r, dict) and r.get("old") and r.get("new") is not None]
     if not reps:
