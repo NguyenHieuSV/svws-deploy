@@ -487,9 +487,8 @@ async function docSOW(f){
   }catch(err){
     modalBody.innerHTML = `<div class="ai-block"><h4>Không đọc được SOW</h4>
       <div style="font-size:12.5px">${esc(err.message)}</div>
-      <div style="font-size:12px;color:var(--muted);margin-top:5px">
-        Nhận PDF, Word (.docx), Excel (.xlsx), ảnh và TXT/CSV. File scan mờ hoặc ảnh chụp
-        nghiêng thì AI đọc kém — chụp lại rõ hoặc dùng bản PDF gốc.</div></div>`;
+      ${goiYThem(err.message, 'Nhận PDF, Word (.docx), Excel (.xlsx), ảnh và TXT/CSV. '
+        + 'File scan mờ hoặc ảnh chụp nghiêng thì AI đọc kém — chụp lại rõ hoặc dùng bản PDF gốc.')}</div>`;
   }
 }
 function _sowO(nhan, val, dai){
@@ -698,6 +697,13 @@ function extractHTML(text){
   if(end>=0) t = t.slice(0, end+7);
   return t;
 }
+/* Server đã dịch lỗi kèm chỗ sửa thì ĐỪNG chèn thêm gợi ý chung — trước đây
+   lỗi "chạm hạn mức chi tiêu" lại bị khuyên "kiểm tra API key", sai hướng. */
+function goiYThem(msg, goiY){
+  const daGiaiThich = /console\.anthropic\.com|Render → Environment|chờ khoảng một phút/i.test(msg||'');
+  return daGiaiThich ? '' :
+    `<div style="font-size:12px;color:var(--muted);margin-top:5px">${goiY}</div>`;
+}
 function jsSyntaxError(html){
   // Bắt lỗi cú pháp JS trước khi giao file: new Function() chỉ PHÂN TÍCH mã,
   // không chạy, nên an toàn. Bỏ qua module (cú pháp import/export khác).
@@ -780,7 +786,7 @@ async function execDesign(promptOverride){
   }catch(err){
     out.innerHTML = `<div class="ai-block"><h4>Lỗi</h4>
       <div style="font-size:12.5px">${esc(err.message)}</div>
-      <div style="font-size:12px;color:var(--muted);margin-top:5px">Kiểm tra ANTHROPIC_API_KEY trên Render, hoặc dùng "📋 Copy đề bài" dán vào chat Claude.</div></div>`;
+      ${goiYThem(err.message, 'Kiểm tra ANTHROPIC_API_KEY trên Render, hoặc dùng "📋 Copy đề bài" dán vào chat Claude.')}</div>`;
     btn.disabled = false; btn.textContent = '↻ Thử lại';
   }
 }
@@ -825,7 +831,7 @@ async function runAI(extraAnswers){
   }catch(err){
     res.innerHTML = `<div class="ai-block"><h4>Lỗi</h4>
       <div style="font-size:12.5px">${esc(err.message)}</div>
-      <div style="font-size:12px;color:var(--muted);margin-top:5px">Kiểm tra ANTHROPIC_API_KEY trên Render, hoặc dùng "📄 Đề bài nhanh (không AI)".</div></div>`;
+      ${goiYThem(err.message, 'Kiểm tra ANTHROPIC_API_KEY trên Render, hoặc dùng "📄 Đề bài nhanh (không AI)".')}</div>`;
     if(btn){btn.disabled=false;btn.textContent='▶ Thử lại';}
   }
 }

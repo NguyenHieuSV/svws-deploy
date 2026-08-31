@@ -512,7 +512,7 @@ def ai_execute(payload: dict = Body(...)):
             ) as resp:
                 if resp.status_code != 200:
                     body = resp.read().decode("utf-8", "replace")
-                    yield f"\n[SVWS-LỖI] Anthropic API {resp.status_code}: {body[:300]}"
+                    yield "\n[SVWS-LỖI] " + _loi_ai_vn(resp.status_code, body)
                     return
                 yield "."  # mở stream ngay để proxy không buffer/timeout
                 for line in resp.iter_lines():
@@ -545,7 +545,8 @@ def ai_execute(payload: dict = Body(...)):
                             return
                         yield f"\n[SVWS-KET] stop={stop} out={used} tran={max_tokens}"
                     elif etype == "error":
-                        yield f"\n[SVWS-LỖI] {json.dumps(ev.get('error', {}), ensure_ascii=False)[:300]}"
+                        yield "\n[SVWS-LỖI] " + _loi_ai_vn(
+                            200, json.dumps(ev.get("error", {}), ensure_ascii=False))
                         return
                     elif not started_text:  # ping / content_block_start…
                         hb = beat()
