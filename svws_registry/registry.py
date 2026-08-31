@@ -381,15 +381,17 @@ def ai_execute(payload: dict = Body(...)):
                             if hb:
                                 yield hb
                     elif etype == "message_delta":
-                        # Báo rõ khi model bị cắt vì chạm trần token, thay vì
-                        # lặng lẽ giao file HTML dở dang cho người dùng.
+                        # Luôn đính lý do dừng + số token vào cuối stream để chẩn
+                        # đoán được khi file ra thiếu. Client cắt tại </html> nên
+                        # dấu này tự biến mất khi file lành lặn.
                         stop = (ev.get("delta") or {}).get("stop_reason")
+                        used = (ev.get("usage") or {}).get("output_tokens", "?")
                         if stop == "max_tokens":
-                            used = (ev.get("usage") or {}).get("output_tokens", "?")
                             yield (f"\n[SVWS-LỖI] File bị cắt vì chạm trần {max_tokens:,} token "
                                    f"(đã dùng {used}). Tăng ANTHROPIC_MAX_TOKENS trên Render, "
                                    f"hoặc chia đề bài thành phần nhỏ hơn.")
                             return
+                        yield f"\n[SVWS-KET] stop={stop} out={used} tran={max_tokens}"
                     elif etype == "error":
                         yield f"\n[SVWS-LỖI] {json.dumps(ev.get('error', {}), ensure_ascii=False)[:300]}"
                         return
@@ -404,3 +406,68 @@ def ai_execute(payload: dict = Body(...)):
     return StreamingResponse(gen(), media_type="text/plain; charset=utf-8",
                              headers={"Cache-Control": "no-cache, no-transform",
                                       "X-Accel-Buffering": "no"})
+
+
+@router.post("/api/fix")
+def ai_fix(payload: dict = Body(...)):
+    """Sửa lỗi cú pháp JS bằng PHÉP THAY THẾ CHUỖI, không chép lại cả file.
+
+    Bắt AI chép lại file 50KB chỉ để sửa một dòng là tự chuốc rủi ro đứt giữa
+    chừng; ở đây AI chỉ trả vài trăm ký tự nên nhanh, rẻ và gần như không hỏng.
+
+    Body: {html: "...", error: "Unexpected token '+'"}
+    Trả: {replacements: [{old, new}], note}
+    """
+    api_key = os.getenv("ANTHROPIC_API_KEY", "")
+    if not api_key:
+        raise HTTPException(503, "Server chưa cấu hình ANTHROPIC_API_KEY")
+    model = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-5")
+    html = payload.get("html") or ""
+    err = (payload.get("error") or "").strip()
+    if len(html) < 200:
+        raise HTTPException(422, 'Body thiếu "html"')
+
+    user_msg = f"""File HTML dưới đây có LỖI CÚ PHÁP JavaScript nên mở ra trang trắng.
+Trình duyệt báo: {err}
+
+Tìm ĐÚNG chỗ sai và trả về các phép thay thế chuỗi TỐI THIỂU để sửa.
+Quy tắc bắt buộc:
+- "old" phải là đoạn văn bản NGUYÊN VĂN copy từ file, đủ dài để chỉ khớp DUY NHẤT một chỗ.
+- "new" là đoạn thay thế đã sửa đúng cú pháp.
+- Chỉ sửa lỗi cú pháp, KHÔNG đổi giao diện hay chức năng.
+- Lỗi hay gặp: khóa đối tượng động thiếu ngoặc vuông — {{'Màng '+t: x}} phải là {{['Màng '+t]: x}}.
+
+CHỈ trả JSON hợp lệ, không markdown, không giải thích ngoài JSON:
+{{"replacements":[{{"old":"...","new":"..."}}],"note":"tóm tắt ngắn chỗ đã sửa"}}
+
+===== FILE =====
+{html}"""
+
+    try:
+        resp = httpx.post(
+            _ANTHROPIC_URL,
+            headers={"x-api-key": api_key, "anthropic-version": "2023-06-01",
+                     "content-type": "application/json"},
+            json={"model": model, "max_tokens": 4000,
+                  "messages": [{"role": "user", "content": user_msg}]},
+            timeout=300.0,
+        )
+    except httpx.HTTPError as e:
+        raise HTTPException(502, f"Không gọi được Anthropic API: {e}")
+    if resp.status_code != 200:
+        raise HTTPException(502, f"Anthropic API lỗi {resp.status_code}: {resp.text[:300]}")
+
+    out = resp.json()
+    text = "\n".join(b.get("text", "") for b in out.get("content", [])
+                     if b.get("type") == "text")
+    clean = text.replace("```json", "").replace("```", "").strip()
+    try:
+        parsed = json.loads(clean)
+    except json.JSONDecodeError:
+        raise HTTPException(502, "AI trả lời không đúng định dạng JSON — thử lại "
+                                 "hoặc làm lại tool từ đầu.")
+    reps = [r for r in (parsed.get("replacements") or [])
+            if isinstance(r, dict) and r.get("old") and r.get("new") is not None]
+    if not reps:
+        raise HTTPException(502, "AI không chỉ ra được chỗ cần sửa — làm lại tool từ đầu.")
+    return {"replacements": reps, "note": parsed.get("note") or ""}

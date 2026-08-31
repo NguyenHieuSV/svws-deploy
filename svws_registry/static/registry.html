@@ -430,15 +430,50 @@ function showFinal(promptText, titleSuffix){
 
 /* ====== AI THỰC HIỆN — stream tạo tool HTML ====== */
 let execBlobUrl = null, brokenHTML = null, brokenErr = '';
-function repairDesign(){
-  // Gửi lại chính file lỗi kèm thông báo lỗi, xin bản đã sửa (rẻ hơn và
-  // đúng hướng hơn là làm lại từ đầu — giữ nguyên phần đã viết đúng).
-  const p = 'File HTML dưới đây bị LỖI CÚ PHÁP JavaScript nên mở ra trang trắng.\n'
-    + 'Trình duyệt báo: ' + brokenErr + '\n\n'
-    + 'Hãy sửa lỗi cú pháp đó (và mọi lỗi cú pháp khác nếu có), GIỮ NGUYÊN toàn bộ '
-    + 'giao diện, nội dung và chức năng còn lại. Lưu ý khóa đối tượng động phải bọc '
-    + "ngoặc vuông: {['Màng '+t]: x} chứ không phải {'Màng '+t: x}.\n\n" + brokenHTML;
-  execDesign(p);
+async function repairDesign(){
+  // Sửa TẠI CHỖ bằng phép thay thế chuỗi: AI chỉ trả vài trăm ký tự thay vì
+  // chép lại cả file (chép lại 50KB rất dễ đứt giữa chừng).
+  const btn = document.getElementById('btnFix');
+  const out = document.getElementById('execResult');
+  if(btn){ btn.disabled = true; btn.innerHTML = '<span class="spin"></span>AI đang tìm chỗ sai…'; }
+  try{
+    const r = await fetch(API + '/fix', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({html: brokenHTML, error: brokenErr})
+    });
+    if(!r.ok){
+      const e = await r.json().catch(()=>({detail:'HTTP '+r.status}));
+      throw new Error(e.detail || ('HTTP '+r.status));
+    }
+    const j = await r.json();
+    let html = brokenHTML, applied = 0, missed = [];
+    for(const rep of j.replacements){
+      if(html.indexOf(rep.old) < 0){ missed.push(rep.old.slice(0,60)); continue; }
+      html = html.split(rep.old).join(rep.new); applied++;
+    }
+    if(!applied) throw new Error('Không khớp được đoạn cần sửa trong file — hãy bấm "↻ Làm lại từ đầu".');
+    const still = jsSyntaxError(html);
+    if(still) throw new Error('Sửa xong vẫn còn lỗi: ' + still + ' — hãy bấm "↻ Làm lại từ đầu".');
+    if(execBlobUrl) URL.revokeObjectURL(execBlobUrl);
+    execBlobUrl = URL.createObjectURL(new Blob([html], {type:'text/html;charset=utf-8'}));
+    const fname = curCode.replace(/[^\w\-\.]+/g,'_') + '_tool.html';
+    out.innerHTML = `
+      <div class="ai-block" style="border-left-color:var(--ok)">
+        <h4 style="color:var(--ok)">✔ Đã sửa xong — JavaScript hợp lệ</h4>
+        <div style="font-size:12.5px">${esc(j.note || ('Đã sửa '+applied+' chỗ.'))}</div>
+        ${missed.length?`<div style="font-size:12px;color:var(--muted);margin-top:4px">Bỏ qua ${missed.length} đoạn không khớp.</div>`:''}
+        <div class="btn-row" style="margin-top:7px">
+          <button class="primary" onclick="window.open(execBlobUrl,'_blank')">👁 Mở xem thử</button>
+          <a href="${execBlobUrl}" download="${fname}"><button>⬇ Tải file ${fname}</button></a>
+        </div>
+      </div>`;
+  }catch(err){
+    if(btn){ btn.disabled = false; btn.textContent = '↻ Thử sửa lại'; }
+    const box = document.createElement('div');
+    box.className = 'ai-block';
+    box.innerHTML = `<h4>Lỗi khi sửa</h4><div style="font-size:12.5px">${esc(err.message)}</div>`;
+    out.appendChild(box);
+  }
 }
 function extractHTML(text){
   // bỏ fence markdown nếu AI lỡ bọc; lấy từ <!DOCTYPE hoặc <html trở đi
@@ -498,12 +533,15 @@ async function execDesign(promptOverride){
     full += dec.decode();
     const errPos = full.indexOf('[SVWS-LỖI]');
     if(errPos >= 0) throw new Error(full.slice(errPos).trim());
+    const ket = (full.match(/\[SVWS-KET\][^\n]*/) || [''])[0];  // lý do dừng, để chẩn đoán
+    full = full.replace(/\n?\[SVWS-KET\][^\n]*/, '');
     const html = extractHTML(full);
     if(html.length < 200 || !/<html[\s>]/i.test(html))
       throw new Error('AI không trả về file HTML hợp lệ — thử lại hoặc dùng Copy đề bài.');
     if(!/<\/html>\s*$/i.test(html))
       throw new Error('File bị cắt giữa chừng (thiếu thẻ đóng </html>) — tool sẽ không chạy được. '
-        + 'Bấm thử lại; nếu vẫn cắt thì rút gọn đề bài hoặc tăng ANTHROPIC_MAX_TOKENS trên Render.');
+        + 'Bấm thử lại; nếu vẫn cắt thì rút gọn đề bài hoặc tăng ANTHROPIC_MAX_TOKENS trên Render. '
+        + ket);
     if(execBlobUrl) URL.revokeObjectURL(execBlobUrl);
     execBlobUrl = URL.createObjectURL(new Blob([html], {type:'text/html;charset=utf-8'}));
     const fname = curCode.replace(/[^\w\-\.]+/g,'_') + '_tool.html';
