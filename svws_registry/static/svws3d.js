@@ -387,6 +387,42 @@
     uv: uvUnit, edi: roSkid, mixedbed: vessel
   };
 
+  /**
+   * Chân đế thiết bị (mm) tính THẲNG TỪ KHAI BÁO, không cần dựng 3D.
+   * Bản GA dùng hàm này nên mặt bằng và mô hình 3D luôn khớp kích thước —
+   * trước đây hai bản vẽ là hai lần đoán độc lập nên hay lệch nhau.
+   */
+  function chanDe(e) {
+    var t = (e.type || 'tank').toLowerCase();
+    if (t === 'tank') { var d = kt(e.d, 2000, 200, 20000);
+      return { w: d + 160, d: d + 160, tron: true, D: d }; }
+    if (t === 'vessel' || t === 'filter' || t === 'mixedbed') {
+      var v = kt(e.d, 1000, 150, 8000);
+      var n = Math.max(1, +e.qty || 1);
+      return { w: v + 120, d: (v + 120) * n + 300 * (n - 1), tron: true, D: v, qty: n }; }
+    if (t === 'cartridge') { var c = kt(e.d, 300, 80, 2000);
+      return { w: c + 200, d: c + 200, tron: true, D: c }; }
+    if (t === 'pump') return { w: kt(e.L, 900, 200, 4000) + 250,
+                               d: kt(e.W, 420, 150, 3000) + 250 };
+    if (t === 'roskid' || t === 'ro' || t === 'edi') {
+      var per = Math.min(12, Math.max(1, +e.memPerVessel || 6));
+      var sz = coMang(e.size);
+      var vl = per * (sz === '4040' ? 1020 : sz === '2540' ? 640 : 1020);
+      var nv = Math.min(40, Math.max(1, +e.vessels || 4));
+      var rows = Math.min(nv, e.rows || Math.ceil(nv / 2));
+      var cols = Math.ceil(nv / rows);
+      var vd = (sz === '4040' ? 130 : sz === '2540' ? 85 : 220);
+      return { w: vl + 1000, d: Math.max(900, cols * (vd + 130) + 260) + 300 }; }
+    if (t === 'panel') return { w: kt(e.W, 800, 200, 6000) + 300,
+                                d: kt(e.D, 400, 150, 2000) + 500 };
+    if (t === 'dosing') { var dd = kt(e.d, 700, 200, 4000);
+      return { w: dd + 700, d: dd + 400 }; }
+    if (t === 'uv') return { w: kt(e.L, 1400, 300, 8000) + 300,
+                             d: kt(e.d, 260, 80, 1500) + 400 };
+    var x = kt(e.d, 2000, 200, 20000);
+    return { w: x + 160, d: x + 160, tron: true, D: x };
+  }
+
   /** Dựng một thiết bị từ khai báo {type, ...}. Kiểu lạ thì về bồn cho an toàn. */
   function build(e) {
     var f = BUILDERS[(e.type || 'tank').toLowerCase()] || tank;
@@ -409,7 +445,9 @@
       return { id: e.id, w: g.userData.foot.w, d: g.userData.foot.d };
     });
     var aisle = opt.aisle || 1800;                 // lối đi giữa hai hàng
-    var gap = opt.gap || 700;                      // khe giữa 2 thiết bị cùng hàng
+    // Khe giữa 2 thiết bị cùng hàng phải ĐỦ CHỖ ĐỨNG BẢO TRÌ. Để 700 là dưới
+    // mức chuẩn đòi (≥800) — bộ kiểm của bản GA bắt được lỗi này.
+    var gap = opt.gap || 900;
     var total = built.reduce(function (s, b) { return s + b.w + gap; }, 0);
     // chọn số hàng sao cho mặt bằng gần vuông (dễ nhìn, giống nhà máy thật)
     var rows = opt.rows || Math.max(1, Math.round(Math.sqrt(total / 2600)));
@@ -786,7 +824,7 @@
   global.SVWS3D = {
     version: '1.0',
     PALETTE: PALETTE, MAT: MAT,
-    scene: scene, build: build, layout: layout, label: label,
+    scene: scene, build: build, layout: layout, label: label, chanDe: chanDe,
     tank: tank, vessel: vessel, cartridge: cartridge, pump: pump,
     roSkid: roSkid, panel: panel, dosing: dosing, uv: uvUnit,
     pipeMesh: pipeMesh, routeOrtho: routeOrtho, routeRack: routeRack,

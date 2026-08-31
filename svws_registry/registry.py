@@ -50,6 +50,7 @@ _PAGE = _HERE / "static" / "registry.html"
 _THREE = _HERE / "static" / "three.min.js"   # Three.js r128 (MIT) — chuẩn Rev.E
 _SVWS3D = _HERE / "static" / "svws3d.js"     # bộ dựng hình 3D chuẩn của SVWS
 _SVWSPID = _HERE / "static" / "svwspid.js"   # bộ dựng sơ đồ P&ID chuẩn
+_SVWSGA = _HERE / "static" / "svwsga.js"     # bộ dựng mặt bằng GA chuẩn
 
 MAX_REVISIONS = 300  # giữ tối đa bao nhiêu bản lịch sử
 
@@ -153,6 +154,20 @@ def svwspid_js():
     if not _SVWSPID.exists():
         raise HTTPException(500, "Thiếu static/svwspid.js trong module")
     return Response(_SVWSPID.read_text(encoding="utf-8"),
+                    media_type="application/javascript; charset=utf-8",
+                    headers={"Cache-Control": "no-cache"})
+
+
+@router.get("/svwsga.js", include_in_schema=False)
+def svwsga_js():
+    """Bộ dựng mặt bằng GA — dùng CHUNG bố cục với bản 3D nên hai bản vẽ khớp nhau.
+
+    Ngoài việc vẽ đúng tỷ lệ và né chồng nhãn, nó còn kiểm KHE VẬN HÀNH giữa các
+    thiết bị — đây là lỗi thiết kế thật, không phải lỗi vẽ.
+    """
+    if not _SVWSGA.exists():
+        raise HTTPException(500, "Thiếu static/svwsga.js trong module")
+    return Response(_SVWSGA.read_text(encoding="utf-8"),
                     media_type="application/javascript; charset=utf-8",
                     headers={"Cache-Control": "no-cache"})
 
@@ -514,6 +529,16 @@ def ai_execute(payload: dict = Body(...)):
                 "  Thư viện tự đo ký hiệu và đo chữ, tự đẩy nhãn cho khỏi đè, tự nhảy con trỏ "
                 "theo bề rộng thật, tự tìm làn trống khi nối. dong nhận: raw · di · conc · "
                 "chem · cip. kiemTra() trả về danh sách chỗ còn đè nhau — phải rỗng.\n"
+                "- Tab 3 (GA — mặt bằng): dùng SVWSGA, và PHẢI dùng LẠI ĐÚNG bộ vị trí của "
+                "tab 3D để hai bản vẽ khớp nhau:\n"
+                "    const G = SVWSGA.to({ma:'<mã>', ten:'<tên>', hoVanHanh:800});\n"
+                "    G.datCum(EQUIP, pos);   // pos CHÍNH LÀ SVWS3D.layout(EQUIP) dùng ở tab 1\n"
+                "    G.rack('nước +300 / hoá chất +900');\n"
+                "    G.kichThuoc();          // chuỗi kích thước tự sinh theo vị trí thật\n"
+                "    el.innerHTML = G.ve();  console.log(G.kiemTra());\n"
+                "  Thư viện tự chọn tỷ lệ cho vừa khổ A3, vẽ đúng tỷ lệ, tự sinh chuỗi kích "
+                "thước và mũi tên hướng Bắc. kiemTra() báo cả nhãn đè nhau LẪN khe vận hành "
+                "thiếu (dưới 800 mm thì không có chỗ đứng bảo trì) — phải rỗng.\n"
                 "- Dồn công sức vào MÔ TẢ ĐÚNG dây chuyền: đủ thiết bị theo Phần A, "
                 "đúng thứ tự dòng công nghệ, tag thiết bị chuẩn (T-101, P-101, F-101…), "
                 "kích thước suy từ thông số thiết kế.\n\n"
