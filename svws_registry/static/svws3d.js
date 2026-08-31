@@ -46,6 +46,30 @@
     concrete:{ color: 0xbfc4c7, metalness: 0.0,  roughness: 0.95 }
   };
 
+  // --------------------------------------------- chuẩn hoá tham số AI gửi vào
+  // AI viết theo lối tự nhiên của kỹ sư ("level: 60" nghĩa là 60%, "material:
+  // 'SS304'"), không theo đúng kiểu nội bộ. Thư viện phải chịu được — một lần
+  // hiểu sai đơn vị là dựng ra cột nước cao 156 m, kéo camera lùi tít, cả cảnh
+  // teo lại (đã vấp đúng lỗi này).
+  function frac(v, mac_dinh) {
+    if (v == null || isNaN(v)) return mac_dinh;
+    v = +v;
+    if (v > 1) v = v / 100;                 // 60 → 0.6
+    return Math.min(1, Math.max(0, v));
+  }
+  function kt(v, mac_dinh, lo, hi) {        // kích thước mm, chặn giá trị vô lý
+    v = +v;
+    if (!v || isNaN(v) || v <= 0) return mac_dinh;
+    return Math.min(hi || 40000, Math.max(lo || 20, v));
+  }
+  function laInox(m) {
+    return /ss|inox|stainless|30[46]|316|thep/i.test(String(m || ''));
+  }
+  function coMang(s) {                      // '8040' | 8040 | '8"' đều nhận
+    s = String(s || '8040');
+    return /4040|4"/.test(s) ? '4040' : /2540|2\.5/.test(s) ? '2540' : '8040';
+  }
+
   function mat(kind, over) {
     var b = MAT[kind] || MAT.ss, o = {};
     for (var k in b) o[k] = b[k];
@@ -114,11 +138,11 @@
   // và userData.ports = {in:[x,y,z], out:[x,y,z]} tính theo gốc của Group.
 
   function tank(o) {
-    var d = o.d || 2000, h = o.h || 2500;
+    var d = kt(o.d, 2000, 200, 20000), h = kt(o.h, 2500, 300, 20000);
     var g = grp('tank');
     var wall = cyl(d, h, glass(), 32); wall.position.y = h / 2; g.add(wall);
     // mực nước bên trong — chuẩn đòi "thành bể trong suốt thấy nội thất"
-    var lv = (o.level == null ? 0.72 : o.level) * h;
+    var lv = frac(o.level, 0.72) * h;
     var water = cyl(d - 90, lv, new THREE.MeshPhysicalMaterial({
       color: PALETTE[o.service] || PALETTE.raw, transparent: true, opacity: 0.55,
       roughness: 0.15, metalness: 0.0
@@ -136,9 +160,10 @@
   }
 
   function vessel(o) {   // cột lọc áp lực: thân trụ + 2 chỏm cầu + chân váy
-    var d = o.d || 1000, h = o.h || 2000, skirt = o.skirt == null ? 350 : o.skirt;
+    var d = kt(o.d, 1000, 150, 8000), h = kt(o.h, 2000, 400, 12000);
+    var skirt = kt(o.skirt, 350, 0, 2000);
     var g = grp('vessel');
-    var m = mat(o.material === 'ss' ? 'ss' : 'frp');
+    var m = mat(laInox(o.material) ? 'ss' : 'frp');
     var body = h - d * 0.5;
     var bd = cyl(d, body, m); bd.position.y = skirt + body / 2; g.add(bd);
     var top = dome(d, m); top.position.y = skirt + body; g.add(top);
@@ -159,7 +184,7 @@
   }
 
   function cartridge(o) {  // lọc tinh dạng ống, thường cụm nhiều lõi
-    var d = o.d || 300, h = o.h || 900;
+    var d = kt(o.d, 300, 80, 2000), h = kt(o.h, 900, 200, 4000);
     var g = grp('cartridge');
     var m = mat('ss');
     var b = cyl(d, h, m); b.position.y = h / 2 + 250; g.add(b);
@@ -173,7 +198,7 @@
 
   function pump(o) {   // bơm ly tâm trên bệ: động cơ + buồng bơm
     var g = grp('pump');
-    var L = o.L || 900, W = o.W || 420, H = o.H || 380;
+    var L = kt(o.L, 900, 200, 4000), W = kt(o.W, 420, 150, 3000), H = kt(o.H, 380, 150, 3000);
     var base = box(L, 90, W, mat('frame')); base.position.y = 45; g.add(base);
     var mo = cyl(H, L * 0.5, mat('paint'), 24);
     mo.rotation.z = Math.PI / 2; mo.position.set(L * 0.18, 90 + H / 2, 0); g.add(mo);
@@ -186,10 +211,11 @@
   }
 
   function roSkid(o) {  // khung RO: vessel màng nằm ngang xếp tầng
-    var n = Math.max(1, o.vessels || 4);
-    var per = Math.max(1, o.memPerVessel || 6);
-    var vd = (o.size === '4040' ? 130 : o.size === '2540' ? 85 : 220);
-    var vl = per * (o.size === '4040' ? 1020 : o.size === '2540' ? 640 : 1020);
+    var n = Math.min(40, Math.max(1, +o.vessels || 4));
+    var per = Math.min(12, Math.max(1, +o.memPerVessel || 6));
+    var sz = coMang(o.size);
+    var vd = (sz === '4040' ? 130 : sz === '2540' ? 85 : 220);
+    var vl = per * (sz === '4040' ? 1020 : sz === '2540' ? 640 : 1020);
     var rows = Math.min(n, o.rows || Math.ceil(n / 2));
     var cols = Math.ceil(n / rows);
     var W = vl + 700, D = Math.max(900, cols * (vd + 130) + 260), H = rows * (vd + 130) + 500;
@@ -227,7 +253,7 @@
   }
 
   function panel(o) {   // tủ điện / tủ điều khiển
-    var W = o.W || 800, H = o.H || 1800, D = o.D || 400;
+    var W = kt(o.W, 800, 200, 6000), H = kt(o.H, 1800, 400, 4000), D = kt(o.D, 400, 150, 2000);
     var g = grp('panel');
     var b = box(W, H, D, mat('panel')); b.position.y = H / 2 + 100; g.add(b);
     var base = box(W + 60, 100, D + 60, mat('frame')); base.position.y = 50; g.add(base);
@@ -242,7 +268,7 @@
   }
 
   function dosing(o) {  // cụm châm hoá chất: bồn nhỏ + bơm định lượng
-    var d = o.d || 700, h = o.h || 1100;
+    var d = kt(o.d, 700, 200, 4000), h = kt(o.h, 1100, 300, 4000);
     var g = grp('dosing');
     var t = cyl(d, h, glass(0xf0e2c8), 24); t.position.y = h / 2 + 150; g.add(t);
     var liq = cyl(d - 60, h * 0.6, new THREE.MeshPhysicalMaterial(
@@ -257,7 +283,7 @@
   }
 
   function uvUnit(o) {  // đèn UV dạng ống nằm ngang
-    var d = o.d || 260, L = o.L || 1400;
+    var d = kt(o.d, 260, 80, 1500), L = kt(o.L, 1400, 300, 8000);
     var g = grp('uv');
     var b = cyl(d, L, mat('ss'), 24); b.rotation.z = Math.PI / 2;
     b.position.y = 700; g.add(b);
