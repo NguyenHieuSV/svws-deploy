@@ -97,6 +97,7 @@ _MUC_CD5 = "Danh sách công đoạn phải ĐỦ 5 LOẠI"
 _MUC_JSON = "File cấu hình JSON theo MỘT ĐỊNH DẠNG DUY NHẤT"
 _MUC_OM = "Sổ O&M sinh từ CHÍNH danh sách thiết bị"
 _MUC_CAP = "Danh mục cáp phải liệt kê RIÊNG TỪNG ĐỘNG CƠ"
+_MUC_BOQ = "Mỗi dòng BOQ phải mang MỨC TIN CẬY"
 
 
 def _bo_sung_nhom(data: dict, dau_hieu: str, tien_to, tu_khoa: str) -> bool:
@@ -262,6 +263,8 @@ def init_db() -> None:
             ghi.append("Sổ O&M sinh từ danh sách thiết bị (SVWSOM)")
         if _bo_sung_muc(data, _MUC_CAP, "Tab 6 (bổ sung)", "6"):
             ghi.append("Danh mục cáp riêng từng động cơ + kiểm sụt áp")
+        if _bo_sung_muc(data, _MUC_BOQ, "Tab 9 (bổ sung)", "9"):
+            ghi.append("BOQ có mức tin cậy đơn giá và bóc tách ống chi tiết")
         if ghi:
             doc.data = data
             flag_modified(doc, "data")
@@ -933,16 +936,22 @@ def ai_execute(payload: dict = Body(...)):
                 "mẫu nhật ký vận hành với cột đúng theo thiết bị. Lấy riêng từng "
                 "mục bằng OM.thongSo(), OM.baoTri(), OM.cip(), OM.suCo(), "
                 "OM.anToan(), OM.nhatKy().\n"
-                "- Tab 9 (BOQ): LẤY DANH MỤC TỪ V.boq() hoặc V.bangBOQ(), KHÔNG tự gõ "
-                "lại. V.boq() gộp đủ 4 nhóm: A thiết bị chính (bồn, bơm, cột lọc, cụm "
-                "RO, EDI, UV, tủ điện — quy cách suy thẳng từ khai báo EQUIP nên không "
-                "lệch bản vẽ), B đường ống & phụ kiện, C móng & kết cấu, D điện & điều "
-                "khiển. Riêng V.bangThietBi() cho bảng thiết bị chính đứng riêng.\n"
-                "  BOQ thiếu thiết bị chính là thiếu phần lớn tiền — kiemTra() báo lỗi "
-                "nếu không có thiết bị nào hoặc có thiết bị chưa ghi quy cách.\n"
-                "  Đơn giá do bạn ước tính điền vào (ghi rõ là số tham khảo, phải thay "
-                "bằng báo giá nhà cung cấp trước khi phát hành); KHỐI LƯỢNG thì lấy "
-                "nguyên từ V.boq().\n"
+                "- Tab 9 (BOQ): dùng V.bangBOQ({vat:0.08, qNgay:<m³/ngày>}), KHÔNG tự gõ "
+                "lại khối lượng. Danh mục gồm đủ 4 nhóm: A thiết bị chính (quy cách suy "
+                "thẳng từ EQUIP nên không lệch bản vẽ, có cả dụng cụ đo đếm từ bảng I/O), "
+                "B đường ống và phụ kiện, C móng và kết cấu, D điện và điều khiển.\n"
+                "  MỖI DÒNG MANG MỨC TIN CẬY của đơn giá: A báo giá nhà cung cấp còn hiệu "
+                "lực · B giá hợp đồng gần đây · C tham khảo nội bộ · D ước tính theo suất. "
+                "Có báo giá thật thì nạp vào bằng "
+                "V.napGia({'tb:RO-101': {gia:430000000, tc:'A', nguon:'Báo giá Pentair 25/08'}}).\n"
+                "  Cuối bảng tự có tổng theo nhóm, VAT, suất đầu tư (VND/m³·ngày) và BẢNG "
+                "TỶ TRỌNG THEO MỨC TIN CẬY. Quá 25 % giá trị ở mức D thì bảng tự báo CHƯA "
+                "ĐỦ TIN CẬY để phát hành báo giá — HIỆN NGUYÊN VĂN cảnh báo đó cho người "
+                "dùng, đừng giấu. Có giá mà không biết giá ấy chắc tới đâu còn nguy hơn "
+                "không có giá.\n"
+                "  Đường ống KHÔNG gộp thành một dòng “trọn bộ” — đã bóc tách theo khối "
+                "lượng đo trên bản vẽ thì giữ nguyên như vậy để còn đối chiếu khi thi công "
+                "và thương lượng từng hạng mục với nhà cung cấp.\n"
                 "- Tab 7 (Logic vận hành & mạch điện): dùng SVWSDIEN. Đây là tab để "
                 "THỢ ĐẤU TỦ và NGƯỜI LẬP TRÌNH PLC làm việc, nên phải đủ số liệu thật, "
                 "ĐỪNG tự gõ toạ độ SVG cho sơ đồ điện.\n"

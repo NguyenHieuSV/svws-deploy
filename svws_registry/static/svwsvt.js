@@ -713,7 +713,8 @@
           ten: e.name || e.ten || '',
           quyCach: quyCach(e),
           dv: 'bộ',
-          sl: soLuong(e)
+          sl: soLuong(e),
+          e: e
         };
       });
     }
@@ -724,11 +725,12 @@
       thietBiChinh().forEach(function (x) {
         ds.push({ nhom: 'A. Thiết bị chính — ' + x.nhom,
                   ten: (x.tag ? x.tag + ' — ' : '') + x.ten,
-                  qc: x.quyCach, dv: x.dv, sl: x.sl });
+                  qc: x.quyCach, dv: x.dv, sl: x.sl,
+                  khoa: 'tb:' + x.tag, e: x.e });
       });
       dungCuDo().forEach(function (x) {
         ds.push({ nhom: 'A. Thiết bị chính — Dụng cụ đo', ten: x.vt, qc: x.qc,
-                  dv: x.dv, sl: x.sl });
+                  dv: x.dv, sl: x.sl, khoa: 'vt:' + x.vt });
       });
       tongHop().forEach(function (g) {
         var nhom = /Bê tông|Thép cốt|Bu lông neo|grout|epoxy/i.test(g.vt)
@@ -736,7 +738,8 @@
                  : /Cáp|Máng|gland|tiếp địa/i.test(g.vt)
                      ? 'D. Điện & điều khiển'
                      : 'B. Đường ống & phụ kiện';
-        ds.push({ nhom: nhom, ten: g.vt, qc: g.qc, dv: g.dv, sl: g.slMua });
+        ds.push({ nhom: nhom, ten: g.vt, qc: g.qc, dv: g.dv, sl: g.slMua,
+                  khoa: 'vt:' + g.vt + '|' + g.qc });
       });
       return ds;
     }
@@ -749,26 +752,175 @@
         }));
     }
 
-    /** Bảng BOQ để dán đơn giá vào — cột đơn giá và thành tiền để trống. */
-    function bangBOQ() {
-      var ds = boq(), nhom = '', h = '';
+    /* ==================================================================
+     * ĐƠN GIÁ VÀ MỨC TIN CẬY
+     * Bảng khối lượng không có giá thì không ra được báo giá; mà có giá
+     * nhưng không biết giá ấy chắc tới đâu thì càng nguy. Mỗi dòng mang một
+     * MỨC TIN CẬY, và cuối bảng nói rõ bao nhiêu phần trăm giá trị đang dựa
+     * trên số ước tính — đó là con số quyết định có dám phát hành báo giá hay
+     * chưa, chứ không phải cảm tính.
+     *   A — báo giá nhà cung cấp còn hiệu lực
+     *   B — giá hợp đồng đã ký gần đây
+     *   C — đơn giá tham khảo nội bộ của công ty
+     *   D — ước tính theo suất, BẮT BUỘC thay trước khi phát hành
+     * ================================================================ */
+    var MUC_TC = { A: 'Báo giá NCC', B: 'Hợp đồng gần đây',
+                   C: 'Tham khảo nội bộ', D: 'Ước tính theo suất' };
+    var giaNgoai = {};                     // bảng giá người dùng nạp vào
+    /** Nạp bảng giá riêng: {khoa: {gia: 85000000, tc: 'A', nguon: '...'}} */
+    api.napGia = function (b) { giaNgoai = b || {}; return api; };
+
+    // Đơn giá tham khảo nội bộ (VND) — mức C. Sửa ở đây khi giá thị trường đổi.
+    function giaThietBi(e) {
+      var t = String(e.type || '').toLowerCase();
+      var d = so(e.d, 1000), kW = so(e.kW, 0);
+      if (t === 'tank') return 85e6 * Math.pow(Math.max(0.5, d / 1954), 1.4);
+      if (t === 'vessel' || t === 'filter')
+        return 38e6 * Math.pow(d / 1067, 1.5) * (laGACe(e) ? 1.15 : 1);
+      if (t === 'mixedbed') return 95e6 * Math.pow(Math.max(0.5, d / 670), 1.3);
+      if (t === 'cartridge') return 18e6;
+      if (t === 'roskid' || t === 'ro') {
+        var nv = Math.max(1, +e.vessels || 4);
+        return 420e6 * (nv / 5);           // hiệu chỉnh theo số vỏ màng
+      }
+      if (t === 'edi') {
+        var moiS = so(e.moiStack, 5);
+        var ns = Math.max(1, +e.stacks ||
+          ((+e.q || +e.congSuat) ? Math.ceil((+e.q || +e.congSuat) / moiS) : 1));
+        return 520e6 * (ns / 2);
+      }
+      if (t === 'uv') return 65e6;
+      if (t === 'pump') return kW ? (25e6 + kW * 10e6) : 55e6;
+      if (t === 'panel') return 350e6;
+      if (t === 'dosing') return 45e6;
+      return 0;
+    }
+    function laGACe(e) {
+      return /gac|than|carbon|acf/i.test(String(e.media || '') + ' ' +
+                                         String(e.tag || '') + ' ' + String(e.name || ''));
+    }
+    /* Suất giá vật tư đường ống — ƯỚC TÍNH, mức D. Con số này chỉ để bảng có
+       tổng tạm tính; PHẢI thay bằng báo giá thật trước khi phát hành. */
+    function giaVatTu(vt, qc) {
+      var dn = (String(qc || '').match(/DN(\d+)/) || [0, 0])[1] * 1;
+      var inox = /ss3|inox|316|304/i.test(vt + ' ' + qc);
+      if (/^Ống/i.test(vt)) return (inox ? 9000 : 2200) * Math.max(15, dn);
+      if (/Co 90|Tê|Côn thu/i.test(vt)) return (inox ? 12000 : 2600) * Math.max(15, dn);
+      if (/Van một chiều/i.test(vt)) return (inox ? 26000 : 9000) * Math.max(15, dn);
+      if (/Van/i.test(vt)) return (inox ? 22000 : 7000) * Math.max(15, dn);
+      if (/Mặt bích|Rắc/i.test(vt)) return (inox ? 14000 : 4500) * Math.max(15, dn);
+      if (/Giá đỡ|kẹp/i.test(vt)) return 85000;
+      if (/Keo dán|Que hàn|băng tan/i.test(vt)) return 250000;
+      if (/Bê tông/i.test(vt)) return 1.6e6;
+      if (/Thép cốt/i.test(vt)) return 22000;
+      if (/Bu lông neo/i.test(vt)) return 45000;
+      if (/grout|Grout|Vữa/i.test(vt)) return 12000;
+      if (/Sơn epoxy/i.test(vt)) return 320000;
+      if (/Cáp nguồn tổng/i.test(vt)) return 220000;
+      if (/Cáp động lực/i.test(vt)) return 95000;
+      if (/Cáp tín hiệu/i.test(vt)) return 28000;
+      if (/máng cáp|Thang/i.test(vt)) return 320000;
+      if (/gland/i.test(vt)) return 85000;
+      if (/tiếp địa/i.test(vt)) return 18e6;
+      if (/Chống sét|UPS/i.test(vt)) return 32e6;
+      if (/Biến tần/i.test(vt)) return 28e6;
+      if (/Tủ MCC/i.test(vt)) return 350e6;
+      if (/Đo mức|LIT/i.test(vt)) return 14e6;
+      if (/Phao/i.test(vt)) return 1.8e6;
+      if (/Dụng cụ đo analog/i.test(vt)) return 16e6;
+      if (/Công tắc \/ phao/i.test(vt)) return 2.2e6;
+      if (/Thang \+ sàn/i.test(vt)) return 12e6;
+      if (/Lập trình|SCADA|Hiệu chuẩn|Chạy thử|Hồ sơ|Đào tạo|Súc rửa|Thử kín/i.test(vt))
+        return 0;                          // công việc — để trống cho người báo giá
+      return 0;
+    }
+
+    /** Gắn đơn giá và mức tin cậy cho từng dòng BOQ. */
+    function boqCoGia() {
+      return boq().map(function (r) {
+        var ng = giaNgoai[r.khoa] || giaNgoai[r.ten];
+        var gia = 0, tc = 'D', nguon = '';
+        if (ng && ng.gia) { gia = ng.gia; tc = ng.tc || 'A'; nguon = ng.nguon || ''; }
+        else if (r.e) { gia = giaThietBi(r.e); tc = gia ? 'C' : 'D'; }
+        else { gia = giaVatTu(r.ten, r.qc); tc = 'D'; }
+        return { nhom: r.nhom, ten: r.ten, qc: r.qc, dv: r.dv, sl: r.sl,
+                 gia: Math.round(gia), tc: gia ? tc : 'D', nguon: nguon,
+                 tien: Math.round(gia * so(r.sl, 0)) };
+      });
+    }
+
+    function tien(v) { return v ? Math.round(v).toLocaleString('vi-VN') : ''; }
+
+    /** Tổng giá theo nhóm, VAT, suất đầu tư và TỶ TRỌNG THEO MỨC TIN CẬY. */
+    function tongGia(o2) {
+      o2 = o2 || {};
+      var ds = boqCoGia(), nhom = {}, tong = 0, tc = { A: 0, B: 0, C: 0, D: 0 };
+      ds.forEach(function (r) {
+        var g = r.nhom.split(' — ')[0];
+        nhom[g] = (nhom[g] || 0) + r.tien;
+        tong += r.tien;
+        tc[r.tc] = (tc[r.tc] || 0) + r.tien;
+      });
+      var vat = so(o2.vat, 0.08);
+      var q = so(o2.qNgay, 0);
+      return { theoNhom: nhom, tong: tong, vat: Math.round(tong * vat),
+               tongVAT: Math.round(tong * (1 + vat)),
+               suatDauTu: q ? Math.round(tong * (1 + vat) / q) : 0,
+               tinCay: tc,
+               tiLeUocTinh: tong ? Math.round(tc.D / tong * 100) : 0 };
+    }
+
+    /** Bảng BOQ có đơn giá, mức tin cậy, tổng theo nhóm, VAT và suất đầu tư. */
+    function bangBOQ(o2) {
+      o2 = o2 || {};
+      var ds = boqCoGia(), t = tongGia(o2), nhom = '', h = '';
       var cot = ['TT', 'Hạng mục', 'Quy cách', 'ĐVT', 'SL', 'Đơn giá (VND)',
-                 'Thành tiền (VND)'];
-      h += '<h4 class="svws-bang-tieu">BẢNG KHỐI LƯỢNG (BOQ) — ' + ds.length +
-           ' hạng mục</h4><table class="svws-bang"><thead><tr>' +
-           cot.map(function (t) { return '<th>' + esc(t) + '</th>'; }).join('') +
+                 'Thành tiền (VND)', 'Mức tin cậy'];
+      h += '<h4 class="svws-bang-tieu">BẢNG KHỐI LƯỢNG VÀ ĐƠN GIÁ (BOQ) — ' +
+           ds.length + ' hạng mục</h4>' +
+           '<div class="svws-ghi">Đơn giá mức C là giá tham khảo nội bộ, mức D là ước ' +
+           'tính theo suất — <b>phải thay bằng báo giá nhà cung cấp trước khi phát ' +
+           'hành</b>. Khối lượng thì lấy từ bản vẽ, không sửa tay.</div>' +
+           '<table class="svws-bang"><thead><tr>' +
+           cot.map(function (x) { return '<th>' + esc(x) + '</th>'; }).join('') +
            '</tr></thead><tbody>';
       ds.forEach(function (r, i) {
         if (r.nhom !== nhom) {
           nhom = r.nhom;
-          h += '<tr><td colspan="7" style="background:#e8eff7;font-weight:600">' +
+          h += '<tr><td colspan="8" style="background:#e8eff7;font-weight:600">' +
                esc(nhom) + '</td></tr>';
         }
-        h += '<tr>' + [i + 1, r.ten, r.qc, r.dv, r.sl, '', ''].map(function (c) {
-          return '<td>' + esc(c) + '</td>';
-        }).join('') + '</tr>';
+        h += '<tr>' + [i + 1, r.ten, r.qc, r.dv, r.sl, tien(r.gia), tien(r.tien),
+                       r.tc + ' · ' + MUC_TC[r.tc]]
+          .map(function (c) { return '<td>' + esc(c) + '</td>'; }).join('') + '</tr>';
       });
-      return h + '</tbody></table>';
+      h += '</tbody></table>';
+
+      var dong = [];
+      Object.keys(t.theoNhom).sort().forEach(function (g) {
+        if (t.theoNhom[g]) dong.push([g, tien(t.theoNhom[g])]);
+      });
+      dong.push(['CỘNG TRƯỚC THUẾ', tien(t.tong)]);
+      dong.push(['VAT ' + Math.round(so(o2.vat, 0.08) * 100) + ' %', tien(t.vat)]);
+      dong.push(['TỔNG SAU THUẾ', tien(t.tongVAT)]);
+      if (t.suatDauTu) dong.push(['Suất đầu tư', tien(t.suatDauTu) + ' VND / m³·ngày']);
+      h += bangHTML('Tổng hợp giá', ['Khoản mục', 'Giá trị'], dong);
+
+      var tcDong = [];
+      ['A', 'B', 'C', 'D'].forEach(function (k) {
+        if (!t.tinCay[k]) return;
+        tcDong.push([k + ' — ' + MUC_TC[k], tien(t.tinCay[k]),
+                     Math.round(t.tinCay[k] / t.tong * 100) + ' %']);
+      });
+      h += bangHTML('Độ tin cậy của giá', ['Mức', 'Giá trị (VND)', 'Tỷ trọng'], tcDong);
+      h += '<div class="svws-ghi"><b>' + t.tiLeUocTinh + ' % giá trị đang dựa trên ước ' +
+           'tính (mức D).</b> ' +
+           (t.tiLeUocTinh > 25
+             ? 'Vượt 25 % — CHƯA ĐỦ TIN CẬY để phát hành báo giá cho khách, phải xin ' +
+               'báo giá nhà cung cấp cho các hạng mục mức D trước.'
+             : 'Dưới 25 % — chấp nhận được cho báo giá sơ bộ, nhưng vẫn phải xin báo ' +
+               'giá thật trước khi ký hợp đồng.') + '</div>';
+      return h;
     }
 
     // ------------------------------------------------------------------ tổng hợp
@@ -967,7 +1119,7 @@
     api.xuatCauHinh = xuatCauHinh;
     api.thietBiChinh = thietBiChinh;
     api.bangThietBi = bangThietBi;
-    api.boq = boq;
+    api.boq = boq; api.boqCoGia = boqCoGia; api.tongGia = tongGia;
     api.bangBOQ = bangBOQ;
     api.mong = mong;
     api.dien = dien;

@@ -124,6 +124,14 @@
           "s": "std"
         },
         {
+          "t": "Tab 9 (bổ sung) — Mỗi dòng BOQ phải mang MỨC TIN CẬY của đơn giá, không chỉ có con số: A báo giá nhà cung cấp còn hiệu lực · B giá hợp đồng đã ký gần đây · C đơn giá tham khảo nội bộ của công ty · D ước tính theo suất. Cuối bảng phải có tổng theo nhóm, VAT, suất đầu tư (VND/m³·ngày) VÀ BẢNG TỶ TRỌNG THEO MỨC TIN CẬY — nói rõ bao nhiêu phần trăm giá trị đang dựa trên ước tính. Quá 25 % giá trị ở mức D thì CHƯA ĐỦ TIN CẬY để phát hành báo giá cho khách, phải xin báo giá nhà cung cấp cho các hạng mục đó trước. Có giá mà không biết giá ấy chắc tới đâu thì còn nguy hơn không có giá.",
+          "s": "new"
+        },
+        {
+          "t": "Tab 9 (bổ sung) — Đường ống và phụ kiện KHÔNG ĐƯỢC gộp thành một dòng \"trọn bộ\": phải bóc tách theo đúng khối lượng đo trên bản vẽ (từng cỡ DN, từng loại phụ kiện, van, giá đỡ) rồi mới áp đơn giá. Gộp trọn bộ thì không đối chiếu được với thực tế thi công, không biết thừa thiếu ở đâu, và mất luôn khả năng thương lượng từng hạng mục với nhà cung cấp.",
+          "s": "new"
+        },
+        {
           "t": "Tab 8 (bổ sung) — Sổ O&M sinh từ CHÍNH danh sách thiết bị bằng SVWSOM.tao({EQUIP, params}), không viết tay mỗi lần một kiểu. Phải đủ sáu mục: (1) thông số vận hành và ngưỡng lấy từ bảng thông số; (2) lịch bảo trì định kỳ theo TỪNG LOẠI thiết bị có trong hệ — không có màng RO thì không sinh mục thay màng, có UV thì tự có mục thay đèn và vệ sinh ống thạch anh; (3) quy trình CIP (chỉ sinh khi hệ có màng RO hoặc EDI); (4) bảng xử lý sự cố thường gặp kèm nguyên nhân và cách xử lý; (5) an toàn vận hành theo nhóm rủi ro thực có (hoá chất, điện, áp lực, không gian hạn chế, tia UV, điện một chiều EDI); (6) mẫu nhật ký vận hành với các cột đúng theo thiết bị của hệ. kiemTra() cảnh báo thiết bị nào chưa có mục bảo trì.",
           "s": "new"
         },
