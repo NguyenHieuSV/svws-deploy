@@ -92,6 +92,7 @@ _MUC_TAB4 = "Bản vẽ chế tạo phải ĐỦ ĐỂ XƯỞNG LÀM ĐƯỢC"
 _MUC_TAB5 = "Số lượng vật tư phải SUY TỪ HÌNH HỌC THẬT"
 _MUC_TAB5B = "Bản vẽ từng công đoạn phải vẽ ĐÚNG TUYẾN THẬT"
 _MUC_THAMSO = "Tham số riêng cho từng loại thiết bị"
+_MUC_MATBANG = "Kích thước mặt bằng là THAM SỐ ĐẦU VÀO"
 
 
 def _bo_sung_nhom(data: dict, dau_hieu: str, tien_to, tu_khoa: str) -> bool:
@@ -241,6 +242,11 @@ def init_db() -> None:
                           "Kiểm tra cụm lọc tự động"], "parametric"):
             ghi.append("Mỗi loại thiết bị có số lượng và kích thước riêng "
                        "(MMF tách khỏi GAC) + kiểm cụm lọc tự động")
+        if _bo_sung_nhom(data, _MUC_MATBANG,
+                         ["Kích thước mặt bằng là THAM SỐ ĐẦU VÀO",
+                          "Kiểm tra mặt bằng tự động"], "parametric"):
+            ghi.append("Kích thước khu đất thành tham số đầu vào — bố cục và bản vẽ "
+                       "tự sắp lại theo diện tích")
         if ghi:
             doc.data = data
             flag_modified(doc, "data")
@@ -698,7 +704,15 @@ def ai_execute(payload: dict = Body(...)):
                 "thẳng, ống đi chéo xuyên thiết bị, tỷ lệ và màu lộn xộn.\n"
                 "  Cách dùng (đơn vị mm, trục Y hướng lên):\n"
                 "    const S = SVWS3D.scene(document.getElementById('view3d'));\n"
-                "    const pos = SVWS3D.layout(EQUIP);   // tự xếp thành hàng có lối đi\n"
+                "    const pos = SVWS3D.layout(EQUIP, {rongKhu, sauKhu, leKhu:1200});\n"
+                "      // KÍCH THƯỚC KHU ĐẤT LÀ THAM SỐ: bảng thông số phải có ô Chiều "
+                "rộng khu đất · Chiều sâu khu đất · Khoảng lùi tường (mm). Truyền vào "
+                "đây thì bố cục tự xếp cho vừa: hàng nào đầy bề rộng thì xuống hàng, "
+                "khu rộng hơn thì ít hàng hơn. Bỏ trống thì thư viện tự chọn bố cục gần "
+                "vuông như trước — nhưng khi đó bản vẽ KHÔNG phản ánh gian nhà thật.\n"
+                "    const km = SVWS3D.kiemMatBang(EQUIP, pos, {rong:rongKhu, sau:sauKhu, le:1200});\n"
+                "      // km.loi báo rõ THIẾU BAO NHIÊU MILIMÉT; km.canhBao nhắc khu quá\n"
+                "      // rộng (thuê thừa) hoặc quá chật (thiếu lối đi bảo trì)\n"
                 "    EQUIP.forEach(e => S.addEquip(SVWS3D.build(e), pos[e.id], e));\n"
                 "    S.addPipes(PIPES, pos);   // PHẢI gọi một lượt cả mảng, đừng gọi từng ống —\n"
                 "                              // biết hết các tuyến thì thư viện mới chia được\n"
@@ -821,7 +835,8 @@ def ai_execute(payload: dict = Body(...)):
                 "lựa chọn theo máy người dùng.\n"
                 "- Tab 3 (GA — mặt bằng): dùng SVWSGA, và PHẢI dùng LẠI ĐÚNG bộ vị trí của "
                 "tab 3D để hai bản vẽ khớp nhau:\n"
-                "    const G = SVWSGA.to({ma:'<mã>', ten:'<tên>', hoVanHanh:800});\n"
+                "    const G = SVWSGA.to({ma:'<mã>', ten:'<tên>', hoVanHanh:800,\n"
+                "                         rongKhu, sauKhu});   // vẽ ĐÚNG ranh khu đất\n"
                 "    G.datCum(EQUIP, pos);   // pos CHÍNH LÀ SVWS3D.layout(EQUIP) dùng ở tab 1\n"
                 "    G.rack('nước +300 / hoá chất +900');\n"
                 "    G.kichThuoc();          // chuỗi kích thước tự sinh theo vị trí thật\n"

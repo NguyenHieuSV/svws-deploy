@@ -43,7 +43,9 @@
     var hoVanHanh = o.hoVanHanh || 800;            // khe vận hành tối thiểu (mm thật)
     var out = [], nhanCho = [], chiem = [], canhBao = [];
     var may = [];                                  // {id,tag,x,z,w,d,tron,D}
-    var tyLe = 50, bb = null, X = null, Y = null, mm = null;
+    var tyLe = 50, bb = null, khu = null, X = null, Y = null, mm = null;
+    // kích thước khu đất thật (mm) — khai thì bản vẽ bám theo, không tự suy
+    var rongKhu = +o.rongKhu || 0, sauKhu = +o.sauKhu || 0;
 
     function themChiem(x1, y1, x2, y2, ten) {
       chiem.push({ x1: x1, y1: y1, x2: x2, y2: y2, ten: ten || '' });
@@ -107,6 +109,25 @@
       x1 -= hoVanHanh; x2 += hoVanHanh; z1 -= hoVanHanh; z2 += hoVanHanh;
       bb = { x1: x1, x2: x2, z1: z1, z2: z2, w: x2 - x1, d: z2 - z1 };
 
+      /* Khai kích thước khu đất thì vẽ ĐÚNG ranh đó, không suy từ cụm thiết bị:
+         bản vẽ mặt bằng phải cho thấy hệ nằm gọn (hay không gọn) trong gian nhà
+         thật. Cụm vượt ranh thì vẫn vẽ, nhưng kiemTra() báo lỗi rõ số mm thiếu. */
+      if (rongKhu && sauKhu) {
+        var cx0 = (x1 + x2) / 2, cz0 = (z1 + z2) / 2;
+        khu = { x1: cx0 - rongKhu / 2, x2: cx0 + rongKhu / 2,
+                z1: cz0 - sauKhu / 2, z2: cz0 + sauKhu / 2, w: rongKhu, d: sauKhu };
+        if (khu.w < bb.w || khu.d < bb.d) {
+          canhBao.push('Cụm thiết bị ' + so(bb.w) + ' × ' + so(bb.d) +
+            ' mm KHÔNG lọt khu đất ' + so(rongKhu) + ' × ' + so(sauKhu) + ' mm — thiếu ' +
+            so(Math.max(0, bb.w - khu.w)) + ' mm bề rộng và ' +
+            so(Math.max(0, bb.d - khu.d)) + ' mm chiều sâu.');
+        }
+        // khổ vẽ lấy theo hình bao ngoài cùng của hai cái
+        bb = { x1: Math.min(bb.x1, khu.x1), x2: Math.max(bb.x2, khu.x2),
+               z1: Math.min(bb.z1, khu.z1), z2: Math.max(bb.z2, khu.z2) };
+        bb.w = bb.x2 - bb.x1; bb.d = bb.z2 - bb.z1;
+      }
+
       // chọn tỷ lệ chuẩn nhỏ nhất mà vẫn lọt khổ giấy
       var cW = W - LE * 2, cH = H - TOP - DUOI;
       var cac = [20, 25, 50, 75, 100, 150, 200, 250, 500];
@@ -120,12 +141,15 @@
       Y = function (v) { return oy + mm(v - bb.z1); };
 
       // ranh khu đất
-      out.push('<rect x="' + X(bb.x1).toFixed(2) + '" y="' + Y(bb.z1).toFixed(2) +
-        '" width="' + mm(bb.w).toFixed(2) + '" height="' + mm(bb.d).toFixed(2) +
-        '" fill="#f6f9fc" stroke="#5c677d" stroke-width="0.5" stroke-dasharray="3,2"/>');
-      nhanCho.push({ x: X((bb.x1 + bb.x2) / 2), y: Y(bb.z1) - 2.5,
-                     s: 'Khu đặt hệ ≈ ' + so(bb.w) + ' × ' + so(bb.d) +
-                        ' mm (bệ BTCT + mương thu)', fs: 3.4, mau: MO, dam: 0, huong: 'tren' });
+      var r = khu || bb;
+      out.push('<rect x="' + X(r.x1).toFixed(2) + '" y="' + Y(r.z1).toFixed(2) +
+        '" width="' + mm(r.w).toFixed(2) + '" height="' + mm(r.d).toFixed(2) +
+        '" fill="#f6f9fc" stroke="' + (khu ? '#0b2545' : '#5c677d') +
+        '" stroke-width="' + (khu ? 0.8 : 0.5) + '" stroke-dasharray="3,2"/>');
+      nhanCho.push({ x: X((r.x1 + r.x2) / 2), y: Y(r.z1) - 2.5,
+                     s: (khu ? 'Khu đất ' : 'Khu đặt hệ ≈ ') + so(r.w) + ' × ' + so(r.d) +
+                        ' mm' + (khu ? ' (theo bảng thông số)' : ' (bệ BTCT + mương thu)'),
+                     fs: 3.4, mau: MO, dam: 0, huong: 'tren' });
 
       // từng thiết bị, vẽ đúng tỷ lệ
       may.forEach(function (m) {

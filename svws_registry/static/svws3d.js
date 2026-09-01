@@ -824,31 +824,102 @@
     // mức chuẩn đòi (≥800) — bộ kiểm của bản GA bắt được lỗi này.
     var gap = opt.gap || 900;
     var total = built.reduce(function (s, b) { return s + b.w + gap; }, 0);
-    // chọn số hàng sao cho mặt bằng gần vuông (dễ nhìn, giống nhà máy thật)
-    var rows = opt.rows || Math.max(1, Math.round(Math.sqrt(total / 2600)));
-    rows = Math.min(rows, Math.max(1, Math.ceil(built.length / 2)));
-    var perRow = Math.ceil(built.length / rows);
 
-    var pos = {}, rowDepth = [], z = 0, idx = 0;
-    for (var r = 0; r < rows; r++) {
-      var slice = built.slice(idx, idx + perRow); idx += perRow;
-      if (!slice.length) break;
+    /* KÍCH THƯỚC KHU ĐẤT (mm). Có khai thì xếp cho VỪA BỀ RỘNG đó — hàng nào
+       đầy thì xuống hàng, đúng cách bố trí trong một gian nhà có sẵn. Không
+       khai thì giữ cách cũ: tự chọn số hàng cho mặt bằng gần vuông. */
+    var le = kt(opt.leKhu, 1200, 0, 20000);        // lùi khỏi tường, mm
+    var rongKhu = +opt.rongKhu || 0;
+    var dung = rongKhu ? Math.max(1000, rongKhu - 2 * le) : 0;
+
+    var hang = [];
+    if (dung) {
+      var cur = [], w = 0;
+      built.forEach(function (b) {
+        if (cur.length && w + gap + b.w > dung) { hang.push(cur); cur = []; w = 0; }
+        cur.push(b);
+        w += (cur.length > 1 ? gap : 0) + b.w;
+      });
+      if (cur.length) hang.push(cur);
+    } else {
+      // chọn số hàng sao cho mặt bằng gần vuông (dễ nhìn, giống nhà máy thật)
+      var rows = opt.rows || Math.max(1, Math.round(Math.sqrt(total / 2600)));
+      rows = Math.min(rows, Math.max(1, Math.ceil(built.length / 2)));
+      var perRow = Math.ceil(built.length / rows);
+      for (var r0 = 0, i0 = 0; r0 < rows; r0++, i0 += perRow) {
+        var sl = built.slice(i0, i0 + perRow);
+        if (sl.length) hang.push(sl);
+      }
+    }
+
+    var pos = {}, z = 0, rongMax = 0;
+    hang.forEach(function (slice, r) {
       var maxD = Math.max.apply(null, slice.map(function (b) { return b.d; }));
       var wsum = slice.reduce(function (s, b) { return s + b.w + gap; }, -gap);
+      rongMax = Math.max(rongMax, wsum);
       var x = -wsum / 2;
       var order = (r % 2 === 1) ? slice.slice().reverse() : slice;   // rắn bò
       order.forEach(function (b) {
         pos[b.id] = { x: x + b.w / 2, y: 0, z: z + maxD / 2 };
         x += b.w + gap;
       });
-      rowDepth.push(maxD);
       z += maxD + aisle;
-    }
+    });
     var depth = z - aisle;
     // dời về giữa gốc toạ độ
     Object.keys(pos).forEach(function (k) { pos[k].z -= depth / 2; });
-    pos.__size = { w: Math.max.apply(null, rowDepth.map(function () { return 0; }).concat([0])), d: depth };
+    // __size.w trước đây LUÔN BẰNG 0 (map(...) trả 0) — không ai dùng được.
+    pos.__size = { w: Math.round(rongMax), d: Math.round(depth),
+                   soHang: hang.length, le: le,
+                   rongKhu: rongKhu || 0, sauKhu: +opt.sauKhu || 0 };
     return pos;
+  }
+
+  /**
+   * Bố cục có vừa khu đất không — trả lời bằng SỐ, không ước lượng bằng mắt.
+   * o: {rong, sau, le}  (mm). Thiếu rong/sau thì lấy từ pos.__size.
+   */
+  function kiemMatBang(EQUIP, pos, o) {
+    o = o || {};
+    var loi = [], canhBao = [];
+    var sz = (pos && pos.__size) || {};
+    var rong = +o.rong || sz.rongKhu || 0;
+    var sau = +o.sau || sz.sauKhu || 0;
+    var le = +o.le || sz.le || 1200;
+    // hộp bao thực tế của cụm thiết bị
+    var x1 = Infinity, x2 = -Infinity, z1 = Infinity, z2 = -Infinity;
+    (EQUIP || []).forEach(function (e) {
+      var p = pos[e.id || e.tag]; if (!p) return;
+      var cd = chanDe(e);
+      x1 = Math.min(x1, p.x - cd.w / 2); x2 = Math.max(x2, p.x + cd.w / 2);
+      z1 = Math.min(z1, p.z - cd.d / 2); z2 = Math.max(z2, p.z + cd.d / 2);
+    });
+    if (!isFinite(x1)) return { loi: ['Không có thiết bị nào để kiểm mặt bằng.'],
+                                canhBao: [], can: null };
+    var canR = Math.round(x2 - x1 + 2 * le), canS = Math.round(z2 - z1 + 2 * le);
+    if (rong && canR > rong)
+      loi.push('Cụm thiết bị rộng ' + Math.round(x2 - x1) + ' mm, cộng lùi tường ' +
+               le + ' mm mỗi bên là cần ' + canR + ' mm — khu đất chỉ rộng ' + rong +
+               ' mm. Thiếu ' + (canR - rong) + ' mm: nới khu đất, giảm lối đi, hoặc ' +
+               'xếp thêm hàng.');
+    if (sau && canS > sau)
+      loi.push('Cụm thiết bị sâu ' + Math.round(z2 - z1) + ' mm, cộng lùi tường là cần ' +
+               canS + ' mm — khu đất chỉ sâu ' + sau + ' mm. Thiếu ' + (canS - sau) +
+               ' mm: nới khu đất hoặc giảm số hàng bằng cách cho khu rộng hơn.');
+    if (rong && sau) {
+      var dt = (x2 - x1) * (z2 - z1) / 1e6, dtKhu = rong * sau / 1e6;
+      var ti = dt / dtKhu;
+      if (ti < 0.18)
+        canhBao.push('Thiết bị chỉ chiếm ' + Math.round(ti * 100) + '% khu đất ' +
+                     Math.round(dtKhu) + ' m² — khu quá rộng so với hệ, xem lại để ' +
+                     'khỏi thuê thừa diện tích.');
+      if (ti > 0.62)
+        canhBao.push('Thiết bị chiếm ' + Math.round(ti * 100) + '% khu đất — chật, ' +
+                     'kiểm lại lối đi bảo trì và chỗ kéo màng ra khỏi vỏ.');
+    }
+    return { loi: loi, canhBao: canhBao,
+             can: { rong: canR, sau: canS, soHang: sz.soHang || 0 },
+             khu: { rong: rong, sau: sau } };
   }
 
   // ------------------------------------------------------------- đường ống
@@ -1251,7 +1322,7 @@
   global.SVWS3D = {
     version: '1.0',
     PALETTE: PALETTE, MAT: MAT,
-    kiemCotLoc: kiemCotLoc,
+    kiemCotLoc: kiemCotLoc, kiemMatBang: kiemMatBang,
     scene: scene, build: build, layout: layout, label: label, chanDe: chanDe,
     tank: tank, vessel: vessel, cartridge: cartridge, pump: pump,
     roSkid: roSkid, panel: panel, dosing: dosing, uv: uvUnit,

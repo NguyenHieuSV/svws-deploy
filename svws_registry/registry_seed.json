@@ -137,6 +137,14 @@
           "s": "new"
         },
         {
+          "t": "Kích thước mặt bằng là THAM SỐ ĐẦU VÀO: bảng thông số phải có ô Chiều rộng khu đất, Chiều sâu khu đất và Khoảng lùi tường (mm). Toàn bộ bố trí thiết bị, bản vẽ 3D và bản vẽ GA phải tự sắp xếp lại theo kích thước đó — hàng nào đầy bề rộng thì xuống hàng, khu rộng hơn thì ít hàng hơn. KHÔNG được tự chọn bố cục rồi mới vẽ một khung đất bao quanh, vì như vậy bản vẽ không phản ánh gian nhà thật và không biết hệ có đặt vừa hay không. Bản vẽ GA vẽ ranh khu đất theo đúng số đã nhập.",
+          "s": "new"
+        },
+        {
+          "t": "Kiểm tra mặt bằng tự động: gọi SVWS3D.kiemMatBang(EQUIP, pos, {rong, sau, le}) và hiện kết quả trong bảng thông số. Báo LỖI kèm SỐ MILIMÉT CÒN THIẾU khi cụm thiết bị không lọt khu đất theo bề rộng hoặc chiều sâu. NHẮC khi thiết bị chiếm dưới 18% khu đất (thuê thừa diện tích) hoặc trên 62% (chật, thiếu lối đi bảo trì và chỗ kéo màng ra khỏi vỏ).",
+          "s": "new"
+        },
+        {
           "t": "Kiểm tra cụm lọc tự động: gọi SVWS3D.kiemCotLoc(EQUIP, Q) và hiện kết quả ngay trong bảng thông số. Báo LỖI khi vận tốc lọc vượt 20 m/h hoặc EBCT than dưới 10 phút; NHẮC khi cột thừa to (vận tốc dưới 8 m/h — tốn tiền và tốn nước rửa ngược), khi một cột rửa ngược làm vận tốc còn lại vượt 25 m/h, và khi vận tốc hai họ cột lệch nhau quá 1,7 lần (dấu hiệu đang bị buộc chung tham số).",
           "s": "new"
         },
