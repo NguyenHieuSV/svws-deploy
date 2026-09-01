@@ -56,6 +56,7 @@
     var vlOng = o.ong || 'UPVC';
     var hao = so(o.heSoHao, 0.07);          // hao hụt cắt nối
     var duTru = so(o.duTru, 0.05);          // dự trù thi công
+    var nguonXa = so(o.nguonXa, 0);         // khoảng cách tủ phân phối → tủ MCC (m)
     var tuyen = [], eq = [], pos = {}, khai = [];
     var api = {};
 
@@ -546,27 +547,84 @@
       });
       if (!dsDC.length) return [];
       var pTu = tu ? (pos[tu.id] || { x: 0, z: 0 }) : { x: 0, z: 0 };
-      var tongCap = 0, xa = 0;
+      var ds = [], tongCap = 0, xa = 0, soVFD = 0;
+
+      // Cáp nguồn tổng từ tủ phân phối nhà máy vào tủ MCC
+      if (nguonXa) {
+        var tongKW = 0;
+        dsDC.forEach(function (e) { tongKW += so(e.kW, 0); });
+        var ttT = (global.SVWSDIEN && tongKW)
+          ? SVWSDIEN.tinhTai(tongKW * 0.8, 380, 3, 'DOL') : null;
+        ds.push({ vt: 'Cáp nguồn tổng (tủ phân phối → tủ MCC)',
+                  qc: ttT ? '4×' + ttT.day + ' mm² Cu' : 'theo dòng tính toán',
+                  sl: lam(nguonXa * 1.25, 0), dv: 'm',
+                  ghi: 'Khoảng cách khai ' + nguonXa + ' m + 25 % đi vòng và chùng' +
+                       (ttT ? ' · dòng tính toán ' + ttT.I + ' A (hệ số đồng thời 0,8)' : '') });
+      }
+      if (tu) {
+        ds.push({ vt: 'Tủ MCC + PLC + HMI', qc: (so(tu.W, 800)) + ' × ' + (so(tu.H, 1800)) +
+                  ' × ' + (so(tu.D, 400)) + ' mm, IP65 hai lớp',
+                  sl: 1, dv: 'tủ', ghi: 'Thiết bị ' + (tu.tag || tu.id) + ' trong bản vẽ' });
+      }
+
+      /* CÁP RIÊNG CHO TỪNG ĐỘNG CƠ — trước đây gộp một dòng "cáp động lực" nên
+         không đặt hàng được: mỗi động cơ một tiết diện và một chiều dài khác
+         nhau. Nay tiết diện chọn theo kW (dùng bảng tra của SVWSDIEN), chiều
+         dài đo Manhattan từ tủ tới đúng vị trí động cơ đó. */
       dsDC.forEach(function (e) {
         var p = pos[e.id] || { x: 0, z: 0 };
         var d = (Math.abs(p.x - pTu.x) + Math.abs(p.z - pTu.z)) / 1000;   // m
         var len = (d + 3.5) * 1.15;      // + lên máng và xuống động cơ, + 15% chùng
-        tongCap += len;
-        xa = Math.max(xa, d);
+        tongCap += len; xa = Math.max(xa, d);
+        var kW = so(e.kW, 0);
+        var kieu = /vfd|bien tan|biến tần/i.test(String(e.kieu || e.mode || '')) ||
+                   so(e.kW, 0) >= 7.5 ? 'VFD' : 'DOL';
+        if (kieu === 'VFD') soVFD++;
+        var tt = (global.SVWSDIEN && kW) ? SVWSDIEN.tinhTai(kW, 380, e.pha || 3, kieu) : null;
+        /* CHỌN CÁP CÒN PHẢI KIỂM SỤT ÁP, không chỉ kiểm dòng. Tuyến 35 m mà lấy
+           tiết diện vừa đủ dòng thì động cơ tụt áp lúc khởi động, mô-men yếu,
+           rơ-le nhiệt nhảy oan. Ngưỡng 3 % cho mạch động lực. */
+        var tiet = tt ? tt.day : 0, sut = 0, daNang = false;
+        if (tt && tt.I) {
+          var NAC = [1.5, 2.5, 4, 6, 10, 16, 25, 35, 50, 70, 95, 120];
+          for (var z = 0; z < NAC.length; z++) {
+            if (NAC[z] < tiet) continue;
+            sut = 1.732 * 0.0175 * len * tt.I / NAC[z] / 380 * 100;   // %
+            if (sut <= 3) { if (NAC[z] > tiet) daNang = true; tiet = NAC[z]; break; }
+          }
+        }
+        var soBom = Math.max(1, Math.min(6, +e.soBom || (e.dup ? 2 : 1)));
+        for (var i = 0; i < soBom; i++) {
+          var ten = (e.tag || e.id) + (soBom > 1 ? String.fromCharCode(65 + i) : '');
+          ds.push({ vt: 'Cáp động lực — ' + ten,
+                    qc: tiet ? '4×' + tiet + ' mm² Cu, 2 lớp cách điện'
+                             : 'theo công suất động cơ',
+                    sl: lam(len, 0), dv: 'm',
+                    ghi: 'Manhattan từ tủ ' + lam(d, 1) + ' m + 3,5 m lên/xuống + 15 % chùng' +
+                         (kW ? ' · ' + kW + ' kW ' + kieu : '') +
+                         (sut ? ' · sụt áp ' + lam(sut, 2) + ' %' : '') +
+                         (daNang ? ' (đã NÂNG tiết diện để sụt áp ≤ 3 %)' : '') });
+        }
       });
+      if (soVFD) ds.push({ vt: 'Biến tần', qc: 'theo công suất từng động cơ', sl: soVFD,
+                           dv: 'bộ', ghi: 'Các động cơ chạy biến tần trong bảng motor list' });
+
       var mang = xa * 1.3;               // máng chính chạy dọc tuyến xa nhất
-      return [
-        { vt: 'Cáp động lực', qc: 'theo bảng motor list', sl: lam(tongCap, 1), dv: 'm',
-          ghi: 'Đo Manhattan từ tủ tới ' + dsDC.length + ' động cơ + 3,5 m lên/xuống + 15% chùng' },
-        { vt: 'Cáp điều khiển/tín hiệu', qc: '2×1,5 mm² có lưới',
-          sl: lam(tongCap * 0.8, 1), dv: 'm', ghi: 'Theo cùng tuyến máng' },
-        { vt: 'Máng cáp', qc: '200×100 mm', sl: lam(mang, 1), dv: 'm',
+      ds.push(
+        { vt: 'Cáp tín hiệu chống nhiễu', qc: '2×0,75 / 4×0,75 mm² có lưới',
+          sl: lam(tongCap * 0.9 + (dsIO.length * 12), 0), dv: 'm',
+          ghi: 'Theo cùng tuyến máng, cộng ' + dsIO.length + ' kênh I/O × 12 m trung bình' },
+        { vt: 'Thang / máng cáp', qc: '200×100 mm mạ kẽm', sl: lam(mang, 0), dv: 'm',
           ghi: 'Tuyến xa nhất ' + lam(xa, 1) + ' m × 1,3 cho rẽ nhánh' },
-        { vt: 'Cáp gland', qc: 'M20/M25', sl: dsDC.length * 2, dv: 'bộ',
-          ghi: '2 đầu cho mỗi động cơ' },
-        { vt: 'Dây tiếp địa', qc: 'Cu 16 mm²', sl: lam(tongCap * 0.35, 1), dv: 'm',
-          ghi: 'Nối đất vỏ thiết bị và máng cáp' }
-      ];
+        { vt: 'Cáp gland + đầu cos + ống ruột gà', qc: 'IP68 M20/M25',
+          sl: dsDC.length * 2 + dsIO.length, dv: 'bộ',
+          ghi: '2 đầu mỗi động cơ + 1 mỗi kênh I/O' },
+        { vt: 'Hệ tiếp địa', qc: 'cọc Ø16 × 2,4 m + Cu 25 mm² + hộp kiểm tra, R < 4 Ω',
+          sl: 1, dv: 'hệ', ghi: 'Nối đất vỏ thiết bị, máng cáp và tủ điện' },
+        { vt: 'Chống sét lan truyền + UPS', qc: 'SPD type 2 + UPS 1 kVA', sl: 1, dv: 'bộ',
+          ghi: 'Bảo vệ PLC và HMI khi mất điện đột ngột' }
+      );
+      return ds;
     }
 
     // ======================================= DANH MỤC THIẾT BỊ CHÍNH (cho BOQ)
@@ -990,4 +1048,208 @@
   function wmDangHien() { return !document.body.classList.contains('svws-an-wm'); }
 
   global.SVWSWM = { gan: wmGan, dat: wmDat, dao: wmDao, dangHien: wmDangHien };
+
+  /* ======================================================================
+   * SVWSOM — SỔ TAY VẬN HÀNH & BẢO TRÌ sinh từ chính danh sách thiết bị
+   * Đây là tab duy nhất trước giờ KHÔNG có thư viện: AI tự viết nên mỗi lần
+   * một kiểu, hay thiếu mục, và không ai kiểm được. Ở đây lịch bảo trì, quy
+   * trình CIP và bảng xử lý sự cố suy thẳng từ LOẠI THIẾT BỊ có trong hệ —
+   * không có màng RO thì không sinh mục thay màng, có UV thì tự có mục thay
+   * đèn và vệ sinh ống thạch anh.
+   * ==================================================================== */
+  function omBang(tieu, cot, dong) {
+    if (!dong.length) return '';
+    var h = '<h4 class="svws-bang-tieu">' + esc(tieu) + '</h4>' +
+      '<table class="svws-bang"><thead><tr>' +
+      cot.map(function (t) { return '<th>' + esc(t) + '</th>'; }).join('') +
+      '</tr></thead><tbody>';
+    dong.forEach(function (r) {
+      h += '<tr>' + r.map(function (c) { return '<td>' + esc(c) + '</td>'; }).join('') + '</tr>';
+    });
+    return h + '</tbody></table>';
+  }
+
+  /* Lịch bảo trì theo TỪNG LOẠI thiết bị — chu kỳ theo thông lệ ngành, phải
+     đối chiếu lại với khuyến cáo của nhà sản xuất trước khi phát hành. */
+  var OM_BAOTRI = {
+    tank: [['Kiểm tra rò rỉ, mối hàn, mức đóng cặn', 'Tháng'],
+           ['Vệ sinh và khử trùng lòng bể', '6 tháng'],
+           ['Kiểm tra và làm sạch màng lọc thông hơi', '3 tháng']],
+    vessel: [['Rửa ngược và xả nước đầu', 'Theo chênh áp, tối thiểu 1 lần/tuần'],
+             ['Kiểm tra chênh áp qua cột, ghi nhật ký', 'Ca'],
+             ['Bổ sung / thay vật liệu lọc', '2–3 năm (than hoạt tính 1–2 năm)'],
+             ['Kiểm tra đầu thu dưới đáy và van đa cổng', 'Năm']],
+    cartridge: [['Thay lõi lọc', 'Khi chênh áp > 1 bar hoặc 1–3 tháng'],
+                ['Vệ sinh vỏ lọc và gioăng nắp', 'Mỗi lần thay lõi']],
+    pump: [['Kiểm tra tiếng ồn, rung, nhiệt độ vỏ', 'Ca'],
+           ['Kiểm tra phớt cơ khí, siết lại đế bơm', '6 tháng'],
+           ['Thay vòng bi và bôi trơn', 'Năm'],
+           ['Luân phiên bơm chạy – bơm dự phòng', 'Tuần']],
+    roskid: [['Ghi lưu lượng, áp suất, chênh áp, độ dẫn để chuẩn hoá số liệu', 'Ca'],
+             ['CIP rửa màng', 'Khi năng suất giảm 10–15 % hoặc chênh áp tăng 15 %'],
+             ['Thay màng RO', '3–5 năm tuỳ chất lượng nước cấp'],
+             ['Kiểm tra o-ring, interconnector, đầu bịt vessel', 'Mỗi lần mở màng']],
+    edi: [['Ghi điện áp, dòng một chiều và điện trở suất đầu ra', 'Ca'],
+          ['Kiểm tra lưu lượng nước điện cực và nước cô đặc', 'Tuần'],
+          ['Vệ sinh hoá chất stack theo hướng dẫn hãng', '1–2 năm'],
+          ['Kiểm tra siết ti giằng và đầu nối một chiều', '6 tháng']],
+    mixedbed: [['Theo dõi điện trở suất đầu ra', 'Liên tục'],
+               ['Tái sinh hoặc thay nhựa', 'Khi điện trở suất tụt dưới ngưỡng']],
+    uv: [['Vệ sinh ống thạch anh', '3 tháng'],
+         ['Thay đèn UV', '9.000–12.000 giờ (khoảng 1 năm chạy liên tục)'],
+         ['Kiểm tra cảm biến cường độ UV', '6 tháng']],
+    dosing: [['Kiểm tra mức hoá chất, pha bổ sung', 'Ca'],
+             ['Hiệu chuẩn lưu lượng bơm định lượng', 'Tháng'],
+             ['Thay màng bơm và van một chiều', 'Năm'],
+             ['Vệ sinh bồn pha và đầu phun', '6 tháng']],
+    panel: [['Kiểm tra nhiệt độ trong tủ, lưới lọc quạt hút', 'Tháng'],
+            ['Siết lại đầu cốt, đo cách điện', '6 tháng'],
+            ['Kiểm tra ắc-quy UPS và chống sét', 'Năm']]
+  };
+
+  var OM_SUCO = [
+    ['Nước ra độ dẫn cao', 'Màng RO rò / o-ring hỏng / EDI mất điện áp',
+     'Kiểm tra độ dẫn từng vessel, thay o-ring; kiểm tra bộ chỉnh lưu EDI'],
+    ['Lưu lượng nước thấm giảm', 'Màng bám cặn hoặc bám sinh học',
+     'Chuẩn hoá số liệu; nếu giảm > 10 % thì CIP; hết hiệu quả thì thay màng'],
+    ['Chênh áp qua cột lọc tăng', 'Vật liệu lọc bít, rửa ngược chưa đủ',
+     'Rửa ngược lâu hơn; kiểm tra lưu lượng rửa; thay vật liệu nếu vẫn cao'],
+    ['Bơm không lên áp', 'Mất mồi, van hút đóng, cánh mòn, quay ngược pha',
+     'Xả khí và mồi bơm; mở van hút; kiểm tra chiều quay; kiểm tra cánh'],
+    ['Bơm chạy nhưng nước không ra', 'Van một chiều kẹt hoặc lắp ngược',
+     'Kiểm tra van một chiều ở đầu đẩy — lắp ngược thì nước chạy vòng trong cụm'],
+    ['Bể tràn', 'Phao mức cao hỏng hoặc cài sai ngưỡng',
+     'Kiểm tra phao và đo mức; kiểm tra ống tràn có bị nghẹt'],
+    ['Báo động dừng khẩn cấp', 'Nút dừng khẩn bị nhấn hoặc mạch an toàn hở',
+     'Xử lý nguyên nhân, xoay nhả nút, ấn RESET; kiểm tra dây mạch an toàn'],
+    ['pH nước xả ngoài ngưỡng', 'Hết hoá chất trung hoà hoặc bơm định lượng hỏng',
+     'Kiểm tra mức hoá chất và bơm định lượng; hiệu chuẩn đầu đo pH']
+  ];
+
+  function omTao(o) {
+    o = o || {};
+    var eq = o.EQUIP || [], p = o.params || {};
+    function co(re) {
+      return eq.some(function (e) { return re.test(String(e.type || '').toLowerCase()); });
+    }
+
+    function thongSo() {
+      var d = [];
+      function them(t, v, dv, ghi) {
+        if (v === undefined || v === '' || v === null) return;
+        d.push([t, v + (dv || ''), ghi || '']);
+      }
+      them('Lưu lượng thiết kế', p.Qavg, ' m³/h', 'Trung bình');
+      them('Lưu lượng tối đa', p.Qmax, ' m³/h', 'Dừng bơm nếu vượt');
+      them('Điện trở suất nước ra', p.res, ' MΩ·cm', 'Dưới ngưỡng thì chuyển van xả');
+      them('Áp suất cuối mạch vòng', p.Ploop, ' bar', 'Biến tần giữ áp');
+      them('Thu hồi RO pass 1', p.rec1, ' %', 'Chỉnh van nước cô đặc');
+      them('Thu hồi RO pass 2', p.rec2, ' %', '');
+      them('Thu hồi EDI', p.recE, ' %', '');
+      them('Lưu lượng rửa ngược', p.bw, ' m³/h', 'Rửa tối thiểu 10–15 phút');
+      them('Liều UV', p.uvd, ' mJ/cm²', 'Báo động khi dưới ngưỡng');
+      them('Nhiệt độ nước cấp', p.temp, ' °C', 'Ảnh hưởng trực tiếp năng suất màng');
+      return omBang('Thông số vận hành và ngưỡng',
+                    ['Thông số', 'Giá trị đặt', 'Ghi chú vận hành'], d);
+    }
+
+    function baoTri() {
+      var d = [], da = {};
+      eq.forEach(function (e) {
+        var t = String(e.type || '').toLowerCase();
+        var b = OM_BAOTRI[t] || (t === 'filter' ? OM_BAOTRI.vessel :
+                                 t === 'ro' ? OM_BAOTRI.roskid : null);
+        if (!b) return;
+        var tag = e.tag || e.id || '';
+        b.forEach(function (r) {
+          var k = t + '|' + r[0];
+          if (da[k]) { da[k].push(tag); return; }
+          da[k] = [tag];
+          d.push([r[0], r[1], da[k]]);        // giữ tham chiếu mảng để nối tag sau
+        });
+      });
+      return omBang('Lịch bảo trì định kỳ',
+        ['Công việc', 'Chu kỳ', 'Áp dụng cho thiết bị'],
+        d.map(function (r) { return [r[0], r[1], r[2].join(', ')]; }));
+    }
+
+    function cip() {
+      if (!co(/roskid|ro|edi/)) return '';
+      var b = [
+        ['1', 'Cô lập cụm màng, xả hết nước trong vessel', '', ''],
+        ['2', 'Pha dung dịch rửa trong bồn CIP theo hướng dẫn hãng màng',
+         'pH 11–12 (rửa hữu cơ) hoặc pH 2–3 (rửa cáu khoáng)', '35 ± 5 °C'],
+        ['3', 'Tuần hoàn dung dịch ở áp suất thấp, không tạo nước thấm',
+         'Lưu lượng theo khuyến cáo hãng', '30–60 phút'],
+        ['4', 'Ngâm', 'Nếu bám nặng', '1–8 giờ'],
+        ['5', 'Tuần hoàn lại rồi xả bỏ dung dịch', '', '15–30 phút'],
+        ['6', 'Súc rửa bằng nước thấm cho tới khi đạt độ dẫn nền', '', ''],
+        ['7', 'Chạy xả bỏ nước đầu trước khi cấp vào bể thành phẩm',
+         'Tới khi độ dẫn đạt ngưỡng', '']
+      ];
+      return omBang('Quy trình CIP rửa màng',
+        ['Bước', 'Thao tác', 'Điều kiện', 'Thời gian'], b);
+    }
+
+    function suCo() {
+      return omBang('Xử lý sự cố thường gặp',
+        ['Hiện tượng', 'Nguyên nhân thường gặp', 'Cách xử lý'], OM_SUCO);
+    }
+
+    function anToan() {
+      var d = [];
+      if (co(/dosing/)) d.push(['Hoá chất',
+        'NaOH và axit gây bỏng; đeo kính, găng, tạp dề chống hoá chất. Có vòi rửa mắt ' +
+        'khẩn cấp gần khu pha. KHÔNG đổ nước vào axit đậm đặc.']);
+      d.push(['Điện', 'Cắt nguồn và treo biển trước khi mở tủ hoặc sửa động cơ. ' +
+              'Chỉ người có chứng chỉ an toàn điện được thao tác trong tủ.']);
+      if (co(/roskid|ro|vessel|filter/)) d.push(['Áp lực',
+        'Xả hết áp trước khi mở vessel hoặc vỏ lọc. Không siết mở đai kẹp khi còn áp.']);
+      if (co(/tank/)) d.push(['Không gian hạn chế',
+        'Vào bể phải có giấy phép, đo khí, thông gió cưỡng bức và người canh bên ngoài.']);
+      if (co(/uv/)) d.push(['Tia UV',
+        'Không nhìn trực tiếp đèn UV đang sáng. Cắt điện trước khi thay đèn.']);
+      if (co(/edi/)) d.push(['Điện một chiều',
+        'Stack EDI mang điện một chiều tới 100 V. Cắt bộ chỉnh lưu trước khi tháo.']);
+      return omBang('An toàn vận hành', ['Nhóm rủi ro', 'Yêu cầu bắt buộc'], d);
+    }
+
+    function nhatKy() {
+      var c = ['Ngày / Ca', 'Người trực'];
+      if (p.Qavg !== undefined) c.push('Lưu lượng (m³/h)');
+      if (co(/vessel|filter/)) c.push('Chênh áp cột lọc (bar)');
+      if (co(/roskid|ro/)) c.push('Áp vào màng (bar)', 'Lưu lượng thấm (m³/h)',
+                                  'Độ dẫn thấm (µS/cm)');
+      if (co(/edi/)) c.push('Dòng EDI (A)', 'Điện trở suất (MΩ·cm)');
+      c.push('Mức bể (%)', 'Hoá chất còn (%)', 'Sự cố và xử lý', 'Ký tên');
+      return omBang('Mẫu nhật ký vận hành (in ra để ghi tay)', c,
+                    [c.map(function () { return ''; })]);
+    }
+
+    function tatCa() {
+      return thongSo() + baoTri() + cip() + suCo() + anToan() + nhatKy();
+    }
+
+    function kiemTra() {
+      var loi = [], canhBao = [];
+      if (!eq.length) loi.push('Chưa nạp danh sách thiết bị — không sinh được sổ O&M.');
+      var thieu = eq.filter(function (e) {
+        var t = String(e.type || '').toLowerCase();
+        return !OM_BAOTRI[t] && !/panel|tu|mcc/.test(t) &&
+               t !== 'filter' && t !== 'ro';
+      });
+      thieu.forEach(function (e) {
+        canhBao.push('Thiết bị ' + (e.tag || e.id) + ' loại "' + (e.type || '?') +
+                     '" chưa có mục bảo trì — bổ sung thủ công vào sổ O&M.');
+      });
+      if (!p.Qavg) canhBao.push('Chưa có lưu lượng thiết kế trong bảng thông số — ' +
+                                'bảng ngưỡng vận hành sẽ thiếu.');
+      return { loi: loi, canhBao: canhBao, soThietBi: eq.length };
+    }
+
+    return { thongSo: thongSo, baoTri: baoTri, cip: cip, suCo: suCo,
+             anToan: anToan, nhatKy: nhatKy, tatCa: tatCa, kiemTra: kiemTra };
+  }
+
+  global.SVWSOM = { version: '1.0', tao: omTao, BAOTRI: OM_BAOTRI, SUCO: OM_SUCO };
 })(window);

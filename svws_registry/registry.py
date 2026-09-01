@@ -95,6 +95,8 @@ _MUC_THAMSO = "Tham số riêng cho từng loại thiết bị"
 _MUC_MATBANG = "Kích thước mặt bằng là THAM SỐ ĐẦU VÀO"
 _MUC_CD5 = "Danh sách công đoạn phải ĐỦ 5 LOẠI"
 _MUC_JSON = "File cấu hình JSON theo MỘT ĐỊNH DẠNG DUY NHẤT"
+_MUC_OM = "Sổ O&M sinh từ CHÍNH danh sách thiết bị"
+_MUC_CAP = "Danh mục cáp phải liệt kê RIÊNG TỪNG ĐỘNG CƠ"
 
 
 def _bo_sung_nhom(data: dict, dau_hieu: str, tien_to, tu_khoa: str) -> bool:
@@ -256,6 +258,10 @@ def init_db() -> None:
         if _bo_sung_nhom(data, _MUC_JSON,
                          "File cấu hình JSON theo MỘT ĐỊNH DẠNG DUY NHẤT", "nền tảng"):
             ghi.append("Chuẩn hoá định dạng file cấu hình JSON cho mọi tool")
+        if _bo_sung_muc(data, _MUC_OM, "Tab 8 (bổ sung)", "8"):
+            ghi.append("Sổ O&M sinh từ danh sách thiết bị (SVWSOM)")
+        if _bo_sung_muc(data, _MUC_CAP, "Tab 6 (bổ sung)", "6"):
+            ghi.append("Danh mục cáp riêng từng động cơ + kiểm sụt áp")
         if ghi:
             doc.data = data
             flag_modified(doc, "data")
@@ -917,6 +923,16 @@ def ai_execute(payload: dict = Body(...)):
                 "bao nhiêu rồi hạ xuống đâu, có đánh dấu co 90°, vị trí giá đỡ, cao trình "
                 "giá và trình tự lắp. Nút in công đoạn PHẢI in cả bản vẽ này (lấy riêng "
                 "bằng V.veCongDoan(c) nếu cần), không chỉ in bảng vật tư.\n"
+                "- Tab 8 (O&M): dùng SVWSOM, ĐỪNG viết tay.\n"
+                "    const OM = SVWSOM.tao({EQUIP, params: state.p});\n"
+                "    el.innerHTML = OM.tatCa();   console.log(OM.kiemTra());\n"
+                "  Sinh đủ 6 mục từ CHÍNH danh sách thiết bị: thông số và ngưỡng "
+                "vận hành · lịch bảo trì theo từng loại thiết bị (có UV mới có mục "
+                "thay đèn, có màng mới có mục thay màng) · quy trình CIP (chỉ khi "
+                "có RO/EDI) · bảng xử lý sự cố · an toàn theo nhóm rủi ro thực có · "
+                "mẫu nhật ký vận hành với cột đúng theo thiết bị. Lấy riêng từng "
+                "mục bằng OM.thongSo(), OM.baoTri(), OM.cip(), OM.suCo(), "
+                "OM.anToan(), OM.nhatKy().\n"
                 "- Tab 9 (BOQ): LẤY DANH MỤC TỪ V.boq() hoặc V.bangBOQ(), KHÔNG tự gõ "
                 "lại. V.boq() gộp đủ 4 nhóm: A thiết bị chính (bồn, bơm, cột lọc, cụm "
                 "RO, EDI, UV, tủ điện — quy cách suy thẳng từ khai báo EQUIP nên không "
