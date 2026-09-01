@@ -634,4 +634,59 @@
     '@media print{.svws-ve{page-break-inside:avoid}}';
 
   global.SVWSVT = { version: '1.0', to: to, buocGia: buocGia, daiCay: daiCay, CSS: CSS };
+
+  /* ======================================================================
+   * SVWSWM — watermark dùng chung
+   * Vì sao ở đây: chuẩn bắt buộc có nút Ẩn/Hiện watermark, nhưng khi AI tự
+   * viết thì nút hay không ăn — nó chỉ ẩn lớp phủ của riêng nó mà bỏ sót
+   * watermark vẽ CHÌM TRONG SVG của các bản vẽ, hoặc gắn sự kiện sai chỗ.
+   * Dùng bộ này thì một lệnh ẩn được tất cả, và trạng thái nhớ theo máy.
+   * ==================================================================== */
+  var WM_KHOA = 'svws_wm_an';
+  function wmCss() {
+    if (document.getElementById('svws-wm-css')) return;
+    var st = document.createElement('style');
+    st.id = 'svws-wm-css';
+    st.textContent =
+      '#svws-wm{position:fixed;inset:0;z-index:9998;pointer-events:none;' +
+      'display:flex;align-items:center;justify-content:center;overflow:hidden}' +
+      '#svws-wm span{font:700 clamp(28px,6vw,84px) ' + FONT + ';color:rgba(179,39,30,.14);' +
+      'transform:rotate(-24deg);white-space:nowrap;letter-spacing:.06em;text-align:center}' +
+      'body.svws-an-wm #svws-wm{display:none}' +
+      'body.svws-an-wm .svws-wm{display:none}' +
+      '@media print{body.svws-an-wm #svws-wm{display:none}}';
+    document.head.appendChild(st);
+  }
+  function wmGan(chu) {
+    wmCss();
+    var el = document.getElementById('svws-wm');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'svws-wm';
+      el.innerHTML = '<span></span>';
+      document.body.appendChild(el);
+    }
+    el.firstChild.textContent = chu || 'BẢN THAM KHẢO — CHƯA DUYỆT THI CÔNG';
+    var an = false;
+    try { an = localStorage.getItem(WM_KHOA) === '1'; } catch (e) {}
+    wmDat(!an);
+    return el;
+  }
+  /** hien = true để hiện, false để ẩn. Ẩn cả lớp phủ LẪN chữ chìm trong SVG. */
+  function wmDat(hien) {
+    wmCss();
+    document.body.classList.toggle('svws-an-wm', !hien);
+    // chữ chìm vẽ bằng <text> trong SVG: gắn class để CSS ở trên ẩn được
+    var ds = document.querySelectorAll('svg text');
+    for (var i = 0; i < ds.length; i++) {
+      if (/BẢN THAM KHẢO|CHƯA DUYỆT/i.test(ds[i].textContent || ''))
+        ds[i].classList.add('svws-wm');
+    }
+    try { localStorage.setItem(WM_KHOA, hien ? '0' : '1'); } catch (e) {}
+    return hien;
+  }
+  function wmDao() { return wmDat(document.body.classList.contains('svws-an-wm')); }
+  function wmDangHien() { return !document.body.classList.contains('svws-an-wm'); }
+
+  global.SVWSWM = { gan: wmGan, dat: wmDat, dao: wmDao, dangHien: wmDangHien };
 })(window);

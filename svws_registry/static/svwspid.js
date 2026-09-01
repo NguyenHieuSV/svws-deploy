@@ -50,6 +50,10 @@
   function to(o) {
     o = o || {};
     var W = o.w || 1560, H = o.h || 940;
+    // Khổ giấy TỰ NỚI theo nội dung. Để cố định thì hàng thiết bị đặt ngoài khổ
+    // bị cắt mất ký hiệu, còn nhãn bị kéo ngược vào trong rồi chồng thành một
+    // đống ở góc — đúng lỗi đã gặp trên bản P&ID hệ DI 168 m³/ngày.
+    var canW = W, canH = H;
     var out = [];                 // các mẩu SVG
     var chiem = [];               // hộp đã chiếm chỗ: {x1,y1,x2,y2,ten}
     var moc = {};                 // tag → {x,y,w,h} để nối và gắn bầu đo
@@ -234,6 +238,7 @@
     // ------------------------------------------------------------ một hàng
     function hang(y, opt) {
       opt = opt || {};
+      canH = Math.max(canH, y + 170);
       var x = opt.x0 || 40;
       var truoc = null;
       var api = {};
@@ -257,6 +262,8 @@
         }
         truoc = { x2: x + k.w };
         x += k.w + (opt.hoHang || 30);    // ← NHẢY THEO BỀ RỘNG THẬT, không phải hằng số
+        canW = Math.max(canW, x + 90);
+        canH = Math.max(canH, y + k.h / 2 + 130);
         return api;
       }
       ['nguon', 'bon', 'bom', 'cot', 'loc', 'ro', 'edi', 'uv', 'van'].forEach(function (t) {
@@ -329,6 +336,13 @@
     }
 
     // ------------------------------------------------------------- xuất
+    /** Nới khổ giấy cho vừa nội dung TRƯỚC khi đặt nhãn — đặt nhãn xong mới nới
+        thì nhãn đã bị ép vào trong rồi. */
+    function noiKho() {
+      W = Math.max(W, canW);
+      H = Math.max(H, canH);
+    }
+
     /** Vẽ hết nhãn đang chờ — gọi khi mọi ký hiệu đã có mặt trong 'chiem'. */
     function xaNhan() {
       nhanCho.forEach(function (n) {
@@ -338,6 +352,7 @@
     }
 
     function ve() {
+      noiKho();
       xaNhan();
       var dau = '<svg viewBox="0 0 ' + W + ' ' + H + '" width="100%" ' +
         'xmlns="http://www.w3.org/2000/svg" style="background:#fdfefe">' +
@@ -357,6 +372,7 @@
 
     /** Còn chỗ nào đè nhau không — bắt lỗi trước khi giao bản vẽ. */
     function kiemTra() {
+      noiKho();
       xaNhan();
       var loi = vachao.slice();
       for (var i = 0; i < chiem.length; i++) {
@@ -370,7 +386,7 @@
       return { loi: loi, soKhoi: chiem.length };
     }
 
-    return { hang: hang, dungCu: dungCu, ghiChu: ghiChu, noi: noi,
+    return { hang: hang, dungCu: dungCu, ghiChu: ghiChu, noi: noi, noiKho: noiKho,
              chu: chu, ln: ln, ve: ve, kiemTra: kiemTra, xaNhan: xaNhan,
              moc: moc, MAU: MAU, W: W, H: H };
   }
