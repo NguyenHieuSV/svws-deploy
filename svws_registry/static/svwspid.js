@@ -59,6 +59,8 @@
     var moc = {};                 // tag → {x,y,w,h} để nối và gắn bầu đo
     var vachao = [];              // các va chạm còn lại sau khi đã né
     var nhanCho = [];             // nhãn CHỜ đặt ở lượt sau (xem ve())
+    var hthong = null;            // đồ thị thiết bị/đường ống khi tự xếp
+    var api2 = null;              // gán ở cuối, để heThong() trả về chính nó
 
     function themChiem(x1, y1, x2, y2, ten) {
       chiem.push({ x1: x1, y1: y1, x2: x2, y2: y2, ten: ten || '' });
@@ -274,6 +276,201 @@
       return api;
     }
 
+    // ==================================================================
+    // SINH P&ID TỪ CHÍNH SỔ EQUIP + PIPES CỦA BẢN VẼ 3D
+    // ------------------------------------------------------------------
+    // Cách cũ bắt người viết tool gọi tay từng ký hiệu theo thứ tự mình nghĩ
+    // ra — nên P&ID hay lộn thứ tự công nghệ và thiếu kết nối so với 3D.
+    // Ở đây coi mỗi thiết bị là một NÚT có cổng vào/ra, mỗi đường ống là một
+    // CẠNH; xếp cột theo thứ tự dòng chảy (sắp xếp tô-pô), xếp hàng trong cột
+    // cho khỏi đè, rồi nối đúng theo tuyến. Thêm thiết bị vào 3D là P&ID có
+    // ngay, không ai phải soát chồng lấn bằng mắt.
+    // ==================================================================
+    var LOAI_KH = {
+      tank: 'bon', be: 'bon', bon: 'bon',
+      vessel: 'cot', filter: 'cot', mixedbed: 'cot', cot: 'cot',
+      cartridge: 'loc', loc: 'loc',
+      pump: 'bom', bom: 'bom',
+      roskid: 'ro', ro: 'ro',
+      edi: 'edi',
+      uv: 'uv',
+      dosing: 'bon'
+    };
+    var MAU_DONG = {
+      raw: MAU.raw, filtered: MAU.raw, ro: MAU.di, di: MAU.di, permeate: MAU.di,
+      conc: MAU.conc, waste: MAU.conc, reject: MAU.conc, drain: MAU.conc,
+      chem: MAU.chem, cip: MAU.cip, air: MAU.tin, steam: MAU.conc
+    };
+    function mauDong(s) { return MAU_DONG[String(s || 'raw').toLowerCase()] || MAU.raw; }
+
+    /** Đo ký hiệu mà KHÔNG vẽ — cần biết kích thước trước mới xếp cột được. */
+    function doKT(loai, e) {
+      var n = out.length;
+      var k = KH[loai](0, 0, e || {});
+      out.length = n;                       // xoá phần vừa vẽ thử
+      return k;
+    }
+
+    /** Đặt một ký hiệu tại đúng toạ độ (dùng cho chế độ tự xếp). */
+    function datTai(loai, e, x, y) {
+      var k = KH[loai](x, y, e);
+      themChiem(x - 2, y - k.h / 2 - 2, x + k.w + 2, y + k.h / 2 + 2, e.tag || loai);
+      moc[e.tag] = { x: k.cx, y: y, w: k.w, h: k.h, x1: x, x2: x + k.w };
+      nhanCho.push({ x: k.cx, y: y - k.h / 2 - 8,
+                     s: e.tag + (e.ghi ? ' ' + e.ghi : ''),
+                     fs: 9, mau: INK, dam: 1, huong: 'tren' });
+      canW = Math.max(canW, x + k.w + 90);
+      canH = Math.max(canH, y + k.h / 2 + 140);
+      return k;
+    }
+
+    /** Mũi tên vào thiết bị đích, để nhìn ra chiều dòng chảy. */
+    function muiVao(x, y, mau) {
+      out.push('<path d="M' + (x - 9) + ' ' + (y - 4.5) + ' L' + x + ' ' + y +
+        ' L' + (x - 9) + ' ' + (y + 4.5) + ' Z" fill="' + mau + '"/>');
+    }
+
+    /**
+     * Dựng cả sơ đồ từ EQUIP + PIPES.
+     * o: {hoCot, hoHang, yTam, ghi(e)->chuỗi ghi chú thêm}
+     */
+    function heThong(EQUIP, PIPES, o2) {
+      o2 = o2 || {};
+      var hoCot = o2.hoCot || 96, hoHang = o2.hoHang || 40;
+      var nut = [], chiSo = {};
+      (EQUIP || []).forEach(function (e) {
+        var t = String(e.type || '').toLowerCase();
+        if (/panel|tu|mcc|plc/.test(t)) return;      // tủ điện không nằm trên P&ID
+        var id = e.id || e.tag;
+        if (!id) { vachao.push('Có thiết bị chưa đặt id/tag — không đưa lên P&ID được.'); return; }
+        chiSo[id] = nut.length;
+        nut.push({ id: id, loai: LOAI_KH[t] || 'bon', e: e, cap: 0, ra: [], vao: [] });
+      });
+      if (!nut.length) { vachao.push('Không có thiết bị nào để vẽ P&ID.'); return api2; }
+
+      var canh = [];
+      (PIPES || []).forEach(function (p) {
+        var a = chiSo[p.from], b = chiSo[p.to];
+        if (a == null || b == null) {
+          vachao.push('Đường ống ' + p.from + ' → ' + p.to +
+                      ': không tìm thấy thiết bị trong danh sách.');
+          return;
+        }
+        var i = canh.length;
+        canh.push({ a: a, b: b, p: p });
+        nut[a].ra.push(i); nut[b].vao.push(i);
+      });
+
+      /* Tách TUYẾN HỒI LƯU trước, rồi mới xếp cột.
+         Dòng hồi lưu (nước cô đặc quay về bể cấp) tạo thành vòng kín; nếu cứ
+         nới cấp bậc theo vòng thì mỗi lượt lại đẩy cả vòng sang phải — 13 thiết
+         bị ra 85 cột. Ở đây duyệt sâu, cạnh nào quay về nút ĐANG TRÊN ĐƯỜNG
+         duyệt thì đánh dấu là hồi lưu và không tính vào thứ tự cột. */
+      var n = nut.length, mau = new Array(n).fill(0);   // 0 trắng, 1 đang đi, 2 xong
+      (function () {
+        function di(u) {
+          mau[u] = 1;
+          nut[u].ra.forEach(function (ci) {
+            var v = canh[ci].b;
+            if (mau[v] === 1) canh[ci].lui = true;      // quay về nút đang đi → hồi lưu
+            else if (mau[v] === 0) di(v);
+          });
+          mau[u] = 2;
+        }
+        nut.forEach(function (u, i) { if (mau[i] === 0 && !u.vao.length) di(i); });
+        nut.forEach(function (u, i) { if (mau[i] === 0) di(i); });   // nút còn kẹt trong vòng
+      })();
+
+      // Cấp bậc = quãng đường dài nhất từ đầu nguồn, chỉ theo tuyến ĐI TỚI.
+      var doi = true, vong = 0;
+      while (doi && vong <= n) {
+        doi = false; vong++;
+        canh.forEach(function (c) {
+          if (c.lui) return;
+          if (nut[c.b].cap < nut[c.a].cap + 1) { nut[c.b].cap = nut[c.a].cap + 1; doi = true; }
+        });
+      }
+
+      // ---- gom theo cột, đo kích thước, tính vị trí
+      var cot = [];
+      nut.forEach(function (u) {
+        u.k = doKT(u.loai, u.e);
+        (cot[u.cap] = cot[u.cap] || []).push(u);
+      });
+      var x = o2.x0 || 56;
+      var caoNhat = 0;
+      cot.forEach(function (ds) {
+        if (!ds) return;
+        var cao = ds.reduce(function (s, u) { return s + u.k.h + hoHang; }, -hoHang);
+        caoNhat = Math.max(caoNhat, cao);
+      });
+      var yTam = o2.yTam || (90 + caoNhat / 2 + 40);
+
+      cot.forEach(function (ds) {
+        if (!ds || !ds.length) return;
+        var cao = ds.reduce(function (s, u) { return s + u.k.h + hoHang; }, -hoHang);
+        var y = yTam - cao / 2;
+        var rong = 0;
+        ds.forEach(function (u) {
+          u.x = x; u.y = y + u.k.h / 2;
+          rong = Math.max(rong, u.k.w);
+          y += u.k.h + hoHang;
+        });
+        ds.forEach(function (u) { datTai(u.loai, u.e, u.x, u.y); });
+        x += rong + hoCot;
+      });
+
+      // ---- nối theo đúng tuyến ống đã khai
+      canh.forEach(function (c) {
+        var a = moc[nut[c.a].e.tag], b = moc[nut[c.b].e.tag];
+        if (!a || !b) return;
+        var mau = mauDong(c.p.service || c.p.dong);
+        var nhan = (c.p.dn ? 'DN' + c.p.dn : '') +
+                   (c.p.nhan ? ' ' + c.p.nhan : '');
+        if (c.lui) {                       // dòng hồi lưu: vòng xuống dưới
+          noi(nut[c.a].e.tag, nut[c.b].e.tag,
+              { dong: c.p.service || 'conc', nhan: nhan || 'hồi lưu', phia: 'duoi' });
+          return;
+        }
+        // đi tới: ra mép phải nút nguồn, sang cột đích, vào mép trái
+        var x1 = a.x2, x2 = b.x1;
+        if (Math.abs(a.y - b.y) < 5) {
+          ln(x1, a.y, x2 - 9, b.y, mau, 1.8);
+        } else {
+          var gap = x2 - x1, xm = x1 + gap * 0.55;
+          // tránh đoạn dọc cắt qua ký hiệu: dịch dần cho tới khi trống
+          for (var t2 = 0; t2 < 8; t2++) {
+            var oDoc = { x1: xm - 5, y1: Math.min(a.y, b.y), x2: xm + 5, y2: Math.max(a.y, b.y) };
+            if (coTrong(oDoc, 3)) break;
+            xm = x1 + gap * (0.55 - 0.06 * (t2 + 1));
+            if (xm < x1 + 14) { xm = x1 + gap * 0.5; break; }
+          }
+          ln(x1, a.y, xm, a.y, mau, 1.8);
+          ln(xm, a.y, xm, b.y, mau, 1.8);
+          ln(xm, b.y, x2 - 9, b.y, mau, 1.8);
+          themChiem(xm - 3, Math.min(a.y, b.y), xm + 3, Math.max(a.y, b.y),
+                    'ống ' + nut[c.a].id + '→' + nut[c.b].id);
+        }
+        muiVao(x2, b.y, mau);
+        if (nhan) nhanCho.push({ x: (x1 + x2) / 2, y: Math.min(a.y, b.y) - 7,
+                                 s: nhan, fs: 8, mau: mau, dam: 0, huong: 'tren' });
+      });
+
+      // ---- mũi tên nguồn cấp cho các nút không có đường vào
+      nut.forEach(function (u) {
+        if (u.vao.length) return;
+        var m = moc[u.e.tag]; if (!m) return;
+        ln(m.x1 - 48, m.y, m.x1 - 10, m.y, MAU.raw, 1.8);
+        muiVao(m.x1, m.y, MAU.raw);
+        nhanCho.push({ x: m.x1 - 30, y: m.y - 12, s: u.e.nguon || 'Nguồn cấp',
+                       fs: 8, mau: MO, dam: 0, huong: 'tren' });
+      });
+
+      // ---- ghi nhận để kiemTra() soi
+      hthong = { nut: nut, canh: canh, cot: cot.length };
+      return api2;
+    }
+
     // --------------------------------------------------- bầu đo & ghi chú
     /** Bầu đo ISA gắn vào thiết bị, tự tìm phía còn trống. */
     function dungCu(tag, ten, phia) {
@@ -383,12 +580,31 @@
           }
         }
       }
-      return { loi: loi, soKhoi: chiem.length };
+      // Chế độ tự xếp: kiểm luôn tính liền lạc của dây chuyền, không chỉ kiểm vẽ.
+      if (hthong) {
+        hthong.nut.forEach(function (u) {
+          if (!u.vao.length && !u.ra.length)
+            loi.push('Thiết bị ' + u.id + ' không nối vào đường ống nào — ' +
+                     'thiếu tuyến trong khai báo PIPES.');
+          else if (!u.ra.length && !/tank|be|bon/.test(String(u.e.type || '').toLowerCase()))
+            loi.push('Thiết bị ' + u.id + ' chỉ có đường vào, không có đường ra — ' +
+                     'nước vào rồi đi đâu?');
+        });
+        var luiSo = hthong.canh.filter(function (c) { return c.lui; }).length;
+        if (luiSo > hthong.nut.length)
+          loi.push('Có ' + luiSo + ' tuyến hồi lưu trên ' + hthong.nut.length +
+                   ' thiết bị — kiểm lại chiều dòng chảy trong PIPES, nhiều khả năng ' +
+                   'khai ngược from/to.');
+      }
+      return { loi: loi, soKhoi: chiem.length,
+               soThietBi: hthong ? hthong.nut.length : 0,
+               soCot: hthong ? hthong.cot : 0 };
     }
 
-    return { hang: hang, dungCu: dungCu, ghiChu: ghiChu, noi: noi, noiKho: noiKho,
-             chu: chu, ln: ln, ve: ve, kiemTra: kiemTra, xaNhan: xaNhan,
-             moc: moc, MAU: MAU, W: W, H: H };
+    api2 = { hang: hang, heThong: heThong, dungCu: dungCu, ghiChu: ghiChu,
+             noi: noi, noiKho: noiKho, chu: chu, ln: ln, ve: ve, kiemTra: kiemTra,
+             xaNhan: xaNhan, moc: moc, MAU: MAU, W: W, H: H };
+    return api2;
   }
 
   global.SVWSPID = { version: '1.0', to: to, MAU: MAU, rongChu: rongChu };
