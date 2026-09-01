@@ -98,6 +98,7 @@ _MUC_JSON = "File cấu hình JSON theo MỘT ĐỊNH DẠNG DUY NHẤT"
 _MUC_OM = "Sổ O&M sinh từ CHÍNH danh sách thiết bị"
 _MUC_CAP = "Danh mục cáp phải liệt kê RIÊNG TỪNG ĐỘNG CƠ"
 _MUC_BOQ = "Mỗi dòng BOQ phải mang MỨC TIN CẬY"
+_MUC_DIEN = "Mức chi tiết bắt buộc của phần điện"
 
 
 def _bo_sung_nhom(data: dict, dau_hieu: str, tien_to, tu_khoa: str) -> bool:
@@ -265,6 +266,11 @@ def init_db() -> None:
             ghi.append("Danh mục cáp riêng từng động cơ + kiểm sụt áp")
         if _bo_sung_muc(data, _MUC_BOQ, "Tab 9 (bổ sung)", "9"):
             ghi.append("BOQ có mức tin cậy đơn giá và bóc tách ống chi tiết")
+        if _bo_sung_muc(data, _MUC_DIEN,
+                        ["Tab 7 (bổ sung) — Mức chi tiết bắt buộc",
+                         "Tab 7 (bổ sung) — Logic vận hành phải tách"], "7"):
+            ghi.append("Mức chi tiết phần điện: lộ Q, lộ phụ, số dây, "
+                       "đầu cốt theo nhóm, tủ xếp theo hàng chức năng")
         if ghi:
             doc.data = data
             flag_modified(doc, "data")
@@ -984,6 +990,19 @@ def ai_execute(payload: dict = Body(...)):
                 "    LG.thietBi({tag:'P-101A', ten:'Bơm cấp', che:'AUTO/MAN', "
                 "chay:'<điều kiện>', dung:'<điều kiện>', khoa:'<khoá liên động>', "
                 "bao:'<báo động>'});\n"
+                "    LG.trinhTu({seq:'Khởi động RO1', viec:'...', dk:'...', t:'15 s', loi:'...'});\n"
+                "      // khai seq để tách thành NHIỀU trình tự có tên (SEQ-1 khởi "
+                "động RO1, SEQ-2 dừng RO1, SEQ-3 rửa ngược…); gộp hết vào một bảng "
+                "thì không lập trình được.\n"
+                "    LG.baoDong({ma:'A-01', muc:'TRIP', …});   // mức H · HH · TRIP:"
+                "  H chỉ cảnh báo, HH cảnh báo kèm SMS, TRIP dừng thiết bị.\n"
+                "  Bảng chọn thiết bị điện tự đánh số LỘ Q0…Qn (Q0 nguồn tổng), có "
+                "cột Iz cáp và ghi rõ công thức; tự thêm các LỘ PHỤ (nguồn 24 VDC, "
+                "chiếu sáng và quạt tủ, ổ cắm bảo trì có RCD, HMI/GSM qua UPS). "
+                "Mạch điều khiển đánh số dây liên tục từ 100. Đầu cốt chia nhóm X1 "
+                "an toàn · X2 động cơ · X3 đầu ra · X4 analog vào · X5 analog ra. "
+                "Bố trí tủ tự xếp theo hàng chức năng có máng đi dây, báo phần trăm "
+                "dự phòng chỗ và lưu lượng quạt cần thiết.\n"
                 "    LG.trinhTu({b:1, viec:'...', dk:'...', t:'15 s', loi:'...'});\n"
                 "    LG.baoDong({ma:'A-01', mo:'Dừng khẩn cấp', muc:'Sự cố', "
                 "nguong:'ES-01=0', tacDong:'Cắt toàn bộ đầu ra', xuLy:'...'});\n"

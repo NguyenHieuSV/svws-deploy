@@ -132,6 +132,14 @@
           "s": "new"
         },
         {
+          "t": "Tab 7 (bổ sung) — Mức chi tiết bắt buộc của phần điện, đủ để thợ đấu tủ và người lập trình làm việc không cần hỏi lại: (a) bảng chọn thiết bị điện đánh số LỘ Q0…Qn (Q0 là nguồn tổng), có cột In · CB · khởi động từ AC-3 hoặc biến tần · dải rơ-le nhiệt · cáp · Iz cáp, và GHI RÕ CÔNG THỨC áp dụng ngay trên bảng; (b) phải có các LỘ PHỤ chứ không chỉ động cơ: nguồn 24 VDC cho PLC, chiếu sáng và quạt tủ, ổ cắm bảo trì có RCD 30 mA, HMI/GSM cấp qua UPS; (c) mạch điều khiển đánh SỐ DÂY liên tục từ 100 (100 = +24 V, 101 = 0 V) kèm tham chiếu chéo cuộn hút → tiếp điểm; (d) đầu cốt chia nhóm theo chức năng X1 tín hiệu an toàn · X2 tín hiệu động cơ · X3 đầu ra · X4 analog vào · X5 analog ra, không đánh số chạy tuốt một dãy; (e) bố trí tủ xếp theo HÀNG CHỨC NĂNG (aptomat · khởi động từ và rơ-le nhiệt · biến tần · PLC/nguồn/an toàn · cầu đấu) có máng đi dây giữa các hàng, kèm phần trăm dự phòng chỗ và cân bằng nhiệt ra lưu lượng quạt cần thiết.",
+          "s": "new"
+        },
+        {
+          "t": "Tab 7 (bổ sung) — Logic vận hành phải tách thành NHIỀU TRÌNH TỰ CÓ TÊN (SEQ-1 khởi động RO1, SEQ-2 dừng RO1, SEQ-3 khởi động RO2, SEQ-4 khởi động EDI, SEQ-5 rửa ngược tự động, SEQ-6 mạch vòng và đổi bình…), mỗi trình tự một bảng riêng gồm bước · hành động · điều kiện chuyển bước · trễ · xử lý khi lỗi. Gộp tất cả vào một bảng thì không lập trình được. Báo động phải phân mức theo chuẩn tủ: H chỉ cảnh báo · HH cảnh báo kèm nhắn tin · TRIP dừng thiết bị — ghi \"cảnh báo\" chung chung thì người lập trình không biết cái nào được phép dừng máy.",
+          "s": "new"
+        },
+        {
           "t": "Tab 8 (bổ sung) — Sổ O&M sinh từ CHÍNH danh sách thiết bị bằng SVWSOM.tao({EQUIP, params}), không viết tay mỗi lần một kiểu. Phải đủ sáu mục: (1) thông số vận hành và ngưỡng lấy từ bảng thông số; (2) lịch bảo trì định kỳ theo TỪNG LOẠI thiết bị có trong hệ — không có màng RO thì không sinh mục thay màng, có UV thì tự có mục thay đèn và vệ sinh ống thạch anh; (3) quy trình CIP (chỉ sinh khi hệ có màng RO hoặc EDI); (4) bảng xử lý sự cố thường gặp kèm nguyên nhân và cách xử lý; (5) an toàn vận hành theo nhóm rủi ro thực có (hoá chất, điện, áp lực, không gian hạn chế, tia UV, điện một chiều EDI); (6) mẫu nhật ký vận hành với các cột đúng theo thiết bị của hệ. kiemTra() cảnh báo thiết bị nào chưa có mục bảo trì.",
           "s": "new"
         },

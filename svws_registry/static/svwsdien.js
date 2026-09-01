@@ -52,6 +52,7 @@
     v = parseFloat(v);
     return isFinite(v) ? v : mac_dinh;
   }
+  function lam(v, n) { var k = Math.pow(10, n || 0); return Math.round(v * k) / k; }
   /** Chọn giá trị nhỏ nhất trong bảng mà ≥ v; hết bảng thì trả phần tử cuối. */
   function chonTren(bang, v) {
     for (var i = 0; i < bang.length; i++) if (bang[i] >= v) return bang[i];
@@ -292,16 +293,56 @@
     function ve() { return dungHinh().svg; }
     function veKiem() { return dungHinh().lan; }
 
+    /** Dòng cho phép của cáp đã chọn (A) — để đối chiếu ngay với nấc CB. */
+    function izCua(mm2) {
+      for (var i = 0; i < DAY.length; i++) if (DAY[i][0] === mm2) return DAY[i][1];
+      return 0;
+    }
+    /* LỘ PHỤ trong tủ — không phải động cơ nhưng vẫn phải có aptomat riêng,
+       thiếu là thợ đấu tủ không biết lấy nguồn cho PLC và đèn quạt ở đâu. */
+    function loPhu() {
+      return [
+        { ten: 'Nguồn 24 VDC (PSU) cho PLC, rơ-le và cảm biến', cb: 'MCB 6A 1P',
+          ghi: 'PSU 24 VDC 10 A, dây 100/101' },
+        { ten: 'Chiếu sáng và quạt lọc tủ', cb: 'MCB 6A 1P',
+          ghi: 'Có công tắc cửa tủ' },
+        { ten: 'Ổ cắm bảo trì trong tủ', cb: 'MCB 16A 1P + RCD 30 mA',
+          ghi: 'Bắt buộc có RCD chống giật' },
+        { ten: 'HMI, GSM modem và SCADA', cb: 'MCB 6A 1P',
+          ghi: 'Cấp qua UPS 1 kVA để không mất dữ liệu khi cúp điện' }
+      ];
+    }
+
     function bangMotor() {
-      var h = '<table class="svws-bang"><thead><tr>' +
-        ['TT', 'Tag', 'Tên thiết bị', 'kW', 'Pha', 'Kiểu KĐ', 'I (A)', 'CB',
-         'Khởi động từ / Biến tần', 'Bảo vệ nhiệt', 'Cáp động lực']
+      var tongKW = 0, tongI = 0;
+      ds.forEach(function (t) { tongKW += t.kW; tongI += t.I; });
+      var cbTong = chonTren(NAC_CB, tongI * 0.8 * 1.25);
+      var h = '<div class="svws-ghi">Công thức áp dụng: ' +
+        'I<sub>n</sub> = P / (√3 · U · cosφ · η) với cosφ 0,85 và η 0,88 · ' +
+        'CB ≥ 1,25 · I<sub>n</sub> (biến tần 1,5 · I<sub>n</sub>) · ' +
+        'khởi động từ AC-3 theo kW · ' +
+        'cáp phải chịu được NẤC CB, không chỉ chịu dòng tải.</div>' +
+        '<table class="svws-bang"><thead><tr>' +
+        ['Lộ', 'Tag', 'Tên thiết bị', 'kW', 'Pha', 'Kiểu KĐ', 'I<sub>n</sub> (A)', 'CB',
+         'Khởi động từ AC-3 / Biến tần', 'Rơ-le nhiệt (A)', 'Cáp động lực', 'I<sub>z</sub> cáp (A)']
         .map(function (t) { return '<th>' + t + '</th>'; }).join('') +
         '</tr></thead><tbody>';
+      h += '<tr><td>Q0</td><td>—</td><td>Nguồn tổng vào tủ</td><td>' +
+lam(tongKW, 1) + '</td><td>3P</td><td>—</td><td>' + lam(tongI * 0.8, 1) +
+        '</td><td>MCCB ' + cbTong + 'A</td><td>—</td><td>—</td><td>theo chiều dài tuyến' +
+        '</td><td>—</td></tr>';
       ds.forEach(function (t, i) {
-        h += '<tr>' + [i + 1, t.tag, t.ten + (t.duPhong ? ' (dự phòng)' : ''), t.kW,
-          t.pha + 'P', t.kieu, t.I, t.cbTen, t.km || t.vfd, t.ol || '—', t.capTen]
+        h += '<tr>' + ['Q' + (i + 1), t.tag, t.ten + (t.duPhong ? ' (dự phòng)' : ''),
+          t.kW, t.pha + 'P', t.kieu, t.I, t.cbTen, t.km || t.vfd, t.ol || '—',
+          t.capTen, izCua(t.day) || '—']
           .map(function (c) { return '<td>' + esc(c) + '</td>'; }).join('') + '</tr>';
+      });
+      var q = ds.length;
+      loPhu().forEach(function (x, j) {
+        q++;
+        h += '<tr>' + ['Q' + q, '—', x.ten, '—', '1P', '—', '—', x.cb, '—', '—',
+          x.ghi, '—'].map(function (c) { return '<td>' + esc(c) + '</td>'; }).join('') +
+          '</tr>';
       });
       return h + '</tbody></table>';
     }
@@ -409,10 +450,13 @@
       // hai ray dọc
       g.ln(b.xL, 84, b.xL, b.H - 30, NAVY, 2.4);
       g.ln(b.xR, 84, b.xR, b.H - 30, NAVY, 2.4);
-      g.chu(b.xL - 6, 76, o.duong || 'L (+24 VDC)', 9, MO, 'start', 1, false);
-      g.chu(b.xR - 6, 76, o.trung || 'N (0 V)', 9, MO, 'end', 1, false);
+      g.chu(b.xL - 6, 76, (o.duong || '+24 VDC') + ' (dây 100)', 9, MO, 'start', 1, false);
+      g.chu(b.xR - 6, 76, (o.trung || '0 V') + ' (dây 101)', 9, MO, 'end', 1, false);
       g.chu(b.xR + 14, 76, 'Tham chiếu chéo', 8.6, XAM, 'start', 1, false);
 
+      /* Số dây đánh LIÊN TỤC từ 100 như hồ sơ tủ thật (100 = +24V, 101 = 0V),
+         không phải mã nấc×10 — thợ đấu tủ dò theo số dây trên đầu cốt. */
+      var soDay = 102;
       ds.forEach(function (m, i) {
         var y = y0 + i * b.buoc, nac = i + 1;
         g.chu(b.xL - 14, y + 4, String(nac), 10, NAVY, 'end', 1, false);
@@ -429,7 +473,7 @@
         trai.forEach(function (p) {
           var w = Math.max(RONG_PT[p.k] || 46, rongChu(p.t || '', 8, 1) + 8);
           g.ln(x, y, x + 13, y, NAVY, 1.6);
-          g.chu(x + 4, y - 7, String(nac * 10 + day), 7, XAM, 'start', 0, false);
+          g.chu(x + 4, y - 7, String(soDay++), 7, XAM, 'start', 0, false);
           day++;
           veP(g, p, x + 13, y, w);
           x += w + 26;
@@ -615,21 +659,41 @@
     }
     function ve() { return dungHinh().svg; }
 
+    /* Đầu cốt chia theo CHỨC NĂNG như tủ thật: X1 tín hiệu an toàn · X2 tín hiệu
+       động cơ · X3 đầu ra · X4 analog vào · X5 analog ra. Đánh số chạy tuốt một
+       dãy thì thợ đấu tủ phải dò cả trăm cực để tìm một dây. */
+    function nhomCot(kieu, tag) {
+      if (kieu === 'DO') return 'X3';
+      if (kieu === 'AI') return 'X4';
+      if (kieu === 'AO') return 'X5';
+      return /estop|e-?stop|sel|auto|door|cửa|reset|an toàn/i.test(String(tag || ''))
+        ? 'X1' : 'X2';
+    }
     function bangIO() {
-      var h = '<table class="svws-bang"><thead><tr>' +
-        ['TT', 'Địa chỉ', 'Kiểu', 'Tag hiện trường', 'Mô tả', 'Tín hiệu', 'Đầu cốt']
+      var h = '<div class="svws-ghi">Đầu cốt chia nhóm: X1 tín hiệu an toàn · ' +
+        'X2 tín hiệu động cơ · X3 đầu ra · X4 analog vào · X5 analog ra.</div>' +
+        '<table class="svws-bang"><thead><tr>' +
+        ['TT', 'Loại', 'Địa chỉ', 'Tag hiện trường', 'Mô tả', 'Tín hiệu', 'Đầu cốt (domino)']
         .map(function (t) { return '<th>' + t + '</th>'; }).join('') + '</tr></thead><tbody>';
-      var n = 0;
+      var n = 0, dem = {};
       mods.forEach(function (m) {
         m.kenh.forEach(function (k) {
           n++;
-          h += '<tr>' + [n, k.dc || '', m.kieu, k.tag || '', k.mo || '',
+          var nh = nhomCot(m.kieu, k.tag);
+          dem[nh] = (dem[nh] || 0) + 1;
+          h += '<tr>' + [n, m.kieu, k.dc || '', k.tag || '', k.mo || '',
             k.tin || (m.kieu === 'AI' || m.kieu === 'AO' ? '4–20 mA' : '24 VDC'),
-            k.cot || ('X' + (n < 10 ? '0' : '') + n)]
+            k.cot || (nh + ':' + dem[nh])]
             .map(function (c) { return '<td>' + esc(c) + '</td>'; }).join('') + '</tr>';
         });
       });
-      return h + '</tbody></table>';
+      var tong = 0;
+      Object.keys(dem).forEach(function (x) { tong += dem[x]; });
+      h += '</tbody></table><div class="svws-ghi">Tổng ' + tong + ' cực tín hiệu' +
+        Object.keys(dem).sort().map(function (x) {
+          return ' · ' + x + ': ' + dem[x] + ' cực';
+        }).join('') + ' — cộng cực nguồn và dự phòng 20 % khi đặt domino.</div>';
+      return h;
     }
 
     function kiemTra() {
@@ -692,9 +756,24 @@
     var LE = so(o.le, 80);           // lề trong tủ (mm)
     var KHE = so(o.kheRay, 60);      // máng đi dây giữa hai ray (mm)
 
+    /* Xếp theo HÀNG CHỨC NĂNG như tủ thật: hàng 1 aptomat, hàng 2 khởi động từ
+       và rơ-le nhiệt, hàng 3 biến tần, hàng 4 PLC/nguồn/an toàn, hàng 5 cầu đấu.
+       Trộn lẫn thì dây động lực chạy cắt ngang dây tín hiệu, nhiễu vào analog. */
+    var TEN_HANG = ['Hàng 1 — Aptomat', 'Hàng 2 — Khởi động từ + rơ-le nhiệt',
+                    'Hàng 3 — Biến tần', 'Hàng 4 — PLC / nguồn / an toàn',
+                    'Hàng 5 — Cầu đấu (domino)'];
+    function nhomHang(ten) {
+      var t = String(ten || '').toLowerCase();
+      if (/domino|cầu đấu|cau dau|terminal/.test(t)) return 4;
+      if (/plc|psu|nguồn|nguon|hmi|rơ-le trung gian|ro-le trung gian|an toàn|safety|ups/.test(t)) return 3;
+      if (/biến tần|bien tan|vfd|inverter/.test(t)) return 2;
+      if (/khởi động từ|khoi dong tu|contactor|km-|rơ-le nhiệt|ro-le nhiet|overload/.test(t)) return 1;
+      return 0;                                  // aptomat và phần còn lại
+    }
     api.thiet = function (e) {
       e = e || {};
-      ds.push({ ten: e.ten || '', r: so(e.r, 18), c: so(e.c, 90), nhiet: so(e.nhiet, 0) });
+      ds.push({ ten: e.ten || '', r: so(e.r, 18), c: so(e.c, 90), nhiet: so(e.nhiet, 0),
+                hang: e.hang != null ? +e.hang : nhomHang(e.ten) });
       return api;
     };
 
@@ -702,14 +781,20 @@
      *  Cao độ mỗi ray tính theo THIẾT BỊ CAO NHẤT của ray trên nó — dùng bước
      *  cố định là biến tần cao 300 mm sẽ đè xuống hàng dưới. */
     function xep() {
-      var rong = Wt - 2 * LE, ray = [], cur = [], w = 0, cao = 0;
-      ds.forEach(function (d) {
-        if (w + d.r > rong && cur.length) {
-          ray.push({ dt: cur, w: w, cao: cao }); cur = []; w = 0; cao = 0;
-        }
-        cur.push(d); w += d.r + 6; cao = Math.max(cao, d.c);
+      var rong = Wt - 2 * LE, ray = [];
+      // gom theo hàng chức năng trước, trong mỗi hàng mới xuống dòng khi hết chỗ
+      var theoNhom = {};
+      ds.forEach(function (d) { (theoNhom[d.hang] = theoNhom[d.hang] || []).push(d); });
+      Object.keys(theoNhom).sort(function (a, b) { return a - b; }).forEach(function (k) {
+        var cur = [], w = 0, cao = 0;
+        theoNhom[k].forEach(function (d) {
+          if (w + d.r > rong && cur.length) {
+            ray.push({ dt: cur, w: w, cao: cao, nhom: +k }); cur = []; w = 0; cao = 0;
+          }
+          cur.push(d); w += d.r + 6; cao = Math.max(cao, d.c);
+        });
+        if (cur.length) ray.push({ dt: cur, w: w, cao: cao, nhom: +k });
       });
-      if (cur.length) ray.push({ dt: cur, w: w, cao: cao });
       var y = LE;
       ray.forEach(function (r) { r.y = y; y += r.cao + KHE; });
       return { ray: ray, cao: y - KHE };
@@ -742,9 +827,16 @@
           g.themChiem(mx(x), my(yy), mx(x + d.r), my(yy + d.c), d.ten);
           x += d.r + 6;
         });
+        // máng đi dây 60×60 ngay dưới mỗi hàng — chỗ thật để luồn dây
+        var yM = yy + r.cao + 12;
+        g.out.push('<rect x="' + mx(LE) + '" y="' + my(yM) + '" width="' +
+          ((Wt - 2 * LE) * sc) + '" height="' + (60 * sc) +
+          '" fill="#eef2f6" stroke="' + XAM + '" stroke-width="0.7"/>');
+        g.chu(mx(Wt / 2), my(yM + 42), 'máng đi dây 60×60', 7, XAM, 'middle', 0, false);
         // chú thích ray đặt bên phải tủ, không đè lên thiết bị
         var ten = r.dt.map(function (d) { return d.ten; }).join(' · ');
-        g.chuGoi(mx(Wt) + 16, my(yy + 22), 'R' + (i + 1) + ': ' + ten, 8, INK, 300);
+        g.chuGoi(mx(Wt) + 16, my(yy + 22),
+                 (TEN_HANG[r.nhom] || ('Hàng ' + (i + 1))) + ': ' + ten, 8, INK, 300);
       });
 
       // cầu đấu dưới cùng
@@ -770,16 +862,24 @@
                  ' mm cho ' + ray.length + ' ray DIN + cầu đấu. Tăng chiều cao tủ ' +
                  'hoặc chuyển sang tủ đôi.');
       }
+      // Diện tích cần so với diện tích có — báo kèm phần trăm dự phòng
+      var rongCan = 0;
+      ray.forEach(function (r) { rongCan = Math.max(rongCan, r.w); });
+      var duPhong = (Wt * Ht) ? Math.round((1 - (rongCan * (xx.cao)) / (Wt * Ht)) * 100) : 0;
       var nhiet = 0;
       ds.forEach(function (d) { nhiet += d.nhiet; });
+      canhBao.push('Bố trí cần ' + Math.ceil(rongCan) + ' × ' + Math.ceil(xx.cao) +
+                   ' mm trong tủ ' + Wt + ' × ' + Ht + ' mm — dự phòng ' + duPhong + ' %.');
       if (nhiet > 0) {
         // Diện tích toả nhiệt tủ kim loại đặt tựa tường ≈ 1,8·(W·H) + 1,4·(W·D)
         var A = (1.8 * Wt * Ht + 1.4 * Wt * Dt) / 1e6;   // m²
         var dT = nhiet / (5.5 * A);                       // k ≈ 5,5 W/m²K
-        if (dT > 15) canhBao.push('Nhiệt trong tủ ' + Math.round(nhiet) + ' W làm nóng ' +
-          'thêm ~' + Math.round(dT) + ' °C so với môi trường — vượt 15 °C. Cần quạt hút ' +
-          'có lọc bụi (' + Math.ceil(nhiet / 8) + ' m³/h) hoặc máy lạnh tủ ' +
-          Math.ceil(nhiet / 100) * 100 + ' W.');
+        var tuTan = Math.round(5.5 * A * 15);              // W tủ tự tản khi ΔT 15 K
+        if (dT > 15) canhBao.push('Nhiệt trong tủ ' + Math.round(nhiet) + ' W, tủ tự tản ' +
+          'được ' + tuTan + ' W (ΔT 15 K) — dư ' + Math.round(nhiet - tuTan) + ' W làm ' +
+          'nóng thêm ~' + Math.round(dT) + ' °C. Cần quạt hút có lọc bụi ' +
+          (Math.ceil((nhiet - tuTan) / 3 / 10) * 10) + ' m³/h, hoặc máy lạnh tủ ' +
+          Math.ceil(nhiet / 100) * 100 + ' W nếu bắt buộc giữ IP65.');
       }
       if (!ds.length) loi.push('Chưa khai báo thiết bị nào trong tủ.');
       return { loi: loi, canhBao: canhBao, soRay: ray.length, soThietBi: ds.length };
@@ -804,15 +904,28 @@
       return api;
     };
     /** Một bước trong trình tự khởi động / dừng. */
+    /* Một hệ có NHIỀU trình tự riêng (khởi động RO1, dừng RO1, khởi động EDI,
+       rửa ngược, đổi bình...). Gộp hết vào một bảng thì không lập trình được:
+       khai seq để tách thành từng bảng có tên. */
     api.trinhTu = function (e) {
       e = e || {};
-      buoc.push({ b: e.b || (buoc.length + 1), viec: e.viec || '',
+      var s2 = e.seq || 'Trình tự khởi động / dừng';
+      var n2 = buoc.filter(function (x) { return x.seq === s2; }).length + 1;
+      buoc.push({ seq: s2, b: e.b || n2, viec: e.viec || '',
                   dk: e.dk || '', t: e.t || '', loi: e.loi || '' });
       return api;
     };
+    /* Mức báo động theo chuẩn tủ: H chỉ cảnh báo · HH cảnh báo + nhắn tin ·
+       TRIP dừng thiết bị. Ghi "Cảnh báo" chung chung thì người lập trình không
+       biết cái nào được phép dừng máy. */
+    var MUC_BD = { H: 'H — cảnh báo', HH: 'HH — cảnh báo + SMS',
+                   TRIP: 'TRIP — dừng thiết bị' };
     api.baoDong = function (e) {
       e = e || {};
-      bao.push({ ma: e.ma || '', mo: e.mo || '', muc: e.muc || 'Cảnh báo',
+      var m = String(e.muc || 'H').toUpperCase();
+      if (!MUC_BD[m]) m = /trip|dừng|dung/i.test(e.muc) ? 'TRIP'
+                        : /sms|nghiêm|su co|sự cố/i.test(e.muc) ? 'HH' : 'H';
+      bao.push({ ma: e.ma || '', mo: e.mo || '', muc: m, mucTen: MUC_BD[m],
                  nguong: e.nguong || '', xuLy: e.xuLy || '', tacDong: e.tacDong || '' });
       return api;
     };
@@ -837,14 +950,21 @@
         }));
     }
     function bangTrinhTu() {
-      return bang('Trình tự khởi động / dừng',
-        ['Bước', 'Thao tác', 'Điều kiện chuyển bước', 'Thời gian', 'Xử lý khi lỗi'],
-        buoc.map(function (b) { return [b.b, b.viec, b.dk, b.t, b.loi]; }));
+      var ten = [];
+      buoc.forEach(function (b) { if (ten.indexOf(b.seq) < 0) ten.push(b.seq); });
+      return ten.map(function (t, i) {
+        return bang((ten.length > 1 ? 'SEQ-' + (i + 1) + ' · ' : '') + t,
+          ['Bước', 'Thao tác', 'Điều kiện chuyển bước', 'Trễ / thời gian',
+           'Xử lý khi lỗi'],
+          buoc.filter(function (b) { return b.seq === t; })
+              .map(function (b) { return [b.b, b.viec, b.dk, b.t, b.loi]; }));
+      }).join('');
     }
     function bangBaoDong() {
-      return bang('Danh mục báo động',
+      return bang('Danh mục báo động (H = cảnh báo · HH = cảnh báo + SMS · TRIP = dừng thiết bị)',
         ['Mã', 'Mô tả', 'Mức', 'Ngưỡng / điều kiện', 'Tác động của hệ thống', 'Xử lý'],
-        bao.map(function (b) { return [b.ma, b.mo, b.muc, b.nguong, b.tacDong, b.xuLy]; }));
+        bao.map(function (b) { return [b.ma, b.mo, b.mucTen || b.muc, b.nguong,
+                                       b.tacDong, b.xuLy]; }));
     }
 
     /** Ma trận khoá liên động: hàng = thiết bị, cột = điều kiện cấm chạy. */
