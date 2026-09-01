@@ -90,6 +90,7 @@ class RegistryRevision(SQLModel, table=True):
 _MUC_TAB7 = "Tab 7 — Logic vận hành & Sơ đồ mạch điện"
 _MUC_TAB4 = "Bản vẽ chế tạo phải ĐỦ ĐỂ XƯỞNG LÀM ĐƯỢC"
 _MUC_TAB5 = "Số lượng vật tư phải SUY TỪ HÌNH HỌC THẬT"
+_MUC_TAB5B = "Bản vẽ từng công đoạn phải vẽ ĐÚNG TUYẾN THẬT"
 
 
 def _seed_items(tien_to) -> list:
@@ -212,6 +213,9 @@ def init_db() -> None:
                         ["Tab 5 (bổ sung) — Số lượng vật tư",
                          "Tab 5 (bổ sung) — Danh sách công đoạn"], "5"):
             ghi.append("Siết chuẩn Tab 5 — vật tư suy từ hình học thật của bản vẽ 3D")
+        if _bo_sung_muc(data, _MUC_TAB5B, "Tab 5 (bổ sung) — Bản vẽ từng công đoạn", "5"):
+            ghi.append("Siết chuẩn Tab 5 — bản vẽ công đoạn vẽ đúng tuyến thật "
+                       "kèm cao trình giá đỡ")
         if ghi:
             doc.data = data
             flag_modified(doc, "data")
@@ -763,6 +767,11 @@ def ai_execute(payload: dict = Body(...)):
                 "  kiemTra() bắt: công đoạn thiếu DN, tuyến ngắn bất thường (hai thiết bị "
                 "trùng chỗ), THIẾT BỊ KHÔNG NỐI VÀO TUYẾN NÀO (thiếu vật tư), tuyến quá "
                 "nhiều co gây tổn thất áp. loi PHẢI rỗng.\n"
+                "  V.bangCongDoan() đã kèm sẵn BẢN VẼ từng công đoạn vẽ theo TUYẾN THẬT: "
+                "mặt bằng tuyến đúng tỷ lệ + trắc dọc trải phẳng cho thấy ống lên giá cao "
+                "bao nhiêu rồi hạ xuống đâu, có đánh dấu co 90°, vị trí giá đỡ, cao trình "
+                "giá và trình tự lắp. Nút in công đoạn PHẢI in cả bản vẽ này (lấy riêng "
+                "bằng V.veCongDoan(c) nếu cần), không chỉ in bảng vật tư.\n"
                 "  Tab 9 (BOQ) LẤY KHỐI LƯỢNG TỪ V.tongHop(), không tự gõ lại số lượng.\n"
                 "- Tab 7 (Logic vận hành & mạch điện): dùng SVWSDIEN. Đây là tab để "
                 "THỢ ĐẤU TỦ và NGƯỜI LẬP TRÌNH PLC làm việc, nên phải đủ số liệu thật, "

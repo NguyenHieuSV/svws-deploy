@@ -114,7 +114,7 @@
         var soNhanh = nhanh[t.from + '|' + (k.fromPort || 'out')] || 1;
         return {
           stt: i + 1,
-          from: t.from, to: t.to,
+          from: t.from, to: t.to, pts: t.pts || [],
           tenFrom: tenTB(t.from), tenTo: tenTB(t.to),
           mo: 'Lắp tuyến ' + (TEN_DV[t.service] || t.service || '') +
               ' từ ' + tenTB(t.from) + ' đến ' + tenTB(t.to),
@@ -167,6 +167,214 @@
                   dv: 'cái', ghi: 'Điểm châm vào đường ống chính' });
       }
       return ds;
+    }
+
+    // ============================================ BẢN VẼ SƠ ĐỒ ĐOẠN THI CÔNG
+    /* Vẽ ĐÚNG tuyến ống thật, không phải hai ô vuông và một đường thẳng. Hai
+       hình: MẶT BẰNG (nhìn từ trên, thấy ống đi vòng thế nào) và TRẮC DỌC
+       TUYẾN (trải phẳng theo chiều đi, thấy ống lên giá cao bao nhiêu rồi hạ
+       xuống đâu). Trắc dọc dùng tỷ lệ đứng khác tỷ lệ ngang — chuẩn của bản vẽ
+       tuyến ống, vì tuyến dài 15 m mà chỉ cao 4 m thì cùng tỷ lệ sẽ bẹt dí. */
+    var NAVY = '#0b2545', INK = '#12263a', MO = '#33475b', XAM = '#8b98a8';
+    var DO = '#b3271e', LUC = '#1f7a4d', NUOC = '#2f7fb8';
+
+    function hinhTB(id) {
+      for (var i = 0; i < eq.length; i++) {
+        var e = eq[i];
+        if (e.id === id || e.tag === id) {
+          var cd = (global.SVWS3D && SVWS3D.chanDe) ? SVWS3D.chanDe(e) : null;
+          var p = pos[id] || pos[e.id] || { x: 0, z: 0 };
+          return { x: so(p.x, 0), z: so(p.z, 0),
+                   w: so(cd && cd.w, 800), d: so(cd && cd.d, 800),
+                   h: so(e.h, 1500), tag: e.tag || id, tron: !!(cd && cd.tron) };
+        }
+      }
+      return null;
+    }
+    function tyLeDep(v) {                       // quy về nấc tỷ lệ quen thuộc
+      var nac = [10, 20, 25, 50, 75, 100, 150, 200, 250, 500];
+      for (var i = 0; i < nac.length; i++) if (nac[i] >= v) return nac[i];
+      return nac[nac.length - 1];
+    }
+
+    function veCongDoan(c) {
+      var pts = c.pts || [];
+      if (pts.length < 2) return '<div class="svws-ghi">Chưa có toạ độ tuyến ống.</div>';
+      var W = 1180, H = 590, o2 = [];
+      function P(s) { o2.push(s); }
+      function ln(x1, y1, x2, y2, m, w, net) {
+        P('<line x1="' + lam(x1, 1) + '" y1="' + lam(y1, 1) + '" x2="' + lam(x2, 1) +
+          '" y2="' + lam(y2, 1) + '" stroke="' + (m || NAVY) + '" stroke-width="' +
+          (w || 1.3) + '"' + (net ? ' stroke-dasharray="' + net + '"' : '') + '/>');
+      }
+      function tx(x, y, s, fs, m, neo, dam) {
+        P('<text x="' + lam(x, 1) + '" y="' + lam(y, 1) + '" font-size="' + (fs || 9) +
+          '" fill="' + (m || INK) + '" text-anchor="' + (neo || 'middle') + '"' +
+          (dam ? ' font-weight="600"' : '') + ' font-family="' + FONT + '">' +
+          esc(s) + '</text>');
+      }
+      var A = hinhTB(c.from), B = hinhTB(c.to);
+
+      // ------------------------------------------------------------ MẶT BẰNG
+      var vx1 = 46, vy1 = 64, vw = 500, vh = 250;
+      var xs = pts.map(function (p) { return p[0]; });
+      var zs = pts.map(function (p) { return p[2]; });
+      [A, B].forEach(function (t) {
+        if (!t) return;
+        xs.push(t.x - t.w / 2, t.x + t.w / 2);
+        zs.push(t.z - t.d / 2, t.z + t.d / 2);
+      });
+      var x0 = Math.min.apply(null, xs), x1 = Math.max.apply(null, xs);
+      var z0 = Math.min.apply(null, zs), z1 = Math.max.apply(null, zs);
+      var tlMB = tyLeDep(Math.max((x1 - x0) / vw, (z1 - z0) / vh) * 1.12 || 10);
+      var sMB = 1 / tlMB;
+      var ox = vx1 + (vw - (x1 - x0) * sMB) / 2 - x0 * sMB;
+      var oz = vy1 + (vh - (z1 - z0) * sMB) / 2 - z0 * sMB;
+      function mbx(x) { return ox + x * sMB; }
+      function mbz(z) { return oz + z * sMB; }
+
+      P('<rect x="' + vx1 + '" y="' + vy1 + '" width="' + vw + '" height="' + vh +
+        '" fill="#f7fafc" stroke="#dde5ee"/>');
+      [A, B].forEach(function (t, i) {
+        if (!t) return;
+        P('<rect x="' + lam(mbx(t.x - t.w / 2), 1) + '" y="' + lam(mbz(t.z - t.d / 2), 1) +
+          '" width="' + lam(t.w * sMB, 1) + '" height="' + lam(t.d * sMB, 1) +
+          '" rx="' + (t.tron ? Math.min(t.w, t.d) * sMB / 2 : 3) +
+          '" fill="#e3ecf5" stroke="' + NAVY + '" stroke-width="1.4"/>');
+        tx(mbx(t.x), mbz(t.z) + 3.5, t.tag, 9, NAVY, 'middle', 1);
+      });
+      // tuyến ống nhìn từ trên
+      var dMB = pts.map(function (p) { return lam(mbx(p[0]), 1) + ',' + lam(mbz(p[2]), 1); });
+      P('<polyline points="' + dMB.join(' ') + '" fill="none" stroke="' + NUOC +
+        '" stroke-width="3" stroke-linejoin="round"/>');
+      // đánh dấu co 90° nhìn trên mặt bằng
+      for (var i = 1; i < pts.length - 1; i++) {
+        var a1 = Math.abs(pts[i][0] - pts[i - 1][0]) > 1 ? 'x'
+               : Math.abs(pts[i][2] - pts[i - 1][2]) > 1 ? 'z' : 'y';
+        var a2 = Math.abs(pts[i + 1][0] - pts[i][0]) > 1 ? 'x'
+               : Math.abs(pts[i + 1][2] - pts[i][2]) > 1 ? 'z' : 'y';
+        if (a1 !== a2 && a1 !== 'y' && a2 !== 'y') {
+          P('<circle cx="' + lam(mbx(pts[i][0]), 1) + '" cy="' + lam(mbz(pts[i][2]), 1) +
+            '" r="3.6" fill="#fff" stroke="' + DO + '" stroke-width="1.5"/>');
+        }
+      }
+      tx(vx1 + vw / 2, vy1 + vh + 20, 'MẶT BẰNG TUYẾN — tỷ lệ 1:' + tlMB, 10.5,
+         NAVY, 'middle', 1);
+      // mũi tên Bắc
+      ln(vx1 + vw - 26, vy1 + 40, vx1 + vw - 26, vy1 + 14, MO, 1.4);
+      P('<path d="M' + (vx1 + vw - 26) + ' ' + (vy1 + 10) + ' l-4.5 9 l9 0 Z" fill="' +
+        MO + '"/>');
+      tx(vx1 + vw - 26, vy1 + 52, 'B', 9, MO, 'middle', 1);
+
+      // ------------------------------------------------------- TRẮC DỌC TUYẾN
+      // Trải phẳng: trục ngang = quãng đường NGANG đã đi, trục đứng = cao độ.
+      var moc = [{ s: 0, y: pts[0][1] }], S = 0;
+      for (var k = 1; k < pts.length; k++) {
+        var dx = pts[k][0] - pts[k - 1][0], dz = pts[k][2] - pts[k - 1][2];
+        S += Math.sqrt(dx * dx + dz * dz);
+        moc.push({ s: S, y: pts[k][1] });
+      }
+      var yMax = Math.max.apply(null, moc.map(function (m) { return m.y; }));
+      var tMax = Math.max(yMax, (A ? A.h : 0), (B ? B.h : 0)) * 1.12 + 200;
+      var px1 = 620, py1 = 64, pw = 508, ph = 250;
+      // Chừa lề hai bên để hình thiết bị ở đầu và cuối tuyến không tràn ra
+      // ngoài khung — tuyến bắt đầu tại s=0 nên vẽ sát mép là mất nửa thiết bị.
+      var le = 46, pwT = pw - le * 2;
+      var tlN = tyLeDep((S || 1) / pwT);                // tỷ lệ NGANG
+      var tlD = tyLeDep(tMax / ph);                     // tỷ lệ ĐỨNG
+      function tdx(s) { return px1 + le + s / tlN; }
+      function tdy(y) { return py1 + ph - y / tlD; }
+
+      P('<rect x="' + px1 + '" y="' + py1 + '" width="' + pw + '" height="' + ph +
+        '" fill="#f7fafc" stroke="#dde5ee"/>');
+      ln(px1, tdy(0), px1 + pw, tdy(0), '#7a5c3a', 2.2);          // mặt nền
+      tx(px1 + 4, tdy(0) + 14, 'CAO ĐỘ ±0.000 (mặt nền)', 8, '#7a5c3a', 'start');
+      // thiết bị hai đầu
+      [[A, 0], [B, S]].forEach(function (t) {
+        if (!t[0]) return;
+        var e = t[0], wpx = Math.min(le * 1.6, Math.max(18, e.w / tlN));
+        var ex = Math.min(px1 + pw - wpx - 3, Math.max(px1 + 3, tdx(t[1]) - wpx / 2));
+        P('<rect x="' + lam(ex, 1) + '" y="' + lam(tdy(e.h), 1) +
+          '" width="' + lam(wpx, 1) + '" height="' + lam(e.h / tlD, 1) +
+          '" fill="#e3ecf5" stroke="' + NAVY + '" stroke-width="1.4"/>');
+        tx(ex + wpx / 2, Math.max(py1 + 11, tdy(e.h) - 7), e.tag, 9, NAVY, 'middle', 1);
+      });
+      // cao trình giá đỡ
+      var caoRack = Math.max.apply(null, moc.map(function (m) { return m.y; }));
+      ln(px1, tdy(caoRack), px1 + pw, tdy(caoRack), LUC, 1, '7 4');
+      // Nhãn cao trình đặt ở khoảng 1/3 tuyến, KHÔNG đặt sát mép phải: hai đầu
+      // tuyến là chỗ đứng của thiết bị, nhãn ở đó sẽ đè lên tag thiết bị.
+      tx(px1 + le + pwT * 0.34, tdy(caoRack) - 17,
+         'CAO TRÌNH GIÁ ĐỠ +' + Math.round(caoRack) + ' mm', 8.4, LUC, 'middle', 1);
+      // tuyến ống trải phẳng
+      P('<polyline points="' + moc.map(function (m) {
+          return lam(tdx(m.s), 1) + ',' + lam(tdy(m.y), 1);
+        }).join(' ') + '" fill="none" stroke="' + NUOC +
+        '" stroke-width="3.4" stroke-linejoin="round"/>');
+      // co 90° + giá đỡ + chiều dài từng đoạn
+      for (var j = 0; j < moc.length - 1; j++) {
+        var m1 = moc[j], m2 = moc[j + 1];
+        var ngang = Math.abs(m2.s - m1.s) > 1, dung = Math.abs(m2.y - m1.y) > 1;
+        if (j > 0) P('<circle cx="' + lam(tdx(m1.s), 1) + '" cy="' + lam(tdy(m1.y), 1) +
+          '" r="4" fill="#fff" stroke="' + DO + '" stroke-width="1.6"/>');
+        if (ngang) {
+          var dai = m2.s - m1.s;
+          tx((tdx(m1.s) + tdx(m2.s)) / 2, tdy(m1.y) - 9, lam(dai / 1000, 2) + ' m',
+             8.2, MO, 'middle');
+          // giá đỡ đặt theo bước chuẩn — vẽ đúng chỗ sẽ đóng kẹp
+          var n = Math.max(1, Math.floor(dai / c.buocGia));
+          for (var g = 1; g <= n; g++) {
+            var sx = tdx(m1.s + dai * g / (n + 1));
+            ln(sx, tdy(m1.y) + 2, sx, tdy(m1.y) + 11, XAM, 1.2);
+            P('<path d="M' + lam(sx - 4, 1) + ' ' + lam(tdy(m1.y) + 11, 1) + ' l8 0 l-4 -5 Z" fill="' +
+              XAM + '"/>');
+          }
+        } else if (dung) {
+          tx(tdx(m1.s) + 6, (tdy(m1.y) + tdy(m2.y)) / 2,
+             lam(Math.abs(m2.y - m1.y) / 1000, 2) + ' m', 8.2, MO, 'start');
+        }
+      }
+      P('<circle cx="' + lam(tdx(moc[moc.length - 1].s), 1) + '" cy="' +
+        lam(tdy(moc[moc.length - 1].y), 1) + '" r="3" fill="' + NUOC + '"/>');
+      tx(px1 + pw / 2, py1 + ph + 20,
+         'TRẮC DỌC TUYẾN (trải phẳng) — ngang 1:' + tlN + ' · đứng 1:' + tlD,
+         10.5, NAVY, 'middle', 1);
+
+      // ------------------------------------------------------------ chú giải
+      var cy = 372;
+      P('<rect x="46" y="' + cy + '" width="1082" height="176" fill="#fff" stroke="#dde5ee"/>');
+      tx(60, cy + 22, 'CÔNG ĐOẠN ' + c.stt + ': ' + c.tenFrom + ' → ' + c.tenTo,
+         12.5, NAVY, 'start', 1);
+      var dong = [
+        'Đường ống: ' + c.vl + ' DN' + c.dn + ' · ' + (TEN_DV[c.service] || c.service) +
+          ' · tổng dài ' + c.daiM + ' m đo trên tuyến 3D',
+        'Co 90°: ' + c.soCo + ' cái (đếm theo khúc gãy thật) · Giá đỡ: ' + c.soGia +
+          ' cái, bước ' + c.buocGia + ' mm' + (c.soTe ? ' · Tê: ' + c.soTe + ' cái' : ''),
+        'Cao trình giá đỡ: +' + Math.round(caoRack) + ' mm so với mặt nền' +
+          (c.van ? ' · Van chặn: ' + c.van + ' cái' : '') +
+          (c.coMotChieu ? ' · Van một chiều ở đầu đẩy bơm' : ''),
+        'Trình tự lắp: định vị hai thiết bị → dựng cột và giá đỡ theo cao trình → ' +
+          'lắp ống nhánh đứng tại hai đầu → nối tuyến ngang trên giá → lắp van và ' +
+          'rắc co → thử kín trước khi bọc bảo ôn.'
+      ];
+      dong.forEach(function (t, i2) {
+        tx(60, cy + 46 + i2 * 19, '• ' + t, 9.2, INK, 'start');
+      });
+      // ký hiệu
+      P('<circle cx="812" cy="' + (cy + 128) + '" r="4" fill="#fff" stroke="' + DO +
+        '" stroke-width="1.6"/>');
+      tx(824, cy + 131, 'co 90°', 8.6, MO, 'start');
+      P('<path d="M880 ' + (cy + 131) + ' l8 0 l-4 -5 Z" fill="' + XAM + '"/>');
+      tx(894, cy + 131, 'giá đỡ ống', 8.6, MO, 'start');
+      ln(962, cy + 128, 986, cy + 128, LUC, 1, '7 4');
+      tx(992, cy + 131, 'cao trình giá', 8.6, MO, 'start');
+      tx(W / 2, H - 12, 'BẢN THAM KHẢO — CHƯA DUYỆT THI CÔNG', 11,
+         'rgba(179,39,30,0.28)', 'middle', 1);
+
+      return '<svg viewBox="0 0 ' + W + ' ' + H + '" width="100%" ' +
+        'xmlns="http://www.w3.org/2000/svg" style="background:#fdfefe">' +
+        '<rect width="' + W + '" height="' + H + '" fill="#fdfefe" stroke="' + NAVY +
+        '" stroke-width="1.4"/>' + o2.join('') + '</svg>';
     }
 
     // ------------------------------------------------- móng & điện theo vị trí
@@ -292,6 +500,7 @@
           ' → ' + esc(c.tenTo) + '</h4>' +
           '<div class="svws-ghi">' + esc(c.mo) + ' · DN' + c.dn + ' · dài ' + c.daiM +
           ' m · ' + c.soCo + ' co 90° · cao trình ' + c.caoNhat + ' mm</div>' +
+          '<div class="svws-ve">' + veCongDoan(c) + '</div>' +
           bangHTML('', ['Vật tư', 'Quy cách', 'SL', 'ĐVT', 'Căn cứ tính'],
             bom(c).map(function (b) { return [b.vt, b.qc, b.sl, b.dv, b.ghi]; }));
       });
@@ -359,6 +568,7 @@
     }
 
     api.congDoan = congDoan;
+    api.veCongDoan = veCongDoan;
     api.bom = bom;
     api.mong = mong;
     api.dien = dien;
@@ -379,7 +589,9 @@
     '.svws-bang-tieu{margin:14px 0 4px;font:600 13px ' + FONT + ';color:#0b2545}' +
     '.svws-ghi{font-size:12px;color:#33475b;margin:2px 0 4px}' +
     '.svws-tq{background:#eef4fb;border-left:4px solid #0b2545;padding:8px 12px;' +
-    'font:600 12.5px ' + FONT + ';color:#0b2545;margin:8px 0 14px}';
+    'font:600 12.5px ' + FONT + ';color:#0b2545;margin:8px 0 14px}' +
+    '.svws-ve{margin:6px 0 10px}' +
+    '@media print{.svws-ve{page-break-inside:avoid}}';
 
   global.SVWSVT = { version: '1.0', to: to, buocGia: buocGia, daiCay: daiCay, CSS: CSS };
 })(window);

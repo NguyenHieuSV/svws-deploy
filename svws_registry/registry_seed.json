@@ -96,6 +96,10 @@
           "s": "new"
         },
         {
+          "t": "Tab 5 (bổ sung) — Bản vẽ từng công đoạn phải vẽ ĐÚNG TUYẾN THẬT lấy từ bản vẽ 3D, không phải hai ô vuông nối bằng một đường thẳng ở toạ độ cố định. Gồm hai hình: MẶT BẰNG TUYẾN đúng tỷ lệ (thấy ống đi vòng qua đâu, tránh thiết bị nào) và TRẮC DỌC TUYẾN trải phẳng (thấy ống lên giá đỡ ở cao trình nào, chạy ngang bao xa, rồi hạ xuống đâu — trắc dọc được phép dùng tỷ lệ đứng khác tỷ lệ ngang, nhưng phải ghi rõ cả hai). Trên bản vẽ đánh dấu: vị trí từng co 90°, vị trí giá đỡ theo bước chuẩn của vật liệu, cao trình giá đỡ ghi bằng mm so với mặt nền, chiều dài từng đoạn thẳng, và trình tự lắp đặt.",
+          "s": "new"
+        },
+        {
           "t": "Tab 6 — Controls & Electrical: danh sách motor (kW / DOL-VFD / duty-standby), danh sách instrument, tổng hợp PLC I/O, ma trận logic điều khiển.",
           "s": "std"
         },
