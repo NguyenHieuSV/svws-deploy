@@ -487,6 +487,11 @@
         Math.abs(p[1] - arr[i - 1][1]) > 1 || Math.abs(p[2] - arr[i - 1][2]) > 1;
     });
   }
+  /** Trục đi của một đoạn ('x' | 'y' | 'z') — dùng để đếm khúc gãy. */
+  function huong(a, b) {
+    var dx = Math.abs(b[0] - a[0]), dy = Math.abs(b[1] - a[1]), dz = Math.abs(b[2] - a[2]);
+    return dx >= dy && dx >= dz ? 'x' : dy >= dz ? 'y' : 'z';
+  }
   function routeOrtho(a, b, elev) {                 // giữ cho tương thích ngược
     return bo1([[a[0], a[1], a[2]], [a[0], elev, a[2]],
                 [b[0], elev, a[2]], [b[0], elev, b[2]], [b[0], b[1], b[2]]]);
@@ -682,6 +687,9 @@
           var g = pipeMesh(routeRack(h.A, h.B, gia[i].yX, gia[i].yZ), h.p.dn, h.p.service);
           g.userData.tuyen = h.p.from + '→' + h.p.to;
           g.userData.noi = [h.p.from, h.p.to];      // bỏ qua khi tự kiểm va chạm
+          g.userData.dn = h.p.dn || 0;              // giữ để thongKeOng() dùng lại
+          g.userData.service = h.p.service || 'raw';
+          g.userData.cong = h.p;                    // khai báo gốc (van, phụ kiện…)
           groups.pipe.add(g); ra.push(g);
         });
         soTang = gia.reduce(function (m, x) { return Math.max(m, x.tang + 1); }, 0);
@@ -690,6 +698,50 @@
 
       /** Giữ cho tương thích ngược: gọi từng ống một (không xếp được giá). */
       addPipe: function (p, pos) { return (this.addPipes([p], pos) || [])[0]; },
+
+      /**
+       * Xuất HÌNH HỌC THẬT của các tuyến ống đã vẽ — để bảng vật tư lấy số từ
+       * đây thay vì gõ cứng "mỗi công đoạn 6 m ống, 2 co 90°".
+       *
+       * Trả về mỗi tuyến: {from,to,dn,service,pts,dai,soCo,caoNhat} với dai tính
+       * bằng mm theo đúng đường ống đang hiển thị, soCo đếm số khúc gãy thật.
+       * Vì lấy từ chính mesh đã dựng nên bảng vật tư KHÔNG THỂ lệch với bản vẽ.
+       */
+      thongKeOng: function () {
+        var ra = [];
+        groups.pipe.children.forEach(function (g) {
+          var pts = (g.userData || {}).pts;
+          if (!pts || pts.length < 2) return;
+          var dai = 0, co = 0;
+          for (var i = 0; i < pts.length - 1; i++) {
+            var dx = pts[i + 1][0] - pts[i][0];
+            var dy = pts[i + 1][1] - pts[i][1];
+            var dz = pts[i + 1][2] - pts[i][2];
+            dai += Math.sqrt(dx * dx + dy * dy + dz * dz);
+          }
+          // Khúc gãy = điểm giữa mà hướng đi đổi khác → đúng một co 90°.
+          for (var j = 1; j < pts.length - 1; j++) {
+            var h1 = huong(pts[j - 1], pts[j]), h2 = huong(pts[j], pts[j + 1]);
+            if (h1 !== h2) co++;
+          }
+          var cao = pts.reduce(function (m, p) { return Math.max(m, p[1]); }, 0);
+          var noi = g.userData.noi || [];
+          ra.push({ from: noi[0] || '', to: noi[1] || '',
+                    dn: g.userData.dn || 0, service: g.userData.service || 'raw',
+                    pts: pts, dai: Math.round(dai), soCo: co,
+                    caoNhat: Math.round(cao) });
+        });
+        return ra;
+      },
+
+      /** Cao trình tầng giá đỡ cao nhất đang dùng (mm) — để tính cột chống. */
+      caoRack: function () {
+        var c = 0;
+        groups.pipe.children.forEach(function (g) {
+          ((g.userData || {}).pts || []).forEach(function (p) { c = Math.max(c, p[1]); });
+        });
+        return Math.round(c);
+      },
 
       /**
        * Tự kiểm: ống có cắt qua thiết bị nào không. Bắt lỗi trước khi giao file

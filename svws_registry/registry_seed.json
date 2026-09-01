@@ -88,6 +88,14 @@
           "s": "new"
         },
         {
+          "t": "Tab 5 (bổ sung) — Số lượng vật tư phải SUY TỪ HÌNH HỌC THẬT của bản vẽ 3D, TUYỆT ĐỐI KHÔNG gõ hằng số cho mọi công đoạn (kiểu \"mỗi công đoạn 6 m ống, 2 co 90°\" — đoạn dài 2 m và đoạn dài 30 m ra cùng một số, và BOQ lấy giá từ đây nên sai theo). Cụ thể: chiều dài ống đo theo tuyến đã định tuyến trong 3D; số co 90° đếm theo khúc gãy thật của tuyến; tê đếm tại đầu nối có nhiều nhánh cùng xuất phát; giá đỡ tính theo bước chuẩn của vật liệu (nhựa dày hơn thép vì võng); mặt bích tính theo số đầu nối thiết bị cộng số van; van một chiều đặt ở đầu đẩy bơm; móng tính theo chân đế thật của thiết bị; cáp điện đo theo khoảng cách Manhattan từ tủ tới từng động cơ cộng đoạn lên xuống máng và độ chùng. Mỗi dòng vật tư phải có cột CĂN CỨ TÍNH nói rõ con số lấy từ đâu.",
+          "s": "new"
+        },
+        {
+          "t": "Tab 5 (bổ sung) — Danh sách công đoạn SINH RA TỪ danh sách đường ống của bản vẽ 3D, không gõ tay: gõ tay thì thêm thiết bị vào 3D mà quên thêm công đoạn là thiếu vật tư và không ai phát hiện. Kiểm tra bắt buộc trước khi phát hành: mọi thiết bị đều phải nằm trên ít nhất một tuyến ống (trừ tủ điện); mọi công đoạn phải có DN; cảnh báo khi một tuyến quá dài hoặc có quá nhiều co gây tổn thất áp; đối chiếu tổng chiều dài ống với kích thước khu đất trên mặt bằng.",
+          "s": "new"
+        },
+        {
           "t": "Tab 6 — Controls & Electrical: danh sách motor (kW / DOL-VFD / duty-standby), danh sách instrument, tổng hợp PLC I/O, ma trận logic điều khiển.",
           "s": "std"
         },

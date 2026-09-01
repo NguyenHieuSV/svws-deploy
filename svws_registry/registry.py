@@ -55,6 +55,7 @@ _SVWSPID = _HERE / "static" / "svwspid.js"   # bộ dựng sơ đồ P&ID chuẩ
 _SVWSGA = _HERE / "static" / "svwsga.js"     # bộ dựng mặt bằng GA chuẩn
 _SVWSDIEN = _HERE / "static" / "svwsdien.js" # bộ dựng logic vận hành + bản vẽ điện
 _SVWSCHE = _HERE / "static" / "svwsche.js"   # bộ dựng bản vẽ chế tạo (SD)
+_SVWSVT = _HERE / "static" / "svwsvt.js"     # vật tư & phân tách thi công theo hình học
 
 MAX_REVISIONS = 300  # giữ tối đa bao nhiêu bản lịch sử
 
@@ -88,37 +89,45 @@ class RegistryRevision(SQLModel, table=True):
 
 _MUC_TAB7 = "Tab 7 — Logic vận hành & Sơ đồ mạch điện"
 _MUC_TAB4 = "Bản vẽ chế tạo phải ĐỦ ĐỂ XƯỞNG LÀM ĐƯỢC"
+_MUC_TAB5 = "Số lượng vật tư phải SUY TỪ HÌNH HỌC THẬT"
 
 
-def _seed_items(tien_to: str) -> list:
-    """Lấy các mục trong file seed có nội dung bắt đầu bằng `tien_to`."""
+def _seed_items(tien_to) -> list:
+    """Lấy các mục trong seed bắt đầu bằng `tien_to` (chuỗi hoặc danh sách chuỗi).
+
+    Giữ nguyên THỨ TỰ trong file seed để chèn vào tài liệu không bị đảo.
+    """
     if not _SEED.exists():
         return []
+    dau = (tien_to,) if isinstance(tien_to, str) else tuple(tien_to)
     ra = []
     for sec in json.loads(_SEED.read_text(encoding="utf-8")).get("sections") or []:
         for it in sec.get("items") or []:
-            if (it.get("t") or "").startswith(tien_to):
+            if (it.get("t") or "").startswith(dau):
                 ra.append(it)
     return ra
 
 
-def _bo_sung_tab4(data: dict) -> bool:
-    """Chèn hai mục siết chuẩn bản vẽ chế tạo vào ngay sau cụm Tab 4.
+def _bo_sung_muc(data: dict, dau_hieu: str, tien_to, nhom: str = "") -> bool:
+    """Chèn các mục seed có tiền tố `tien_to` vào ngay sau cụm tab tương ứng.
 
-    Idempotent như _nang_cap_9_tab: nhận diện bằng câu đặc trưng trong nội dung.
+    Idempotent: nhận diện bằng câu đặc trưng `dau_hieu` đã có trong tài liệu.
+    Dùng cho mọi lần siết chuẩn về sau, không phải viết lại hàm mới mỗi lần.
     """
+    if not nhom:                                       # "Tab 4 (bổ sung)" → "4"
+        nhom = (tien_to if isinstance(tien_to, str) else tien_to[0]).split(" ")[1]
     for sec in data.get("sections") or []:
         if "tab bắt buộc" not in (sec.get("title") or "").lower():
             continue
         items = sec.get("items") or []
-        if any(_MUC_TAB4 in (it.get("t") or "") for it in items):
+        if any(dau_hieu in (it.get("t") or "") for it in items):
             return False
-        them = [it for it in _seed_items("Tab 4 (bổ sung)")]
+        them = _seed_items(tien_to)
         if not them:
             return False
         vt = 0
         for i, it in enumerate(items):
-            if (it.get("t") or "").startswith("Tab 4"):
+            if (it.get("t") or "").startswith("Tab " + nhom):
                 vt = i + 1
         sec["items"] = items[:vt] + them + items[vt:]
         return True
@@ -197,8 +206,12 @@ def init_db() -> None:
         if _nang_cap_9_tab(data):
             ghi.append("Tab 7 — Logic vận hành & Sơ đồ mạch điện "
                        "(chuẩn chuyển từ 8 lên 9 tab)")
-        if _bo_sung_tab4(data):
+        if _bo_sung_muc(data, _MUC_TAB4, "Tab 4 (bổ sung)"):
             ghi.append("Siết chuẩn Tab 4 — bản vẽ chế tạo phải đủ để xưởng làm được")
+        if _bo_sung_muc(data, _MUC_TAB5,
+                        ["Tab 5 (bổ sung) — Số lượng vật tư",
+                         "Tab 5 (bổ sung) — Danh sách công đoạn"], "5"):
+            ghi.append("Siết chuẩn Tab 5 — vật tư suy từ hình học thật của bản vẽ 3D")
         if ghi:
             doc.data = data
             flag_modified(doc, "data")
@@ -315,6 +328,22 @@ def svwsche_js():
     if not _SVWSCHE.exists():
         raise HTTPException(500, "Thiếu static/svwsche.js trong module")
     return Response(_SVWSCHE.read_text(encoding="utf-8"),
+                    media_type="application/javascript; charset=utf-8",
+                    headers={"Cache-Control": "no-cache"})
+
+
+@router.get("/svwsvt.js", include_in_schema=False)
+def svwsvt_js():
+    """Vật tư & phân tách thi công lấy số từ HÌNH HỌC THẬT của bản vẽ 3D.
+
+    Trong tool đã sinh, mọi công đoạn đều ra 6 m ống và 2 co 90° vì đó là hằng
+    số gõ cứng — đoạn dài 2 m và đoạn dài 30 m ra cùng một số, và BOQ lấy giá
+    từ đó nên sai theo. Thư viện này đọc chiều dài thật, số khúc gãy thật và vị
+    trí thật của thiết bị để ra số lượng, kèm cột "căn cứ tính" cho từng dòng.
+    """
+    if not _SVWSVT.exists():
+        raise HTTPException(500, "Thiếu static/svwsvt.js trong module")
+    return Response(_SVWSVT.read_text(encoding="utf-8"),
                     media_type="application/javascript; charset=utf-8",
                     headers={"Cache-Control": "no-cache"})
 
@@ -712,6 +741,29 @@ def ai_execute(payload: dict = Body(...)):
                 "nozzle nằm ngoài thân, hai nozzle sát tới mức chồng vùng gia cường, "
                 "thiếu xả đáy, thiếu cửa thăm. loi PHẢI rỗng.\n"
                 "  Nút in tờ chế tạo PHẢI in cả HÌNH (T.ve()) chứ không chỉ bảng chữ.\n"
+                "- Tab 5 (Phân tách thi công & vật tư): dùng SVWSVT. TUYỆT ĐỐI KHÔNG "
+                "gõ hằng số kiểu qty:6 cho ống và qty:2 cho co 90° ở mọi công đoạn — "
+                "đoạn dài 2 m và đoạn dài 30 m sẽ ra cùng một số, và tab BOQ lấy giá "
+                "từ đây nên giá cũng sai.\n"
+                "    // SAU khi đã dựng xong tab 3D (cần chính hình học đó):\n"
+                "    const V = SVWSVT.to({ong:'UPVC', heSoHao:0.07, duTru:0.05});\n"
+                "    V.nap(S.thongKeOng(), EQUIP, pos, PIPES);\n"
+                "    elCongDoan.innerHTML = V.bangCongDoan();  // từng công đoạn + vật tư\n"
+                "    elTongHop.innerHTML  = V.bangTongHop();   // gộp toàn hệ để đặt hàng\n"
+                "    console.log(V.kiemTra());\n"
+                "  S.thongKeOng() trả chiều dài THẬT (mm), số co 90° đếm theo khúc gãy "
+                "thật và cao trình của từng tuyến đã vẽ, nên bảng vật tư không thể lệch "
+                "với bản vẽ. Danh sách công đoạn tự sinh từ PIPES — đừng gõ tay danh "
+                "sách công đoạn, gõ tay thì thêm thiết bị vào 3D mà quên thêm công đoạn "
+                "là thiếu vật tư mà không ai phát hiện.\n"
+                "  Thư viện tự tính: giá đỡ theo bước chuẩn của vật liệu, tê tại đầu nối "
+                "nhiều nhánh, van một chiều ở đầu đẩy bơm, mặt bích theo số đầu nối và "
+                "số van, móng theo chân đế thật, cáp điện theo khoảng cách Manhattan từ "
+                "tủ tới từng động cơ. Mỗi dòng có cột CĂN CỨ TÍNH — giữ nguyên cột này.\n"
+                "  kiemTra() bắt: công đoạn thiếu DN, tuyến ngắn bất thường (hai thiết bị "
+                "trùng chỗ), THIẾT BỊ KHÔNG NỐI VÀO TUYẾN NÀO (thiếu vật tư), tuyến quá "
+                "nhiều co gây tổn thất áp. loi PHẢI rỗng.\n"
+                "  Tab 9 (BOQ) LẤY KHỐI LƯỢNG TỪ V.tongHop(), không tự gõ lại số lượng.\n"
                 "- Tab 7 (Logic vận hành & mạch điện): dùng SVWSDIEN. Đây là tab để "
                 "THỢ ĐẤU TỦ và NGƯỜI LẬP TRÌNH PLC làm việc, nên phải đủ số liệu thật, "
                 "ĐỪNG tự gõ toạ độ SVG cho sơ đồ điện.\n"
