@@ -28,6 +28,17 @@
 (function (global) {
   'use strict';
 
+  /* Khung tên + logo công ty: nới viewBox thêm một dải ở dưới rồi vẽ vào đó.
+     Chèn đè lên bản vẽ thì che mất thiết bị, nên phải nới. Không có SVWSKT
+     (mở file rời, thiếu thư viện) thì trả nguyên bản vẽ, không vỡ. */
+  function _kt(W, H, opt) {
+    var K = window.SVWSKT;
+    if (!K) return { H: H, g: '' };
+    var c = K.cao(W);
+    return { H: H + c, g: K.svg(W, H, opt || {}) };
+  }
+
+
   var NAVY = '#0b2545', INK = '#12263a', MO = '#33475b', XAM = '#6c757d';
   var DO = '#b3271e', LUC = '#1f7a4d', VANG = '#b8860b';
   var FONT = 'IBM Plex Sans,Segoe UI,Arial,sans-serif';
@@ -657,9 +668,14 @@
           }
         }
       return {
-        svg: '<svg viewBox="0 0 ' + b.W + ' ' + b.H + '" width="100%" ' +
-             'xmlns="http://www.w3.org/2000/svg" style="background:#fdfefe">' +
-             out.join('') + '</svg>',
+        svg: (function () {
+          var kt = _kt(b.W, b.H, { tenBV: 'Bản vẽ chế tạo — ' + tag +
+                                     (ten ? ' (' + ten + ')' : ''),
+                                   soBV: 'SD-' + tag, tyLe: '1:' + b.tyLe });
+          return '<svg viewBox="0 0 ' + b.W + ' ' + kt.H + '" width="100%" ' +
+            'xmlns="http://www.w3.org/2000/svg" style="background:#fdfefe">' +
+            out.join('') + kt.g + '</svg>';
+        })(),
         lan: lan, nhac: nhac, tyLe: b.tyLe
       };
     }

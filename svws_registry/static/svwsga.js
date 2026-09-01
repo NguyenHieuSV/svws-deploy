@@ -23,6 +23,17 @@
 (function (global) {
   'use strict';
 
+  /* Khung tên + logo công ty: nới viewBox thêm một dải ở dưới rồi vẽ vào đó.
+     Chèn đè lên bản vẽ thì che mất thiết bị, nên phải nới. Không có SVWSKT
+     (mở file rời, thiếu thư viện) thì trả nguyên bản vẽ, không vỡ. */
+  function _kt(W, H, opt) {
+    var K = window.SVWSKT;
+    if (!K) return { H: H, g: '' };
+    var c = K.cao(W);
+    return { H: H + c, g: K.svg(W, H, opt || {}) };
+  }
+
+
   var NAVY = '#0b2545', INK = '#12263a', MO = '#33475b', DO = '#c9184a';
 
   function esc(s) {
@@ -228,7 +239,9 @@
 
     function ve() {
       xaNhan(); huongBac();
-      var d = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ' + W + ' ' + H +
+      var kt = _kt(W, H, { tenBV: 'GA — Mặt bằng bố trí', soBV: (o.ma || '') + '-GA-001',
+                           tyLe: '1:' + tyLe, ma: o.ma, ten: o.ten });
+      var d = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ' + W + ' ' + kt.H +
         '" style="width:100%;background:#fff;font-family:IBM Plex Sans,Arial">' +
         '<rect x="2" y="2" width="' + (W - 4) + '" height="' + (H - 4) +
         '" fill="none" stroke="' + NAVY + '" stroke-width="1.2"/>' +
@@ -238,7 +251,7 @@
             ' (A3) • kích thước mm') + '</text>';
       if (o.ten) d += '<text x="10" y="21" font-size="4" fill="' + MO +
         '" font-family="IBM Plex Sans,Arial">' + esc(o.ten) + '</text>';
-      return d + out.join('') + '</svg>';
+      return d + out.join('') + kt.g + '</svg>';
     }
 
     /**

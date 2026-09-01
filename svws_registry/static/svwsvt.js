@@ -28,6 +28,17 @@
 (function (global) {
   'use strict';
 
+  /* Khung tên + logo công ty: nới viewBox thêm một dải ở dưới rồi vẽ vào đó.
+     Chèn đè lên bản vẽ thì che mất thiết bị, nên phải nới. Không có SVWSKT
+     (mở file rời, thiếu thư viện) thì trả nguyên bản vẽ, không vỡ. */
+  function _kt(W, H, opt) {
+    var K = window.SVWSKT;
+    if (!K) return { H: H, g: '' };
+    var c = K.cao(W);
+    return { H: H + c, g: K.svg(W, H, opt || {}) };
+  }
+
+
   var FONT = 'IBM Plex Sans,Segoe UI,Arial,sans-serif';
   function esc(s) {
     return String(s == null ? '' : s)
@@ -412,10 +423,12 @@
       tx(W / 2, H - 12, 'BẢN THAM KHẢO — CHƯA DUYỆT THI CÔNG', 11,
          'rgba(179,39,30,0.28)', 'middle', 1);
 
-      return '<svg viewBox="0 0 ' + W + ' ' + H + '" width="100%" ' +
+      var kt = _kt(W, H, { tenBV: 'Công đoạn thi công — ' + (c.mo || ''),
+                           soBV: 'CĐ-' + ('0' + (c.stt || 1)).slice(-2), tyLe: 'NTS' });
+      return '<svg viewBox="0 0 ' + W + ' ' + kt.H + '" width="100%" ' +
         'xmlns="http://www.w3.org/2000/svg" style="background:#fdfefe">' +
         '<rect width="' + W + '" height="' + H + '" fill="#fdfefe" stroke="' + NAVY +
-        '" stroke-width="1.4"/>' + o2.join('') + '</svg>';
+        '" stroke-width="1.4"/>' + o2.join('') + kt.g + '</svg>';
     }
 
     // ====================== CÔNG ĐOẠN LẮP BỂ & CHẠY THỬ NGHIỆM THU ==========

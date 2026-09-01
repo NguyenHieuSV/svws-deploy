@@ -34,6 +34,17 @@
 (function (global) {
   'use strict';
 
+  /* Khung tên + logo công ty: nới viewBox thêm một dải ở dưới rồi vẽ vào đó.
+     Chèn đè lên bản vẽ thì che mất thiết bị, nên phải nới. Không có SVWSKT
+     (mở file rời, thiếu thư viện) thì trả nguyên bản vẽ, không vỡ. */
+  function _kt(W, H, opt) {
+    var K = window.SVWSKT;
+    if (!K) return { H: H, g: '' };
+    var c = K.cao(W);
+    return { H: H + c, g: K.svg(W, H, opt || {}) };
+  }
+
+
   var NAVY = '#0b2545', INK = '#12263a', MO = '#33475b', XAM = '#6c757d';
   var DO = '#b3271e', LUC = '#1f7a4d', VANG = '#b8860b', TIM = '#6f4fa8';
   var FONT = 'IBM Plex Sans,Segoe UI,Arial,sans-serif';
@@ -166,15 +177,16 @@
       dong.forEach(function (d, i) { chu(x, y + i * (fs + 2.5), d, fs, mau, neo, dam); });
       return dong.length * (fs + 2.5);
     }
-    function khung(tieu, phu) {
-      var s = '<svg viewBox="0 0 ' + W + ' ' + H + '" width="100%" ' +
+    function khung(tieu, phu, sbv) {
+      var kt = _kt(W, H, { tenBV: tieu || '', soBV: sbv || '', tyLe: 'NTS' });
+      var s = '<svg viewBox="0 0 ' + W + ' ' + kt.H + '" width="100%" ' +
         'xmlns="http://www.w3.org/2000/svg" style="background:#fdfefe">' +
         '<rect width="' + W + '" height="' + H + '" fill="#fdfefe" stroke="' + NAVY + '"/>';
       if (tieu) s += '<text x="20" y="26" font-size="15" font-weight="700" fill="' +
         NAVY + '" font-family="' + FONT + '">' + esc(tieu) + '</text>';
       if (phu) s += '<text x="20" y="46" font-size="10.5" fill="' + MO +
         '" font-family="' + FONT + '">' + esc(phu) + '</text>';
-      return s + out.join('') + '</svg>';
+      return s + out.join('') + kt.g + '</svg>';
     }
     function chongLan() {
       var ds = [];
@@ -287,7 +299,8 @@
       g.chu(24, b.H - 22, 'Tổng công suất lắp đặt ' + (Math.round(tongKW * 10) / 10) +
         ' kW · dòng tính toán ' + Math.round(Itt) + ' A (hệ số đồng thời 0,8) · ' +
         'MCCB tổng chọn ' + cbTong + ' A', 9, MO, 'start', 0, false);
-      return { svg: g.khung('SƠ ĐỒ NGUYÊN LÝ MẠCH ĐỘNG LỰC — ' + (o.ma || ''), o.ten || ''),
+      return { svg: g.khung('SƠ ĐỒ NGUYÊN LÝ MẠCH ĐỘNG LỰC', o.ten || '',
+                              (o.ma || '') + '-EL-001'),
                lan: g.chongLan() };
     }
     function ve() { return dungHinh().svg; }
@@ -496,7 +509,8 @@ lam(tongKW, 1) + '</td><td>3P</td><td>—</td><td>' + lam(tongI * 0.8, 1) +
         if (t) g.chu(b.xR + 14, y + 4, t, 8, XAM, 'start');
         if (m.ghi) g.chu(b.xR + 14, y + 16, m.ghi, 7.6, XAM, 'start');
       });
-      return { svg: g.khung('SƠ ĐỒ MẠCH ĐIỀU KHIỂN — ' + (o.ma || ''), o.ten || ''),
+      return { svg: g.khung('SƠ ĐỒ MẠCH ĐIỀU KHIỂN', o.ten || '',
+                              (o.ma || '') + '-EL-002'),
                lan: g.chongLan() };
     }
     function ve() { return dungHinh().svg; }
@@ -654,7 +668,8 @@ lam(tongKW, 1) + '</td><td>3P</td><td>—</td><td>' + lam(tongI * 0.8, 1) +
                 7.8, MO, 'start', 0, false);
         });
       });
-      return { svg: g.khung('SƠ ĐỒ ĐẤU NỐI PLC — ' + (o.ma || ''), o.ten || ''),
+      return { svg: g.khung('SƠ ĐỒ ĐẤU NỐI PLC', o.ten || '',
+                              (o.ma || '') + '-EL-003'),
                lan: g.chongLan() };
     }
     function ve() { return dungHinh().svg; }
@@ -848,8 +863,9 @@ lam(tongKW, 1) + '</td><td>3P</td><td>—</td><td>' + lam(tongI * 0.8, 1) +
       g.chu(24, H - 18, 'Tủ ' + Wt + ' × ' + Ht + ' × ' + Dt + ' mm · ' + ray.length +
         ' ray DIN · ' + ds.length + ' thiết bị · tỷ lệ vẽ 1:' +
         Math.round(1 / sc * 10) / 10, 9, MO, 'start', 0, false);
-      return { svg: g.khung('BỐ TRÍ THIẾT BỊ TRONG TỦ — ' + (o.ma || ''),
-                            o.ten || 'Mặt trước, đã tháo cánh'),
+      return { svg: g.khung('BỐ TRÍ THIẾT BỊ TRONG TỦ',
+                            o.ten || 'Mặt trước, đã tháo cánh',
+                            (o.ma || '') + '-EL-004'),
                lan: g.chongLan() };
     }
     function ve() { return dungHinh().svg; }

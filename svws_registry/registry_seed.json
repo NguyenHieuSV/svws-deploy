@@ -45,6 +45,10 @@
         {
           "t": "Mọi BẢN VẼ khi in (in A3 từng tab · in công đoạn thi công · in tờ chế tạo) phải có KHUNG TÊN bản vẽ + LOGO công ty: logo SVWS, tên & địa chỉ công ty, tên dự án (Q tự lấy theo bảng thông số), tên bản vẽ, số bản vẽ, Rev, tỷ lệ, người lập, ngày, trạng thái duyệt/watermark (\"BẢN THAM KHẢO — CHƯA DUYỆT\"). Khung tên song ngữ theo nút Việt/Anh.",
           "s": "new"
+        },
+        {
+          "t": "LOGO SÓNG VIỆT PHẢI CÓ TRÊN MỌI TRANG, MỌI TAB VÀ MỌI TỜ IN — dùng thư viện SVWSKT, không tự vẽ. Trước đây chuẩn chỉ bắt buộc khung tên khi IN bản vẽ, và không thư viện nào cung cấp khung tên nên mỗi bộ dựng tự viết một dòng tiêu đề riêng, còn logo thì AI KHÔNG THỂ nhúng (ảnh base64 dài gần 19.000 ký tự, vượt xa mức nó gõ được) nên nó vẽ một ô vuông rồi ghi chữ “LOGO” vào đó — hồ sơ gửi khách không có nhận diện công ty. Nay logo thật được server chèn sẵn vào biến window.SVWS_LOGO lúc sinh tool; tool chỉ cần khai MỘT LẦN ở đầu: SVWSKT.dat({duAn, khach, ma, ten, rev, nguoiLap, ngay, diaChi}). Sau đó: (1) MỌI BẢN VẼ SVG tự có khung tên ở dải dưới cùng — các thư viện SVWS3D/SVWSPID/SVWSGA/SVWSCHE/SVWSVT/SVWSDIEN đã tự gọi, không phải làm gì thêm; (2) MỌI TAB trên màn hình dán SVWSKT.dauTrang('<tên tab>') ở đầu nội dung; (3) MỌI TỜ IN BẢNG BIỂU (BOQ, O&M, chạy thử, vật tư công đoạn) dán SVWSKT.html({tenBV, soBV}) ở đầu mỗi tờ. Nhúng SVWSKT.CSS_TAG một lần. Khung tên gồm: logo · tên pháp nhân đúng đăng ký kinh doanh (Công ty TNHH Giải pháp Kỹ Thuật Sóng Việt / Song Viet Water Solutions Co., Ltd.) · địa chỉ · dự án và khách hàng · tên bản vẽ · số bản vẽ · Rev · tỷ lệ · người lập · ngày · trạng thái duyệt. Song ngữ theo nút Việt/Anh bằng SVWSKT.en(true). Khung tên tự co giãn theo bề rộng bản vẽ và được vẽ trong dải NỚI THÊM ở dưới, không đè lên nội dung. Mở file rời thiếu logo thì thư viện tự dựng dấu hiệu SV bằng vector — không bao giờ để ô trống hay chữ “LOGO”.",
+          "s": "std"
         }
       ]
     },

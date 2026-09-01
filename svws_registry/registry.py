@@ -57,6 +57,7 @@ _SVWSDIEN = _HERE / "static" / "svwsdien.js" # bộ dựng logic vận hành + b
 _SVWSCHE = _HERE / "static" / "svwsche.js"   # bộ dựng bản vẽ chế tạo (SD)
 _SVWSVT = _HERE / "static" / "svwsvt.js"     # vật tư & phân tách thi công theo hình học
 _SVWSCM = _HERE / "static" / "svwscm.js"     # hồ sơ chạy thử & nghiệm thu (commissioning)
+_SVWSKT = _HERE / "static" / "svwskt.js"     # khung tên + logo công ty dùng chung
 
 MAX_REVISIONS = 300  # giữ tối đa bao nhiêu bản lịch sử
 
@@ -101,6 +102,7 @@ _MUC_CAP = "Danh mục cáp phải liệt kê RIÊNG TỪNG ĐỘNG CƠ"
 _MUC_BOQ = "Mỗi dòng BOQ phải mang MỨC TIN CẬY"
 _MUC_DIEN = "Mức chi tiết bắt buộc của phần điện"
 _MUC_TAB8 = "Tab 8 — Commissioning (Chạy thử & nghiệm thu)"
+_MUC_LOGO = "LOGO SÓNG VIỆT PHẢI CÓ TRÊN MỌI TRANG"
 
 
 def _bo_sung_nhom(data: dict, dau_hieu: str, tien_to, tu_khoa: str) -> bool:
@@ -321,6 +323,10 @@ def init_db() -> None:
         if _bo_sung_nhom(data, _MUC_JSON,
                          "File cấu hình JSON theo MỘT ĐỊNH DẠNG DUY NHẤT", "nền tảng"):
             ghi.append("Chuẩn hoá định dạng file cấu hình JSON cho mọi tool")
+        if _bo_sung_nhom(data, _MUC_LOGO,
+                         "LOGO SÓNG VIỆT PHẢI CÓ TRÊN MỌI TRANG", "nền tảng"):
+            ghi.append("Logo và khung tên công ty trên mọi trang, mọi tab, "
+                       "mọi tờ in — dùng thư viện SVWSKT")
         if _bo_sung_muc(data, _MUC_OM, "Tab 9 (bổ sung)", "9"):
             ghi.append("Sổ O&M sinh từ danh sách thiết bị (SVWSOM)")
         if _bo_sung_muc(data, _MUC_CAP, "Tab 6 (bổ sung)", "6"):
@@ -366,7 +372,7 @@ def _phien_ban_lib() -> str:
         return v[:12]
     m = 0
     for f in (_THREE, _SVWS3D, _SVWSPID, _SVWSGA, _SVWSDIEN,
-              _SVWSCHE, _SVWSVT, _SVWSCM):
+              _SVWSCHE, _SVWSVT, _SVWSCM, _SVWSKT):
         if f.exists():
             m = max(m, int(f.stat().st_mtime))
     return str(m)
@@ -503,6 +509,23 @@ def svwscm_js():
     if not _SVWSCM.exists():
         raise HTTPException(500, "Thiếu static/svwscm.js trong module")
     return Response(_SVWSCM.read_text(encoding="utf-8"),
+                    media_type="application/javascript; charset=utf-8",
+                    headers={"Cache-Control": "no-cache"})
+
+
+@router.get("/svwskt.js", include_in_schema=False)
+def svwskt_js():
+    """Khung tên và logo công ty dùng chung cho mọi bản vẽ, tab và tờ in.
+
+    Chuẩn bắt buộc mọi bản vẽ in ra phải có khung tên kèm logo Sóng Việt, nhưng
+    AI KHÔNG THỂ tự làm: ảnh logo dạng base64 dài gần 19.000 ký tự, vượt xa mức
+    nó gõ được, nên nó vẽ một ô vuông rồi ghi chữ "LOGO" vào đó. Logo thật được
+    chèn vào biến window.SVWS_LOGO lúc sinh tool, thư viện này đọc ra và dựng
+    khung tên cho cả bản vẽ SVG lẫn tờ in bảng biểu.
+    """
+    if not _SVWSKT.exists():
+        raise HTTPException(500, "Thiếu static/svwskt.js trong module")
+    return Response(_SVWSKT.read_text(encoding="utf-8"),
                     media_type="application/javascript; charset=utf-8",
                     headers={"Cache-Control": "no-cache"})
 
@@ -800,7 +823,8 @@ def ai_execute(payload: dict = Body(...)):
                 "★★★ ĐIỀU QUAN TRỌNG NHẤT — ĐỌC TRƯỚC TIÊN ★★★\n"
                 "Bảy thư viện sau ĐÃ CÓ SẴN dưới dạng biến toàn cục khi file chạy, do hệ "
                 "thống tự chèn vào chỗ dấu <script>/*__SVWS_THREE__*/</script>:\n"
-                "  THREE · SVWS3D · SVWSPID · SVWSGA · SVWSCHE · SVWSVT · SVWSDIEN · SVWSCM\n"
+                "  THREE · SVWSKT · SVWS3D · SVWSPID · SVWSGA · SVWSCHE · SVWSVT · SVWSDIEN · "
+                "SVWSCM  (kèm LOGO công ty thật ở biến window.SVWS_LOGO)\n"
                 "TUYỆT ĐỐI KHÔNG được tự viết lại chúng. KHÔNG viết "
                 "'const SVWSGA = (function(){…})();' hay bất kỳ khai báo nào đặt tên "
                 "trùng bảy tên trên — khai báo trong file sẽ CHE MẤT bản thật, và bản "
@@ -1032,6 +1056,24 @@ def ai_execute(payload: dict = Body(...)):
                 "bao nhiêu rồi hạ xuống đâu, có đánh dấu co 90°, vị trí giá đỡ, cao trình "
                 "giá và trình tự lắp. Nút in công đoạn PHẢI in cả bản vẽ này (lấy riêng "
                 "bằng V.veCongDoan(c) nếu cần), không chỉ in bảng vật tư.\n"
+                "- LOGO VÀ KHUNG TÊN — làm ĐẦU TIÊN, trước khi dựng tab nào: khai một "
+                "lần rồi mọi bản vẽ tự có khung tên mang logo Sóng Việt.\n"
+                "    SVWSKT.dat({ duAn:'<tên dự án>', khach:'<khách hàng>',\n"
+                "      ma:'<mã thiết kế>', ten:'<tên hệ>', rev:'0',\n"
+                "      nguoiLap:'<người lập>', ngay:'<dd/mm/yyyy>', diaChi:'<địa chỉ>' });\n"
+                "    document.head.insertAdjacentHTML('beforeend', SVWSKT.CSS_TAG);\n"
+                "  Sau đó KHÔNG phải làm gì thêm cho bản vẽ: SVWS3D · SVWSPID · SVWSGA · "
+                "SVWSCHE · SVWSVT · SVWSDIEN đều tự đóng khung tên vào dải nới thêm phía "
+                "dưới bản vẽ.\n"
+                "  CÒN HAI CHỖ PHẢI TỰ DÁN:\n"
+                "    · đầu MỖI TAB trên màn hình: SVWSKT.dauTrang('<tên tab>')\n"
+                "    · đầu MỖI TỜ IN BẢNG BIỂU (BOQ, O&M, chạy thử, vật tư công đoạn): "
+                "SVWSKT.html({tenBV:'…', soBV:'…'})\n"
+                "  TUYỆT ĐỐI KHÔNG tự vẽ logo bằng CSS/SVG/text và KHÔNG gõ chuỗi base64 "
+                "của ảnh — logo thật đã có sẵn ở window.SVWS_LOGO, thư viện tự đọc. Tự vẽ "
+                "lại là ra một ô vuông có chữ “LOGO”, hồ sơ gửi khách mất nhận diện công "
+                "ty. Nút Việt/Anh gọi SVWSKT.en(true|false) rồi vẽ lại là khung tên đổi "
+                "theo.\n"
                 "- Tab 8 (Commissioning — Chạy thử & nghiệm thu): dùng SVWSCM, "
                 "ĐỪNG viết tay từng bảng. Đây là tab người ta cầm ra công trường để "
                 "mở van thật, đóng điện thật, cấp dòng một chiều vào stack EDI thật — "

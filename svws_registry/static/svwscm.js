@@ -1196,7 +1196,11 @@
     ];
 
     function tatCa() {
-      return MUC.map(function (m, i) {
+      // Dải đầu trang mang logo công ty: tab xem trên màn hình cũng phải nhận
+      // ra là hồ sơ của Sóng Việt, không chỉ lúc in.
+      var dau = global.SVWSKT
+        ? global.SVWSKT.dauTrang('Chạy thử & nghiệm thu — ' + ma) : '';
+      return dau + MUC.map(function (m, i) {
         return muc(m[0], m[1] + '   [' + soBanVe(i + 1) + ']', m[2]() || '');
       }).join('');
     }
@@ -1207,7 +1211,13 @@
      * chung một khung tên với các tab khác — không vẽ khung riêng ở đây.
      */
     function inA3(k) {
-      var khung = typeof k === 'function' ? k : function (sbv, tbv) {
+      /* Khung tên lấy từ SVWSKT nên có LOGO công ty và trùng đúng khung tên
+         của các bản vẽ khác; chỉ khi mở file rời thiếu thư viện mới dùng bản
+         rút gọn bên dưới, để tờ in không bao giờ trắng đầu trang. */
+      var K = global.SVWSKT;
+      var khung = typeof k === 'function' ? k
+        : K ? function (sbv, tbv) { return K.html({ tenBV: tbv, soBV: sbv }); }
+        : function (sbv, tbv) {
         return '<div class="svws-cm-khung"><b>' + esc(o.ten || ma) + '</b>' +
           '<span>' + esc(tbv) + '</span><span>Số bản vẽ: ' + esc(sbv) + '</span>' +
           '<span>Rev: ' + esc(o.rev || '0') + '</span>' +
@@ -1226,7 +1236,8 @@
       if (!w) return null;
       w.document.write('<!doctype html><html lang="vi"><head><meta charset="utf-8">' +
         '<title>' + esc(ma) + ' — Chạy thử &amp; nghiệm thu</title><style>' +
-        CSS + CSS_IN + '</style></head><body>' + than + '</body></html>');
+        CSS + CSS_IN + (global.SVWSKT ? global.SVWSKT.CSS : '') +
+        '</style></head><body>' + than + '</body></html>');
       w.document.close();
       w.focus();
       setTimeout(function () { w.print(); }, 400);
@@ -1276,7 +1287,8 @@
     version: '1.0',
     tao: tao,
     CSS: CSS, CSS_IN: CSS_IN,
-    CSS_TAG: '<style>' + CSS + '@media print{' + CSS_IN + '}</style>',
+    CSS_TAG: '<style>' + CSS + '@media print{' + CSS_IN + '}</style>' +
+      (global.SVWSKT ? global.SVWSKT.CSS_TAG : ''),
     GATE: GATE, CK: CK, TEN_DV: TEN_DV,
     apThu: apThu, vatLieu: vatLieu
   };

@@ -27,6 +27,17 @@
 (function (global) {
   'use strict';
 
+  /* Khung tên + logo công ty: nới viewBox thêm một dải ở dưới rồi vẽ vào đó.
+     Chèn đè lên bản vẽ thì che mất thiết bị, nên phải nới. Không có SVWSKT
+     (mở file rời, thiếu thư viện) thì trả nguyên bản vẽ, không vỡ. */
+  function _kt(W, H, opt) {
+    var K = window.SVWSKT;
+    if (!K) return { H: H, g: '' };
+    var c = K.cao(W);
+    return { H: H + c, g: K.svg(W, H, opt || {}) };
+  }
+
+
   var NAVY = '#0b2545', INK = '#12263a', MO = '#33475b', XAM = '#6c757d';
   var MAU = {
     raw:   '#0b2545',   // nước cấp / RO feed
@@ -625,7 +636,10 @@
     function ve() {
       noiKho();
       xaNhan();
-      var dau = '<svg viewBox="0 0 ' + W + ' ' + H + '" width="100%" ' +
+      var kt = _kt(W, H, { tenBV: 'P&ID — Sơ đồ công nghệ và điều khiển',
+                           soBV: (o.ma || '') + '-PID-001', tyLe: 'NTS',
+                           ma: o.ma, ten: o.ten });
+      var dau = '<svg viewBox="0 0 ' + W + ' ' + kt.H + '" width="100%" ' +
         'xmlns="http://www.w3.org/2000/svg" style="background:#fdfefe">' +
         '<rect width="' + W + '" height="' + H + '" fill="#fdfefe" stroke="' + NAVY + '"/>';
       var tieu = '';
@@ -638,7 +652,7 @@
         tieu += '<text x="20" y="46" font-size="10.5" fill="' + MO +
           '" font-family="IBM Plex Sans,Segoe UI,Arial,sans-serif">' + esc(o.dong2) + '</text>';
       }
-      return dau + tieu + out.join('') + '</svg>';
+      return dau + tieu + out.join('') + kt.g + '</svg>';
     }
 
     /** Còn chỗ nào đè nhau không — bắt lỗi trước khi giao bản vẽ. */
