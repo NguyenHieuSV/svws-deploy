@@ -60,6 +60,8 @@
     var vachao = [];              // các va chạm còn lại sau khi đã né
     var nhanCho = [];             // nhãn CHỜ đặt ở lượt sau (xem ve())
     var hthong = null;            // đồ thị thiết bị/đường ống khi tự xếp
+    var mocLoai = {};             // tag → loại thiết bị, để chọn chỗ gắn bầu đo
+    var ioDaGan = null;           // kết quả gắn bầu đo từ bảng I/O
     var api2 = null;              // gán ở cuối, để heThong() trả về chính nó
 
     function themChiem(x1, y1, x2, y2, ten) {
@@ -255,6 +257,7 @@
         // chưa biết chỗ nào bận. Xếp hàng, vẽ ở lượt sau khi đã có đủ ký hiệu.
         if (e.tag) {
           moc[e.tag] = { x: k.cx, y: y, w: k.w, h: k.h, x1: x, x2: x + k.w };
+          mocLoai[e.tag] = String(e.type || '') + ' ' + loai;
           nhanCho.push({ x: k.cx, y: y - k.h / 2 - 8,
                          s: e.tag + (e.ghi ? ' ' + e.ghi : ''),
                          fs: 9, mau: INK, dam: 1, huong: 'tren' });
@@ -316,6 +319,7 @@
       var k = KH[loai](x, y, e);
       themChiem(x - 2, y - k.h / 2 - 2, x + k.w + 2, y + k.h / 2 + 2, e.tag || loai);
       moc[e.tag] = { x: k.cx, y: y, w: k.w, h: k.h, x1: x, x2: x + k.w };
+      mocLoai[e.tag] = String(e.type || '') + ' ' + loai;
       nhanCho.push({ x: k.cx, y: y - k.h / 2 - 8,
                      s: e.tag + (e.ghi ? ' ' + e.ghi : ''),
                      fs: 9, mau: INK, dam: 1, huong: 'tren' });
@@ -495,6 +499,76 @@
       vachao.push('Không còn chỗ trống để đặt bầu đo ' + ten + ' cạnh ' + tag);
     }
 
+    /* ==================================================================
+     * GẮN BẦU ĐO TỪ CHÍNH BẢNG I/O CỦA TỦ ĐIỆN
+     * Mỗi kênh DI/AI là một dụng cụ đo THẬT ngoài hiện trường. Lấy thẳng từ
+     * bảng I/O thì P&ID và bảng I/O không thể lệch nhau: thêm một đầu đo vào
+     * PLC là bầu đo hiện lên sơ đồ, và kênh nào không gắn được vào thiết bị
+     * nào sẽ bị báo lỗi thay vì lặng lẽ thiếu.
+     * ================================================================ */
+    // Chữ cái đầu của tag ISA → loại thiết bị hay mang dụng cụ đó
+    var HOP_TB = {
+      L: /tank|be|bon/i,                       // mức: bồn bể
+      T: /tank|be|bon/i,                       // nhiệt độ
+      P: /pump|bom|vessel|filter|ro|edi|cartridge/i,   // áp suất
+      F: /./,                                  // lưu lượng: chỗ nào cũng có thể
+      A: /vessel|ro|edi|mixedbed|tank/i,       // phân tích (pH, độ dẫn)
+      C: /vessel|ro|edi|mixedbed|tank/i
+    };
+    function soVongLap(tag) {                  // 'LIT-101' → '101'
+      var m = String(tag || '').match(/(\d{2,4})\s*$/);
+      return m ? m[1] : '';
+    }
+    /**
+     * ds: mảng từ SVWSDIEN.plc(...).danhSach()
+     * opt: {caDauRa: true để gắn cả DO/AO (van điều khiển, lệnh chạy)}
+     */
+    var daGan = {};       // tag thiết bị → danh sách dụng cụ đã gắn lên nó
+    function daGanCho(tag, re) {
+      return (daGan[tag] || []).some(function (t) { return re.test(t); });
+    }
+    function dungCuTuIO(ds, opt) {
+      opt = opt || {};
+      var dsTag = Object.keys(moc);
+      var demGan = 0, demBo = 0;
+      (ds || []).forEach(function (k) {
+        var kieu = String(k.kieu || '').toUpperCase();
+        var doDac = kieu === 'DI' || kieu === 'AI';
+        if (!doDac && !opt.caDauRa) return;
+        if (!k.tag) { vachao.push('Kênh ' + (k.dc || '?') + ' chưa có tag hiện trường — ' +
+                                  'không biết gắn dụng cụ vào thiết bị nào.'); return; }
+        var dich = '';
+        if (k.tb && moc[k.tb]) dich = k.tb;                    // khai rõ thì theo khai
+        else {
+          var so = soVongLap(k.tag);
+          if (so) {
+            var chu0 = String(k.tag).charAt(0).toUpperCase();
+            var hop = HOP_TB[chu0] || /./;
+            // ưu tiên thiết bị cùng số vòng lặp VÀ đúng họ thiết bị
+            var uu = dsTag.filter(function (t) {
+              return soVongLap(t) === so && hop.test(String((mocLoai[t] || '')));
+            });
+            var moi = uu.length ? uu : dsTag.filter(function (t) {
+              return soVongLap(t) === so;
+            });
+            if (moi.length) dich = moi[0];
+          }
+        }
+        if (!dich) {
+          demBo++;
+          vachao.push('Dụng cụ ' + k.tag + ' (' + kieu + ' ' + (k.dc || '') + ') không ' +
+                      'gắn được vào thiết bị nào trên sơ đồ — kiểm lại số vòng lặp, ' +
+                      'hoặc khai rõ tb:"<tag thiết bị>" trong kênh I/O.');
+          return;
+        }
+        dungCu(dich, k.tag, opt.phia);
+        (daGan[dich] = daGan[dich] || []).push(k.tag);
+        demGan++;
+      });
+      ioDaGan = { gan: demGan, bo: demBo, tong: (ds || []).length };
+      return api2;
+    }
+
     function ghiChu(tag, s, phia) {
       var m = moc[tag];
       if (!m) { vachao.push('Không thấy thiết bị ' + tag + ' để ghi chú'); return; }
@@ -596,12 +670,34 @@
                    ' thiết bị — kiểm lại chiều dòng chảy trong PIPES, nhiều khả năng ' +
                    'khai ngược from/to.');
       }
+      // Đối chiếu P&ID với bảng I/O: bồn nào cũng phải có đo mức, cụm màng phải
+      // có đo áp — thiếu là vận hành mù, không phải lỗi vẽ nhưng phải nhắc.
+      if (ioDaGan && hthong) {
+        var coDo = {};
+        Object.keys(moc).forEach(function (t) { coDo[t] = 0; });
+        chiem.forEach(function (c) {
+          var m = String(c.ten || '').match(/^bầu (\S+)/);
+          if (m) coDo[m[1]] = 1;
+        });
+        hthong.nut.forEach(function (u) {
+          var t = String(u.e.type || '').toLowerCase();
+          var tag = u.e.tag;
+          if (/tank|be|bon/.test(t) && !daGanCho(tag, /^L/))
+            loi.push('Bồn ' + tag + ' chưa có dụng cụ đo mức trong bảng I/O — ' +
+                     'không biết khi nào bơm chạy hay dừng.');
+          if (/^(ro|roskid|edi)$/.test(t) && !daGanCho(tag, /^[PA]/))
+            loi.push('Cụm ' + tag + ' chưa có đo áp suất hoặc độ dẫn trong bảng I/O — ' +
+                     'không giám sát được chất lượng và tình trạng màng.');
+        });
+      }
       return { loi: loi, soKhoi: chiem.length,
                soThietBi: hthong ? hthong.nut.length : 0,
-               soCot: hthong ? hthong.cot : 0 };
+               soCot: hthong ? hthong.cot : 0,
+               io: ioDaGan };
     }
 
-    api2 = { hang: hang, heThong: heThong, dungCu: dungCu, ghiChu: ghiChu,
+    api2 = { hang: hang, heThong: heThong, dungCu: dungCu,
+             dungCuTuIO: dungCuTuIO, ghiChu: ghiChu,
              noi: noi, noiKho: noiKho, chu: chu, ln: ln, ve: ve, kiemTra: kiemTra,
              xaNhan: xaNhan, moc: moc, MAU: MAU, W: W, H: H };
     return api2;

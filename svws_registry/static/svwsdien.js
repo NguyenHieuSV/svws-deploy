@@ -666,6 +666,18 @@
                dem: dem };
     }
 
+    /** Danh sách phẳng mọi kênh I/O — để P&ID gắn bầu đo từ chính bảng này,
+        nhờ vậy sơ đồ và bảng I/O không thể lệch nhau. */
+    api.danhSach = function () {
+      var ra = [];
+      mods.forEach(function (m) {
+        m.kenh.forEach(function (k) {
+          ra.push({ kieu: m.kieu, module: m.ten, dc: k.dc || '', tag: k.tag || '',
+                    mo: k.mo || '', tin: k.tin || '', tb: k.tb || '' });
+        });
+      });
+      return ra;
+    };
     api.ve = ve; api.bangIO = bangIO; api.kiemTra = kiemTra;
     return api;
   }
