@@ -56,6 +56,7 @@ _SVWSGA = _HERE / "static" / "svwsga.js"     # bộ dựng mặt bằng GA chu�
 _SVWSDIEN = _HERE / "static" / "svwsdien.js" # bộ dựng logic vận hành + bản vẽ điện
 _SVWSCHE = _HERE / "static" / "svwsche.js"   # bộ dựng bản vẽ chế tạo (SD)
 _SVWSVT = _HERE / "static" / "svwsvt.js"     # vật tư & phân tách thi công theo hình học
+_SVWSCM = _HERE / "static" / "svwscm.js"     # hồ sơ chạy thử & nghiệm thu (commissioning)
 
 MAX_REVISIONS = 300  # giữ tối đa bao nhiêu bản lịch sử
 
@@ -99,6 +100,7 @@ _MUC_OM = "Sổ O&M sinh từ CHÍNH danh sách thiết bị"
 _MUC_CAP = "Danh mục cáp phải liệt kê RIÊNG TỪNG ĐỘNG CƠ"
 _MUC_BOQ = "Mỗi dòng BOQ phải mang MỨC TIN CẬY"
 _MUC_DIEN = "Mức chi tiết bắt buộc của phần điện"
+_MUC_TAB8 = "Tab 8 — Commissioning (Chạy thử & nghiệm thu)"
 
 
 def _bo_sung_nhom(data: dict, dau_hieu: str, tien_to, tu_khoa: str) -> bool:
@@ -209,6 +211,62 @@ def _nang_cap_9_tab(data: dict) -> bool:
     return False
 
 
+def _nang_cap_10_tab(data: dict) -> bool:
+    """Chèn Tab 8 — Commissioning vào tài liệu ĐANG CHẠY, đẩy O&M và BOQ lùi một số.
+
+    Chạy thử là khâu duy nhất trong hồ sơ mà sai thì tốn tiền ngay tại công
+    trường, nên nó phải là một tab riêng có số bản vẽ riêng chứ không nằm ké
+    trong sổ O&M như trước. Đánh số lại từ CUỐI về ĐẦU (9→10 rồi mới 8→9), nếu
+    đổi xuôi thì mục vừa thành 9 lại bị lượt sau đẩy tiếp thành 10.
+
+    Idempotent: chạy lại nhiều lần cũng chỉ thêm một lần.
+    """
+    if not _SEED.exists():
+        return False
+    for sec in data.get("sections") or []:
+        if "tab bắt buộc" not in (sec.get("title") or "").lower():
+            continue
+        items = sec.get("items") or []
+        if any(_MUC_TAB8 in (it.get("t") or "") for it in items):
+            return False
+
+        for cu, moi in (("Tab 9 —", "Tab 10 —"), ("Tab 9 (", "Tab 10 (")):
+            for it in items:
+                t = it.get("t") or ""
+                if t.startswith(cu):
+                    it["t"] = moi + t[len(cu):]
+        for cu, moi in (("Tab 8 —", "Tab 9 —"), ("Tab 8 (", "Tab 9 (")):
+            for it in items:
+                t = it.get("t") or ""
+                if t.startswith(cu):
+                    it["t"] = moi + t[len(cu):]
+        # Sổ O&M không còn ôm phần chạy thử nữa — nó đã tách thành tab riêng.
+        for it in items:
+            t = it.get("t") or ""
+            if t.startswith("Tab 9 — O&M manual"):
+                it["t"] = t.replace("setpoint & ngưỡng, commissioning, trình tự",
+                                    "setpoint & ngưỡng, trình tự")
+
+        them = _seed_items("Tab 8")
+        if not them:
+            return False
+        vt = 0
+        for i, it in enumerate(items):
+            if (it.get("t") or "").startswith("Tab 7"):
+                vt = i + 1
+        items = items[:vt] + them + items[vt:]
+        # Các lượt siết chuẩn trước đây nối mục vào cuối danh sách, nên thứ tự
+        # đọc đã lộn xộn từ lâu. Nhân dịp đổi số, xếp lại theo đúng số tab.
+        def khoa(it):
+            t = (it.get("t") or "")
+            m = re.match(r"Tab (\d+)\s*(—|\()", t)
+            return (int(m.group(1)) if m else 99, 0 if m and m.group(2) == "—" else 1)
+        sec["items"] = sorted(items, key=khoa)
+        sec["title"] = "Cấu trúc 10 tab bắt buộc"
+        return True
+    return False
+
+
 def init_db() -> None:
     """Tạo bảng nếu chưa có; nạp seed nếu DB trống; nâng cấp chuẩn nếu đã có."""
     SQLModel.metadata.create_all(engine)
@@ -234,6 +292,9 @@ def init_db() -> None:
         if _nang_cap_9_tab(data):
             ghi.append("Tab 7 — Logic vận hành & Sơ đồ mạch điện "
                        "(chuẩn chuyển từ 8 lên 9 tab)")
+        if _nang_cap_10_tab(data):
+            ghi.append("Tab 8 — Commissioning: chạy thử & nghiệm thu tách "
+                       "thành tab riêng (O&M lùi thành Tab 9, BOQ thành Tab 10)")
         if _bo_sung_muc(data, _MUC_TAB4, "Tab 4 (bổ sung)"):
             ghi.append("Siết chuẩn Tab 4 — bản vẽ chế tạo phải đủ để xưởng làm được")
         if _bo_sung_muc(data, _MUC_TAB5,
@@ -260,11 +321,11 @@ def init_db() -> None:
         if _bo_sung_nhom(data, _MUC_JSON,
                          "File cấu hình JSON theo MỘT ĐỊNH DẠNG DUY NHẤT", "nền tảng"):
             ghi.append("Chuẩn hoá định dạng file cấu hình JSON cho mọi tool")
-        if _bo_sung_muc(data, _MUC_OM, "Tab 8 (bổ sung)", "8"):
+        if _bo_sung_muc(data, _MUC_OM, "Tab 9 (bổ sung)", "9"):
             ghi.append("Sổ O&M sinh từ danh sách thiết bị (SVWSOM)")
         if _bo_sung_muc(data, _MUC_CAP, "Tab 6 (bổ sung)", "6"):
             ghi.append("Danh mục cáp riêng từng động cơ + kiểm sụt áp")
-        if _bo_sung_muc(data, _MUC_BOQ, "Tab 9 (bổ sung)", "9"):
+        if _bo_sung_muc(data, _MUC_BOQ, "Tab 10 (bổ sung)", "10"):
             ghi.append("BOQ có mức tin cậy đơn giá và bóc tách ống chi tiết")
         if _bo_sung_muc(data, _MUC_DIEN,
                         ["Tab 7 (bổ sung) — Mức chi tiết bắt buộc",
@@ -403,6 +464,25 @@ def svwsvt_js():
     if not _SVWSVT.exists():
         raise HTTPException(500, "Thiếu static/svwsvt.js trong module")
     return Response(_SVWSVT.read_text(encoding="utf-8"),
+                    media_type="application/javascript; charset=utf-8",
+                    headers={"Cache-Control": "no-cache"})
+
+
+@router.get("/svwscm.js", include_in_schema=False)
+def svwscm_js():
+    """Hồ sơ chạy thử & nghiệm thu sinh từ chính sổ thiết bị, tuyến ống, bảng điện.
+
+    Đây là tập hồ sơ AI viết ra dễ đọc nhất mà sai nhiều nhất: nó gõ "thử áp
+    10 bar" cho mọi tuyến kể cả uPVC lẫn đoạn cao áp, "kiểm tra bơm" cho mọi
+    bơm, và số hạng mục thì tuỳ hứng mỗi lần một khác. Chạy thử là lúc người ta
+    mở van thật, đóng điện thật, cấp dòng một chiều vào stack EDI thật — biểu
+    mẫu sai ở đây tốn tiền và có khi tốn người. Thư viện suy từng dòng biểu mẫu
+    từ EQUIP · PIPES · bảng tải · bảng I/O · bảng báo động, nên thêm một bơm vào
+    3D là mục cơ khí, mục điện và mục interlock đều tự có thêm dòng.
+    """
+    if not _SVWSCM.exists():
+        raise HTTPException(500, "Thiếu static/svwscm.js trong module")
+    return Response(_SVWSCM.read_text(encoding="utf-8"),
                     media_type="application/javascript; charset=utf-8",
                     headers={"Cache-Control": "no-cache"})
 
@@ -700,7 +780,7 @@ def ai_execute(payload: dict = Body(...)):
                 "★★★ ĐIỀU QUAN TRỌNG NHẤT — ĐỌC TRƯỚC TIÊN ★★★\n"
                 "Bảy thư viện sau ĐÃ CÓ SẴN dưới dạng biến toàn cục khi file chạy, do hệ "
                 "thống tự chèn vào chỗ dấu <script>/*__SVWS_THREE__*/</script>:\n"
-                "  THREE · SVWS3D · SVWSPID · SVWSGA · SVWSCHE · SVWSVT · SVWSDIEN\n"
+                "  THREE · SVWS3D · SVWSPID · SVWSGA · SVWSCHE · SVWSVT · SVWSDIEN · SVWSCM\n"
                 "TUYỆT ĐỐI KHÔNG được tự viết lại chúng. KHÔNG viết "
                 "'const SVWSGA = (function(){…})();' hay bất kỳ khai báo nào đặt tên "
                 "trùng bảy tên trên — khai báo trong file sẽ CHE MẤT bản thật, và bản "
@@ -932,7 +1012,48 @@ def ai_execute(payload: dict = Body(...)):
                 "bao nhiêu rồi hạ xuống đâu, có đánh dấu co 90°, vị trí giá đỡ, cao trình "
                 "giá và trình tự lắp. Nút in công đoạn PHẢI in cả bản vẽ này (lấy riêng "
                 "bằng V.veCongDoan(c) nếu cần), không chỉ in bảng vật tư.\n"
-                "- Tab 8 (O&M): dùng SVWSOM, ĐỪNG viết tay.\n"
+                "- Tab 8 (Commissioning — Chạy thử & nghiệm thu): dùng SVWSCM, "
+                "ĐỪNG viết tay từng bảng. Đây là tab người ta cầm ra công trường để "
+                "mở van thật, đóng điện thật, cấp dòng một chiều vào stack EDI thật — "
+                "biểu mẫu sai ở đây tốn tiền và có khi tốn người.\n"
+                "    const CM = SVWSCM.tao({ma:'<mã dự án>', ten:'<tên hệ>',\n"
+                "      EQUIP, PIPES, cd: V.congDoan(), ong: S.thongKeOng(),\n"
+                "      tai: DL.danhSach(), io: IO.danhSach(), lg: LG.danhSach(),\n"
+                "      caoRack: S.caoRack(), params: state.p });\n"
+                "    el.innerHTML = SVWSCM.CSS_TAG + CM.tatCa();\n"
+                "    console.log(CM.kiemTra());   // loi PHẢI RỖNG mới được phát hành\n"
+                "  Sinh đủ MƯỜI mục 8.0 → 8.9: tổng quan bảy cổng · checklist cơ khí "
+                "theo từng thiết bị · thử áp và xúc rửa từng tuyến · điện chạy nguội · "
+                "hiệu chuẩn và loop check từng kênh đo · kịch bản interlock và trình "
+                "tự · chạy công nghệ từng cụm theo chiều dòng · chạy thử 72 h · tám "
+                "chỉ tiêu nghiệm thu hiệu năng · đào tạo và hồ sơ bàn giao.\n"
+                "  MỌI DÒNG suy từ dữ liệu đã khai, không có hằng số mô tả hệ thống: "
+                "mỗi thiết bị trong EQUIP ra đủ bộ hạng mục kiểm cơ khí của đúng loại "
+                "đó (kèm tiêu chí CÓ SỐ và ô ký) · mỗi tuyến ống ra một dòng thử áp "
+                "kèm chiều dài, số co, số van lấy từ chính bảng vật tư nên không lệch "
+                "BOQ · mỗi kênh AI ra một phiếu hiệu chuẩn có địa chỉ PLC, dải đo và "
+                "ba điểm 4/12/20 mA · MỖI BÁO ĐỘNG MỨC HH VÀ TRIP cùng mỗi trình tự "
+                "có tên ra một kịch bản thử interlock. Thêm một bơm vào 3D là ba mục "
+                "8.1, 8.3 và 8.5 đều tự có thêm dòng — không ai phải nhớ sửa ba chỗ.\n"
+                "  ÁP THỬ tính theo dịch vụ và vị trí từng tuyến, KHÔNG một con số cho "
+                "cả hệ: uPVC 9 bar · đoạn SS316 cao áp (chỉ từ đầu đẩy bơm cao áp tới "
+                "cụm màng) 1,5 × áp vận hành của chính pass đó · mạch vòng DI "
+                "1,5 × (áp cuối vòng + 3 bar) · đường châm hoá chất 10 bar · đường xả "
+                "tự chảy thử kín bằng nước đầy 2 h. Nước thấm ra khỏi màng cũng là "
+                "dịch vụ ro nhưng chạy áp thấp; thư viện tự phân biệt bằng loại thiết "
+                "bị hai đầu tuyến, đừng ép cờ cao áp bằng tay.\n"
+                "  Khai thêm cho tuyến nếu có: line (mã tuyến), vong:true cho tuyến "
+                "mạch vòng, ap (áp thử tự quyết định), vl (vật liệu). Khai thêm cho "
+                "kênh AI: dai và dv nếu dải đo khác quy ước theo tiền tố tag; cao cho "
+                "kênh mức. Khai soStack cho cụm EDI và Hlop cho cột lọc thì lưu lượng "
+                "rửa ngược và khối lượng vật liệu mới ra số thật.\n"
+                "  IN KHỔ A3 NGANG bằng CM.inA3(khungTen) — mỗi mục một tờ, số bản vẽ "
+                "riêng <mã dự án>-CM-001 … -CM-010, dùng chung hàm khung tên với các "
+                "tab khác. CM.MUC trả danh sách mục kèm số bản vẽ để làm mục lục.\n"
+                "  GHI RÕ cho người dùng: logic an toàn, dừng khẩn cấp và điều kiện "
+                "TRIP trong hồ sơ này là BẢN NHÁP — kỹ sư có chứng chỉ phải rà và ký "
+                "trước khi nạp vào nhà máy đang vận hành.\n"
+                "- Tab 9 (O&M): dùng SVWSOM, ĐỪNG viết tay.\n"
                 "    const OM = SVWSOM.tao({EQUIP, params: state.p});\n"
                 "    el.innerHTML = OM.tatCa();   console.log(OM.kiemTra());\n"
                 "  Sinh đủ 6 mục từ CHÍNH danh sách thiết bị: thông số và ngưỡng "
@@ -942,7 +1063,7 @@ def ai_execute(payload: dict = Body(...)):
                 "mẫu nhật ký vận hành với cột đúng theo thiết bị. Lấy riêng từng "
                 "mục bằng OM.thongSo(), OM.baoTri(), OM.cip(), OM.suCo(), "
                 "OM.anToan(), OM.nhatKy().\n"
-                "- Tab 9 (BOQ): dùng V.bangBOQ({vat:0.08, qNgay:<m³/ngày>}), KHÔNG tự gõ "
+                "- Tab 10 (BOQ): dùng V.bangBOQ({vat:0.08, qNgay:<m³/ngày>}), KHÔNG tự gõ "
                 "lại khối lượng. Danh mục gồm đủ 4 nhóm: A thiết bị chính (quy cách suy "
                 "thẳng từ EQUIP nên không lệch bản vẽ, có cả dụng cụ đo đếm từ bảng I/O), "
                 "B đường ống và phụ kiện, C móng và kết cấu, D điện và điều khiển.\n"

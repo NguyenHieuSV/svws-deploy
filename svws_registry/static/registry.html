@@ -667,7 +667,7 @@ let execBlobUrl = null, brokenHTML = null, brokenErr = '';
 const THREE_MARK = /<script[^>]*>\s*\/\*\s*__SVWS_THREE__\s*\*\/\s*<\/script>/i;
 let libCache = null;
 const LIB_FILE = ['three.js','svws3d.js','svwspid.js','svwsga.js','svwsdien.js',
-                  'svwsche.js','svwsvt.js'];
+                  'svwsche.js','svwsvt.js','svwscm.js'];
 
 async function napLib(){
   if(libCache) return libCache;
@@ -684,7 +684,7 @@ async function napLib(){
    Bốn bộ dựng của SVWS (3D · P&ID · GA · ĐIỆN) cũng chèn ở đây; thiếu chúng thì
    tool báo "SVWSPID is not defined" và tab tương ứng ra trang trắng. */
 async function injectThree(html){
-  const dungSvws  = /\bSVWS(3D|PID|GA|DIEN|CHE|VT)\s*\./.test(html);
+  const dungSvws  = /\bSVWS(3D|PID|GA|DIEN|CHE|VT|CM)\s*\./.test(html);
   const dungThree = THREE_MARK.test(html) || /\bTHREE\s*\./.test(html)
                     || /\bSVWS3D\s*\./.test(html);
   if(!dungThree && !dungSvws) return {html, injected:false};
@@ -703,7 +703,7 @@ async function injectThree(html){
   return {html: html.replace(/<body[^>]*>/i, m => m + tag()), injected:true};
 }
 
-const TEN_LIB = ['SVWS3D','SVWSPID','SVWSGA','SVWSCHE','SVWSVT','SVWSDIEN'];
+const TEN_LIB = ['SVWS3D','SVWSPID','SVWSGA','SVWSCHE','SVWSVT','SVWSDIEN','SVWSCM'];
 
 /* Tìm dấu chấm phẩy kết thúc một câu lệnh, bỏ qua chuỗi và chú thích.
    Chỗ dễ sai: `${...}` trong chuỗi mẫu — phần trong ngoặc là MÃ chứ không phải
@@ -850,7 +850,7 @@ async function finalizeTool(html, headline, extraNote){
       + (thu.loi.length ? 'Lỗi JavaScript lúc chạy: ' + thu.loi.slice(0,3).join(' | ') + '. ' : '')
       + (thu.tabTrong.length ? 'Các tab không hiện nội dung: ' + thu.tabTrong.join(', ') + '. ' : '')
       + 'Nguyên nhân hay gặp: gọi hàm không có trong thư viện SVWS3D/SVWSPID/SVWSGA/'
-      + 'SVWSCHE/SVWSVT/SVWSDIEN, hoặc hàm dựng một tab ném lỗi làm chết luôn các tab sau.';
+      + 'SVWSCHE/SVWSVT/SVWSDIEN/SVWSCM, hoặc hàm dựng một tab ném lỗi làm chết luôn các tab sau.';
   }
   if(execBlobUrl) URL.revokeObjectURL(execBlobUrl);
   execBlobUrl = URL.createObjectURL(new Blob([html], {type:'text/html;charset=utf-8'}));
@@ -881,7 +881,7 @@ async function finalizeTool(html, headline, extraNote){
           ✔ Đã chạy thử: mở được, bấm hết ${thu.soTab} tab, không tab nào trắng, không lỗi.
         </div>`) : ''}
       <div style="font-size:12px;color:var(--muted);margin-top:4px">
-        ${res.injected ? '✔ Đã nhúng Three.js r128 + bộ dựng SVWS3D / SVWSPID / SVWSGA / SVWSDIEN / SVWSCHE / SVWSVT — file vẫn mở offline.'
+        ${res.injected ? '✔ Đã nhúng Three.js r128 + bộ dựng SVWS3D / SVWSPID / SVWSGA / SVWSDIEN / SVWSCHE / SVWSVT / SVWSCM — file vẫn mở offline.'
           : res.already ? '✔ Tool tự mang sẵn Three.js.'
           : res.err ? '⚠ Không nạp được Three.js ('+esc(res.err)+') — bản vẽ 3D có thể không hiện.'
           : 'Tool này không dùng Three.js.'}

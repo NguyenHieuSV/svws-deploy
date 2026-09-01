@@ -1019,6 +1019,12 @@ lam(tongKW, 1) + '</td><td>3P</td><td>—</td><td>' + lam(tongI * 0.8, 1) +
       return bangDieuKhien() + maTran() + bangTrinhTu() + bangBaoDong();
     };
     api.kiemTra = kiemTra;
+    /* Mở sổ logic ra ngoài để hồ sơ chạy thử (SVWSCM) đọc thẳng: mỗi báo động
+       mức HH/TRIP phải có một kịch bản thử interlock. Chép tay sang tab chạy
+       thử thì thêm báo động là quên thử, và không ai phát hiện. */
+    api.danhSach = function () {
+      return { tb: ds.slice(), buoc: buoc.slice(), bao: bao.slice() };
+    };
     return api;
   }
 
