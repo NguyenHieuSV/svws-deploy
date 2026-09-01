@@ -275,7 +275,16 @@
     return g;
   }
 
-  function roSkid(o) {  // khung RO: vessel màng nằm ngang xếp tầng
+  /**
+   * Khung RO: vỏ màng nằm ngang xếp tầng, VÀ các cụm lắp sẵn trên chính khung.
+   *
+   * Skid thật xuất xưởng đã gồm bơm cao áp, vỏ lọc tinh và tủ điều khiển gắn
+   * ngay trên khung, đã đấu ống sẵn — không phải ba thiết bị rời đặt chỗ khác
+   * trong nhà xưởng. Khai bom / loc / tu để vẽ đúng như vậy; khi đó ĐỪNG khai
+   * chúng thành thiết bị riêng nữa, nếu không vừa vẽ thừa vừa tính thừa đường
+   * ống nối giữa chúng trong bảng vật tư.
+   */
+  function roSkid(o) {
     var n = Math.min(40, Math.max(1, +o.vessels || 4));
     var per = Math.min(12, Math.max(1, +o.memPerVessel || 6));
     var sz = coMang(o.size);
@@ -283,10 +292,18 @@
     var vl = per * (sz === '4040' ? 1020 : sz === '2540' ? 640 : 1020);
     var rows = Math.min(n, o.rows || Math.ceil(n / 2));
     var cols = Math.ceil(n / rows);
-    var W = vl + 700, D = Math.max(900, cols * (vd + 130) + 260), H = rows * (vd + 130) + 500;
+    var soBom = Math.max(0, Math.min(4, +o.bom || 0));      // bơm cao áp trên skid
+    var coLoc = !!(o.loc || o.cartridge);                   // vỏ lọc tinh trên skid
+    var coTu = !!(o.tu || o.panel);                         // tủ điều khiển trên skid
+    var truoc = (soBom || coLoc || coTu) ? 820 : 0;         // dải trước cho các cụm
+    var W = vl + 700;
+    var Dv = Math.max(900, cols * (vd + 130) + 260);
+    var D = Dv + truoc;
+    var H = rows * (vd + 130) + 500;
     var g = grp('roSkid');
     // khung thép
-    var fm = mat('frame'), t = 90;
+    var fm = mat(o.mauKhung ? 'paint' : 'frame',
+                 o.mauKhung ? { color: o.mauKhung } : null), t = 90;
     [[-W / 2, -D / 2], [W / 2, -D / 2], [-W / 2, D / 2], [W / 2, D / 2]].forEach(function (p) {
       var c = box(t, H, t, fm); c.position.set(p[0], H / 2, p[1]); g.add(c);
     });
@@ -311,15 +328,76 @@
         var cap2 = cap.clone(); cap2.position.x = -vl / 2; g.add(cap2);
       }
     }
+    // ---------------------------------------- các cụm lắp sẵn ở dải trước skid
+    var zTruoc = D / 2 - truoc / 2;              // tim dải trước
+    var xTu = 0, xLoc = 0, yBom = 0, yLoc = 0, yTu = 0;
+    if (truoc) {
+      var xCon = -W / 2 + 260;                   // con trỏ chạy dọc skid
+      // bơm cao áp: bơm ly tâm nhiều tầng đứng, mô tơ nằm trên
+      for (var b2 = 0; b2 < soBom; b2++) {
+        var than = cyl(230, 780, mat('ss'), 22);
+        than.position.set(xCon, 120 + 390, zTruoc); g.add(than);
+        var moto = box(330, 430, 330, mat('panel', { color: 0x9aa3ab }));
+        moto.position.set(xCon, 120 + 780 + 215, zTruoc); g.add(moto);
+        var de = box(430, 120, 430, fm);
+        de.position.set(xCon, 60, zTruoc); g.add(de);
+        yBom = 120 + 780 + 430;
+        xCon += 620;
+      }
+      // vỏ lọc tinh (cartridge) đứng, nắp bích sẫm màu như thiết bị thật
+      if (coLoc) {
+        xCon += soBom ? 220 : 0;
+        xLoc = xCon;
+        var vo = cyl(kt(o.locD, 300, 120, 900), kt(o.locH, 1150, 400, 3000),
+                     mat('ss'), 24);
+        vo.position.set(xLoc, 120 + kt(o.locH, 1150, 400, 3000) / 2, zTruoc);
+        g.add(vo);
+        var nap = cyl(kt(o.locD, 300, 120, 900) * 1.18, 90,
+                      mat('panel', { color: 0x2a2f36 }), 24);
+        nap.position.set(xLoc, 120 + kt(o.locH, 1150, 400, 3000) + 45, zTruoc);
+        g.add(nap);
+        var deL = box(480, 120, 480, fm); deL.position.set(xLoc, 60, zTruoc); g.add(deL);
+        yLoc = 120 + kt(o.locH, 1150, 400, 3000) + 90;
+        xCon += 700;
+      }
+      // tủ điều khiển đặt cuối skid, kê chân lên khỏi mặt sàn
+      if (coTu) {
+        var tW = kt(o.tuW, 700, 300, 2000), tD = kt(o.tuD, 300, 120, 900);
+        // Tủ không được cao quá khung skid — thực tế tủ nằm gọn trong khung để
+        // còn cẩu và vận chuyển nguyên cụm.
+        var chanTu = 350;
+        var tH = Math.min(kt(o.tuH, 900, 300, 2200), Math.max(500, H - chanTu));
+        xTu = W / 2 - tW / 2 - 200;
+        var tb = box(tW, tH, tD, mat('panel'));
+        tb.position.set(xTu, chanTu + tH / 2, zTruoc); g.add(tb);
+        var cua = box(tW * 0.84, tH * 0.8, 18, mat('panel', { color: 0xeef1f3 }));
+        cua.position.set(xTu, chanTu + tH * 0.52, zTruoc + tD / 2 + 6); g.add(cua);
+        [[-1, -1], [1, -1], [-1, 1], [1, 1]].forEach(function (p) {
+          var ch = box(70, chanTu, 70, fm);
+          ch.position.set(xTu + p[0] * (tW / 2 - 60), chanTu / 2,
+                          zTruoc + p[1] * (tD / 2 - 40));
+          g.add(ch);
+        });
+        yTu = chanTu + tH;
+      }
+    }
+
     g.userData.foot = { w: W + 300, d: D + 300 };
-    g.userData.h = H;
+    // Chiều cao phải tính CẢ các cụm lắp sẵn: giá đỡ ống chạy trên đầu thiết bị
+    // cao nhất, khai thiếu là ống đâm xuyên qua mô tơ bơm hoặc nóc tủ.
+    g.userData.h = Math.max(H, yBom, yLoc, yTu);
+    g.userData.gomSan = { bom: soBom, loc: coLoc, tu: coTu };
     var yTren = 320 + (rows - 1) * (vd + 130);
     g.userData.ports = {
-      in:   P(-vl / 2 - 120, 320, -D / 2 + 180, -1, 0, 0),     // nước cấp: một đầu vỏ
+      in:   P(-vl / 2 - 120, 320, -Dv / 2 + 180 - truoc / 2, -1, 0, 0),  // nước cấp
       out:  P(vl / 2 + 120, yTren, -D / 2 + 180, 1, 0, 0),     // nước thấm: nắp đầu kia
-      conc: P(vl / 2 + 120, 320, D / 2 - 180, 1, 0, 0),        // nước cô đặc
-      cip:  P(-vl / 2 - 120, yTren, D / 2 - 180, -1, 0, 0)     // đường CIP
+      conc: P(vl / 2 + 120, 320, -D / 2 + 180 + (cols - 1) * (vd + 130), 1, 0, 0),
+      cip:  P(-vl / 2 - 120, yTren, -D / 2 + 180, -1, 0, 0)    // đường CIP
     };
+    // Có lọc tinh trên skid thì NƯỚC CẤP đi thẳng vào vỏ lọc, không vào ống góp
+    // màng — vẽ sai chỗ này là thợ đấu ống sai thứ tự công nghệ.
+    if (coLoc) g.userData.ports.in = P(xLoc, 120 + 200, zTruoc + 260, 0, 0, 1);
+    if (coTu) g.userData.ports.dien = P(xTu, 900 + 120, zTruoc + 260, 0, 0, 1);
     veCacNozzle(g, 65);
     return g;
   }
@@ -521,7 +599,10 @@
       var rows = Math.min(nv, e.rows || Math.ceil(nv / 2));
       var cols = Math.ceil(nv / rows);
       var vd = (sz === '4040' ? 130 : sz === '2540' ? 85 : 220);
-      return { w: vl + 1000, d: Math.max(900, cols * (vd + 130) + 260) + 300 }; }
+      // dải trước cho bơm cao áp / lọc tinh / tủ lắp sẵn trên chính skid
+      var tr = ((+e.bom || 0) || e.loc || e.cartridge || e.tu || e.panel) ? 820 : 0;
+      return { w: vl + 1000,
+               d: Math.max(900, cols * (vd + 130) + 260) + tr + 300 }; }
     if (t === 'edi') {                      // chồng tấm–khung, không phải vỏ màng
       var moiS = kt(e.moiStack, 5, 0.5, 100);
       var ns = Math.max(1, Math.min(12,
