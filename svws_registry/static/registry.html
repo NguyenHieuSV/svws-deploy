@@ -671,7 +671,10 @@ const LIB_FILE = ['three.js','svws3d.js','svwspid.js','svwsga.js','svwsdien.js',
 
 async function napLib(){
   if(libCache) return libCache;
-  const rs = await Promise.all(LIB_FILE.map(t => fetch('/registry/'+t)));
+  // Gắn phiên bản deploy vào URL: Cloudflare cache theo đuôi .js, kể cả 404.
+  // Thêm thư viện mới mà giữ nguyên URL thì client còn nhận 404 cũ nhiều giờ.
+  const v = '__LIB_VER__'.indexOf('LIB_VER') >= 0 ? '' : '?v=__LIB_VER__';
+  const rs = await Promise.all(LIB_FILE.map(t => fetch('/registry/'+t+v)));
   rs.forEach((r,i) => { if(!r.ok) throw new Error(LIB_FILE[i]+' HTTP '+r.status); });
   const vb = await Promise.all(rs.map(r => r.text()));
   libCache = { three: vb[0], svws: vb.slice(1).join('\n;\n') };

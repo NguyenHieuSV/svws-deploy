@@ -352,13 +352,33 @@ def init_db() -> None:
 router = APIRouter(prefix="/registry", tags=["SVWS Design Registry"])
 
 
+def _phien_ban_lib() -> str:
+    """Chuỗi phiên bản đổi theo mỗi lần deploy, để dán vào URL thư viện.
+
+    Cloudflare đứng trước app và cache theo đuôi .js — kể cả câu trả lời 404.
+    Thêm một thư viện mới mà trước đó đã có ai gọi thử URL của nó thì client
+    còn nhận 404 đã cache trong nhiều giờ, và tool sinh ra sẽ trắng tab. Gắn
+    phiên bản vào URL thì mỗi lần deploy là một địa chỉ mới, cache cũ không
+    dùng lại được.
+    """
+    v = os.environ.get("RENDER_GIT_COMMIT", "")
+    if v:
+        return v[:12]
+    m = 0
+    for f in (_THREE, _SVWS3D, _SVWSPID, _SVWSGA, _SVWSDIEN,
+              _SVWSCHE, _SVWSVT, _SVWSCM):
+        if f.exists():
+            m = max(m, int(f.stat().st_mtime))
+    return str(m)
+
+
 @router.get("", response_class=HTMLResponse, include_in_schema=False)
 @router.get("/", response_class=HTMLResponse, include_in_schema=False)
 def page() -> str:
     """Giao diện app (single-file HTML)."""
     if not _PAGE.exists():
         raise HTTPException(500, "Thiếu file static/registry.html trong module")
-    return _PAGE.read_text(encoding="utf-8")
+    return _PAGE.read_text(encoding="utf-8").replace("__LIB_VER__", _phien_ban_lib())
 
 
 @router.get("/three.js", include_in_schema=False)
