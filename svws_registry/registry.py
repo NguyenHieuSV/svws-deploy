@@ -54,6 +54,7 @@ _SVWS3D = _HERE / "static" / "svws3d.js"     # bộ dựng hình 3D chuẩn củ
 _SVWSPID = _HERE / "static" / "svwspid.js"   # bộ dựng sơ đồ P&ID chuẩn
 _SVWSGA = _HERE / "static" / "svwsga.js"     # bộ dựng mặt bằng GA chuẩn
 _SVWSDIEN = _HERE / "static" / "svwsdien.js" # bộ dựng logic vận hành + bản vẽ điện
+_SVWSCHE = _HERE / "static" / "svwsche.js"   # bộ dựng bản vẽ chế tạo (SD)
 
 MAX_REVISIONS = 300  # giữ tối đa bao nhiêu bản lịch sử
 
@@ -86,6 +87,42 @@ class RegistryRevision(SQLModel, table=True):
 
 
 _MUC_TAB7 = "Tab 7 — Logic vận hành & Sơ đồ mạch điện"
+_MUC_TAB4 = "Bản vẽ chế tạo phải ĐỦ ĐỂ XƯỞNG LÀM ĐƯỢC"
+
+
+def _seed_items(tien_to: str) -> list:
+    """Lấy các mục trong file seed có nội dung bắt đầu bằng `tien_to`."""
+    if not _SEED.exists():
+        return []
+    ra = []
+    for sec in json.loads(_SEED.read_text(encoding="utf-8")).get("sections") or []:
+        for it in sec.get("items") or []:
+            if (it.get("t") or "").startswith(tien_to):
+                ra.append(it)
+    return ra
+
+
+def _bo_sung_tab4(data: dict) -> bool:
+    """Chèn hai mục siết chuẩn bản vẽ chế tạo vào ngay sau cụm Tab 4.
+
+    Idempotent như _nang_cap_9_tab: nhận diện bằng câu đặc trưng trong nội dung.
+    """
+    for sec in data.get("sections") or []:
+        if "tab bắt buộc" not in (sec.get("title") or "").lower():
+            continue
+        items = sec.get("items") or []
+        if any(_MUC_TAB4 in (it.get("t") or "") for it in items):
+            return False
+        them = [it for it in _seed_items("Tab 4 (bổ sung)")]
+        if not them:
+            return False
+        vt = 0
+        for i, it in enumerate(items):
+            if (it.get("t") or "").startswith("Tab 4"):
+                vt = i + 1
+        sec["items"] = items[:vt] + them + items[vt:]
+        return True
+    return False
 
 
 def _nang_cap_9_tab(data: dict) -> bool:
@@ -156,7 +193,13 @@ def init_db() -> None:
         # đó là sửa luôn giá trị cũ → SQLAlchemy thấy "mới bằng cũ" và bỏ qua
         # cột JSON, kết quả là updated_by đổi mà nội dung thì không.
         data = copy.deepcopy(doc.data or {})
+        ghi = []
         if _nang_cap_9_tab(data):
+            ghi.append("Tab 7 — Logic vận hành & Sơ đồ mạch điện "
+                       "(chuẩn chuyển từ 8 lên 9 tab)")
+        if _bo_sung_tab4(data):
+            ghi.append("Siết chuẩn Tab 4 — bản vẽ chế tạo phải đủ để xưởng làm được")
+        if ghi:
             doc.data = data
             flag_modified(doc, "data")
             doc.updated_at = _now()
@@ -164,10 +207,10 @@ def init_db() -> None:
             s.add(doc)
             s.add(RegistryRevision(data=data, updated_at=doc.updated_at,
                                    updated_by="nâng cấp tự động",
-                                   note="Thêm Tab 7 — Logic vận hành & Sơ đồ mạch điện "
-                                        "(chuẩn chuyển từ 8 lên 9 tab)"))
+                                   note=" · ".join(ghi)))
             s.commit()
-            print("[REGISTRY] Đã bổ sung Tab 7 — Logic vận hành & Sơ đồ mạch điện")
+            for t in ghi:
+                print("[REGISTRY] Đã bổ sung: " + t)
 
 
 # ----------------------------------------------------------------------------
@@ -255,6 +298,23 @@ def svwsdien_js():
     if not _SVWSDIEN.exists():
         raise HTTPException(500, "Thiếu static/svwsdien.js trong module")
     return Response(_SVWSDIEN.read_text(encoding="utf-8"),
+                    media_type="application/javascript; charset=utf-8",
+                    headers={"Cache-Control": "no-cache"})
+
+
+@router.get("/svwsche.js", include_in_schema=False)
+def svwsche_js():
+    """Bộ dựng BẢN VẼ CHẾ TẠO — đủ để xưởng cắt tôn, khoét lỗ và hàn.
+
+    Đo được trong tool đã sinh: "3 hình chiếu" là ba ô chữ nhật rỗng ở toạ độ cố
+    định, giống hệt nhau cho mọi thiết bị, không tỷ lệ và không nozzle. Thư viện
+    này dựng hình theo kích thước thật, tự chọn tỷ lệ, tự ghi chuỗi kích thước,
+    và tính những thứ xưởng cần: bề dày yêu cầu theo cột nước/áp suất, khai
+    triển tôn, trọng lượng, bảng mối hàn.
+    """
+    if not _SVWSCHE.exists():
+        raise HTTPException(500, "Thiếu static/svwsche.js trong module")
+    return Response(_SVWSCHE.read_text(encoding="utf-8"),
                     media_type="application/javascript; charset=utf-8",
                     headers={"Cache-Control": "no-cache"})
 
@@ -626,6 +686,32 @@ def ai_execute(payload: dict = Body(...)):
                 "  Thư viện tự chọn tỷ lệ cho vừa khổ A3, vẽ đúng tỷ lệ, tự sinh chuỗi kích "
                 "thước và mũi tên hướng Bắc. kiemTra() báo cả nhãn đè nhau LẪN khe vận hành "
                 "thiếu (dưới 800 mm thì không có chỗ đứng bảo trì) — phải rỗng.\n"
+                "- Tab 4 (SD Chế tạo): dùng SVWSCHE, MỖI THIẾT BỊ MỘT TỜ. ĐỪNG tự vẽ "
+                "ba ô chữ nhật giống nhau cho mọi thiết bị — thợ không chế tạo được.\n"
+                "    const T = SVWSCHE.to({ma:'<mã>', duAn:'<dự án>', nguoiLap:'<tên>', "
+                "ngay:'<dd/mm/yyyy>',\n"
+                "      tag:'TK-101', ten:'Bể chứa nước thô', kieu:'bon',   // bon | cot\n"
+                "      d:1800, h:2400, day:'phang',        // day: phang | chom | con\n"
+                "      chan:'chande', caoChan:300,          // chan: chande | vay\n"
+                "      vatLieu:'SS304', dayThan:5, dayDay:6, ap:0, mucNuoc:2200,\n"
+                "      nozzle:[{ma:'N1', dv:'Nước vào', dn:65, cao:2250, goc:0, nho:150},\n"
+                "              {ma:'N4', dv:'Xả đáy', dn:50, cao:120, goc:270, nho:130}]});\n"
+                "    elVe.innerHTML = T.ve();  elBang.innerHTML = T.bang();\n"
+                "    console.log(T.kiemTra());\n"
+                "  cao = cao độ tâm nozzle đo TỪ MẶT TRONG ĐÁY (mm); goc = góc quay (độ, "
+                "0° theo hình chiếu bằng); nho = độ nhô mặt bích khỏi thành. Bỏ trống "
+                "mảng nozzle thì thư viện tự đặt bộ tiêu chuẩn theo loại thiết bị.\n"
+                "  Thư viện tự chọn tỷ lệ, tự vẽ 3 hình chiếu đúng kích thước thật, tự "
+                "ghi chuỗi kích thước và cao độ từng nozzle, vẽ hình chiếu bằng định vị "
+                "góc quay, thêm khối ghi chú chế tạo + khung tên + watermark. T.bang() "
+                "cho ra bảng nozzle, kiểm bề dày, bảng vật liệu, KHAI TRIỂN TÔN (kích "
+                "thước phôi để cắt), bảng mối hàn, khối lượng, sơn phủ.\n"
+                "  Kích thước d/h/vật liệu phải LẤY ĐÚNG từ EQUIP đã khai ở tab 3D — hai "
+                "tab nói khác nhau là bản vẽ chế tạo sai.\n"
+                "  kiemTra() bắt: bề dày không đủ chịu cột nước/áp suất, nozzle trùng mã, "
+                "nozzle nằm ngoài thân, hai nozzle sát tới mức chồng vùng gia cường, "
+                "thiếu xả đáy, thiếu cửa thăm. loi PHẢI rỗng.\n"
+                "  Nút in tờ chế tạo PHẢI in cả HÌNH (T.ve()) chứ không chỉ bảng chữ.\n"
                 "- Tab 7 (Logic vận hành & mạch điện): dùng SVWSDIEN. Đây là tab để "
                 "THỢ ĐẤU TỦ và NGƯỜI LẬP TRÌNH PLC làm việc, nên phải đủ số liệu thật, "
                 "ĐỪNG tự gõ toạ độ SVG cho sơ đồ điện.\n"

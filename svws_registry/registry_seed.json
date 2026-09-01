@@ -68,6 +68,14 @@
           "s": "std"
         },
         {
+          "t": "Tab 4 (bổ sung) — Bản vẽ chế tạo phải ĐỦ ĐỂ XƯỞNG LÀM ĐƯỢC, không phải hình minh hoạ. Ba hình chiếu vẽ theo KÍCH THƯỚC THẬT và đúng tỷ lệ ghi trong khung tên (mỗi thiết bị một tỷ lệ riêng, không dùng ô chữ nhật chung cho mọi thiết bị). Bắt buộc có: chuỗi kích thước bao và cao độ từng nozzle đo từ mặt trong đáy; bảng nozzle đủ cột mã · dịch vụ · DN · Ø ngoài ống · dày ống · cao độ tâm · GÓC QUAY · độ nhô · tiêu chuẩn mặt bích · đường kính lỗ khoét; hình chiếu bằng định vị góc quay nozzle với mốc 0°; bảng khai triển tôn (chiều dài phôi thân = π×(D+t), phôi đáy/nắp, phôi ống nozzle) để xưởng cắt; bảng mối hàn kèm phương pháp và yêu cầu kiểm tra; xử lý bề mặt và sơn phủ ghi rõ chiều dày màng khô; khối lượng chay / vận hành / thử thuỷ lực để tính móng; dung sai chế tạo. Tờ in A3 phải KÈM HÌNH VẼ và đọc được độc lập ngoài xưởng.",
+          "s": "new"
+        },
+        {
+          "t": "Tab 4 (bổ sung) — Kiểm tra thiết kế chế tạo tự động trước khi phát hành: bề dày thân đủ chịu cột nước/áp suất thiết kế và không mỏng hơn mức tối thiểu của xưởng; nozzle không trùng mã, không nằm ngoài chiều cao thân, không đặt sát nhau tới mức hai vùng gia cường miệng lỗ chồng nhau; có đường xả đáy; bồn từ Ø1000 trở lên phải có cửa thăm; mực nước thiết kế chừa khoảng trống an toàn và có ống tràn.",
+          "s": "new"
+        },
+        {
           "t": "Tab 5 — Construction Breakdown (Phân tách công đoạn thi công): form theo dạng công đoạn \"Thi công từ thiết bị A đến thiết bị B\", kèm danh sách chi tiết vật tư, thiết bị, đường ống kết nối, ... — có thể thêm/bớt/chỉnh sửa công đoạn và danh mục. Các công đoạn ghép lại phải phủ trọn vẹn hệ thống, không bỏ sót hạng mục. Mỗi công đoạn có nút \"In bản vẽ / Danh mục vật tư\" riêng. Nội dung tự cập nhật theo bảng thông số (parametric). Mục tiêu: giao việc cho đội triển khai chi tiết được chính xác và đơn giản.",
           "s": "std"
         },
