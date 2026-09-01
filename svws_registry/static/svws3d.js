@@ -725,6 +725,79 @@
     return { w: x + 160, d: x + 160, tron: true, D: x };
   }
 
+  /* ====================================================================
+   * KIỂM CỘT LỌC — bắt chuyện "hai cột lọc không cân xứng" bằng SỐ
+   * --------------------------------------------------------------------
+   * Mỗi loại lọc có luật riêng: lọc đa vật liệu tính theo VẬN TỐC LỌC,
+   * lọc than tính theo THỜI GIAN TIẾP XÚC (EBCT). Dùng chung một bộ tham
+   * số cho cả hai thì không thể cùng đạt — cột này đúng thì cột kia sai.
+   * Vì vậy MỖI LOẠI PHẢI CÓ SỐ LƯỢNG VÀ KÍCH THƯỚC RIÊNG.
+   * ================================================================== */
+  function laGAC(e) {
+    return /gac|than|carbon|acf/i.test(String(e.media || '') + ' ' +
+                                       String(e.tag || '') + ' ' + String(e.name || ''));
+  }
+  function kiemCotLoc(EQUIP, Q) {
+    Q = +Q || 0;
+    var loi = [], canhBao = [], ds = [];
+    (EQUIP || []).forEach(function (e) {
+      var t = String(e.type || '').toLowerCase();
+      if (t !== 'vessel' && t !== 'filter' && t !== 'mixedbed') return;
+      var d = +e.d || 0, n = Math.max(1, +e.qty || 1), h = +e.h || 0;
+      var tag = e.tag || e.id || '?';
+      if (!d) { loi.push('Cột lọc ' + tag + ' chưa có đường kính.'); return; }
+      var A = Math.PI / 4 * (d / 1000) * (d / 1000);           // m² một cột
+      var v = Q > 0 ? Q / (A * n) : 0;                          // m/h khi đủ cột
+      var vDuPhong = Q > 0 ? Q / (A * Math.max(1, n - 1)) : 0;  // khi 1 cột rửa ngược
+      // chiều cao lớp vật liệu: khai riêng thì dùng, không thì lấy ~55% chiều cao
+      var hLop = (+e.hLop || +e.mediaH || (h ? h * 0.55 : 0)) / 1000;   // m
+      var ebct = (Q > 0 && hLop) ? (A * hLop * n) / Q * 60 : 0;         // phút
+      var gac = laGAC(e);
+      ds.push({ tag: tag, gac: gac, d: d, n: n, v: Math.round(v * 10) / 10,
+                vDuPhong: Math.round(vDuPhong * 10) / 10,
+                ebct: Math.round(ebct * 10) / 10 });
+      if (!Q) return;
+      if (gac) {
+        if (ebct && ebct < 10)
+          loi.push('Cột than ' + tag + ': thời gian tiếp xúc EBCT chỉ ' + ds[ds.length-1].ebct +
+                   ' phút (cần ≥ 10 phút, khử clo dư thường lấy 10–15). Tăng đường kính, ' +
+                   'chiều cao lớp than, hoặc số cột.');
+        if (v > 12)
+          canhBao.push('Cột than ' + tag + ': vận tốc ' + ds[ds.length-1].v +
+                       ' m/h là cao (thường 5–12 m/h) — than dễ bị xô lớp.');
+      } else {
+        if (v > 20)
+          loi.push('Cột lọc ' + tag + ': vận tốc lọc ' + ds[ds.length-1].v +
+                   ' m/h vượt 20 m/h — nước xuyên nhanh, lọc không sạch. Tăng đường ' +
+                   'kính hoặc số cột.');
+        else if (v < 8 && v > 0)
+          canhBao.push('Cột lọc ' + tag + ': vận tốc ' + ds[ds.length-1].v +
+                       ' m/h thấp (thường 10–20 m/h) — cột thừa to, tốn tiền và tốn ' +
+                       'nước rửa ngược.');
+        if (n > 1 && vDuPhong > 25)
+          canhBao.push('Cột lọc ' + tag + ': khi một cột rửa ngược, vận tốc các cột còn ' +
+                       'lại lên ' + ds[ds.length-1].vDuPhong + ' m/h — nên tăng số cột ' +
+                       'hoặc rửa ngoài giờ sản xuất.');
+      }
+      if (n > 1 && !e.qty)
+        canhBao.push('Cột lọc ' + tag + ': chưa khai qty — mỗi loại lọc phải có SỐ ' +
+                     'LƯỢNG RIÊNG, không dùng chung với loại khác.');
+    });
+    // So hai họ cột với nhau — đây chính là chuyện "không cân xứng"
+    var mmf = ds.filter(function (x) { return !x.gac && x.v; });
+    var gacs = ds.filter(function (x) { return x.gac && x.v; });
+    if (mmf.length && gacs.length) {
+      var vM = mmf[0].v, vG = gacs[0].v;
+      var ti = Math.max(vM, vG) / Math.max(0.01, Math.min(vM, vG));
+      if (ti > 1.7)
+        canhBao.push('Cột lọc đa vật liệu chạy ' + vM + ' m/h còn cột than chạy ' + vG +
+                     ' m/h — lệch ' + (Math.round(ti * 10) / 10) + ' lần. Hai loại đang ' +
+                     'bị buộc theo cùng một bộ tham số; tách riêng số lượng và kích ' +
+                     'thước cho từng loại rồi chỉnh lại.');
+    }
+    return { loi: loi, canhBao: canhBao, cot: ds };
+  }
+
   /** Dựng một thiết bị từ khai báo {type, ...}. Kiểu lạ thì về bồn cho an toàn. */
   function build(e) {
     var f = BUILDERS[(e.type || 'tank').toLowerCase()] || tank;
@@ -1178,6 +1251,7 @@
   global.SVWS3D = {
     version: '1.0',
     PALETTE: PALETTE, MAT: MAT,
+    kiemCotLoc: kiemCotLoc,
     scene: scene, build: build, layout: layout, label: label, chanDe: chanDe,
     tank: tank, vessel: vessel, cartridge: cartridge, pump: pump,
     roSkid: roSkid, panel: panel, dosing: dosing, uv: uvUnit,

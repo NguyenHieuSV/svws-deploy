@@ -91,6 +91,26 @@ _MUC_TAB7 = "Tab 7 — Logic vận hành & Sơ đồ mạch điện"
 _MUC_TAB4 = "Bản vẽ chế tạo phải ĐỦ ĐỂ XƯỞNG LÀM ĐƯỢC"
 _MUC_TAB5 = "Số lượng vật tư phải SUY TỪ HÌNH HỌC THẬT"
 _MUC_TAB5B = "Bản vẽ từng công đoạn phải vẽ ĐÚNG TUYẾN THẬT"
+_MUC_THAMSO = "Tham số riêng cho từng loại thiết bị"
+
+
+def _bo_sung_nhom(data: dict, dau_hieu: str, tien_to, tu_khoa: str) -> bool:
+    """Chèn mục seed vào cuối NHÓM có tiêu đề chứa `tu_khoa` (không phải nhóm tab).
+
+    Idempotent như các hàm nâng cấp khác.
+    """
+    for sec in data.get("sections") or []:
+        if tu_khoa.lower() not in (sec.get("title") or "").lower():
+            continue
+        items = sec.get("items") or []
+        if any(dau_hieu in (it.get("t") or "") for it in items):
+            return False
+        them = _seed_items(tien_to)
+        if not them:
+            return False
+        sec["items"] = items + them
+        return True
+    return False
 
 
 def _seed_items(tien_to) -> list:
@@ -216,6 +236,11 @@ def init_db() -> None:
         if _bo_sung_muc(data, _MUC_TAB5B, "Tab 5 (bổ sung) — Bản vẽ từng công đoạn", "5"):
             ghi.append("Siết chuẩn Tab 5 — bản vẽ công đoạn vẽ đúng tuyến thật "
                        "kèm cao trình giá đỡ")
+        if _bo_sung_nhom(data, _MUC_THAMSO,
+                         ["Tham số riêng cho từng loại thiết bị",
+                          "Kiểm tra cụm lọc tự động"], "parametric"):
+            ghi.append("Mỗi loại thiết bị có số lượng và kích thước riêng "
+                       "(MMF tách khỏi GAC) + kiểm cụm lọc tự động")
         if ghi:
             doc.data = data
             flag_modified(doc, "data")
@@ -910,6 +935,17 @@ def ai_execute(payload: dict = Body(...)):
                 "  Số liệu phải KHỚP giữa các tab: tag động cơ ở mạch động lực trùng "
                 "tag bơm ở 3D/P&ID; mỗi động cơ phải có đủ DO lệnh chạy và DI phản hồi "
                 "trong bảng I/O; mỗi dụng cụ đo trên P&ID phải có một kênh AI.\n"
+                "- BẢNG THÔNG SỐ: mỗi loại thiết bị có Ô SỐ LƯỢNG VÀ KÍCH THƯỚC RIÊNG, "
+                "không dùng chung. Cụ thể phải có ĐỦ và TÁCH RỜI: số cột MMF · Ø MMF · "
+                "chiều cao lớp vật liệu MMF · số cột GAC · Ø GAC · chiều cao lớp than "
+                "GAC. Buộc chung một bộ tham số thì cột này đúng là cột kia sai, vì MMF "
+                "tính theo VẬN TỐC LỌC (10–20 m/h) còn GAC tính theo THỜI GIAN TIẾP XÚC "
+                "EBCT (≥ 10 phút) — hai luật khác nhau. Áp dụng tương tự cho mọi họ "
+                "thiết bị lặp lại (bơm, bồn, vỏ màng).\n"
+                "    const kl = SVWS3D.kiemCotLoc(EQUIP, Q);   // Q m³/h\n"
+                "    // kl.loi phải rỗng; hiện kl.canhBao ngay dưới bảng thông số\n"
+                "  Khai thêm qty (số cột) và hLop (chiều cao lớp vật liệu, mm) cho từng "
+                "cột lọc thì bộ kiểm mới tính được vận tốc và EBCT.\n"
                 "- Dồn công sức vào MÔ TẢ ĐÚNG dây chuyền: đủ thiết bị theo Phần A, "
                 "đúng thứ tự dòng công nghệ, tag thiết bị chuẩn (T-101, P-101, F-101…), "
                 "kích thước suy từ thông số thiết kế.\n\n"

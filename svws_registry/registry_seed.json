@@ -133,6 +133,14 @@
           "s": "std"
         },
         {
+          "t": "Tham số riêng cho từng loại thiết bị: MỖI LOẠI phải có SỐ LƯỢNG và KÍCH THƯỚC riêng trong bảng thông số, không dùng chung. Cụ thể với cụm lọc: số cột và đường kính của lọc đa vật liệu (MMF) tách hoàn toàn khỏi số cột và đường kính của lọc than hoạt tính (GAC/ACF), mỗi loại có thêm ô chiều cao lớp vật liệu riêng. Lý do: hai loại chịu hai luật thiết kế khác nhau — MMF tính theo VẬN TỐC LỌC (10–20 m/h, khi một cột rửa ngược không quá 25 m/h), GAC tính theo THỜI GIAN TIẾP XÚC EBCT (≥ 10 phút, khử clo dư thường 10–15 phút) — nên buộc chung một bộ tham số thì cột này đúng là cột kia sai, và hai cột trông không cân xứng. Nguyên tắc này áp dụng cho mọi họ thiết bị lặp lại khác (bơm, bồn, vỏ màng): tham số của từng cụm là độc lập.",
+          "s": "new"
+        },
+        {
+          "t": "Kiểm tra cụm lọc tự động: gọi SVWS3D.kiemCotLoc(EQUIP, Q) và hiện kết quả ngay trong bảng thông số. Báo LỖI khi vận tốc lọc vượt 20 m/h hoặc EBCT than dưới 10 phút; NHẮC khi cột thừa to (vận tốc dưới 8 m/h — tốn tiền và tốn nước rửa ngược), khi một cột rửa ngược làm vận tốc còn lại vượt 25 m/h, và khi vận tốc hai họ cột lệch nhau quá 1,7 lần (dấu hiệu đang bị buộc chung tham số).",
+          "s": "new"
+        },
+        {
           "t": "Nút \"Chỉnh bản vẽ bằng AI\": ô nhập yêu cầu bằng ngôn ngữ tự nhiên (VD: \"tăng bể lên 4m, dời bơm sang phải\"), AI tự phân tích và điều chỉnh bản vẽ / thông số thiết kế theo yêu cầu, sau đó toàn bộ nội dung parametric tự cập nhật theo. Lưu ý: tính năng này gọi API Claude nên cần kết nối mạng khi sử dụng — toàn bộ chức năng còn lại của tool vẫn chạy offline 100%.",
           "s": "std"
         }
