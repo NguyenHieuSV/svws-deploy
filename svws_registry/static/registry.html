@@ -163,6 +163,8 @@
   <span class="count-note" id="countNote"></span>
 </div>
 
+<div id="toolCu" class="toolbar tab-hidden" style="border-top:0"></div>
+
 <main>
   <div id="tabReq">
     <div class="intro">
@@ -238,6 +240,65 @@ async function loadDoc(){
   renderServerMeta(j.updated_at, j.updated_by);
   setInd('✓ Đồng bộ');
 }
+/* ====== GIỮ LẠI TOOL VỪA TẠO QUA MỖI LẦN TẢI TRANG ======
+   Tool giao bằng blob: blob sống bám vào trang tạo ra nó, tải lại trang là
+   blob mất và tab tool báo ERR_FILE_NOT_FOUND. Một tool tốn vài phút chờ AI
+   và tiền gọi API, mất vì lỡ bấm F5 thì quá phí. Ở đây lưu BẢN GỐC AI VIẾT
+   (vài chục KB, chưa nhúng thư viện) vào máy; mở lại thì nhúng lại thư viện. */
+const KHOA_TOOL = 'svws_tool_moi';
+function luuToolMoi(ma, htmlGoc){
+  try{
+    localStorage.setItem(KHOA_TOOL, JSON.stringify({
+      ma: ma || '', luc: new Date().toISOString(), html: htmlGoc
+    }));
+  }catch(e){ /* hết chỗ lưu thì thôi, không chặn việc giao file */ }
+  hienToolCu();
+}
+function docToolCu(){
+  try{ return JSON.parse(localStorage.getItem(KHOA_TOOL) || 'null'); }
+  catch(e){ return null; }
+}
+function hienToolCu(){
+  const t = docToolCu(), el = document.getElementById('toolCu');
+  if(!el) return;
+  if(!t || !t.html){ el.classList.add('tab-hidden'); return; }
+  const d = new Date(t.luc);
+  const gio = isNaN(d) ? '' : d.toLocaleString('vi-VN', {hour:'2-digit', minute:'2-digit',
+                                day:'2-digit', month:'2-digit'});
+  el.classList.remove('tab-hidden');
+  el.innerHTML = `<span style="font-size:12.5px">🧰 Tool đã tạo:
+      <b>${esc(t.ma || '(không rõ mã)')}</b> · ${esc(gio)} · ${(t.html.length/1024).toFixed(0)} KB</span>
+    <button class="primary" onclick="moLaiToolCu()">👁 Mở lại</button>
+    <button onclick="taiToolCu()">⬇ Tải file</button>
+    <span class="spacer"></span>
+    <button onclick="xoaToolCu()">✕ Bỏ khỏi máy</button>`;
+}
+async function dungLaiTool(){
+  const t = docToolCu();
+  if(!t || !t.html) return null;
+  const go = boThuVienTuViet(t.html);
+  const res = await injectThree(go.html);
+  return {ma: t.ma, html: res.html};
+}
+async function moLaiToolCu(){
+  const r = await dungLaiTool(); if(!r) return;
+  if(execBlobUrl) URL.revokeObjectURL(execBlobUrl);
+  execBlobUrl = URL.createObjectURL(new Blob([r.html], {type:'text/html;charset=utf-8'}));
+  window.open(execBlobUrl, '_blank');
+}
+async function taiToolCu(){
+  const r = await dungLaiTool(); if(!r) return;
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([r.html], {type:'text/html;charset=utf-8'}));
+  a.download = (r.ma || 'SVWS').replace(/[^\w\-\.]+/g,'_') + '_tool.html';
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+}
+function xoaToolCu(){
+  try{ localStorage.removeItem(KHOA_TOOL); }catch(e){}
+  hienToolCu();
+}
+
 let saveTimer = null;
 function touch(){
   setInd('Đang lưu…');
@@ -762,6 +823,7 @@ function chayThuTool(html){
 /* Dùng chung cho cả tạo mới lẫn sau khi sửa lỗi: nhúng thư viện rồi giao file. */
 async function finalizeTool(html, headline, extraNote){
   const goc = html;
+  luuToolMoi(curCode, goc);       // giữ lại để tải lại trang không mất tool
   const go = boThuVienTuViet(html);
   let res = await injectThree(go.html);
   let thu = null, daLui = false;
@@ -1099,6 +1161,7 @@ document.getElementById('jsonInput').addEventListener('change',e=>{
 /* ================= INIT ================= */
 (async ()=>{
   renderUser();
+  hienToolCu();          // tool tạo lần trước vẫn mở lại được sau khi tải trang
   try{
     await loadDoc();
     renderMeta(); render(); renderDesigns(); switchTab('req');
