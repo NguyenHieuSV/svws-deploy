@@ -604,26 +604,38 @@ function showFinal(promptText, titleSuffix){
 let execBlobUrl = null, brokenHTML = null, brokenErr = '';
 // khoan dung: AI có thể viết thẻ kèm thuộc tính hoặc thừa khoảng trắng
 const THREE_MARK = /<script[^>]*>\s*\/\*\s*__SVWS_THREE__\s*\*\/\s*<\/script>/i;
-let threeCache = null;
+let libCache = null;
+const LIB_FILE = ['three.js','svws3d.js','svwspid.js','svwsga.js','svwsdien.js'];
 
-/* Nhúng Three.js r128 vào tool: AI không thể gõ tay 600KB thư viện (vượt xa
-   trần token) nên trước đây nó tự hạ cấp xuống canvas 2D. Nay nó chỉ để chỗ
-   trống, ta chèn thư viện thật vào → tool vẫn là 1 file chạy offline. */
+async function napLib(){
+  if(libCache) return libCache;
+  const rs = await Promise.all(LIB_FILE.map(t => fetch('/registry/'+t)));
+  rs.forEach((r,i) => { if(!r.ok) throw new Error(LIB_FILE[i]+' HTTP '+r.status); });
+  const vb = await Promise.all(rs.map(r => r.text()));
+  libCache = { three: vb[0], svws: vb.slice(1).join('\n;\n') };
+  return libCache;
+}
+
+/* Nhúng thư viện vào tool: AI không thể gõ tay 600KB Three.js (vượt xa trần
+   token) nên trước đây nó tự hạ cấp xuống canvas 2D. Nay nó chỉ để chỗ trống,
+   ta chèn thư viện thật vào → tool vẫn là 1 file chạy offline.
+   Bốn bộ dựng của SVWS (3D · P&ID · GA · ĐIỆN) cũng chèn ở đây; thiếu chúng thì
+   tool báo "SVWSPID is not defined" và tab tương ứng ra trang trắng. */
 async function injectThree(html){
-  if(!THREE_MARK.test(html) && !/\bTHREE\s*\./.test(html))
-    return {html, injected:false};                 // tool không dùng 3D
-  if(/Three\.js Authors|THREE\s*=\s*\{\}/.test(html))
-    return {html, injected:false, already:true};   // AI đã tự nhúng, đừng nhúng đôi
-  try{
-    if(threeCache === null){
-      const [a,b] = await Promise.all([fetch('/registry/three.js'), fetch('/registry/svws3d.js')]);
-      if(!a.ok) throw new Error('three.js HTTP '+a.status);
-      if(!b.ok) throw new Error('svws3d.js HTTP '+b.status);
-      threeCache = (await a.text()) + '\n;\n' + (await b.text());
-    }
-  }catch(e){ return {html, injected:false, err:e.message}; }
+  const dungSvws  = /\bSVWS(3D|PID|GA|DIEN)\s*\./.test(html);
+  const dungThree = THREE_MARK.test(html) || /\bTHREE\s*\./.test(html)
+                    || /\bSVWS3D\s*\./.test(html);
+  if(!dungThree && !dungSvws) return {html, injected:false};
+  const daCoThree = /Three\.js Authors|THREE\s*=\s*\{\}/.test(html);
+  let lib;
+  try{ lib = await napLib(); }
+  catch(e){ return {html, injected:false, err:e.message}; }
+  let ma = '';
+  if(dungThree && !daCoThree) ma += lib.three + '\n;\n';
+  if(dungSvws) ma += lib.svws;
+  if(!ma) return {html, injected:false, already:true};
   // PHẢI dùng dạng hàm: mã thư viện chứa ký tự $ nên replace kiểu chuỗi sẽ hỏng
-  const tag = () => '<script>' + threeCache + '<\/script>';
+  const tag = () => '<script>' + ma + '<\/script>';
   if(THREE_MARK.test(html)) return {html: html.replace(THREE_MARK, tag), injected:true};
   if(/<\/head>/i.test(html)) return {html: html.replace(/<\/head>/i, () => tag()+'</head>'), injected:true};
   return {html: html.replace(/<body[^>]*>/i, m => m + tag()), injected:true};
@@ -641,7 +653,7 @@ async function finalizeTool(html, headline, extraNote){
       <h4 style="color:var(--ok)">${headline} — ${(html.length/1024).toFixed(0)} KB</h4>
       ${extraNote?`<div style="font-size:12.5px">${esc(extraNote)}</div>`:''}
       <div style="font-size:12px;color:var(--muted);margin-top:4px">
-        ${res.injected ? '✔ Đã nhúng Three.js r128 + bộ dựng SVWS3D / SVWSPID / SVWSGA — file vẫn mở offline.'
+        ${res.injected ? '✔ Đã nhúng Three.js r128 + bộ dựng SVWS3D / SVWSPID / SVWSGA / SVWSDIEN — file vẫn mở offline.'
           : res.already ? '✔ Tool tự mang sẵn Three.js.'
           : res.err ? '⚠ Không nạp được Three.js ('+esc(res.err)+') — bản vẽ 3D có thể không hiện.'
           : 'Tool này không dùng Three.js.'}

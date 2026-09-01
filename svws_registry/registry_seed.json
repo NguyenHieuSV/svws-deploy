@@ -45,7 +45,7 @@
       ]
     },
     {
-      "title": "Cấu trúc 8 tab bắt buộc",
+      "title": "Cấu trúc 9 tab bắt buộc",
       "items": [
         {
           "t": "Tab 1 — 3D Layout: bể tường trong suốt thấy đầy đủ nội thất; toolbar bật/tắt nhãn đồng bộ với checkbox layer; ống chỉ đi vuông góc theo trục X/Y/Z (rẽ 90°); ống gom trên rack phía trước theo tầng cao độ (nước/RAS +300, khí +550, hóa chất +900/+1200); bơm đặt inline trên rack.",
@@ -84,11 +84,19 @@
           "s": "std"
         },
         {
-          "t": "Tab 7 — O&M manual: setpoint & ngưỡng, commissioning, trình tự start/stop, bảo trì định kỳ, CIP, xử lý sự cố, an toàn, mẫu nhật ký vận hành.",
+          "t": "Tab 7 — Logic vận hành & Sơ đồ mạch điện: đủ để THI CÔNG TỦ ĐIỆN và LẬP TRÌNH PLC hoàn chỉnh, không dừng ở mức minh hoạ. Gồm hai phần. (A) LOGIC VẬN HÀNH: bảng logic điều khiển từng thiết bị (chế độ AUTO/MAN, điều kiện CHẠY, điều kiện DỪNG, khoá liên động cấm chạy, báo động); ma trận khoá liên động; trình tự khởi động/dừng theo bước kèm điều kiện chuyển bước, thời gian trễ và xử lý khi lỗi; danh mục báo động (mã, mức, ngưỡng, tác động của hệ thống, cách xử lý). (B) BẢN VẼ ĐIỆN: sơ đồ nguyên lý mạch động lực (MCCB tổng → thanh cái → từng lộ: CB, khởi động từ, rơ-le nhiệt hoặc biến tần, động cơ, kèm tiết diện cáp); sơ đồ mạch điều khiển dạng thang có đánh số nấc, số dây và tham chiếu chéo; sơ đồ đấu nối PLC I/O kèm bảng I/O (địa chỉ, tag hiện trường, loại tín hiệu, số đầu cốt); bản vẽ bố trí thiết bị trong tủ theo tỷ lệ thật kèm kích thước tủ. Tất cả parametric theo bảng thông số.",
+          "s": "new"
+        },
+        {
+          "t": "Tab 7 (bổ sung) — Tự chọn thiết bị điện theo công suất: dòng định mức tính từ kW, chọn MCB/MCCB, khởi động từ AC-3, dải đặt rơ-le nhiệt, tiết diện cáp đồng (cáp phải chịu được nấc CB chứ không chỉ chịu dòng tải). Kiểm tra bắt buộc trước khi phát hành: có nút dừng khẩn cấp, không trùng địa chỉ PLC, không trùng tag trong cùng nhóm tín hiệu, mọi thiết bị đều có khoá liên động, tủ đủ chỗ và đủ giải nhiệt.",
+          "s": "new"
+        },
+        {
+          "t": "Tab 8 — O&M manual: setpoint & ngưỡng, commissioning, trình tự start/stop, bảo trì định kỳ, CIP, xử lý sự cố, an toàn, mẫu nhật ký vận hành.",
           "s": "std"
         },
         {
-          "t": "Tab 8 — BOQ & Pricing: đơn giá tham khảo nội bộ nạp sẵn (mức tin cậy AI/kinh nghiệm theo Forecast Cal, thay bằng báo giá NCC trước khi phát hành), ô chỉnh sửa được, tổng theo nhóm + VAT + suất đầu tư (VND/m³·ngày), nút Export Excel.",
+          "t": "Tab 9 — BOQ & Pricing: đơn giá tham khảo nội bộ nạp sẵn (mức tin cậy AI/kinh nghiệm theo Forecast Cal, thay bằng báo giá NCC trước khi phát hành), ô chỉnh sửa được, tổng theo nhóm + VAT + suất đầu tư (VND/m³·ngày), nút Export Excel.",
           "s": "std"
         }
       ]
@@ -203,7 +211,7 @@
       "capacity": "25 m³/ngày",
       "project": "Coats",
       "params": "Đủ 7 tab đời cũ: P&ID/GA/SD/điện/O&M/BOQ",
-      "notes": "Cần nâng cấp lên chuẩn 8 tab (thêm Construction Breakdown)",
+      "notes": "Cần nâng cấp lên chuẩn 9 tab (thêm Construction Breakdown + Logic vận hành & mạch điện)",
       "status": "Đã có tool"
     },
     {

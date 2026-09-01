@@ -24,6 +24,7 @@ URL sau khi deploy:  https://<app>.onrender.com/registry
 """
 import os
 import re
+import copy
 import json
 import datetime
 from pathlib import Path
@@ -33,6 +34,7 @@ import httpx
 from fastapi import APIRouter, HTTPException, Body, Response, UploadFile, File
 from fastapi.responses import HTMLResponse, StreamingResponse
 from sqlalchemy import Column, JSON, Text
+from sqlalchemy.orm.attributes import flag_modified
 from sqlmodel import SQLModel, Field, Session, create_engine, select
 
 # ----------------------------------------------------------------------------
@@ -51,6 +53,7 @@ _THREE = _HERE / "static" / "three.min.js"   # Three.js r128 (MIT) — chuẩn R
 _SVWS3D = _HERE / "static" / "svws3d.js"     # bộ dựng hình 3D chuẩn của SVWS
 _SVWSPID = _HERE / "static" / "svwspid.js"   # bộ dựng sơ đồ P&ID chuẩn
 _SVWSGA = _HERE / "static" / "svwsga.js"     # bộ dựng mặt bằng GA chuẩn
+_SVWSDIEN = _HERE / "static" / "svwsdien.js" # bộ dựng logic vận hành + bản vẽ điện
 
 MAX_REVISIONS = 300  # giữ tối đa bao nhiêu bản lịch sử
 
@@ -82,8 +85,58 @@ class RegistryRevision(SQLModel, table=True):
     note: str = Field(default="", sa_column=Column(Text))
 
 
+_MUC_TAB7 = "Tab 7 — Logic vận hành & Sơ đồ mạch điện"
+
+
+def _nang_cap_9_tab(data: dict) -> bool:
+    """Bổ sung mục Tab 7 (Logic vận hành & mạch điện) vào tài liệu ĐANG CHẠY.
+
+    Seed chỉ nạp khi DB trống, nên bản đã chạy trên Render sẽ không tự có mục
+    mới. Hàm này chèn thêm, và đánh lại số hai tab cuối (O&M → 8, BOQ → 9).
+    Chạy lại nhiều lần cũng chỉ thêm một lần; không đụng nội dung người dùng
+    đã tự sửa. Trả về True nếu có thay đổi.
+    """
+    if not _SEED.exists():
+        return False
+    for sec in data.get("sections") or []:
+        if "tab bắt buộc" not in (sec.get("title") or "").lower():
+            continue
+        items = sec.get("items") or []
+        if any(_MUC_TAB7 in (it.get("t") or "") for it in items):
+            return False                       # đã nâng cấp rồi
+
+        seed_items = []
+        for s_sec in json.loads(_SEED.read_text(encoding="utf-8")).get("sections") or []:
+            for it in s_sec.get("items") or []:
+                if (it.get("t") or "").startswith("Tab 7"):
+                    seed_items.append(it)
+        if not seed_items:
+            return False
+
+        # Đánh số lại TRƯỚC khi chèn, nếu không mục mới cũng bị đánh số theo.
+        for it in items:
+            t = it.get("t") or ""
+            if t.startswith("Tab 8 —"):
+                it["t"] = "Tab 9 —" + t[len("Tab 8 —"):]
+            elif t.startswith("Tab 7 —"):
+                it["t"] = "Tab 8 —" + t[len("Tab 7 —"):]
+            elif t.startswith("Tab 7 ("):
+                it["t"] = "Tab 8 (" + t[len("Tab 7 ("):]
+            elif t.startswith("Tab 8 ("):
+                it["t"] = "Tab 9 (" + t[len("Tab 8 ("):]
+
+        vt = 0                                 # chèn ngay sau cụm Tab 6
+        for i, it in enumerate(items):
+            if (it.get("t") or "").startswith("Tab 6"):
+                vt = i + 1
+        sec["items"] = items[:vt] + seed_items + items[vt:]
+        sec["title"] = "Cấu trúc 9 tab bắt buộc"
+        return True
+    return False
+
+
 def init_db() -> None:
-    """Tạo bảng nếu chưa có; nạp seed Rev.E nếu DB trống. Gọi ở startup."""
+    """Tạo bảng nếu chưa có; nạp seed nếu DB trống; nâng cấp chuẩn nếu đã có."""
     SQLModel.metadata.create_all(engine)
     with Session(engine) as s:
         doc = s.get(RegistryDoc, 1)
@@ -97,6 +150,24 @@ def init_db() -> None:
             s.add(RegistryRevision(data=seed, updated_at=doc.updated_at,
                                    updated_by="seed Rev.E", note="Khởi tạo từ file Rev.E"))
             s.commit()
+            return
+
+        # PHẢI sao chép SÂU: sao chép nông dùng chung các đối tượng con, sửa vào
+        # đó là sửa luôn giá trị cũ → SQLAlchemy thấy "mới bằng cũ" và bỏ qua
+        # cột JSON, kết quả là updated_by đổi mà nội dung thì không.
+        data = copy.deepcopy(doc.data or {})
+        if _nang_cap_9_tab(data):
+            doc.data = data
+            flag_modified(doc, "data")
+            doc.updated_at = _now()
+            doc.updated_by = "nâng cấp tự động"
+            s.add(doc)
+            s.add(RegistryRevision(data=data, updated_at=doc.updated_at,
+                                   updated_by="nâng cấp tự động",
+                                   note="Thêm Tab 7 — Logic vận hành & Sơ đồ mạch điện "
+                                        "(chuẩn chuyển từ 8 lên 9 tab)"))
+            s.commit()
+            print("[REGISTRY] Đã bổ sung Tab 7 — Logic vận hành & Sơ đồ mạch điện")
 
 
 # ----------------------------------------------------------------------------
@@ -168,6 +239,22 @@ def svwsga_js():
     if not _SVWSGA.exists():
         raise HTTPException(500, "Thiếu static/svwsga.js trong module")
     return Response(_SVWSGA.read_text(encoding="utf-8"),
+                    media_type="application/javascript; charset=utf-8",
+                    headers={"Cache-Control": "no-cache"})
+
+
+@router.get("/svwsdien.js", include_in_schema=False)
+def svwsdien_js():
+    """Bộ dựng LOGIC VẬN HÀNH + BẢN VẼ ĐIỆN — đủ để thi công tủ và lập trình PLC.
+
+    Ngoài phần vẽ (mạch động lực, thang điều khiển, đấu nối PLC, bố trí tủ), nó
+    còn TỰ CHỌN THIẾT BỊ theo công suất: dòng định mức, MCCB, khởi động từ,
+    rơ-le nhiệt, tiết diện cáp — và tự kiểm những lỗi chết người như thiếu nút
+    dừng khẩn cấp, trùng địa chỉ PLC, thiết bị không đủ chỗ trong tủ.
+    """
+    if not _SVWSDIEN.exists():
+        raise HTTPException(500, "Thiếu static/svwsdien.js trong module")
+    return Response(_SVWSDIEN.read_text(encoding="utf-8"),
                     media_type="application/javascript; charset=utf-8",
                     headers={"Cache-Control": "no-cache"})
 
@@ -539,6 +626,49 @@ def ai_execute(payload: dict = Body(...)):
                 "  Thư viện tự chọn tỷ lệ cho vừa khổ A3, vẽ đúng tỷ lệ, tự sinh chuỗi kích "
                 "thước và mũi tên hướng Bắc. kiemTra() báo cả nhãn đè nhau LẪN khe vận hành "
                 "thiếu (dưới 800 mm thì không có chỗ đứng bảo trì) — phải rỗng.\n"
+                "- Tab 7 (Logic vận hành & mạch điện): dùng SVWSDIEN. Đây là tab để "
+                "THỢ ĐẤU TỦ và NGƯỜI LẬP TRÌNH PLC làm việc, nên phải đủ số liệu thật, "
+                "ĐỪNG tự gõ toạ độ SVG cho sơ đồ điện.\n"
+                "    // (1) mạch động lực — thư viện TỰ CHỌN CB, khởi động từ, rơ-le "
+                "nhiệt, tiết diện cáp theo kW; chỉ khai báo tải:\n"
+                "    const DL = SVWSDIEN.dongLuc({ma:'<mã>', ten:'<tên>', "
+                "nguon:'3P+N 380/220 VAC 50 Hz'});\n"
+                "    DL.tai({tag:'P-101A', ten:'Bơm cấp', kW:3, kieu:'DOL'});      "
+                "// kieu: DOL | VFD ; pha:1 cho tải 1 pha\n"
+                "    elDL.innerHTML = DL.ve();   elMotor.innerHTML = DL.bangMotor();\n"
+                "    // (2) mạch điều khiển dạng thang — tự đánh số nấc, số dây, "
+                "tham chiếu chéo:\n"
+                "    const DK = SVWSDIEN.dieuKhien({ma:'<mã>'});\n"
+                "    DK.mach({ten:'Cho phép chạy', pt:[{k:'estop',t:'ES-01'},"
+                "{k:'nc',t:'F1'},{k:'cuon',t:'KA-01'}]});\n"
+                "      k nhận: estop · no · nc · nut · chon · tg · di · do · cuon · "
+                "den · coi. Cuộn/đèn/còi tự ép sát ray phải.\n"
+                "    // (3) đấu nối PLC + bảng I/O:\n"
+                "    const IO = SVWSDIEN.plc({ma:'<mã>', cpu:'S7-1200 CPU1214C'});\n"
+                "    IO.module({kieu:'DI', ten:'DI on-board', kenh:[{dc:'I0.0',"
+                "tag:'ES-01', mo:'Nút dừng khẩn cấp', tin:'NC'}]});   // kieu: DI/DO/AI/AO\n"
+                "    elIO.innerHTML = IO.ve();   elBangIO.innerHTML = IO.bangIO();\n"
+                "    // (4) bố trí tủ theo tỷ lệ thật (r = bề rộng mm, c = chiều cao mm, "
+                "nhiet = W toả ra):\n"
+                "    const TU = SVWSDIEN.tuDien({W:800, H:1200, D:300});\n"
+                "    TU.thiet({ten:'MCCB 100A', r:105, c:165, nhiet:12});\n"
+                "    // (5) bảng logic vận hành — phần người lập trình PLC đọc để viết "
+                "chương trình:\n"
+                "    const LG = SVWSDIEN.logic({});\n"
+                "    LG.thietBi({tag:'P-101A', ten:'Bơm cấp', che:'AUTO/MAN', "
+                "chay:'<điều kiện>', dung:'<điều kiện>', khoa:'<khoá liên động>', "
+                "bao:'<báo động>'});\n"
+                "    LG.trinhTu({b:1, viec:'...', dk:'...', t:'15 s', loi:'...'});\n"
+                "    LG.baoDong({ma:'A-01', mo:'Dừng khẩn cấp', muc:'Sự cố', "
+                "nguong:'ES-01=0', tacDong:'Cắt toàn bộ đầu ra', xuLy:'...'});\n"
+                "    elLG.innerHTML = LG.tatCa();   // 4 bảng + ma trận khoá liên động\n"
+                "  Nhúng SVWSDIEN.CSS một lần để các bảng có định dạng. Mỗi bộ có "
+                "kiemTra() trả {loi, canhBao}: loi PHẢI RỖNG (thiếu nút dừng khẩn cấp, "
+                "trùng địa chỉ PLC, thiết bị đè nhau, tủ không đủ chỗ); canhBao là "
+                "khuyến nghị kỹ thuật, hiện lên cho người dùng đọc chứ không chặn.\n"
+                "  Số liệu phải KHỚP giữa các tab: tag động cơ ở mạch động lực trùng "
+                "tag bơm ở 3D/P&ID; mỗi động cơ phải có đủ DO lệnh chạy và DI phản hồi "
+                "trong bảng I/O; mỗi dụng cụ đo trên P&ID phải có một kênh AI.\n"
                 "- Dồn công sức vào MÔ TẢ ĐÚNG dây chuyền: đủ thiết bị theo Phần A, "
                 "đúng thứ tự dòng công nghệ, tag thiết bị chuẩn (T-101, P-101, F-101…), "
                 "kích thước suy từ thông số thiết kế.\n\n"
