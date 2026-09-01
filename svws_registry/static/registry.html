@@ -642,8 +642,70 @@ async function injectThree(html){
   return {html: html.replace(/<body[^>]*>/i, m => m + tag()), injected:true};
 }
 
+const TEN_LIB = ['SVWS3D','SVWSPID','SVWSGA','SVWSCHE','SVWSVT','SVWSDIEN'];
+
+/* Tìm dấu chấm phẩy kết thúc một câu lệnh, bỏ qua chuỗi và chú thích.
+   Chỗ dễ sai: `${...}` trong chuỗi mẫu — phần trong ngoặc là MÃ chứ không phải
+   chuỗi, phải thoát chế độ chuỗi rồi quay lại khi đóng ngoặc. Không làm vậy thì
+   dấu } đóng bị nuốt như ký tự thường, độ sâu không bao giờ về 0 và bộ dò chạy
+   hết file mà không tìm ra điểm kết thúc. */
+function cuoiLenh(s, i){
+  let d = 0, q = null, esc = false;
+  const nguoc = [];                      // chuỗi mẫu đang tạm dừng vì vào ${ }
+  for(; i < s.length; i++){
+    const c = s[i];
+    if(q){
+      if(esc){ esc = false; continue; }
+      if(c === '\\'){ esc = true; continue; }
+      if(q === '`' && c === '$' && s[i+1] === '{'){
+        nguoc.push({d: d, q: q}); q = null; d++; i++; continue;
+      }
+      if(c === q) q = null;
+      continue;
+    }
+    if(c === '"' || c === "'" || c === '`'){ q = c; continue; }
+    if(c === '/' && s[i+1] === '/'){ while(i < s.length && s[i] !== '\n') i++; continue; }
+    if(c === '/' && s[i+1] === '*'){ i = s.indexOf('*/', i+2); if(i < 0) return -1; i++; continue; }
+    if(c === '(' || c === '[' || c === '{') d++;
+    else if(c === ')' || c === ']' || c === '}'){
+      d--;
+      if(nguoc.length && d === nguoc[nguoc.length-1].d){ q = nguoc.pop().q; continue; }
+      if(d < 0) return -1;
+    }
+    else if(c === ';' && d === 0) return i + 1;
+  }
+  return -1;
+}
+
+/* AI hay TỰ VIẾT LẠI các thư viện ngay trong tool (const SVWSGA = (function(){…})()),
+   che mất bản thật đã nhúng — nên mọi công sức làm thư viện bị vô hiệu mà nhìn bề
+   ngoài tool vẫn chạy. Đo trên một tool sinh thật: cả 6 bộ đều bị viết lại, bản GA
+   tự viết ghi "Tỷ lệ 1:50" trong khi hệ số vẽ là 1:16,7 — nhãn nói dối.
+   Gỡ phần tự viết đi thì các lời gọi còn lại tự động dùng thư viện thật. */
+function boThuVienTuViet(html){
+  const daBo = [];
+  let ra = html;
+  for(const ten of TEN_LIB){
+    const re = new RegExp('\\b(?:const|let|var)\\s+' + ten + '\\s*=', 'g');
+    let m;
+    while((m = re.exec(ra))){
+      const het = cuoiLenh(ra, m.index + m[0].length);
+      if(het < 0) break;
+      const thu = ra.slice(0, m.index) + '\n/* SVWS: đã gỡ bản ' + ten +
+                  ' tự viết — dùng thư viện chuẩn của công ty */\n' + ra.slice(het);
+      if(jsSyntaxError(thu)) break;          // gỡ mà hỏng cú pháp thì thôi, giữ nguyên
+      ra = thu; daBo.push(ten);
+      re.lastIndex = 0;
+      break;
+    }
+  }
+  return { html: ra, daBo };
+}
+
 /* Dùng chung cho cả tạo mới lẫn sau khi sửa lỗi: nhúng thư viện rồi giao file. */
 async function finalizeTool(html, headline, extraNote){
+  const go = boThuVienTuViet(html);
+  html = go.html;
   const res = await injectThree(html);
   html = res.html;
   if(execBlobUrl) URL.revokeObjectURL(execBlobUrl);
@@ -653,6 +715,10 @@ async function finalizeTool(html, headline, extraNote){
     <div class="ai-block" style="border-left-color:var(--ok)">
       <h4 style="color:var(--ok)">${headline} — ${(html.length/1024).toFixed(0)} KB</h4>
       ${extraNote?`<div style="font-size:12.5px">${esc(extraNote)}</div>`:''}
+      ${go.daBo.length ? `<div style="font-size:12px;color:var(--warn,#b8860b);margin-top:5px">
+        ⚠ AI đã tự viết lại ${go.daBo.length} thư viện (${esc(go.daBo.join(', '))}) đè lên bản chuẩn —
+        đã gỡ phần tự viết để tool dùng đúng thư viện của công ty. Mở xem thử kiểm tra lại các bản vẽ.
+      </div>` : ''}
       <div style="font-size:12px;color:var(--muted);margin-top:4px">
         ${res.injected ? '✔ Đã nhúng Three.js r128 + bộ dựng SVWS3D / SVWSPID / SVWSGA / SVWSDIEN / SVWSCHE / SVWSVT — file vẫn mở offline.'
           : res.already ? '✔ Tool tự mang sẵn Three.js.'
