@@ -324,6 +324,115 @@
     return g;
   }
 
+  /**
+   * EDI dạng TẤM–KHUNG (plate & frame) — Veolia E-Cell MK-5 và tương đương.
+   *
+   * Trước đây kiểu 'edi' dùng chung hình với cụm RO nên hiện ra thành giàn vỏ
+   * màng nằm ngang — SAI HẲN loại thiết bị: EDI là chồng nhiều tấm cell mỏng
+   * kẹp giữa hai tấm bích đầu bằng ti giằng, không phải vỏ áp lực.
+   *
+   * Công suất: MỖI STACK 5 m³/h. Khai q (m³/h) thì thư viện tự chia số stack;
+   * hoặc khai thẳng stacks.
+   *
+   * Kích thước mặc định lấy theo TỶ LỆ ẢNH thiết bị thật, CHƯA phải số liệu
+   * catalogue — có datasheet thì truyền L/H/D vào cho đúng.
+   */
+  function ediStack(o) {
+    var q = +o.q || +o.congSuat || 0;
+    var moiStack = kt(o.moiStack, 5, 0.5, 100);        // m³/h cho mỗi stack
+    var n = Math.max(1, Math.min(12, +o.stacks || (q ? Math.ceil(q / moiStack) : 1)));
+    var L = kt(o.L, 1100, 400, 3000);                  // chiều xếp tấm (trục X)
+    var H = kt(o.H, 700, 300, 2000);
+    var D = kt(o.D, 600, 250, 2000);
+    var chan = 260;                                    // chân đế
+    var khe = 420;                                     // lối đi giữa hai stack
+    var g = grp('ediStack');
+    var mBich = mat('ss', { color: 0xb9c3c9 });
+    var mTam = mat('pvc', { color: 0xe9edef });
+    var mTi = mat('ss', { color: 0x9aa6ad });
+    var mCong = mat('pvc', { color: 0x3a4046, metalness: 0.3, roughness: 0.6 });
+    var dayBich = 90, packL = L - 2 * dayBich;
+    var zTong = n * D + (n - 1) * khe;
+
+    for (var s = 0; s < n; s++) {
+      var z0 = -zTong / 2 + D / 2 + s * (D + khe);
+
+      // bệ đỡ
+      var be = box(L + 120, chan, D + 120, mat('frame'));
+      be.position.set(0, chan / 2, z0); g.add(be);
+
+      // chồng tấm cell — vẽ thành nhiều gân mỏng để thấy đúng dạng tấm–khung
+      var soGan = 22, buoc = packL / soGan;
+      for (var i = 0; i < soGan; i++) {
+        var tam = box(buoc * 0.62, H * 0.9, D, mTam);
+        tam.position.set(-packL / 2 + buoc * (i + 0.5), chan + H / 2, z0);
+        g.add(tam);
+      }
+      // thanh ốp trên và dưới giữ chồng tấm
+      [chan + H * 0.955, chan + H * 0.045].forEach(function (y) {
+        var op = box(packL, H * 0.09, D * 1.02, mBich);
+        op.position.set(0, y, z0); g.add(op);
+      });
+
+      // hai tấm bích đầu
+      [-1, 1].forEach(function (d) {
+        var b = box(dayBich, H, D * 1.05, mBich);
+        b.position.set(d * (packL / 2 + dayBich / 2), chan + H / 2, z0);
+        g.add(b);
+      });
+
+      // ti giằng 4 góc + ê-cu hai đầu
+      [[H * 0.14, D * 0.36], [H * 0.14, -D * 0.36],
+       [H * 0.86, D * 0.36], [H * 0.86, -D * 0.36]].forEach(function (p) {
+        var ti = cyl(34, L + 120, mTi, 12);
+        ti.rotation.z = Math.PI / 2;
+        ti.position.set(0, chan + p[0], z0 + p[1]);
+        g.add(ti);
+        [-1, 1].forEach(function (d2) {
+          var ec = cyl(64, 46, mTi, 6);
+          ec.rotation.z = Math.PI / 2;
+          ec.position.set(d2 * (L / 2 + 32), chan + p[0], z0 + p[1]);
+          g.add(ec);
+        });
+      });
+
+      // đầu nối trên tấm bích trước (mặt +X) — theo ảnh thiết bị thật
+      var xNoi = packL / 2 + dayBich;
+      [[H * 0.24, -D * 0.28], [H * 0.24, D * 0.28],
+       [H * 0.5, -D * 0.3], [H * 0.5, D * 0.3],
+       [H * 0.76, -D * 0.28], [H * 0.76, D * 0.28]].forEach(function (p) {
+        var c = cyl(96, 110, mCong, 16);
+        c.rotation.z = Math.PI / 2;
+        c.position.set(xNoi + 55, chan + p[0], z0 + p[1]);
+        g.add(c);
+      });
+
+      // hai cọc nguồn một chiều trên đỉnh tấm bích
+      [[0x9b2c2c, -110], [0x1b2530, 110]].forEach(function (t) {
+        var coc = cyl(52, 130, mat('ss', { color: t[0] }), 12);
+        coc.position.set(xNoi - 20, chan + H + 65, z0 + t[1]);
+        g.add(coc);
+      });
+    }
+
+    g.userData.foot = { w: L + 700, d: zTong + 700 };
+    g.userData.h = chan + H + 130;
+    g.userData.soStack = n;
+    // Đầu nối đặt trên tấm bích của stack đầu tiên — chỗ đấu ống góp chung.
+    var zA = -zTong / 2 + D / 2, xN = packL / 2 + dayBich + 110;
+    g.userData.ports = {
+      in:      P(xN, chan + H * 0.24, zA - D * 0.28, 1, 0, 0),   // nước cấp (dilute)
+      out:     P(xN, chan + H * 0.76, zA - D * 0.28, 1, 0, 0),   // nước sản phẩm
+      conc_in: P(xN, chan + H * 0.24, zA + D * 0.28, 1, 0, 0),   // cô đặc vào
+      conc:    P(xN, chan + H * 0.76, zA + D * 0.28, 1, 0, 0),   // cô đặc ra
+      dien:    P(xN, chan + H * 0.5, zA + D * 0.3, 1, 0, 0),     // nước điện cực
+      cip:     P(-xN, chan + H * 0.5, zA - D * 0.3, -1, 0, 0),   // CIP
+      dc:      P(packL / 2 + dayBich - 20, chan + H + 130, zA, 0, 1, 0)  // cáp DC
+    };
+    veCacNozzle(g, 60);
+    return g;
+  }
+
   function panel(o) {   // tủ điện / tủ điều khiển
     var W = kt(o.W, 800, 200, 6000), H = kt(o.H, 1800, 400, 4000), D = kt(o.D, 400, 150, 2000);
     var g = grp('panel');
@@ -384,7 +493,7 @@
   var BUILDERS = {
     tank: tank, vessel: vessel, filter: vessel, cartridge: cartridge,
     pump: pump, roskid: roSkid, ro: roSkid, panel: panel, dosing: dosing,
-    uv: uvUnit, edi: roSkid, mixedbed: vessel
+    uv: uvUnit, edi: ediStack, mixedbed: vessel
   };
 
   /**
@@ -404,7 +513,7 @@
       return { w: c + 200, d: c + 200, tron: true, D: c }; }
     if (t === 'pump') return { w: kt(e.L, 900, 200, 4000) + 250,
                                d: kt(e.W, 420, 150, 3000) + 250 };
-    if (t === 'roskid' || t === 'ro' || t === 'edi') {
+    if (t === 'roskid' || t === 'ro') {     // EDI có nhánh riêng ở dưới
       var per = Math.min(12, Math.max(1, +e.memPerVessel || 6));
       var sz = coMang(e.size);
       var vl = per * (sz === '4040' ? 1020 : sz === '2540' ? 640 : 1020);
@@ -413,6 +522,12 @@
       var cols = Math.ceil(nv / rows);
       var vd = (sz === '4040' ? 130 : sz === '2540' ? 85 : 220);
       return { w: vl + 1000, d: Math.max(900, cols * (vd + 130) + 260) + 300 }; }
+    if (t === 'edi') {                      // chồng tấm–khung, không phải vỏ màng
+      var moiS = kt(e.moiStack, 5, 0.5, 100);
+      var ns = Math.max(1, Math.min(12,
+        +e.stacks || ((+e.q || +e.congSuat) ? Math.ceil((+e.q || +e.congSuat) / moiS) : 1)));
+      var Le = kt(e.L, 1100, 400, 3000), De = kt(e.D, 600, 250, 2000);
+      return { w: Le + 700, d: ns * De + (ns - 1) * 420 + 700 }; }
     if (t === 'panel') return { w: kt(e.W, 800, 200, 6000) + 300,
                                 d: kt(e.D, 400, 150, 2000) + 500 };
     if (t === 'dosing') { var dd = kt(e.d, 700, 200, 4000);

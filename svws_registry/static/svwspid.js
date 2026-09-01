@@ -157,6 +157,24 @@
         }
         return { w: w + 10, h: (n - 1) * buoc + hv, cx: x + w / 2 };
       },
+      edi: function (x, y, e) {           // EDI dạng tấm–khung, KHÔNG phải vỏ màng
+        var w = 78, h = 58, n = Math.max(1, Math.min(6, e.stacks || 1));
+        var buoc = h + 18;                // luôn lớn hơn chiều cao ký hiệu
+        for (var i = 0; i < n; i++) {
+          var yy = y + (i - (n - 1) / 2) * buoc;
+          out.push('<rect x="' + x + '" y="' + (yy - h / 2) + '" width="' + w +
+            '" height="' + h + '" fill="#eef4fb" stroke="' + NAVY + '" stroke-width="1.8"/>');
+          for (var k = 1; k < 7; k++) {   // các tấm cell xếp chồng
+            ln(x + w * k / 7, yy - h / 2 + 4, x + w * k / 7, yy + h / 2 - 4, NAVY, 0.8);
+          }
+          // hai cực một chiều
+          out.push('<text x="' + (x + 8) + '" y="' + (yy - h / 2 - 3) + '" font-size="9" ' +
+            'fill="#b3271e" font-weight="700">+</text>');
+          out.push('<text x="' + (x + w - 13) + '" y="' + (yy - h / 2 - 3) + '" font-size="9" ' +
+            'fill="#12263a" font-weight="700">−</text>');
+        }
+        return { w: w + 12, h: (n - 1) * buoc + h + 12, cx: x + w / 2 };
+      },
       uv: function (x, y) {
         var w = 54, h = 22;
         out.push('<rect x="' + x + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
@@ -206,7 +224,7 @@
         x += k.w + (opt.hoHang || 30);    // ← NHẢY THEO BỀ RỘNG THẬT, không phải hằng số
         return api;
       }
-      ['nguon', 'bon', 'bom', 'cot', 'loc', 'ro', 'uv', 'van'].forEach(function (t) {
+      ['nguon', 'bon', 'bom', 'cot', 'loc', 'ro', 'edi', 'uv', 'van'].forEach(function (t) {
         api[t] = function (e) { return dat(t, e); };
       });
       api.cuoi = function () { return x; };
