@@ -702,12 +702,94 @@ function boThuVienTuViet(html){
   return { html: ra, daBo };
 }
 
+/* CHẠY THỬ tool trước khi giao — kiểm cú pháp là CHƯA ĐỦ.
+   Gỡ phần thư viện AI tự viết thì mã còn lại có thể gọi một hàm chỉ có trong
+   bản tự viết (đã gặp: SVWS3D.widthOf không tồn tại trong thư viện chuẩn).
+   Cú pháp vẫn sạch, mở ra mới thấy tab trắng — và vì các tool dựng hết tab
+   trong một lượt nên một lỗi ở tab 3 làm trắng luôn tab 4 đến 9.
+   Ở đây nạp thật vào iframe ẩn, bấm hết các tab, thu lỗi và đếm tab rỗng. */
+function chayThuTool(html){
+  return new Promise(resolve => {
+    let xong = false;
+    const thu = html.replace(/<head[^>]*>/i, m => m +
+      '<script>window.__svwsLoi=[];addEventListener("error",e=>' +
+      'window.__svwsLoi.push(String(e.message||e)));' +
+      'addEventListener("unhandledrejection",e=>' +
+      'window.__svwsLoi.push("promise: "+e.reason));<\/script>');
+    const url = URL.createObjectURL(new Blob([thu], {type:'text/html;charset=utf-8'}));
+    const ifr = document.createElement('iframe');
+    ifr.style.cssText = 'position:fixed;left:-10000px;top:0;width:1400px;height:1000px;border:0';
+    function ket(kq){
+      if(xong) return; xong = true;
+      try{ ifr.remove(); }catch(e){}
+      URL.revokeObjectURL(url);
+      resolve(kq);
+    }
+    ifr.onload = () => {
+      setTimeout(() => {
+        const kq = {loi: [], tabTrong: [], soTab: 0};
+        try{
+          const w = ifr.contentWindow, d = w.document;
+          const nut = [...d.querySelectorAll('button')]
+            .filter(b => /^\s*\d+\s*\./.test(b.textContent || ''));
+          kq.soTab = nut.length;
+          nut.forEach(b => {
+            const truoc = (w.__svwsLoi || []).length;
+            try{ b.click(); }catch(e){ (w.__svwsLoi = w.__svwsLoi || []).push(e.message); }
+            const ten = b.textContent.trim().slice(0, 28);
+            // tab coi là RỖNG nếu sau khi bấm không có chữ lẫn hình nào mới
+            const than = d.body;
+            const co = than && (than.querySelectorAll('svg,canvas,table').length > 0 ||
+                                (than.innerText || '').length > 400);
+            if(!co) kq.tabTrong.push(ten);
+            if((w.__svwsLoi || []).length > truoc) kq.loi.push(ten + ': ' +
+              w.__svwsLoi[w.__svwsLoi.length - 1]);
+          });
+          (w.__svwsLoi || []).slice(0, 3).forEach(m => {
+            if(!kq.loi.some(x => x.indexOf(m) >= 0)) kq.loi.unshift('khi mở file: ' + m);
+          });
+        }catch(e){ kq.loi.push('không đọc được nội dung tool: ' + e.message); }
+        ket(kq);
+      }, 1200);
+    };
+    setTimeout(() => ket({loi: ['Tool không tải xong trong 20 giây.'],
+                          tabTrong: [], soTab: 0}), 20000);
+    ifr.src = url;
+    document.body.appendChild(ifr);
+  });
+}
+
 /* Dùng chung cho cả tạo mới lẫn sau khi sửa lỗi: nhúng thư viện rồi giao file. */
 async function finalizeTool(html, headline, extraNote){
+  const goc = html;
   const go = boThuVienTuViet(html);
-  html = go.html;
-  const res = await injectThree(html);
+  let res = await injectThree(go.html);
+  let thu = null, daLui = false;
+  try{ thu = await chayThuTool(res.html); }catch(e){ thu = null; }
+
+  /* Gỡ thư viện AI tự viết là ĐÚNG về nguyên tắc, nhưng mã còn lại có thể gọi
+     một hàm chỉ bản tự viết mới có — gỡ xong tool chết, tab trắng. Khi đó thà
+     giao bản chạy được: thử lại KHÔNG gỡ, nếu chạy sạch thì dùng bản đó và nói
+     rõ tool đang dùng thư viện AI tự viết chứ không phải bản chuẩn. */
+  if(go.daBo.length && thu && (thu.loi.length || thu.tabTrong.length)){
+    try{
+      const res2 = await injectThree(goc);
+      const thu2 = await chayThuTool(res2.html);
+      if(thu2 && !thu2.loi.length && !thu2.tabTrong.length){
+        res = res2; thu = thu2; daLui = true;
+      }
+    }catch(e){}
+  }
   html = res.html;
+  if(thu && (thu.loi.length || thu.tabTrong.length)){
+    // giữ lại để nút 🔧 gửi đúng file này kèm mô tả lỗi CHẠY (không phải cú pháp)
+    brokenHTML = html;
+    brokenErr = 'Tool mở được nhưng chạy lỗi. '
+      + (thu.loi.length ? 'Lỗi JavaScript lúc chạy: ' + thu.loi.slice(0,3).join(' | ') + '. ' : '')
+      + (thu.tabTrong.length ? 'Các tab không hiện nội dung: ' + thu.tabTrong.join(', ') + '. ' : '')
+      + 'Nguyên nhân hay gặp: gọi hàm không có trong thư viện SVWS3D/SVWSPID/SVWSGA/'
+      + 'SVWSCHE/SVWSVT/SVWSDIEN, hoặc hàm dựng một tab ném lỗi làm chết luôn các tab sau.';
+  }
   if(execBlobUrl) URL.revokeObjectURL(execBlobUrl);
   execBlobUrl = URL.createObjectURL(new Blob([html], {type:'text/html;charset=utf-8'}));
   const fname = curCode.replace(/[^\w\-\.]+/g,'_') + '_tool.html';
@@ -716,9 +798,26 @@ async function finalizeTool(html, headline, extraNote){
       <h4 style="color:var(--ok)">${headline} — ${(html.length/1024).toFixed(0)} KB</h4>
       ${extraNote?`<div style="font-size:12.5px">${esc(extraNote)}</div>`:''}
       ${go.daBo.length ? `<div style="font-size:12px;color:var(--warn,#b8860b);margin-top:5px">
-        ⚠ AI đã tự viết lại ${go.daBo.length} thư viện (${esc(go.daBo.join(', '))}) đè lên bản chuẩn —
-        đã gỡ phần tự viết để tool dùng đúng thư viện của công ty. Mở xem thử kiểm tra lại các bản vẽ.
+        ${daLui
+          ? `⚠ AI tự viết lại ${go.daBo.length} thư viện (${esc(go.daBo.join(', '))}). Gỡ ra thì tool
+             chết vì mã còn gọi hàm riêng của bản tự viết, nên GIỮ NGUYÊN bản AI viết để tool chạy được.
+             Các bản vẽ trong tool này KHÔNG dùng thư viện chuẩn — kiểm kỹ tỷ lệ và số liệu trước khi phát hành.`
+          : `⚠ AI đã tự viết lại ${go.daBo.length} thư viện (${esc(go.daBo.join(', '))}) đè lên bản chuẩn —
+             đã gỡ phần tự viết để tool dùng đúng thư viện của công ty.`}
       </div>` : ''}
+      ${thu ? (thu.loi.length || thu.tabTrong.length ? `
+        <div class="ai-block" style="border-left-color:var(--err,#b3271e);margin-top:7px">
+          <b style="color:var(--err,#b3271e)">⚠ Chạy thử tool phát hiện lỗi — ĐỪNG giao file này cho khách</b>
+          ${thu.loi.length ? `<div style="font-size:12px;margin-top:4px">Lỗi khi chạy:<br>${
+            thu.loi.slice(0,5).map(x=>'• '+esc(x)).join('<br>')}</div>` : ''}
+          ${thu.tabTrong.length ? `<div style="font-size:12px;margin-top:4px">Tab không có nội dung:
+            ${esc(thu.tabTrong.join(' · '))}</div>` : ''}
+          <div class="btn-row" style="margin-top:6px">
+            <button class="ai" id="btnFix" onclick="repairDesign()">🔧 Nhờ AI sửa lỗi này</button>
+          </div>
+        </div>` : `<div style="font-size:12px;color:var(--ok);margin-top:5px">
+          ✔ Đã chạy thử: mở được, bấm hết ${thu.soTab} tab, không tab nào trắng, không lỗi.
+        </div>`) : ''}
       <div style="font-size:12px;color:var(--muted);margin-top:4px">
         ${res.injected ? '✔ Đã nhúng Three.js r128 + bộ dựng SVWS3D / SVWSPID / SVWSGA / SVWSDIEN / SVWSCHE / SVWSVT — file vẫn mở offline.'
           : res.already ? '✔ Tool tự mang sẵn Three.js.'
