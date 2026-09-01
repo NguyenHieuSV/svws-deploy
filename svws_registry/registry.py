@@ -103,6 +103,7 @@ _MUC_BOQ = "Mỗi dòng BOQ phải mang MỨC TIN CẬY"
 _MUC_DIEN = "Mức chi tiết bắt buộc của phần điện"
 _MUC_TAB8 = "Tab 8 — Commissioning (Chạy thử & nghiệm thu)"
 _MUC_LOGO = "LOGO SÓNG VIỆT PHẢI CÓ TRÊN MỌI TRANG"
+_MUC_PID2 = "Ba quy tắc KHAI BÁO để P&ID không sinh lỗi giả"
 
 
 def _bo_sung_nhom(data: dict, dau_hieu: str, tien_to, tu_khoa: str) -> bool:
@@ -327,6 +328,9 @@ def init_db() -> None:
                          "LOGO SÓNG VIỆT PHẢI CÓ TRÊN MỌI TRANG", "nền tảng"):
             ghi.append("Logo và khung tên công ty trên mọi trang, mọi tab, "
                        "mọi tờ in — dùng thư viện SVWSKT")
+        if _bo_sung_muc(data, _MUC_PID2, "Tab 2 (bổ sung)", "2"):
+            ghi.append("Ba quy tắc khai báo cho P&ID: khai tb cho dụng cụ · "
+                       "cụm bơm là một thiết bị · thiết bị phải có vào và ra")
         if _bo_sung_muc(data, _MUC_OM, "Tab 9 (bổ sung)", "9"):
             ghi.append("Sổ O&M sinh từ danh sách thiết bị (SVWSOM)")
         if _bo_sung_muc(data, _MUC_CAP, "Tab 6 (bổ sung)", "6"):
@@ -1056,6 +1060,32 @@ def ai_execute(payload: dict = Body(...)):
                 "bao nhiêu rồi hạ xuống đâu, có đánh dấu co 90°, vị trí giá đỡ, cao trình "
                 "giá và trình tự lắp. Nút in công đoạn PHẢI in cả bản vẽ này (lấy riêng "
                 "bằng V.veCongDoan(c) nếu cần), không chỉ in bảng vật tư.\n"
+                "- BA QUY TẮC KHAI BÁO cho P&ID — làm đúng thì phần Kiểm tra P&ID "
+                "sạch lỗi ngay lượt đầu:\n"
+                "  (1) MỖI KÊNH ĐO khai rõ thiết bị nó gắn vào:\n"
+                "      IO.module({kieu:'AI', ten:'AI', kenh:[\n"
+                "        {dc:'IW64', tag:'LIT-101', mo:'Mức bể cấp', tb:'T-101'},\n"
+                "        {dc:'IW66', tag:'PIT-102', mo:'Áp đẩy bơm', tb:'P-102'} ]});\n"
+                "      Bỏ tb thì thư viện phải đoán theo số vòng lặp, mà một hệ có tới "
+                "sáu thiết bị cùng mang số 101 (T-101 · P-101 · MMF-101 · GAC-101 · "
+                "CF-101 · RO-101) — đoán là có lúc sai.\n"
+                "  (2) CỤM BƠM 1 CHẠY 1 DỪNG là MỘT thiết bị:\n"
+                "      {id:'P-101', tag:'P-101', type:'pump', soBom:2}   ✔\n"
+                "      {id:'P-101A', …}, {id:'P-101B', …}                 ✘\n"
+                "      Hai bơm chung góp hút và góp đẩy nên trên P&ID là một cụm. Tách "
+                "ra thì con thứ hai không nối vào tuyến nào, P&ID báo lỗi, và bảng vật "
+                "tư đếm thiếu bộ van của cụm. Riêng bảng điện thì VẪN khai đủ hai lộ "
+                "DL.tai({tag:'P-101A'…}) và DL.tai({tag:'P-101B'…}) — tủ điện có hai "
+                "khởi động từ thật.\n"
+                "  (3) MỌI THIẾT BỊ phải có cả đường VÀO và đường RA trong PIPES, trừ "
+                "bồn chứa và điểm cuối dây chuyền. Thiết bị chỉ có đường vào nghĩa là "
+                "nước vào rồi biến mất — đó là thiếu tuyến, không phải thiết kế.\n"
+                "  Bảng I/O còn có TÍN HIỆU TRẠNG THÁI VÀ LỆNH (RUN-P101A, FLT-P102, "
+                "ES-01, SEL-AUTO, PNL-DOOR): chúng nằm trong tủ hoặc trên động cơ, "
+                "KHÔNG phải dụng cụ đo và không lên P&ID. Thư viện tự nhận ra và bỏ "
+                "qua — đừng đặt tb cho chúng để ép lên sơ đồ.\n"
+                "  Đọc kết quả kiểm: kiemTra().loi PHẢI RỖNG mới phát hành; "
+                "kiemTra().canhBao là nhắc nhở — hiện cho người dùng đọc, không chặn.\n"
                 "- LOGO VÀ KHUNG TÊN — làm ĐẦU TIÊN, trước khi dựng tab nào: khai một "
                 "lần rồi mọi bản vẽ tự có khung tên mang logo Sóng Việt.\n"
                 "    SVWSKT.dat({ duAn:'<tên dự án>', khach:'<khách hàng>',\n"

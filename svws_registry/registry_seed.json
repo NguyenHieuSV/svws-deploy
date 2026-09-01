@@ -68,6 +68,10 @@
           "s": "std"
         },
         {
+          "t": "Tab 2 (bổ sung) — Ba quy tắc KHAI BÁO để P&ID không sinh lỗi giả và không bỏ sót lỗi thật. (1) MỖI KÊNH ĐO trong bảng I/O phải khai rõ tb:\"<tag thiết bị>\" — số vòng lặp không đủ để biết dụng cụ nằm ở đâu: trong một hệ có tới sáu thiết bị mang số 101 (T-101, P-101, MMF-101, GAC-101, CF-101, RO-101), thư viện phải đoán và có thể đoán sai. (2) CỤM BƠM 1 CHẠY 1 DỪNG khai MỘT thiết bị có soBom:2, KHÔNG tách thành P-101A và P-101B — hai bơm dùng chung góp hút và góp đẩy nên trên P&ID là một cụm; tách ra thì con thứ hai không nối vào tuyến nào và bị báo lỗi, còn bảng vật tư đếm thiếu bộ van của cụm. (3) MỌI THIẾT BỊ phải có cả đường vào lẫn đường ra trong PIPES, trừ bồn chứa và điểm cuối dây chuyền — thiết bị chỉ có đường vào nghĩa là nước vào rồi biến mất, đó là thiếu tuyến chứ không phải thiết kế. Bảng I/O còn chứa TÍN HIỆU TRẠNG THÁI VÀ LỆNH (RUN-P101A phản hồi bơm chạy, FLT báo lỗi, ES-01 dừng khẩn cấp, SEL-AUTO chọn chế độ, PNL-DOOR cửa tủ) — chúng nằm trong tủ hoặc trên động cơ, KHÔNG phải dụng cụ đo ngoài hiện trường và không được vẽ thành bầu đo trên P&ID; thư viện tự nhận ra và bỏ qua, đừng ép chúng lên sơ đồ.",
+          "s": "std"
+        },
+        {
           "t": "Tab 3 — GA drawing: mặt bằng tỷ lệ 1:50 khổ A3, kích thước ghi bằng mm.",
           "s": "std"
         },

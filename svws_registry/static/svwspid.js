@@ -69,6 +69,7 @@
     var chiem = [];               // hộp đã chiếm chỗ: {x1,y1,x2,y2,ten}
     var moc = {};                 // tag → {x,y,w,h} để nối và gắn bầu đo
     var vachao = [];              // các va chạm còn lại sau khi đã né
+    var nhac = [];                // khuyến nghị: hiện cho người đọc, KHÔNG chặn
     var nhanCho = [];             // nhãn CHỜ đặt ở lượt sau (xem ve())
     var hthong = null;            // đồ thị thiết bị/đường ống khi tự xếp
     var mocLoai = {};             // tag → loại thiết bị, để chọn chỗ gắn bầu đo
@@ -491,23 +492,30 @@
     function dungCu(tag, ten, phia) {
       var m = moc[tag];
       if (!m) { vachao.push('Không thấy thiết bị ' + tag + ' để gắn ' + ten); return; }
+      // Một thiết bị thường mang vài dụng cụ (bồn có mức + nhiệt độ; skid RO có
+      // áp vào, áp ra, lưu lượng, độ dẫn). Chỉ thử thẳng trên và thẳng dưới thì
+      // cái thứ ba hết chỗ — phải NÉ NGANG rồi mới báo hết chỗ.
       var r = 15, thu = phia === 'duoi' ? [1, -1] : [-1, 1];
+      var lech = [0, -34, 34, -68, 68];
       for (var t = 0; t < thu.length; t++) {
-        for (var d = 30; d <= 96; d += 16) {
-          var cy = m.y + thu[t] * (m.h / 2 + d);
-          var box = { x1: m.x - r - 2, y1: cy - r - 2, x2: m.x + r + 2, y2: cy + r + 2 };
-          if (coTrong(box, 3)) {
-            ln(m.x, m.y + thu[t] * m.h / 2, m.x, cy - thu[t] * r, XAM, 0.9, '3 3');
-            out.push('<circle cx="' + m.x + '" cy="' + cy + '" r="' + r +
+        for (var d = 30; d <= 112; d += 16) {
+          for (var q = 0; q < lech.length; q++) {
+            var cx = m.x + lech[q];
+            var cy = m.y + thu[t] * (m.h / 2 + d);
+            var box = { x1: cx - r - 2, y1: cy - r - 2, x2: cx + r + 2, y2: cy + r + 2 };
+            if (!coTrong(box, 3)) continue;
+            ln(m.x, m.y + thu[t] * m.h / 2, cx, cy - thu[t] * r, XAM, 0.9, '3 3');
+            out.push('<circle cx="' + cx + '" cy="' + cy + '" r="' + r +
               '" fill="#fff" stroke="' + XAM + '" stroke-width="1.3"/>');
-            out.push('<text x="' + m.x + '" y="' + (cy + 3.5) + '" font-size="7.6" ' +
+            out.push('<text x="' + cx + '" y="' + (cy + 3.5) + '" font-size="7.6" ' +
               'text-anchor="middle" fill="' + MO + '">' + esc(ten) + '</text>');
             themChiem(box.x1, box.y1, box.x2, box.y2, 'bầu ' + ten);
             return;
           }
         }
       }
-      vachao.push('Không còn chỗ trống để đặt bầu đo ' + ten + ' cạnh ' + tag);
+      vachao.push('Không còn chỗ trống để đặt bầu đo ' + ten + ' cạnh ' + tag +
+                  ' — nới khổ giấy (tham số h khi gọi SVWSPID.to) hoặc giãn hàng.');
     }
 
     /* ==================================================================
@@ -518,17 +526,64 @@
      * nào sẽ bị báo lỗi thay vì lặng lẽ thiếu.
      * ================================================================ */
     // Chữ cái đầu của tag ISA → loại thiết bị hay mang dụng cụ đó
-    var HOP_TB = {
-      L: /tank|be|bon/i,                       // mức: bồn bể
-      T: /tank|be|bon/i,                       // nhiệt độ
-      P: /pump|bom|vessel|filter|ro|edi|cartridge/i,   // áp suất
-      F: /./,                                  // lưu lượng: chỗ nào cũng có thể
-      A: /vessel|ro|edi|mixedbed|tank/i,       // phân tích (pH, độ dẫn)
-      C: /vessel|ro|edi|mixedbed|tank/i
+    /* So loại thiết bị phải khớp NGUYÊN TỪ. Trước đây dùng /tank|be|bon/ nên
+       "mixedbed" cũng khớp (nó chứa "be") — cột trao đổi ion bị đòi phải có đo
+       mức như bồn chứa, và bầu đo mức nhảy sang cột lọc. */
+    var UU_TB = {
+      L: ['tank'],                                        // mức: chỉ bồn bể
+      T: ['tank', 'roskid', 'ro'],                        // nhiệt độ
+      P: ['pump', 'cartridge', 'vessel', 'filter', 'roskid', 'ro', 'edi'],
+      F: ['pump', 'roskid', 'ro', 'edi', 'tank', 'vessel'],
+      A: ['roskid', 'ro', 'edi', 'mixedbed', 'tank', 'vessel'],
+      C: ['roskid', 'ro', 'edi', 'mixedbed', 'tank', 'vessel'],
+      Q: ['edi', 'mixedbed', 'roskid', 'ro', 'tank'],
+      S: ['pump'], V: ['pump'], Z: ['pump']
     };
+    var LOAI_BON = /^(tank|be|bon|bể|bồn)$/i;
+    /* mocLoai lưu "tank bon" — loại thiết bị GHÉP với tên ký hiệu, cách nhau
+       khoảng trắng. So cả chuỗi thì không bao giờ khớp, phải so THEO TỪ. */
+    function loaiCua(t) { return ' ' + String(mocLoai[t] || '').toLowerCase() + ' '; }
+    function hangLoai(t, uu) {
+      var s = loaiCua(t);
+      for (var i = 0; i < uu.length; i++) if (s.indexOf(' ' + uu[i] + ' ') >= 0) return i;
+      return -1;
+    }
+    function nutCua(t) {
+      if (!hthong) return null;
+      for (var i = 0; i < hthong.nut.length; i++)
+        if (hthong.nut[i].id === t) return hthong.nut[i];
+      return null;
+    }
+    function noiCua(t) { var u = nutCua(t); return !!u && !!(u.vao.length + u.ra.length); }
+    function capCua(t) { var u = nutCua(t); return u ? u.cap : 999; }
     function soVongLap(tag) {                  // 'LIT-101' → '101'
-      var m = String(tag || '').match(/(\d{2,4})\s*$/);
+      var m = String(tag || '').match(/(\d{2,4})[A-Za-z]?\s*$/);
       return m ? m[1] : '';
+    }
+
+    /* Bảng I/O chứa CẢ tín hiệu trạng thái và lệnh, không chỉ dụng cụ đo:
+       RUN-P101A (phản hồi bơm đang chạy), FLT (báo lỗi), ES-01 (dừng khẩn cấp),
+       SEL-AUTO (chọn chế độ), PNL-DOOR (cửa tủ)… Chúng nằm trong tủ hoặc ngay
+       trên động cơ, KHÔNG phải dụng cụ ngoài hiện trường — vẽ thành bầu đo trên
+       P&ID là sai chuẩn ISA, làm rối sơ đồ và sinh ra một loạt cảnh báo giả. */
+    var TU_TRANGTHAI = new RegExp('^(run|rn|fb|fdbk|flt|fault|loi|alm|alarm|trip|' +
+      'cmd|lenh|start|stop|es|estop|sel|auto|man|hand|reset|ack|sms|door|pnl|panel|' +
+      'rdy|ready|avl|remote|local|spd|speed|hz|kw|kwh|hour|hrs|ups|mcb|mccb)$', 'i');
+    /* Dạng tag ISA: chữ cái BIẾN ĐO + chữ cái CHỈ THỊ, rồi tới số vòng lặp.
+       FIT-100 · LIT-101 · PIT-105 · QIT-102 · PSL-105 · TIT-101 · PDT-201… */
+    var DANG_ISA = /^[FLPTACQDSWMVZ][IDTRSCAEGVYQ][A-Z]{0,2}$/i;
+    var DANG_SO = /^\d{2,4}[A-Z]?$/i;
+
+    function tachTag(t) {
+      return String(t || '').split(/[-_\s.]+/).filter(Boolean);
+    }
+    /** Kênh này có phải DỤNG CỤ ĐO thật ngoài hiện trường không. */
+    function laDungCuDo(k) {
+      if (k.dungCu === false || k.dungCu === true) return k.dungCu;  // tool tự quyết
+      var seg = tachTag(k.tag);
+      if (seg.length < 2) return false;
+      if (TU_TRANGTHAI.test(seg[0])) return false;
+      return DANG_ISA.test(seg[0]) && DANG_SO.test(seg[seg.length - 1]);
     }
     /**
      * ds: mảng từ SVWSDIEN.plc(...).danhSach()
@@ -541,42 +596,84 @@
     function dungCuTuIO(ds, opt) {
       opt = opt || {};
       var dsTag = Object.keys(moc);
-      var demGan = 0, demBo = 0;
+      var demGan = 0, demBo = 0, demTT = 0;
       (ds || []).forEach(function (k) {
         var kieu = String(k.kieu || '').toUpperCase();
         var doDac = kieu === 'DI' || kieu === 'AI';
         if (!doDac && !opt.caDauRa) return;
         if (!k.tag) { vachao.push('Kênh ' + (k.dc || '?') + ' chưa có tag hiện trường — ' +
                                   'không biết gắn dụng cụ vào thiết bị nào.'); return; }
+        // Tín hiệu trạng thái và lệnh nằm trong tủ, không lên P&ID — bỏ qua LẶNG LẼ,
+        // báo lỗi cho chúng là báo nhầm và làm người dùng bỏ qua luôn lỗi thật.
+        if (!k.tb && !laDungCuDo(k)) { demTT++; return; }
+
         var dich = '';
         if (k.tb && moc[k.tb]) dich = k.tb;                    // khai rõ thì theo khai
-        else {
+        else if (k.tb) {
+          vachao.push('Kênh ' + k.tag + ' khai tb:"' + k.tb + '" nhưng không có thiết bị ' +
+                      'nào mang tag đó — kiểm lại danh sách EQUIP.');
+          demBo++; return;
+        }
+        if (!dich) {
+          // Tag mang thẳng tag thiết bị (LIT-TK101, PIT-RO101): so theo TỪNG ĐOẠN
+          // của tag, không so kiểu chứa chuỗi — 'LIT101' chứa 'T101' sẽ khớp nhầm
+          // sang bồn T-101.
+          var seg = tachTag(k.tag).map(function (x) { return x.toUpperCase(); });
+          for (var i2 = 0; i2 < dsTag.length && !dich; i2++) {
+            var gon = dsTag[i2].replace(/[-_\s.]+/g, '').toUpperCase();
+            if (seg.indexOf(gon) >= 0) dich = dsTag[i2];
+          }
+        }
+        if (!dich) {
           var so = soVongLap(k.tag);
           if (so) {
             var chu0 = String(k.tag).charAt(0).toUpperCase();
-            var hop = HOP_TB[chu0] || /./;
-            // ưu tiên thiết bị cùng số vòng lặp VÀ đúng họ thiết bị
-            var uu = dsTag.filter(function (t) {
-              return soVongLap(t) === so && hop.test(String((mocLoai[t] || '')));
+            var uu = UU_TB[chu0] || null;
+            var cung = dsTag.filter(function (t) { return soVongLap(t) === so; });
+            // Xếp hạng theo HỌ THIẾT BỊ hay mang dụng cụ đó, không lấy bừa thiết bị
+            // đầu tiên cùng số: bầu đo áp của bơm P-102 từng nhảy sang cột trao đổi
+            // ion MB-102 vì hai cái cùng số 102.
+            var hop = uu ? cung.filter(function (t) {
+              return hangLoai(t, uu) >= 0;
+            }) : cung;
+            if (!hop.length) hop = cung;
+            // Hoà hạng thì ưu tiên thiết bị THẬT SỰ nằm trên tuyến ống, rồi tới
+            // cái ở đầu dòng chảy. Không có tiêu chí phụ thì bầu đo hay rơi vào
+            // đúng cái bơm dự phòng chưa đấu ống — chỗ vô nghĩa nhất.
+            hop.sort(function (a, b) {
+              var d = (uu ? hangLoai(a, uu) - hangLoai(b, uu) : 0);
+              if (d) return d;
+              d = (noiCua(b) ? 1 : 0) - (noiCua(a) ? 1 : 0);
+              if (d) return d;
+              return capCua(a) - capCua(b);
             });
-            var moi = uu.length ? uu : dsTag.filter(function (t) {
-              return soVongLap(t) === so;
-            });
-            if (moi.length) dich = moi[0];
+            if (hop.length) {
+              dich = hop[0];
+              // Còn nhiều ứng viên cùng hạng thì vẫn gắn — nhưng NHẮC, không báo
+              // lỗi: số vòng lặp không đủ để biết dụng cụ nằm ở đâu trên tuyến.
+              if (hop.length > 1 && hangLoai(hop[1], uu || []) === hangLoai(hop[0], uu || []))
+                nhac.push('Dụng cụ ' + k.tag + ' hợp với nhiều thiết bị cùng vòng lặp ' +
+                          so + ' (' + hop.join(', ') + ') — đang gắn vào ' + dich +
+                          '. Khai rõ tb:"<tag thiết bị>" trong kênh I/O cho chắc.');
+            }
           }
         }
         if (!dich) {
           demBo++;
           vachao.push('Dụng cụ ' + k.tag + ' (' + kieu + ' ' + (k.dc || '') + ') không ' +
-                      'gắn được vào thiết bị nào trên sơ đồ — kiểm lại số vòng lặp, ' +
-                      'hoặc khai rõ tb:"<tag thiết bị>" trong kênh I/O.');
+                      'gắn được vào thiết bị nào trên sơ đồ. Cách sửa: đặt số vòng lặp ' +
+                      'trùng với thiết bị nó đo (LIT-101 cho bồn T-101), hoặc khai rõ ' +
+                      'tb:"<tag thiết bị>" trong kênh I/O.');
           return;
         }
         dungCu(dich, k.tag, opt.phia);
         (daGan[dich] = daGan[dich] || []).push(k.tag);
         demGan++;
       });
-      ioDaGan = { gan: demGan, bo: demBo, tong: (ds || []).length };
+      // demTT: tín hiệu trạng thái/lệnh đã bỏ qua có chủ ý — báo ra để người
+      // dùng biết P&ID không thiếu dụng cụ, chỉ là chúng không thuộc về P&ID.
+      ioDaGan = { gan: demGan, bo: demBo, trangThai: demTT,
+                  tong: (ds || []).length };
       return api2;
     }
 
@@ -656,6 +753,24 @@
     }
 
     /** Còn chỗ nào đè nhau không — bắt lỗi trước khi giao bản vẽ. */
+    /* Nguyên nhân phổ biến nhất của "thiết bị không nối vào ống nào": cụm bơm
+       1 chạy 1 dừng bị khai thành HAI thiết bị P-101A và P-101B, rồi chỉ đấu
+       ống cho cái A. Trên thực tế hai bơm chung một góp hút và một góp đẩy, nên
+       phải khai MỘT thiết bị có soBom:2 — đúng cách mà 3D và bảng vật tư đang
+       hiểu. Chỉ ra thẳng chỗ đó, đừng bắt người dùng tự đoán. */
+    function goiYCum(id) {
+      var g = String(id).replace(/[A-Za-z]$/, '');
+      if (g === String(id)) return '';
+      var anh = Object.keys(moc).filter(function (t) {
+        return t !== id && t.replace(/[A-Za-z]$/, '') === g;
+      });
+      if (!anh.length) return '';
+      return ' Có vẻ đây là cụm chạy–dự phòng cùng với ' + anh.join(', ') +
+             ': khai MỘT thiết bị ' + g.replace(/-$/, '') +
+             ' với soBom:' + (anh.length + 1) + ' thay vì tách thành nhiều thiết bị — ' +
+             'hai bơm dùng chung góp hút và góp đẩy nên trên P&ID là một cụm.';
+    }
+
     function kiemTra() {
       noiKho();
       xaNhan();
@@ -673,8 +788,8 @@
         hthong.nut.forEach(function (u) {
           if (!u.vao.length && !u.ra.length)
             loi.push('Thiết bị ' + u.id + ' không nối vào đường ống nào — ' +
-                     'thiếu tuyến trong khai báo PIPES.');
-          else if (!u.ra.length && !/tank|be|bon/.test(String(u.e.type || '').toLowerCase()))
+                     'thiếu tuyến trong khai báo PIPES.' + goiYCum(u.id));
+          else if (!u.ra.length && !LOAI_BON.test(String(u.e.type || '').toLowerCase()))
             loi.push('Thiết bị ' + u.id + ' chỉ có đường vào, không có đường ra — ' +
                      'nước vào rồi đi đâu?');
         });
@@ -696,7 +811,7 @@
         hthong.nut.forEach(function (u) {
           var t = String(u.e.type || '').toLowerCase();
           var tag = u.e.tag;
-          if (/tank|be|bon/.test(t) && !daGanCho(tag, /^L/))
+          if (LOAI_BON.test(t) && !daGanCho(tag, /^L/))
             loi.push('Bồn ' + tag + ' chưa có dụng cụ đo mức trong bảng I/O — ' +
                      'không biết khi nào bơm chạy hay dừng.');
           if (/^(ro|roskid|edi)$/.test(t) && !daGanCho(tag, /^[PA]/))
@@ -704,7 +819,7 @@
                      'không giám sát được chất lượng và tình trạng màng.');
         });
       }
-      return { loi: loi, soKhoi: chiem.length,
+      return { loi: loi, canhBao: nhac.slice(), soKhoi: chiem.length,
                soThietBi: hthong ? hthong.nut.length : 0,
                soCot: hthong ? hthong.cot : 0,
                io: ioDaGan };
