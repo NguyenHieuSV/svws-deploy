@@ -39,6 +39,10 @@
           "s": "std"
         },
         {
+          "t": "File cấu hình JSON theo MỘT ĐỊNH DẠNG DUY NHẤT cho mọi tool — dùng hàm SVWSVT.xuatCauHinh(design, params), không tự nghĩ ra kiểu lưu riêng. Cấu trúc: {type:\"svws-3d-design\", design:{code,name,project,tech,rev,date,drawn,company}, params:{toàn bộ bảng thông số}, stages:[{t, kind, from, to, dn, d, stats:{len,elbows,tees,supports,span,valves,maxY}, mats:[{name, spec, unit, qty, basis}]}], thietBi:[...], boq:[...], boqEdits:{}, saved}. Mỗi tool một kiểu lưu thì file không dùng chéo được giữa các thiết kế, và sổ đăng ký không đọc nổi để nạp thiết kế vào.",
+          "s": "new"
+        },
+        {
           "t": "Mọi BẢN VẼ khi in (in A3 từng tab · in công đoạn thi công · in tờ chế tạo) phải có KHUNG TÊN bản vẽ + LOGO công ty: logo SVWS, tên & địa chỉ công ty, tên dự án (Q tự lấy theo bảng thông số), tên bản vẽ, số bản vẽ, Rev, tỷ lệ, người lập, ngày, trạng thái duyệt/watermark (\"BẢN THAM KHẢO — CHƯA DUYỆT\"). Khung tên song ngữ theo nút Việt/Anh.",
           "s": "new"
         }
@@ -97,6 +101,10 @@
         },
         {
           "t": "Tab 5 (bổ sung) — Bản vẽ từng công đoạn phải vẽ ĐÚNG TUYẾN THẬT lấy từ bản vẽ 3D, không phải hai ô vuông nối bằng một đường thẳng ở toạ độ cố định. Gồm hai hình: MẶT BẰNG TUYẾN đúng tỷ lệ (thấy ống đi vòng qua đâu, tránh thiết bị nào) và TRẮC DỌC TUYẾN trải phẳng (thấy ống lên giá đỡ ở cao trình nào, chạy ngang bao xa, rồi hạ xuống đâu — trắc dọc được phép dùng tỷ lệ đứng khác tỷ lệ ngang, nhưng phải ghi rõ cả hai). Trên bản vẽ đánh dấu: vị trí từng co 90°, vị trí giá đỡ theo bước chuẩn của vật liệu, cao trình giá đỡ ghi bằng mm so với mặt nền, chiều dài từng đoạn thẳng, và trình tự lắp đặt.",
+          "s": "new"
+        },
+        {
+          "t": "Tab 5 (bổ sung) — Danh sách công đoạn phải ĐỦ 5 LOẠI, đánh số CĐ-01, CĐ-02… theo đúng thứ tự hồ sơ thi công thật: (1) civil — móng, bệ thiết bị, mương thu, sơn nền; (2) tank — lắp đặt bồn bể kèm đo mức, phao, ống tràn, xả đáy, van xả, thang và sàn thao tác, bu lông neo và grout; (3) pipe — mỗi tuyến ống một công đoạn; (4) elec — điện động lực, tín hiệu, tủ điều khiển và DANH MỤC DỤNG CỤ ĐO đếm từ bảng I/O; (5) tc — lập trình PLC theo bảng logic, cấu hình HMI/SCADA, hiệu chuẩn dụng cụ, thử kín và thử áp từng tuyến, súc rửa khử trùng, chạy thử 72 giờ, hồ sơ nghiệm thu, đào tạo vận hành. Chỉ có công đoạn ống là thiếu tiền và thiếu việc.",
           "s": "new"
         },
         {

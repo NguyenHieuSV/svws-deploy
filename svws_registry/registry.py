@@ -93,6 +93,8 @@ _MUC_TAB5 = "Số lượng vật tư phải SUY TỪ HÌNH HỌC THẬT"
 _MUC_TAB5B = "Bản vẽ từng công đoạn phải vẽ ĐÚNG TUYẾN THẬT"
 _MUC_THAMSO = "Tham số riêng cho từng loại thiết bị"
 _MUC_MATBANG = "Kích thước mặt bằng là THAM SỐ ĐẦU VÀO"
+_MUC_CD5 = "Danh sách công đoạn phải ĐỦ 5 LOẠI"
+_MUC_JSON = "File cấu hình JSON theo MỘT ĐỊNH DẠNG DUY NHẤT"
 
 
 def _bo_sung_nhom(data: dict, dau_hieu: str, tien_to, tu_khoa: str) -> bool:
@@ -247,6 +249,13 @@ def init_db() -> None:
                           "Kiểm tra mặt bằng tự động"], "parametric"):
             ghi.append("Kích thước khu đất thành tham số đầu vào — bố cục và bản vẽ "
                        "tự sắp lại theo diện tích")
+        if _bo_sung_muc(data, _MUC_CD5,
+                        "Tab 5 (bổ sung) — Danh sách công đoạn phải ĐỦ 5 LOẠI", "5"):
+            ghi.append("Công đoạn thi công đủ 5 loại: móng · lắp bể · ống · điện · "
+                       "chạy thử nghiệm thu")
+        if _bo_sung_nhom(data, _MUC_JSON,
+                         "File cấu hình JSON theo MỘT ĐỊNH DẠNG DUY NHẤT", "nền tảng"):
+            ghi.append("Chuẩn hoá định dạng file cấu hình JSON cho mọi tool")
         if ghi:
             doc.data = data
             flag_modified(doc, "data")
@@ -892,6 +901,17 @@ def ai_execute(payload: dict = Body(...)):
                 "  kiemTra() bắt: công đoạn thiếu DN, tuyến ngắn bất thường (hai thiết bị "
                 "trùng chỗ), THIẾT BỊ KHÔNG NỐI VÀO TUYẾN NÀO (thiếu vật tư), tuyến quá "
                 "nhiều co gây tổn thất áp. loi PHẢI rỗng.\n"
+                "  V.napIO(IO.danhSach());   // để đưa DỤNG CỤ ĐO vào BOQ và tính hiệu chuẩn\n"
+                "  V.congDoanDayDu() sinh ĐỦ 5 LOẠI công đoạn đánh số CĐ-01, CĐ-02…: "
+                "civil (móng, mương thu) · tank (lắp bể, đo mức, phao, ống tràn, xả đáy, "
+                "thang thao tác, bu lông neo) · pipe (mỗi tuyến một công đoạn) · elec "
+                "(điện + danh mục dụng cụ đo đếm từ bảng I/O) · tc (lập trình PLC, "
+                "HMI/SCADA, hiệu chuẩn, thử áp từng tuyến, súc rửa, chạy thử 72 giờ, hồ "
+                "sơ nghiệm thu, đào tạo). Chỉ sinh công đoạn ống là thiếu tiền và thiếu "
+                "việc.\n"
+                "  LƯU FILE JSON bằng V.xuatCauHinh(design, params) — MỘT định dạng "
+                "duy nhất cho mọi tool, đừng tự nghĩ kiểu lưu riêng, nếu không file "
+                "không dùng chéo được và sổ đăng ký không nạp được.\n"
                 "  V.bangCongDoan() đã kèm sẵn BẢN VẼ từng công đoạn vẽ theo TUYẾN THẬT: "
                 "mặt bằng tuyến đúng tỷ lệ + trắc dọc trải phẳng cho thấy ống lên giá cao "
                 "bao nhiêu rồi hạ xuống đâu, có đánh dấu co 90°, vị trí giá đỡ, cao trình "

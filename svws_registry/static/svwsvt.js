@@ -417,6 +417,87 @@
         '" stroke-width="1.4"/>' + o2.join('') + '</svg>';
     }
 
+    // ====================== CÔNG ĐOẠN LẮP BỂ & CHẠY THỬ NGHIỆM THU ==========
+    /* Hồ sơ thi công thật không chỉ có ống: còn công đoạn LẮP BỂ (cẩu đặt, neo
+       bu lông, grout, lắp đo mức, ống tràn, xả đáy, thang thao tác) và công
+       đoạn CHẠY THỬ NGHIỆM THU (lập trình PLC, SCADA, hiệu chuẩn dụng cụ, chạy
+       thử, hồ sơ). Thiếu hai công đoạn này là thiếu tiền và thiếu việc. */
+    function laBe(e) {
+      return /tank|be|bon/i.test(String(e.type || ''));
+    }
+    function lapBe() {
+      var ds = [], be = eq.filter(laBe);
+      if (!be.length) return ds;
+      var soThang = 0;
+      be.forEach(function (e) {
+        var d = so(e.d, 0), h = so(e.h, 0);
+        var v = (d && h) ? m3(d, h) : 0;
+        ds.push({ vt: (e.tag || e.id) + ' ' + (e.name || 'Bể chứa'),
+                  qc: 'Ø' + d + ' × H' + h + ' mm' + (v ? ' · ' + v + ' m³' : '') +
+                      ' · ' + (e.vatLieu || e.material || 'SS304'),
+                  sl: 1, dv: 'bể', ghi: 'Thiết bị trong bản vẽ 3D' });
+        if (d >= 1500) soThang++;
+      });
+      ds.push({ vt: 'Đo mức liên tục (LIT)', qc: 'siêu âm 4–20 mA', sl: be.length,
+                dv: 'bộ', ghi: '1 bộ mỗi bể' });
+      ds.push({ vt: 'Phao báo mức LSL / LSH', qc: '', sl: be.length * 2, dv: 'bộ',
+                ghi: '2 phao mỗi bể (thấp và cao)' });
+      ds.push({ vt: 'Ống tràn + xả đáy', qc: 'uPVC DN80', sl: be.length * 6, dv: 'm',
+                ghi: '≈6 m mỗi bể: tràn xuống mương + xả đáy' });
+      ds.push({ vt: 'Van xả đáy', qc: 'bi uPVC DN40', sl: be.length, dv: 'cái',
+                ghi: '1 van mỗi bể' });
+      if (soThang) ds.push({ vt: 'Thang + sàn thao tác', qc: 'SS304', sl: soThang,
+                             dv: 'bộ', ghi: 'Bể Ø ≥ 1500 mm phải có chỗ đứng thao tác' });
+      ds.push({ vt: 'Bu lông neo + grout chân bể', qc: 'M16 + vữa không co ngót',
+                sl: be.length * 4, dv: 'bộ', ghi: '4 bu lông mỗi bể' });
+      return ds;
+    }
+
+    var dsIO = [];
+    /** Nạp bảng I/O của tủ điện — để đưa DỤNG CỤ ĐO vào BOQ và tính hiệu chuẩn. */
+    api.napIO = function (ds) { dsIO = (ds || []).slice(); return api; };
+
+    function dungCuDo() {
+      var ds = [], nhom = {};
+      dsIO.forEach(function (k) {
+        var kieu = String(k.kieu || '').toUpperCase();
+        if (kieu !== 'DI' && kieu !== 'AI') return;      // DO/AO là lệnh, không phải dụng cụ
+        var loai = kieu === 'AI' ? 'Dụng cụ đo analog (4–20 mA)'
+                                 : 'Công tắc / phao báo (tiếp điểm)';
+        (nhom[loai] = nhom[loai] || []).push(k.tag || k.dc);
+      });
+      Object.keys(nhom).forEach(function (t) {
+        ds.push({ vt: t, qc: nhom[t].join(', '), sl: nhom[t].length, dv: 'bộ',
+                  ghi: 'Đếm từ bảng I/O của tủ điện — mỗi kênh một thiết bị thật' });
+      });
+      return ds;
+    }
+
+    function chayThu() {
+      var soKenh = dsIO.length;
+      var soDo = dsIO.filter(function (k) {
+        var t = String(k.kieu || '').toUpperCase();
+        return t === 'DI' || t === 'AI';
+      }).length;
+      var ds = [
+        { vt: 'Lập trình PLC theo bảng logic vận hành', qc: 'gồm khoá liên động và báo động',
+          sl: 1, dv: 'gói', ghi: soKenh ? soKenh + ' kênh I/O theo bảng I/O' : '' },
+        { vt: 'Cấu hình HMI / SCADA', qc: 'màn hình vận hành, xu hướng, cảnh báo',
+          sl: 1, dv: 'gói', ghi: '' },
+        { vt: 'Hiệu chuẩn dụng cụ đo', qc: 'có giấy hiệu chuẩn', sl: soDo || 1,
+          dv: 'bộ', ghi: 'Mỗi dụng cụ đo một lần hiệu chuẩn trước nghiệm thu' },
+        { vt: 'Thử kín và thử áp đường ống', qc: '1,5 × áp làm việc, giữ 30 phút',
+          sl: tuyen.length || 1, dv: 'tuyến', ghi: 'Mỗi tuyến ống một lần thử' },
+        { vt: 'Súc rửa, khử trùng và xả nước đầu', qc: '', sl: 1, dv: 'gói', ghi: '' },
+        { vt: 'Chạy thử không tải và có tải', qc: '72 giờ liên tục', sl: 1, dv: 'gói',
+          ghi: '' },
+        { vt: 'Hồ sơ nghiệm thu', qc: 'CO/CQ, bản vẽ hoàn công, tài liệu vận hành, ' +
+              'biên bản chạy thử, bảo hành', sl: 1, dv: 'bộ', ghi: '' },
+        { vt: 'Đào tạo vận hành', qc: 'cho nhân sự nhà máy', sl: 1, dv: 'gói', ghi: '' }
+      ];
+      return ds;
+    }
+
     // ------------------------------------------------- móng & điện theo vị trí
     /** Móng tính từ CHÂN ĐẾ THẬT của thiết bị, không phải con số ước chừng. */
     function mong() {
@@ -587,6 +668,10 @@
                   ten: (x.tag ? x.tag + ' — ' : '') + x.ten,
                   qc: x.quyCach, dv: x.dv, sl: x.sl });
       });
+      dungCuDo().forEach(function (x) {
+        ds.push({ nhom: 'A. Thiết bị chính — Dụng cụ đo', ten: x.vt, qc: x.qc,
+                  dv: x.dv, sl: x.sl });
+      });
       tongHop().forEach(function (g) {
         var nhom = /Bê tông|Thép cốt|Bu lông neo|grout|epoxy/i.test(g.vt)
                      ? 'C. Móng & kết cấu'
@@ -670,28 +755,88 @@
       return h + '</tbody></table>';
     }
 
-    function bangCongDoan() {
-      var cd = congDoan(), tq = tongQuan();
-      var h = '<div class="svws-tq">Tổng ' + tq.soCongDoan + ' công đoạn · ' +
-        tq.tongDaiM + ' m ống đo trên tuyến 3D · ' + tq.tongCo + ' co 90° · ' +
-        tq.tongGia + ' giá đỡ · cao trình rack ' + tq.caoRack + ' mm</div>';
-      cd.forEach(function (c) {
-        h += '<h4 class="svws-bang-tieu">Công đoạn ' + c.stt + ': ' + esc(c.tenFrom) +
-          ' → ' + esc(c.tenTo) + '</h4>' +
-          '<div class="svws-ghi">' + esc(c.mo) + ' · DN' + c.dn + ' · dài ' + c.daiM +
-          ' m · ' + c.soCo + ' co 90° · cao trình ' + c.caoNhat + ' mm</div>' +
-          '<div class="svws-ve">' + veCongDoan(c) + '</div>' +
-          bangHTML('', ['Vật tư', 'Quy cách', 'SL', 'ĐVT', 'Căn cứ tính'],
-            bom(c).map(function (b) { return [b.vt, b.qc, b.sl, b.dv, b.ghi]; }));
+    /**
+     * TOÀN BỘ công đoạn thi công, ĐÁNH SỐ theo đúng thứ tự hồ sơ thật:
+     *   CĐ-01 móng → CĐ-02 lắp bể → các tuyến ống → điện → chạy thử nghiệm thu.
+     * Trước đây chỉ sinh công đoạn ống, còn móng và điện là hai bảng rời không
+     * đánh số, thiếu hẳn công đoạn lắp bể và công đoạn nghiệm thu.
+     */
+    function congDoanDayDu() {
+      var ra = [], stt = 0;
+      function them(kind, ten, mats, kem) {
+        if (!mats || !mats.length) return;
+        stt++;
+        var c = { stt: stt, ma: 'CĐ-' + (stt < 10 ? '0' : '') + stt,
+                  kind: kind, ten: ten, mats: mats };
+        if (kem) for (var k in kem) c[k] = kem[k];
+        ra.push(c);
+      }
+      them('civil', 'Móng, bệ thiết bị & mương thu', mong());
+      them('tank', 'Lắp đặt bồn bể, đo mức và phụ kiện', lapBe());
+      congDoan().forEach(function (c) {
+        them('pipe', 'Tuyến ' + c.tenFrom + ' → ' + c.tenTo, bom(c), { ong: c });
       });
-      var m = mong(), d = dien();
-      if (m.length) h += bangHTML('Công đoạn: Móng & bệ thiết bị',
-        ['Vật tư', 'Quy cách', 'SL', 'ĐVT', 'Căn cứ tính'],
-        m.map(function (b) { return [b.vt, b.qc, b.sl, b.dv, b.ghi]; }));
-      if (d.length) h += bangHTML('Công đoạn: Điện & tín hiệu điều khiển',
-        ['Vật tư', 'Quy cách', 'SL', 'ĐVT', 'Căn cứ tính'],
-        d.map(function (b) { return [b.vt, b.qc, b.sl, b.dv, b.ghi]; }));
+      them('elec', 'Điện động lực, tín hiệu và tủ điều khiển',
+           dien().concat(dungCuDo()));
+      them('tc', 'Lập trình, hiệu chuẩn, chạy thử và nghiệm thu', chayThu());
+      return ra;
+    }
+
+    function bangCongDoan() {
+      var ds = congDoanDayDu(), tq = tongQuan();
+      var dem = {};
+      ds.forEach(function (c) { dem[c.kind] = (dem[c.kind] || 0) + 1; });
+      var h = '<div class="svws-tq">Tổng ' + ds.length + ' công đoạn (' +
+        (dem.civil || 0) + ' móng · ' + (dem.tank || 0) + ' lắp bể · ' +
+        (dem.pipe || 0) + ' tuyến ống · ' + (dem.elec || 0) + ' điện · ' +
+        (dem.tc || 0) + ' nghiệm thu) · ' + tq.tongDaiM +
+        ' m ống đo trên tuyến 3D · ' + tq.tongCo + ' co 90° · ' + tq.tongGia +
+        ' giá đỡ · cao trình rack ' + tq.caoRack + ' mm</div>';
+      ds.forEach(function (c) {
+        h += '<h4 class="svws-bang-tieu">' + c.ma + ' · ' + esc(c.ten) + '</h4>';
+        if (c.ong) {
+          h += '<div class="svws-ghi">' + esc(c.ong.mo) + ' · DN' + c.ong.dn +
+            ' · dài ' + c.ong.daiM + ' m · ' + c.ong.soCo + ' co 90° · cao trình ' +
+            c.ong.caoNhat + ' mm</div>' +
+            '<div class="svws-ve">' + veCongDoan(c.ong) + '</div>';
+        }
+        h += bangHTML('', ['Vật tư', 'Quy cách', 'SL', 'ĐVT', 'Căn cứ tính'],
+          c.mats.map(function (b) { return [b.vt, b.qc, b.sl, b.dv, b.ghi]; }));
+      });
       return h;
+    }
+
+    /* ==================================================================
+     * FILE CẤU HÌNH JSON — MỘT ĐỊNH DẠNG DUY NHẤT CHO MỌI TOOL
+     * Mỗi tool tự nghĩ ra một kiểu lưu thì file không dùng chéo được và sổ
+     * đăng ký không đọc nổi. Dùng đúng hàm này để lưu, và nhận lại bằng
+     * SVWSVT.docCauHinh() khi mở file.
+     * ================================================================ */
+    function xuatCauHinh(design, params) {
+      return {
+        type: 'svws-3d-design',
+        design: design || {},
+        params: params || {},
+        stages: congDoanDayDu().map(function (c) {
+          var s = { t: c.ma + ' · ' + c.ten, kind: c.kind,
+                    mats: c.mats.map(function (b) {
+                      return { name: b.vt, spec: b.qc, unit: b.dv,
+                               qty: so(b.sl, 0), basis: b.ghi || '' };
+                    }) };
+          if (c.ong) {
+            s.from = c.ong.tenFrom; s.to = c.ong.tenTo; s.dn = c.ong.dn;
+            s.d = c.ong.mo;
+            s.stats = { len: c.ong.dai / 1000, elbows: c.ong.soCo, tees: c.ong.soTe,
+                        supports: c.ong.soGia, span: c.ong.buocGia / 1000,
+                        valves: c.ong.van, maxY: c.ong.caoNhat / 1000 };
+          }
+          return s;
+        }),
+        thietBi: thietBiChinh(),
+        boq: boq(),
+        boqEdits: {},
+        saved: new Date().toISOString()
+      };
     }
 
     function bangTongHop() {
@@ -759,6 +904,9 @@
     api.congDoan = congDoan;
     api.veCongDoan = veCongDoan;
     api.bom = bom;
+    api.congDoanDayDu = congDoanDayDu;
+    api.lapBe = lapBe; api.chayThu = chayThu; api.dungCuDo = dungCuDo;
+    api.xuatCauHinh = xuatCauHinh;
     api.thietBiChinh = thietBiChinh;
     api.bangThietBi = bangThietBi;
     api.boq = boq;
