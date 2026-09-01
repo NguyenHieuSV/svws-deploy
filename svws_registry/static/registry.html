@@ -702,8 +702,7 @@ async function injectThree(html){
   // vẽ, mọi tab và mọi tờ in của tool đều mang nhận diện công ty; đổi logo trong
   // sổ là tool sinh sau đó đổi theo.
   const lg = (data && data.meta && data.meta.logo) || '';
-  if(dungSvws) ma += 'window.SVWS_LOGO=' + JSON.stringify(lg) + ';
-' + lib.svws;
+  if(dungSvws) ma += 'window.SVWS_LOGO=' + JSON.stringify(lg) + ';\n' + lib.svws;
   if(!ma) return {html, injected:false, already:true};
   // PHẢI dùng dạng hàm: mã thư viện chứa ký tự $ nên replace kiểu chuỗi sẽ hỏng
   const tag = () => '<script>' + ma + '<\/script>';
