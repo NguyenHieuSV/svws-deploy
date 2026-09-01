@@ -257,21 +257,92 @@
     return g;
   }
 
-  function pump(o) {   // bơm ly tâm trên bệ: động cơ + buồng bơm
+  /** Van tay trên đường ống: thân van + vô-lăng, đủ để nhìn ra là có van. */
+  function van(x, y, z, dn, mau) {
+    var g = grp('van'), d = Math.max(60, dn || 80);
+    var th = cyl(d * 1.5, d * 0.9, mat('ss', { color: mau || 0xa9b4bb }), 14);
+    th.position.set(x, y, z); g.add(th);
+    var truc = cyl(d * 0.22, d * 0.9, mat('ss'), 8);
+    truc.position.set(x, y + d * 0.85, z); g.add(truc);
+    var vl = cyl(d * 1.25, d * 0.16, mat('paint', { color: 0xc0392b }), 16);
+    vl.position.set(x, y + d * 1.3, z); g.add(vl);
+    return g;
+  }
+  /** Van một chiều: thân van + mũi tên chỉ chiều cho phép chảy. */
+  function vanMotChieu(x, y, z, dn) {
+    var g = grp('vanMotChieu'), d = Math.max(60, dn || 80);
+    var th = cyl(d * 1.45, d * 1.1, mat('ss', { color: 0x8fa3ad }), 14);
+    th.position.set(x, y, z); g.add(th);
+    var mui = new THREE.Mesh(new THREE.ConeGeometry(d * 0.45, d * 0.75, 12),
+                             mat('paint', { color: 0x1f7a4d }));
+    mui.position.set(x, y + d * 0.2, z); g.add(mui);
+    return g;
+  }
+
+  /**
+   * BƠM — một bơm, hoặc CỤM BƠM song song kiểu 1 chạy 1 dự phòng.
+   *
+   * Khai dup:true (hoặc soBom:2) thì dựng đúng cách đấu thực tế: các bơm đứng
+   * SONG SONG giữa hai ống góp chung — góp hút ở dưới, góp đẩy ở trên — cả hai
+   * góp cùng dẫn về MỘT ĐẦU để nối vào điểm vào/ra, nên mỗi nhánh bơm thành
+   * hình chữ U. Mỗi nhánh có van chặn ở hút và ở đẩy để cô lập bơm mà không
+   * dừng hệ, và VAN MỘT CHIỀU ở đẩy — thiếu van một chiều thì nước từ bơm đang
+   * chạy vòng ngược qua bơm dừng rồi quay lại góp hút, chạy lòng vòng trong
+   * cụm chứ không ra hệ thống.
+   */
+  function pump(o) {
+    var n = Math.max(1, Math.min(6, +o.soBom || (o.dup ? 2 : 1)));
     var g = grp('pump');
     var L = kt(o.L, 900, 200, 4000), W = kt(o.W, 420, 150, 3000), H = kt(o.H, 380, 150, 3000);
-    var base = box(L, 90, W, mat('frame')); base.position.y = 45; g.add(base);
-    var mo = cyl(H, L * 0.5, mat('paint'), 24);
-    mo.rotation.z = Math.PI / 2; mo.position.set(L * 0.18, 90 + H / 2, 0); g.add(mo);
-    var cs = cyl(H * 0.95, W * 0.55, mat('ss'), 24);
-    cs.rotation.z = Math.PI / 2; cs.position.set(-L * 0.28, 90 + H / 2, 0); g.add(cs);
-    g.userData.foot = { w: L + 250, d: W + 250 };
-    g.userData.h = 90 + H;
-    g.userData.ports = {
-      in:  P(-L * 0.28 - W * 0.32, 90 + H / 2, 0, -1, 0, 0),   // hút: đầu trục
-      out: P(-L * 0.28, 90 + H * 0.95, 0, 0, 1, 0)             // đẩy: đỉnh buồng bơm
+    var dn = kt(o.dn, 80, 25, 400);
+    var buoc = W + 520;                       // khoảng cách tim hai bơm (lối bảo trì)
+    var z0 = -(n - 1) * buoc / 2;
+    var yHut = 90 + H * 0.5, yDay = 90 + H + 420;   // cao trình hai ống góp
+    var xGop = -L * 0.28;                     // hai góp chạy dọc trục Z tại đây
+    var mHut = mat('pvc', { color: 0x6b8fa8 }), mDay = mat('pvc', { color: 0x3aa6c9 });
+
+    for (var i = 0; i < n; i++) {
+      var z = z0 + i * buoc;
+      var base = box(L, 90, W, mat('frame')); base.position.set(0, 45, z); g.add(base);
+      var mo = cyl(H, L * 0.5, mat('paint'), 24);
+      mo.rotation.z = Math.PI / 2; mo.position.set(L * 0.18, 90 + H / 2, z); g.add(mo);
+      var cs = cyl(H * 0.95, W * 0.55, mat('ss'), 24);
+      cs.rotation.z = Math.PI / 2; cs.position.set(xGop, 90 + H / 2, z); g.add(cs);
+      if (n === 1) continue;
+
+      // nhánh hút: từ góp hút vào đầu trục bơm, có van chặn
+      var t1 = tube([xGop - W * 0.9, yHut, z], [xGop - W * 0.32, yHut, z], dn, mHut);
+      if (t1) g.add(t1);
+      g.add(van(xGop - W * 0.62, yHut, z, dn));
+      // nhánh đẩy: lên van một chiều rồi van chặn rồi vào góp đẩy
+      var t2 = tube([xGop, 90 + H * 0.95, z], [xGop, yDay, z], dn, mDay);
+      if (t2) g.add(t2);
+      g.add(vanMotChieu(xGop, 90 + H + 130, z, dn));
+      g.add(van(xGop, 90 + H + 300, z, dn));
+    }
+
+    if (n > 1) {
+      // hai ống góp chung chạy dọc, cùng gom về đầu −Z để nối ra ngoài
+      var zA = z0 - buoc * 0.55, zB = z0 + (n - 1) * buoc + buoc * 0.35;
+      var gh = tube([xGop - W * 0.9, yHut, zA], [xGop - W * 0.9, yHut, zB], dn * 1.25, mHut);
+      if (gh) g.add(gh);
+      var gd = tube([xGop, yDay, zA], [xGop, yDay, zB], dn * 1.25, mDay);
+      if (gd) g.add(gd);
+    }
+
+    var rong = (n - 1) * buoc + W;
+    g.userData.foot = { w: L + 250, d: rong + 400 };
+    g.userData.h = n > 1 ? yDay + 120 : 90 + H;
+    g.userData.soBom = n;
+    g.userData.ports = n > 1 ? {
+      // cả hai đầu nối ở CÙNG một phía — đúng cách đấu vào/ra của cụm bơm
+      in:  P(xGop - W * 0.9, yHut, z0 - buoc * 0.55, 0, 0, -1),
+      out: P(xGop, yDay, z0 - buoc * 0.55, 0, 0, -1)
+    } : {
+      in:  P(xGop - W * 0.32, yHut, 0, -1, 0, 0),      // hút: đầu trục
+      out: P(xGop, 90 + H * 0.95, 0, 0, 1, 0)          // đẩy: đỉnh buồng bơm
     };
-    veCacNozzle(g, 80);
+    veCacNozzle(g, dn);
     return g;
   }
 
@@ -292,7 +363,8 @@
     var vl = per * (sz === '4040' ? 1020 : sz === '2540' ? 640 : 1020);
     var rows = Math.min(n, o.rows || Math.ceil(n / 2));
     var cols = Math.ceil(n / rows);
-    var soBom = Math.max(0, Math.min(4, +o.bom || 0));      // bơm cao áp trên skid
+    // Bơm cao áp trên skid THƯỜNG CHỈ MỘT — không chạy dự phòng như bơm cấp.
+    var soBom = Math.max(0, Math.min(4, o.bom === true ? 1 : (+o.bom || 0)));
     var coLoc = !!(o.loc || o.cartridge);                   // vỏ lọc tinh trên skid
     var coTu = !!(o.tu || o.panel);                         // tủ điều khiển trên skid
     var truoc = (soBom || coLoc || coTu) ? 820 : 0;         // dải trước cho các cụm
@@ -620,8 +692,11 @@
       return { w: v + 120, d: (v + 120) * n + 300 * (n - 1), tron: true, D: v, qty: n }; }
     if (t === 'cartridge') { var c = kt(e.d, 300, 80, 2000);
       return { w: c + 200, d: c + 200, tron: true, D: c }; }
-    if (t === 'pump') return { w: kt(e.L, 900, 200, 4000) + 250,
-                               d: kt(e.W, 420, 150, 3000) + 250 };
+    if (t === 'pump') {                     // cụm 1 chạy 1 dừng chiếm rộng hơn
+      var nb = Math.max(1, Math.min(6, +e.soBom || (e.dup ? 2 : 1)));
+      var Wb = kt(e.W, 420, 150, 3000);
+      return { w: kt(e.L, 900, 200, 4000) + 250,
+               d: (nb - 1) * (Wb + 520) + Wb + (nb > 1 ? 400 : 250) }; }
     if (t === 'roskid' || t === 'ro') {     // EDI có nhánh riêng ở dưới
       var per = Math.min(12, Math.max(1, +e.memPerVessel || 6));
       var sz = coMang(e.size);

@@ -80,12 +80,21 @@
       }
       return {};
     }
-    function laBom(id) {
+    function timTB(id) {
       for (var i = 0; i < eq.length; i++) {
-        if ((eq[i].id === id || eq[i].tag === id))
-          return /pump|bom|bơm/i.test(String(eq[i].type || '') + ' ' + String(eq[i].tag || ''));
+        if (eq[i].id === id || eq[i].tag === id) return eq[i];
       }
-      return false;
+      return null;
+    }
+    function laBom(id) {
+      var e = timTB(id);
+      return !!e && /pump|bom|bơm/i.test(String(e.type || '') + ' ' + String(e.tag || ''));
+    }
+    /** Số bơm trong cụm — cụm 1 chạy 1 dừng cần bộ van riêng cho TỪNG bơm. */
+    function soBomCua(id) {
+      var e = timTB(id);
+      if (!e) return 1;
+      return Math.max(1, Math.min(6, +e.soBom || (e.dup ? 2 : 1)));
     }
 
     /** Đếm số nhánh cùng xuất phát từ một đầu nối → chỗ đó phải có tê/ống góp. */
@@ -106,6 +115,12 @@
      */
     function congDoan() {
       var nhanh = demNhanh();
+      // Van và ống góp của cụm bơm thuộc về CHÍNH CỤM BƠM, không thuộc đoạn ống
+      // nào — tính ở cả đoạn vào lẫn đoạn ra là nhân đôi. Quy ước: tính ở đoạn
+      // mà cụm bơm là ĐIỂM ĐẾN; cụm nào không có đoạn nào dẫn tới thì tính ở
+      // đoạn đi ra của nó.
+      var laDich = {};
+      tuyen.forEach(function (t) { laDich[t.to] = 1; });
       return tuyen.map(function (t, i) {
         var k = khaiCua(t);
         var daiM = t.dai / 1000;
@@ -124,7 +139,12 @@
           soGia: Math.max(2, Math.ceil(t.dai / buoc)),
           buocGia: buoc,
           soTe: soNhanh > 1 ? 1 : 0,
-          coMotChieu: laBom(t.from),
+          // Bơm ĐƠN mới cần van một chiều riêng ở đoạn đẩy; cụm nhiều bơm đã
+          // tính mỗi bơm một cái trong bộ van của cụm rồi.
+          coMotChieu: laBom(t.from) && soBomCua(t.from) === 1,
+          // chỉ ĐÚNG MỘT đoạn được tính vật tư của cụm bơm
+          cumBom: laBom(t.to) ? soBomCua(t.to)
+                : (laBom(t.from) && !laDich[t.from]) ? soBomCua(t.from) : 0,
           van: k.van == null ? 1 : so(k.van, 1)
         };
       });
@@ -143,12 +163,32 @@
                             ghi: 'Đếm theo khúc gãy thật của tuyến' });
       if (c.soTe) ds.push({ vt: 'Tê / cút chia', qc: 'DN' + c.dn, sl: c.soTe, dv: 'cái',
                             ghi: 'Đầu nối này có nhiều nhánh cùng xuất phát' });
+      // Cụm bơm 1 chạy 1 dừng: MỖI BƠM cần 2 van chặn (hút và đẩy) để cô lập
+      // bơm mà không dừng hệ, và 1 van một chiều ở đẩy — thiếu van một chiều
+      // thì nước từ bơm đang chạy vòng ngược qua bơm dừng về góp hút, chạy
+      // lòng vòng trong cụm chứ không ra hệ thống.
+      var nBom = c.cumBom || 0;
+      var vanCum = nBom > 1 ? nBom * 2 : 0;
+      var mcCum = nBom > 1 ? nBom : (c.coMotChieu ? 1 : 0);
       if (c.van) ds.push({ vt: 'Van chặn (bi/bướm)', qc: 'DN' + c.dn, sl: c.van,
                            dv: 'cái', ghi: 'Cô lập để bảo trì' });
-      if (c.coMotChieu) ds.push({ vt: 'Van một chiều', qc: 'DN' + c.dn, sl: 1, dv: 'cái',
-                                  ghi: 'Đầu đẩy bơm — chống chảy ngược' });
+      if (vanCum) ds.push({ vt: 'Van chặn cụm bơm', qc: 'DN' + c.dn, sl: vanCum,
+                            dv: 'cái',
+                            ghi: 'Cụm ' + nBom + ' bơm song song — 2 van mỗi bơm ' +
+                                 '(hút và đẩy) để cô lập từng bơm' });
+      if (mcCum) ds.push({ vt: 'Van một chiều', qc: 'DN' + c.dn, sl: mcCum, dv: 'cái',
+                           ghi: nBom > 1
+                             ? 'Mỗi bơm một cái — chặn nước chạy vòng qua bơm dừng'
+                             : 'Đầu đẩy bơm — chống chảy ngược' });
+      if (nBom > 1) {
+        ds.push({ vt: 'Ống góp hút + góp đẩy', qc: 'DN' + Math.round(c.dn * 1.25),
+                  sl: 2, dv: 'tuyến',
+                  ghi: 'Hai góp chung gom về một đầu nối (dạng chữ U)' });
+        ds.push({ vt: 'Tê góp bơm', qc: 'DN' + c.dn, sl: nBom * 2, dv: 'cái',
+                  ghi: 'Điểm rẽ nhánh vào và ra từng bơm' });
+      }
       // Mặt bích: 2 đầu nối thiết bị + 2 cho mỗi van (tháo được để bảo trì)
-      var soBich = 2 + 2 * (c.van + (c.coMotChieu ? 1 : 0));
+      var soBich = 2 + 2 * (c.van + vanCum + mcCum);
       ds.push({ vt: 'Mặt bích + gioăng + bộ bu lông', qc: 'DN' + c.dn, sl: soBich,
                 dv: 'bộ', ghi: '2 đầu thiết bị + 2 mỗi van' });
       ds.push({ vt: 'Rắc co / khớp nối tháo được', qc: 'DN' + c.dn, sl: 2, dv: 'bộ',

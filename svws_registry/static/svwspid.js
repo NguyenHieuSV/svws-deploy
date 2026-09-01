@@ -117,16 +117,51 @@
           '" height="' + (h / 2 - 10) + '" fill="#bfe0f2" opacity="0.85"/>');
         return { w: w, h: h, cx: x + w / 2 };
       },
+      /* Bơm đơn, hoặc CỤM BƠM song song 1 chạy 1 dừng. Cụm phải vẽ đủ van chặn
+         hai đầu mỗi bơm và VAN MỘT CHIỀU ở đẩy — thiếu van một chiều thì nước
+         từ bơm đang chạy vòng ngược qua bơm dừng về góp hút, chạy lòng vòng
+         trong cụm chứ không ra hệ thống. Vẽ thiếu là thợ lắp thiếu. */
       bom: function (x, y, e) {
-        var r = 13, dup = !!e.dup;
-        function mot(yy) {
-          out.push('<circle cx="' + (x + r) + '" cy="' + yy + '" r="' + r +
+        var r = 13;
+        var n = Math.max(1, Math.min(4, +e.soBom || (e.dup ? 2 : 1)));
+        function mot(yy, xb) {
+          out.push('<circle cx="' + (xb + r) + '" cy="' + yy + '" r="' + r +
             '" fill="#fff" stroke="' + NAVY + '" stroke-width="1.8"/>');
-          out.push('<path d="M' + (x + r - 5) + ' ' + (yy - 6) + ' L' + (x + r + 7) +
-            ' ' + yy + ' L' + (x + r - 5) + ' ' + (yy + 6) + ' Z" fill="' + NAVY + '"/>');
+          out.push('<path d="M' + (xb + r - 5) + ' ' + (yy - 6) + ' L' + (xb + r + 7) +
+            ' ' + yy + ' L' + (xb + r - 5) + ' ' + (yy + 6) + ' Z" fill="' + NAVY + '"/>');
         }
-        if (dup) { mot(y - 20); mot(y + 20); } else mot(y);
-        return { w: r * 2 + 8, h: dup ? 66 : 30, cx: x + r };
+        function vanNho(cx, cy) {          // van chặn: hai tam giác đối đỉnh
+          var s = 6;
+          out.push('<path d="M' + (cx - s) + ' ' + (cy - s) + ' L' + (cx + s) + ' ' +
+            (cy + s) + ' L' + (cx + s) + ' ' + (cy - s) + ' L' + (cx - s) + ' ' +
+            (cy + s) + ' Z" fill="#fff" stroke="' + NAVY + '" stroke-width="1.3"/>');
+        }
+        function motChieu(cx, cy) {        // van một chiều: tam giác chặn
+          out.push('<path d="M' + (cx - 7) + ' ' + (cy - 6) + ' L' + (cx + 6) + ' ' +
+            cy + ' L' + (cx - 7) + ' ' + (cy + 6) + ' Z" fill="#fff" stroke="' +
+            MAU.di + '" stroke-width="1.5"/>');
+          ln(cx + 6, cy - 7, cx + 6, cy + 7, MAU.di, 1.5);
+        }
+        if (n === 1) { mot(y, x); return { w: r * 2 + 8, h: 30, cx: x + r }; }
+
+        var buoc = 46, xv = x + 22, xb = xv + 22, xm = xb + r * 2 + 18, xr = xm + 30;
+        var y0 = y - (n - 1) * buoc / 2;
+        for (var i = 0; i < n; i++) {
+          var yy = y0 + i * buoc;
+          ln(x, yy, xv - 6, yy, NAVY, 1.5);            // nhánh từ góp hút
+          vanNho(xv, yy);                              // van chặn hút
+          ln(xv + 6, yy, xb, yy, NAVY, 1.5);
+          mot(yy, xb);
+          ln(xb + r * 2, yy, xm - 7, yy, NAVY, 1.5);
+          motChieu(xm, yy);                            // van một chiều
+          ln(xm + 7, yy, xr - 6, yy, NAVY, 1.5);
+          vanNho(xr, yy);                              // van chặn đẩy
+          ln(xr + 6, yy, xr + 22, yy, NAVY, 1.5);
+        }
+        // hai ống góp chung nối các nhánh lại
+        ln(x, y0, x, y0 + (n - 1) * buoc, NAVY, 2);
+        ln(xr + 22, y0, xr + 22, y0 + (n - 1) * buoc, NAVY, 2);
+        return { w: xr + 22 - x + 8, h: (n - 1) * buoc + 34, cx: (x + xr + 22) / 2 };
       },
       cot: function (x, y, e) {           // cột lọc áp lực (MMF/GAC/MB)
         var w = 30, h = 46, n = Math.max(1, e.qty || 1);
