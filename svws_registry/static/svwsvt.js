@@ -488,6 +488,146 @@
       ];
     }
 
+    // ======================================= DANH MỤC THIẾT BỊ CHÍNH (cho BOQ)
+    /* Bảng vật tư ở trên chỉ suy từ ĐƯỜNG ỐNG nên có ống, phụ kiện, móng, cáp —
+       KHÔNG có thiết bị chính. BOQ mà thiếu bồn, bơm, cột lọc, giàn RO thì
+       thiếu đúng phần lớn tiền. Ở đây sinh danh mục thiết bị từ CHÍNH khai báo
+       EQUIP đã dùng dựng 3D, nên không thể lệch với bản vẽ. */
+    function m3(d, h) { return lam(Math.PI / 4 * d * d * h / 1e9, 1); }
+
+    function quyCach(e) {
+      var t = String(e.type || '').toLowerCase();
+      var d = so(e.d, 0), h = so(e.h, 0);
+      var vl = e.vatLieu || e.material || '';
+      var ds = [];
+      if (t === 'tank') {
+        ds.push('Ø' + d + ' × H' + h + ' mm');
+        if (d && h) ds.push('dung tích ' + m3(d, h) + ' m³');
+        if (vl) ds.push(vl);
+        if (e.dayThan) ds.push('dày thân ' + e.dayThan + ' mm');
+      } else if (t === 'vessel' || t === 'filter' || t === 'mixedbed') {
+        ds.push('Ø' + d + ' × H' + h + ' mm');
+        if (e.media) ds.push('vật liệu lọc: ' + e.media);
+        if (vl) ds.push('vỏ ' + vl);
+        if (e.ap) ds.push('áp làm việc ' + e.ap + ' bar');
+      } else if (t === 'cartridge') {
+        ds.push('Ø' + d + ' × H' + h + ' mm');
+        if (e.micron || e.um) ds.push('lõi ' + (e.micron || e.um) + ' µm');
+        if (e.soLoi) ds.push(e.soLoi + ' lõi');
+      } else if (t === 'pump') {
+        if (e.kW) ds.push(e.kW + ' kW');
+        if (e.Q) ds.push('Q ' + e.Q + ' m³/h');
+        if (e.cot) ds.push('cột áp ' + e.cot + ' m');
+        ds.push(soBomCua(e.id || e.tag) > 1 ? '1 chạy 1 dự phòng' : 'một bơm');
+      } else if (t === 'roskid' || t === 'ro') {
+        var nv = Math.max(1, +e.vessels || 4), per = Math.max(1, +e.memPerVessel || 6);
+        ds.push(nv + ' vỏ màng × ' + per + ' màng ' + (e.size || '8040'));
+        ds.push('tổng ' + (nv * per) + ' màng');
+        if (e.bom) ds.push('kèm ' + (e.bom === true ? 1 : e.bom) + ' bơm cao áp');
+        if (e.loc || e.cartridge) ds.push('kèm vỏ lọc tinh');
+        if (e.tu || e.panel) ds.push('kèm tủ điều khiển');
+      } else if (t === 'edi') {
+        var moiS = so(e.moiStack, 5);
+        var ns = Math.max(1, +e.stacks ||
+          ((+e.q || +e.congSuat) ? Math.ceil((+e.q || +e.congSuat) / moiS) : 1));
+        ds.push(ns + ' stack × ' + moiS + ' m³/h');
+        ds.push('module tấm–khung');
+      } else if (t === 'uv') {
+        if (e.lieu) ds.push('liều ' + e.lieu + ' mJ/cm²');
+        if (e.kW) ds.push(e.kW + ' kW');
+        if (e.d && e.L) ds.push('Ø' + e.d + ' × L' + e.L + ' mm');
+      } else if (t === 'panel') {
+        ds.push((so(e.W, 800)) + ' × ' + (so(e.H, 1800)) + ' × ' + (so(e.D, 400)) + ' mm');
+        ds.push('vỏ sơn tĩnh điện, IP54');
+      } else if (t === 'dosing') {
+        ds.push('bồn Ø' + d + ' × H' + h + ' mm');
+        if (d && h) ds.push(m3(d, h) + ' m³');
+        ds.push('kèm bơm định lượng');
+      } else {
+        if (d) ds.push('Ø' + d + (h ? ' × H' + h : '') + ' mm');
+        if (vl) ds.push(vl);
+      }
+      return ds.join(' · ');
+    }
+
+    /** Số lượng đặt hàng của một thiết bị (cụm bơm đôi = 2 cái). */
+    function soLuong(e) {
+      var t = String(e.type || '').toLowerCase();
+      if (t === 'pump') return soBomCua(e.id || e.tag);
+      if (t === 'vessel' || t === 'filter') return Math.max(1, +e.qty || 1);
+      return 1;
+    }
+
+    var NHOM_TB = {
+      tank: 'Bồn bể', vessel: 'Thiết bị lọc', filter: 'Thiết bị lọc',
+      mixedbed: 'Thiết bị lọc', cartridge: 'Thiết bị lọc', pump: 'Bơm',
+      roskid: 'Cụm màng', ro: 'Cụm màng', edi: 'Cụm màng', uv: 'Khử trùng',
+      panel: 'Điện & điều khiển', dosing: 'Hoá chất'
+    };
+
+    function thietBiChinh() {
+      return eq.map(function (e) {
+        var t = String(e.type || '').toLowerCase();
+        return {
+          nhom: NHOM_TB[t] || 'Thiết bị khác',
+          tag: e.tag || e.id || '',
+          ten: e.name || e.ten || '',
+          quyCach: quyCach(e),
+          dv: 'bộ',
+          sl: soLuong(e)
+        };
+      });
+    }
+
+    /** BOQ đầy đủ: thiết bị chính + vật tư suy từ hình học, gộp một danh mục. */
+    function boq() {
+      var ds = [];
+      thietBiChinh().forEach(function (x) {
+        ds.push({ nhom: 'A. Thiết bị chính — ' + x.nhom,
+                  ten: (x.tag ? x.tag + ' — ' : '') + x.ten,
+                  qc: x.quyCach, dv: x.dv, sl: x.sl });
+      });
+      tongHop().forEach(function (g) {
+        var nhom = /Bê tông|Thép cốt|Bu lông neo|grout|epoxy/i.test(g.vt)
+                     ? 'C. Móng & kết cấu'
+                 : /Cáp|Máng|gland|tiếp địa/i.test(g.vt)
+                     ? 'D. Điện & điều khiển'
+                     : 'B. Đường ống & phụ kiện';
+        ds.push({ nhom: nhom, ten: g.vt, qc: g.qc, dv: g.dv, sl: g.slMua });
+      });
+      return ds;
+    }
+
+    function bangThietBi() {
+      return bangHTML('Danh mục thiết bị chính',
+        ['TT', 'Nhóm', 'Tag', 'Tên thiết bị', 'Quy cách kỹ thuật', 'ĐVT', 'SL'],
+        thietBiChinh().map(function (x, i) {
+          return [i + 1, x.nhom, x.tag, x.ten, x.quyCach, x.dv, x.sl];
+        }));
+    }
+
+    /** Bảng BOQ để dán đơn giá vào — cột đơn giá và thành tiền để trống. */
+    function bangBOQ() {
+      var ds = boq(), nhom = '', h = '';
+      var cot = ['TT', 'Hạng mục', 'Quy cách', 'ĐVT', 'SL', 'Đơn giá (VND)',
+                 'Thành tiền (VND)'];
+      h += '<h4 class="svws-bang-tieu">BẢNG KHỐI LƯỢNG (BOQ) — ' + ds.length +
+           ' hạng mục</h4><table class="svws-bang"><thead><tr>' +
+           cot.map(function (t) { return '<th>' + esc(t) + '</th>'; }).join('') +
+           '</tr></thead><tbody>';
+      ds.forEach(function (r, i) {
+        if (r.nhom !== nhom) {
+          nhom = r.nhom;
+          h += '<tr><td colspan="7" style="background:#e8eff7;font-weight:600">' +
+               esc(nhom) + '</td></tr>';
+        }
+        h += '<tr>' + [i + 1, r.ten, r.qc, r.dv, r.sl, '', ''].map(function (c) {
+          return '<td>' + esc(c) + '</td>';
+        }).join('') + '</tr>';
+      });
+      return h + '</tbody></table>';
+    }
+
     // ------------------------------------------------------------------ tổng hợp
     function tongHop() {
       var gom = {};
@@ -604,12 +744,25 @@
       }
       if (!eq.length) canhBao.push('Chưa nạp danh sách thiết bị — không tính được móng ' +
                                    'và cáp điện.');
-      return { loi: loi, canhBao: canhBao, tongQuan: tq };
+      // BOQ thiếu thiết bị chính là thiếu phần lớn tiền — kiểm luôn ở đây.
+      var tb = thietBiChinh();
+      if (!tb.length) loi.push('BOQ không có thiết bị chính nào — kiểm tra lại việc nạp ' +
+                               'EQUIP vào V.nap().');
+      tb.forEach(function (x) {
+        if (!x.quyCach) loi.push('Thiết bị ' + (x.tag || x.ten) + ' chưa có quy cách kỹ ' +
+                                 'thuật — không đặt hàng và không báo giá được.');
+        if (!x.tag) canhBao.push('Có thiết bị chưa đặt tag — BOQ khó đối chiếu với bản vẽ.');
+      });
+      return { loi: loi, canhBao: canhBao, tongQuan: tq, soThietBi: tb.length };
     }
 
     api.congDoan = congDoan;
     api.veCongDoan = veCongDoan;
     api.bom = bom;
+    api.thietBiChinh = thietBiChinh;
+    api.bangThietBi = bangThietBi;
+    api.boq = boq;
+    api.bangBOQ = bangBOQ;
     api.mong = mong;
     api.dien = dien;
     api.tongHop = tongHop;
