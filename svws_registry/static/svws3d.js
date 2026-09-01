@@ -332,8 +332,26 @@
     var zTruoc = D / 2 - truoc / 2;              // tim dải trước
     var xTu = 0, xLoc = 0, yBom = 0, yLoc = 0, yTu = 0;
     if (truoc) {
-      var xCon = -W / 2 + 260;                   // con trỏ chạy dọc skid
-      // bơm cao áp: bơm ly tâm nhiều tầng đứng, mô tơ nằm trên
+      // XẾP THEO CHIỀU DÒNG CHẢY từ đầu cấp: vỏ lọc tinh → bơm cao áp → màng RO.
+      // Xếp ngược là thợ đấu ống chạy vòng lại, và người xem hiểu sai công nghệ.
+      var xCon = -W / 2 + 300;                   // con trỏ chạy dọc skid
+      var locD = kt(o.locD, 300, 120, 900), locH = kt(o.locH, 1150, 400, 3000);
+      var xBom = [];
+
+      // 1) vỏ lọc tinh (cartridge) đứng, nắp bích sẫm màu như thiết bị thật
+      if (coLoc) {
+        xLoc = xCon;
+        var vo = cyl(locD, locH, mat('ss'), 24);
+        vo.position.set(xLoc, 120 + locH / 2, zTruoc); g.add(vo);
+        var nap = cyl(locD * 1.18, 90, mat('panel', { color: 0x2a2f36 }), 24);
+        nap.position.set(xLoc, 120 + locH + 45, zTruoc); g.add(nap);
+        var deL = box(locD + 180, 120, locD + 180, fm);
+        deL.position.set(xLoc, 60, zTruoc); g.add(deL);
+        yLoc = 120 + locH + 90;
+        xCon += locD / 2 + 520;
+      }
+
+      // 2) bơm cao áp: bơm ly tâm nhiều tầng đứng, mô tơ nằm trên
       for (var b2 = 0; b2 < soBom; b2++) {
         var than = cyl(230, 780, mat('ss'), 22);
         than.position.set(xCon, 120 + 390, zTruoc); g.add(than);
@@ -342,23 +360,34 @@
         var de = box(430, 120, 430, fm);
         de.position.set(xCon, 60, zTruoc); g.add(de);
         yBom = 120 + 780 + 430;
+        xBom.push(xCon);
         xCon += 620;
       }
-      // vỏ lọc tinh (cartridge) đứng, nắp bích sẫm màu như thiết bị thật
-      if (coLoc) {
-        xCon += soBom ? 220 : 0;
-        xLoc = xCon;
-        var vo = cyl(kt(o.locD, 300, 120, 900), kt(o.locH, 1150, 400, 3000),
-                     mat('ss'), 24);
-        vo.position.set(xLoc, 120 + kt(o.locH, 1150, 400, 3000) / 2, zTruoc);
-        g.add(vo);
-        var nap = cyl(kt(o.locD, 300, 120, 900) * 1.18, 90,
-                      mat('panel', { color: 0x2a2f36 }), 24);
-        nap.position.set(xLoc, 120 + kt(o.locH, 1150, 400, 3000) + 45, zTruoc);
-        g.add(nap);
-        var deL = box(480, 120, 480, fm); deL.position.set(xLoc, 60, zTruoc); g.add(deL);
-        yLoc = 120 + kt(o.locH, 1150, 400, 3000) + 90;
-        xCon += 700;
+
+      // 3) ống nội bộ đã đấu sẵn tại xưởng — cho thấy rõ hướng dòng
+      var mHut = mat('pvc', { color: 0x3aa6c9 });        // đoạn áp thấp sau lọc
+      var mDay = mat('pvc', { color: 0xc0392b });        // đoạn cao áp sau bơm
+      if (coLoc && xBom.length) {
+        // lọc → hút bơm: chạy dọc sát mặt sàn skid
+        var yHut = 300;
+        var t1 = tube([xLoc + locD / 2, yHut, zTruoc],
+                      [xBom[xBom.length - 1] + 200, yHut, zTruoc], 90, mHut);
+        if (t1) g.add(t1);
+        xBom.forEach(function (xb) {
+          var nhanh = tube([xb, yHut, zTruoc], [xb, 120 + 200, zTruoc], 80, mHut);
+          if (nhanh) g.add(nhanh);
+        });
+      }
+      if (xBom.length) {
+        // đẩy bơm → lên ống góp màng ở cao trình vỏ màng dưới cùng
+        var yGop = 320;
+        xBom.forEach(function (xb) {
+          var len = tube([xb, 120 + 780, zTruoc], [xb, yBom + 120, zTruoc], 80, mDay);
+          if (len) g.add(len);
+          var ngang = tube([xb, yBom + 120, zTruoc],
+                           [xb, yBom + 120, -Dv / 2 + 180 - truoc / 2 + 200], 80, mDay);
+          if (ngang) g.add(ngang);
+        });
       }
       // tủ điều khiển đặt cuối skid, kê chân lên khỏi mặt sàn
       if (coTu) {
@@ -396,7 +425,9 @@
     };
     // Có lọc tinh trên skid thì NƯỚC CẤP đi thẳng vào vỏ lọc, không vào ống góp
     // màng — vẽ sai chỗ này là thợ đấu ống sai thứ tự công nghệ.
-    if (coLoc) g.userData.ports.in = P(xLoc, 120 + 200, zTruoc + 260, 0, 0, 1);
+    // Đầu vào skid là MIỆNG VỎ LỌC (thiết bị đầu tiên theo chiều dòng chảy),
+    // không phải ống góp màng.
+    if (coLoc) g.userData.ports.in = P(xLoc, 120 + 420, zTruoc + 240, 0, 0, 1);
     if (coTu) g.userData.ports.dien = P(xTu, 900 + 120, zTruoc + 260, 0, 0, 1);
     veCacNozzle(g, 65);
     return g;
