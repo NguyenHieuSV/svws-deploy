@@ -1145,16 +1145,70 @@ function dl(text, name){
 function exportJSON(){
   dl(JSON.stringify(data,null,2), (data.meta.code||'SVWS-3D-REQ')+'_'+(data.meta.rev||'Rev')+'.json');
 }
+/* Có HAI loại file JSON khác nhau và người dùng dễ nhầm:
+   1. File CHUẨN của sổ đăng ký  {meta, sections, designs}  — nút này nhận.
+   2. File CẤU HÌNH của một tool thiết kế  {type:"svws-3d-design", design,
+      params, stages…} — do nút "Lưu JSON" TRONG TOOL xuất ra.
+   Trước đây gặp loại 2 chỉ báo cụt lủn 'Thiếu trường "sections"'. Nay nhận ra
+   và làm việc có ích: rút thông tin thiết kế đưa vào sổ. */
+function napToolJSON(d){
+  const t = d.design || {};
+  const ma = (t.code || '').trim();
+  if(!ma){ alert('File tool này không có mã thiết kế (design.code) nên không đưa vào sổ được.'); return; }
+  const p = d.params || {};
+  const dong = [];
+  const them = (nhan, v, dv) => { if(v!==undefined && v!=='' && v!==null) dong.push(nhan+': '+v+(dv||'')); };
+  them('Q trung bình', p.Qavg, ' m³/h'); them('Q tối đa', p.Qmax, ' m³/h');
+  them('Điện trở suất', p.res, ' MΩ·cm');
+  them('MMF', p.nmmf!==undefined ? p.nmmf+' cột Ø'+(p.dmmf||'?') : '');
+  them('GAC', p.ngac!==undefined ? p.ngac+' cột Ø'+(p.dgac||'?')+' lớp than '+(p.hgac||'?')+' mm' : '');
+  them('RO pass 1', p.v1!==undefined ? p.v1+' vessel × '+(p.epv1||'?')+' màng '+(p.mem||'') : '');
+  them('RO pass 2', p.v2!==undefined ? p.v2+' vessel × '+(p.epv2||'?')+' màng' : '');
+  them('EDI', p.nedi!==undefined ? p.nedi+' stack' : '');
+  them('Mixed bed', p.nmb!==undefined ? p.nmb+' bình Ø'+(p.dmb||'?') : '');
+  them('Khu đất', (p.plotL&&p.plotW) ? p.plotL+' × '+p.plotW+' m' : '');
+  const soCD = (d.stages||[]).length;
+  const moi = {
+    code: ma, name: t.name || '', tech: t.tech || '',
+    capacity: p.Qavg ? (p.Qavg+' m³/h (Qmax '+(p.Qmax||'?')+')') : '',
+    project: t.project || '',
+    params: dong.join('\n'),
+    notes: 'Nạp từ file cấu hình tool ngày ' + (t.date || '') +
+           (t.rev ? ' (Rev.'+t.rev+')' : '') +
+           (soCD ? ' · '+soCD+' công đoạn thi công' : ''),
+    status: 'Đã có tool'
+  };
+  const i = (data.designs||[]).findIndex(x => (x.code||'').trim() === ma);
+  if(i >= 0){
+    if(!confirm('Sổ đã có thiết kế "'+ma+'". Cập nhật thông số theo file này?')) return;
+    Object.keys(moi).forEach(k => { if(moi[k]) data.designs[i][k] = moi[k]; });
+  }else{
+    if(!confirm('Thêm thiết kế "'+ma+'" vào sổ đăng ký?')) return;
+    data.designs = data.designs || [];
+    data.designs.push(moi);
+  }
+  touch(); renderDesigns(); switchTab('des');
+  alert('Đã ' + (i>=0 ? 'cập nhật' : 'thêm') + ' thiết kế ' + ma + ' vào sổ.');
+}
+
 document.getElementById('jsonInput').addEventListener('change',e=>{
   const f=e.target.files[0];if(!f)return;
   const r=new FileReader();
   r.onload=()=>{try{
       const d=JSON.parse(r.result);
-      if(!d.sections) throw new Error('Thiếu trường "sections"');
+      if(d && (d.type==='svws-3d-design' || (d.design && d.params))){
+        napToolJSON(d);            // file cấu hình của TOOL, không phải file chuẩn
+        return;
+      }
+      if(!d.sections) throw new Error(
+        'Đây không phải file chuẩn của sổ đăng ký (thiếu trường "sections").\n\n' +
+        'Nút này chỉ nhận file do chính nút "⬇ Xuất JSON" ở đây tạo ra.\n' +
+        'Nếu đây là file cấu hình của một TOOL thiết kế thì mở bằng nút ' +
+        '"📂 Mở JSON" NGAY TRONG TOOL đó để nạp lại thông số.');
       if(!d.designs) d.designs=[];
       if(!confirm('Thay toàn bộ dữ liệu trên server bằng file này?')) return;
       data=d; touch(); renderMeta(); render(); renderDesigns();
-    }catch(err){alert('File JSON không hợp lệ: '+err.message);}};
+    }catch(err){alert('Không nạp được file: '+err.message);}};
   r.readAsText(f);e.target.value='';
 });
 
