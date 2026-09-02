@@ -53,6 +53,10 @@
         {
           "t": "BA SỔ GỐC là nguồn khai báo duy nhất của một thiết kế, và phải QUAY VỀ được sổ đăng ký. Thay vì để AI rải danh sách thiết bị và đường ống trong mã JavaScript, tool khai ba sổ bằng SVWSSO: (1) sổ thiết bị — có gì trong hệ; (2) sổ tuyến ống — nối với nhau ra sao; (3) sổ dụng cụ đo — đo cái gì, ở đâu. Mọi thứ khác SUY RA, không khai lần thứ hai: EQUIP và PIPES cho 3D với P&ID, danh sách tải cho tủ điện (lấy kW ở dòng thiết bị), bảng I/O cho PLC (tự cấp địa chỉ, mỗi kênh mang sẵn thiết bị nó gắn vào). Nhờ vậy không thể có động cơ trong tủ mà không có thiết bị trên bản vẽ, và bảng I/O không thể lệch P&ID. Ba sổ phải SỬA ĐƯỢC ngay trong tool (SVWSSO.tao({...,suaDuoc:true, khiDoi:<hàm vẽ lại>}) rồi SO.gan(el)); sửa một ô là bộ kiểm và mọi bản vẽ đổi theo. QUAN TRỌNG NHẤT: nút Lưu JSON phải ghi ba sổ vào trường \"so\" của file cấu hình (SVWSVT.xuatCauHinh(design, params, SO.xuat())). Người thiết kế nạp file đó lại vào phiếu trong sổ đăng ký, và từ đó mọi đề bài đều mang sẵn ba sổ đã chốt — AI KHÔNG được khai lại. Thiếu vòng quay này thì mỗi lần sinh lại tool là mọi chỉnh sửa của người thiết kế bay sạch, mà sinh lại tool là việc xảy ra thường xuyên.",
           "s": "std"
+        },
+        {
+          "t": "MỖI TAB PHẢI DỰNG TRONG VÒNG BẢO VỆ — bọc bằng SVWSKT.veAnToan(el, '<tên tab>', function(){ …dựng tab… }). Một hàm dựng ném lỗi là cả script chết theo và MỌI TAB TRẮNG cùng lúc; người dùng chỉ thấy “app hỏng”, không biết hỏng ở đâu, và cả bộ hồ sơ thành vô dụng vì một dòng sai. Bọc lại thì chỉ tab đó hiện hộp lỗi kèm nguyên văn thông báo và dòng stack đầu tiên, chín tab kia vẫn dùng được, và người dùng dán được đúng dòng lỗi vào nút sửa lỗi bằng AI. Áp dụng cho CẢ hàm vẽ lần đầu LẪN hàm vẽ lại khi đổi tham số hay đổi ba sổ.",
+          "s": "std"
         }
       ]
     },

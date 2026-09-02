@@ -244,11 +244,43 @@
     '.svws-kt-dau img,.svws-kt-dau svg{height:38px;width:auto;display:block}' +
     '.svws-kt-dau b{display:block;color:#0b2545;font-size:12.5px}' +
     '.svws-kt-dau span{display:block;color:#5b6b7d;font-size:10.5px}' +
+    '.svws-kt-loi{border:1px solid #e2b6b2;border-left:4px solid #b3271e;' +
+    'background:#fdeeec;padding:12px 14px;border-radius:4px;margin:10px 0;' +
+    'font-family:' + FONT + ';display:flex;flex-direction:column;gap:6px}' +
+    '.svws-kt-loi b{color:#8c1d16;font-size:13.5px}' +
+    '.svws-kt-loi span{color:#5b6b7d;font-size:12px}' +
+    '.svws-kt-loi code{display:block;white-space:pre-wrap;background:#fff;' +
+    'border:1px solid #e2cac7;border-radius:3px;padding:7px 9px;font:12px ' +
+    'Consolas,monospace;color:#8c1d16}' +
     '@media print{.svws-kt-bar{page-break-inside:avoid}}';
 
+  /**
+   * Dựng nội dung MỘT TAB trong vòng bảo vệ. Một hàm dựng ném lỗi là cả script
+   * chết theo và MỌI tab trắng cùng lúc — người dùng chỉ thấy "app hỏng", không
+   * biết hỏng ở đâu. Bọc lại thì chỉ tab đó hiện hộp lỗi, chín tab kia vẫn chạy,
+   * và thông báo nói thẳng chỗ hỏng để sửa.
+   *   SVWSKT.veAnToan(el, 'Tab 2 — P&ID', function(){ el.innerHTML = P.ve(); });
+   */
+  function veAnToan(el, ten, fn) {
+    try { fn(); return true; }
+    catch (e) {
+      var m = (e && e.message) || String(e);
+      var v = (e && e.stack ? String(e.stack).split('\n')[1] || '' : '').trim();
+      if (el) el.innerHTML =
+        '<div class="svws-kt-loi"><b>Tab này không dựng được</b>' +
+        '<span>' + esc(ten || '') + '</span>' +
+        '<code>' + esc(m) + (v ? '\n' + v : '') + '</code>' +
+        '<span>Các tab khác vẫn chạy. Bấm nút sửa lỗi bằng AI và dán nguyên ' +
+        'dòng trên để sửa đúng chỗ.</span></div>';
+      if (typeof console !== 'undefined' && console.error)
+        console.error('[SVWS] ' + (ten || '') + ': ' + m, e);
+      return false;
+    }
+  }
+
   var api = {
-    version: '1.0',
-    dat: dat, en: en, logo: logo, coLogo: coLogo,
+    version: '1.1',
+    dat: dat, en: en, logo: logo, coLogo: coLogo, veAnToan: veAnToan,
     svg: svg, html: html, dauTrang: dauTrang,
     cao: cao, heSo: heSo, CSS: CSS,
     CSS_TAG: '<style>' + CSS + '</style>',

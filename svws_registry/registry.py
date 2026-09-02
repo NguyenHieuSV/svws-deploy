@@ -107,6 +107,7 @@ _MUC_LOGO = "LOGO SÓNG VIỆT PHẢI CÓ TRÊN MỌI TRANG"
 _MUC_PID2 = "Ba quy tắc KHAI BÁO để P&ID không sinh lỗi giả"
 _MUC_PID3 = "SỔ THIẾT BỊ PHẢI KHỚP BẢNG ĐIỆN"
 _MUC_BASO = "BA SỔ GỐC là nguồn khai báo duy nhất"
+_MUC_ANTOAN = "MỖI TAB PHẢI DỰNG TRONG VÒNG BẢO VỆ"
 
 
 def _bo_sung_nhom(data: dict, dau_hieu: str, tien_to, tu_khoa: str) -> bool:
@@ -341,6 +342,10 @@ def init_db() -> None:
                          "BA SỔ GỐC là nguồn khai báo duy nhất", "nền tảng"):
             ghi.append("Ba sổ gốc (thiết bị · tuyến ống · dụng cụ đo) sửa được "
                        "trong tool và quay về được sổ đăng ký")
+        if _bo_sung_nhom(data, _MUC_ANTOAN,
+                         "MỖI TAB PHẢI DỰNG TRONG VÒNG BẢO VỆ", "nền tảng"):
+            ghi.append("Mỗi tab dựng trong vòng bảo vệ — một lỗi không làm "
+                       "trắng cả tool")
         if _bo_sung_muc(data, _MUC_OM, "Tab 9 (bổ sung)", "9"):
             ghi.append("Sổ O&M sinh từ danh sách thiết bị (SVWSOM)")
         if _bo_sung_muc(data, _MUC_CAP, "Tab 6 (bổ sung)", "6"):
@@ -1090,6 +1095,15 @@ def ai_execute(payload: dict = Body(...)):
                 "bao nhiêu rồi hạ xuống đâu, có đánh dấu co 90°, vị trí giá đỡ, cao trình "
                 "giá và trình tự lắp. Nút in công đoạn PHẢI in cả bản vẽ này (lấy riêng "
                 "bằng V.veCongDoan(c) nếu cần), không chỉ in bảng vật tư.\n"
+                "- MỖI TAB DỰNG TRONG VÒNG BẢO VỆ — bắt buộc, làm ngay từ khung "
+                "sườn tool:\n"
+                "    function veTab2(){ SVWSKT.veAnToan(el2, 'Tab 2 — P&ID', "
+                "function(){ el2.innerHTML = P.ve(); }); }\n"
+                "  Một hàm dựng ném lỗi là cả script chết theo và MỌI TAB TRẮNG "
+                "cùng lúc — người dùng chỉ thấy “app hỏng”, không biết hỏng ở đâu. "
+                "Bọc lại thì chỉ tab đó hiện hộp lỗi kèm nguyên văn thông báo, các "
+                "tab kia vẫn dùng được. Áp dụng cho cả hàm vẽ lần đầu lẫn hàm vẽ "
+                "lại khi đổi tham số hoặc đổi ba sổ.\n"
                 "- BA SỔ GỐC — khai báo TẤT CẢ ở đây, đừng rải trong mã:\n"
                 "    const SO = SVWSSO.tao({\n"
                 "      thietBi:[{tag,ten,loai,sl,dau,d,h,hLop,kW,kieuDien,ghi}…],\n"
