@@ -74,6 +74,7 @@
     var hthong = null;            // đồ thị thiết bị/đường ống khi tự xếp
     var mocLoai = {};             // tag → loại thiết bị, để chọn chỗ gắn bầu đo
     var ioDaGan = null;           // kết quả gắn bầu đo từ bảng I/O
+    var dsTai = null;             // danh sách tải điện, để đối chiếu thiết bị
     var api2 = null;              // gán ở cuối, để heThong() trả về chính nó
 
     function themChiem(x1, y1, x2, y2, ten) {
@@ -103,17 +104,24 @@
       // giữ chữ trong khổ giấy — nhãn dài ở mép trái từng bị đẩy ra ngoài khung
       x = Math.min(W - 8 - (dx + w), Math.max(8 - dx, x));
       var uu = (huong === 'duoi' ? 1 : -1) * (fs + 5);
-      var yy = y, r = null, xong = false;
-      // thử hướng ưu tiên trước, hết chỗ thì thử hướng ngược lại
+      var yy = y, xx = x, r = null, xong = false;
+      // Thử hướng ưu tiên trước, hết chỗ thì hướng ngược lại; mỗi hướng còn NÉ
+      // NGANG vài nấc. Chỉ đẩy theo phương đứng thì nhãn nằm giữa hai hàng thiết
+      // bị hết chỗ là rơi đè lên bồn — lỗi "chữ DN40 đè lên DR-101".
+      var lechX = [0, 26, -26, 52, -52];
       [uu, -uu].forEach(function (buoc) {
         if (xong) return;
-        yy = y;
-        for (var i = 0; i < 16; i++) {
-          r = { x1: x + dx - 2, y1: yy - h, x2: x + dx + w + 2, y2: yy + 3 };
-          if (coTrong(r, 2) && r.y1 > 52 && r.y2 < H - 6) { xong = true; return; }
-          yy += buoc;
+        for (var q = 0; q < lechX.length && !xong; q++) {
+          xx = x + lechX[q]; yy = y;
+          for (var i = 0; i < 16; i++) {
+            r = { x1: xx + dx - 2, y1: yy - h, x2: xx + dx + w + 2, y2: yy + 3 };
+            if (coTrong(r, 2) && r.y1 > 52) { xong = true; break; }
+            yy += buoc;
+          }
         }
       });
+      if (!xong) { xx = x; }
+      x = xx;
       themChiem(r.x1, r.y1, r.x2, r.y2, 'chữ:' + s);
       out.push('<text x="' + x + '" y="' + yy + '" font-size="' + fs +
         '" fill="' + (mau || INK) + '" text-anchor="' + neo + '"' +
@@ -135,6 +143,34 @@
           '" rx="4" fill="#eaf4fb" stroke="' + NAVY + '" stroke-width="1.8"/>');
         out.push('<rect x="' + (x + 4) + '" y="' + (y + 6) + '" width="' + (w - 8) +
           '" height="' + (h / 2 - 10) + '" fill="#bfe0f2" opacity="0.85"/>');
+        return { w: w, h: h, cx: x + w / 2 };
+      },
+      /* CỤM CHÂM HOÁ CHẤT — bồn pha + bơm định lượng, KHÔNG phải bồn nước.
+         Trước đây dosing dùng chung ký hiệu bồn nên ba cụm châm trên bản Cụm RO
+         30 m³/h trông y như ba bể nước cấp, lại còn tự mọc mũi tên "Nguồn cấp"
+         vì chúng không có đường ống vào. Hoá chất đổ vào bằng tay, không có
+         tuyến cấp — ký hiệu riêng và không vẽ mũi tên nguồn. */
+      hoachat: function (x, y, e) {
+        var w = 62, hb = 58, h = 92;
+        var yb = y - h / 2;
+        out.push('<rect x="' + x + '" y="' + yb + '" width="' + w + '" height="' + hb +
+          '" rx="3" fill="#fdf3e2" stroke="' + MAU.chem + '" stroke-width="1.8"/>');
+        out.push('<rect x="' + (x + 3) + '" y="' + (yb + hb * 0.42) + '" width="' + (w - 6) +
+          '" height="' + (hb * 0.55) + '" fill="#f0d9a8" opacity="0.9"/>');
+        // que khuấy
+        out.push('<line x1="' + (x + w / 2) + '" y1="' + (yb - 6) + '" x2="' + (x + w / 2) +
+          '" y2="' + (yb + hb * 0.75) + '" stroke="' + MAU.chem + '" stroke-width="1.4"/>');
+        out.push('<line x1="' + (x + w / 2 - 9) + '" y1="' + (yb + hb * 0.75) + '" x2="' +
+          (x + w / 2 + 9) + '" y2="' + (yb + hb * 0.75) + '" stroke="' + MAU.chem +
+          '" stroke-width="1.4"/>');
+        // bơm định lượng dưới đáy
+        var cy = yb + hb + 16;
+        out.push('<circle cx="' + (x + w / 2) + '" cy="' + cy + '" r="11" fill="#fff" stroke="' +
+          MAU.chem + '" stroke-width="1.7"/>');
+        out.push('<path d="M' + (x + w / 2 - 4) + ' ' + (cy - 5) + ' L' + (x + w / 2 + 6) +
+          ' ' + cy + ' L' + (x + w / 2 - 4) + ' ' + (cy + 5) + ' Z" fill="' + MAU.chem + '"/>');
+        out.push('<line x1="' + (x + w / 2) + '" y1="' + (yb + hb) + '" x2="' + (x + w / 2) +
+          '" y2="' + (cy - 11) + '" stroke="' + MAU.chem + '" stroke-width="1.4"/>');
         return { w: w, h: h, cx: x + w / 2 };
       },
       /* Bơm đơn, hoặc CỤM BƠM song song 1 chạy 1 dừng. Cụm phải vẽ đủ van chặn
@@ -283,7 +319,8 @@
         canH = Math.max(canH, y + k.h / 2 + 130);
         return api;
       }
-      ['nguon', 'bon', 'bom', 'cot', 'loc', 'ro', 'edi', 'uv', 'van'].forEach(function (t) {
+      ['nguon', 'bon', 'hoachat', 'bom', 'cot', 'loc', 'ro', 'edi', 'uv', 'van']
+        .forEach(function (t) {
         api[t] = function (e) { return dat(t, e); };
       });
       api.cuoi = function () { return x; };
@@ -309,7 +346,7 @@
       roskid: 'ro', ro: 'ro',
       edi: 'edi',
       uv: 'uv',
-      dosing: 'bon'
+      dosing: 'hoachat', hoachat: 'hoachat', chem: 'hoachat'
     };
     var MAU_DONG = {
       raw: MAU.raw, filtered: MAU.raw, ro: MAU.di, di: MAU.di, permeate: MAU.di,
@@ -448,34 +485,24 @@
               { dong: c.p.service || 'conc', nhan: nhan || 'hồi lưu', phia: 'duoi' });
           return;
         }
-        // đi tới: ra mép phải nút nguồn, sang cột đích, vào mép trái
-        var x1 = a.x2, x2 = b.x1;
-        if (Math.abs(a.y - b.y) < 5) {
-          ln(x1, a.y, x2 - 9, b.y, mau, 1.8);
-        } else {
-          var gap = x2 - x1, xm = x1 + gap * 0.55;
-          // tránh đoạn dọc cắt qua ký hiệu: dịch dần cho tới khi trống
-          for (var t2 = 0; t2 < 8; t2++) {
-            var oDoc = { x1: xm - 5, y1: Math.min(a.y, b.y), x2: xm + 5, y2: Math.max(a.y, b.y) };
-            if (coTrong(oDoc, 3)) break;
-            xm = x1 + gap * (0.55 - 0.06 * (t2 + 1));
-            if (xm < x1 + 14) { xm = x1 + gap * 0.5; break; }
-          }
-          ln(x1, a.y, xm, a.y, mau, 1.8);
-          ln(xm, a.y, xm, b.y, mau, 1.8);
-          ln(xm, b.y, x2 - 9, b.y, mau, 1.8);
-          themChiem(xm - 3, Math.min(a.y, b.y), xm + 3, Math.max(a.y, b.y),
-                    'ống ' + nut[c.a].id + '→' + nut[c.b].id);
-        }
-        muiVao(x2, b.y, mau);
-        if (nhan) nhanCho.push({ x: (x1 + x2) / 2, y: Math.min(a.y, b.y) - 7,
-                                 s: nhan, fs: 8, mau: mau, dam: 0, huong: 'tren' });
+        // Đi tới: để bộ định tuyến lo — nó kiểm ĐỦ MỌI ĐOẠN trước khi vẽ nên
+        // tuyến không thể xuyên qua thiết bị nằm giữa hai cột.
+        dinhTuyen(nut[c.a].e.tag, nut[c.b].e.tag, mau, nhan, 'duoi');
       });
 
       // ---- mũi tên nguồn cấp cho các nút không có đường vào
       nut.forEach(function (u) {
         if (u.vao.length) return;
         var m = moc[u.e.tag]; if (!m) return;
+        // Cụm châm hoá chất KHÔNG có tuyến cấp — hoá chất đổ vào bồn pha bằng
+        // tay. Vẽ mũi tên "Nguồn cấp" cho nó là biến cụm châm thành bể nước cấp
+        // trên bản vẽ, đúng lỗi thấy trên bản Cụm RO 30 m³/h.
+        if (u.loai === 'hoachat') {
+          nhanCho.push({ x: m.x + m.w / 2, y: m.y + m.h / 2 + 14,
+                         s: u.e.nguon || 'Pha thủ công', fs: 7.6, mau: MAU.chem,
+                         dam: 0, huong: 'duoi' });
+          return;
+        }
         ln(m.x1 - 48, m.y, m.x1 - 10, m.y, MAU.raw, 1.8);
         muiVao(m.x1, m.y, MAU.raw);
         nhanCho.push({ x: m.x1 - 30, y: m.y - 12, s: u.e.nguon || 'Nguồn cấp',
@@ -685,33 +712,151 @@
     }
 
     /** Nối hai thiết bị bằng đường gấp khúc VUÔNG GÓC, né mọi ký hiệu. */
-    function noi(tagA, tagB, e) {
-      e = e || {};
-      var a = moc[tagA], b = moc[tagB];
-      if (!a || !b) { vachao.push('Không nối được ' + tagA + ' → ' + tagB); return; }
-      var mau = MAU[e.dong || 'conc'] || MAU.conc;
-      // Tìm một làn ngang còn trống: thử hướng ưu tiên trước, hết chỗ thì thử
-      // hướng ngược lại — chỉ thử một hướng thì gặp hàng kế bên là bí.
-      var uu = e.phia === 'tren' ? -1 : 1;
-      var thu = [uu, -uu], i, huong, d, yy, dai;
-      for (i = 0; i < thu.length; i++) {
-        huong = thu[i];
-        for (d = 46; d <= 420; d += 16) {
-          yy = huong > 0 ? Math.max(a.y, b.y) + d : Math.min(a.y, b.y) - d;
-          if (yy < 60 || yy > H - 20) break;
-          dai = { x1: Math.min(a.x, b.x) - 2, y1: yy - 6, x2: Math.max(a.x, b.x) + 2, y2: yy + 6 };
-          if (!coTrong(dai, 4)) continue;
-          ln(a.x, a.y + huong * a.h / 2, a.x, yy, mau, 1.5);
-          ln(a.x, yy, b.x, yy, mau, 1.5);
-          ln(b.x, yy, b.x, b.y + huong * b.h / 2, mau, 1.5);
-          themChiem(dai.x1, dai.y1, dai.x2, dai.y2, 'ống ' + tagA + '→' + tagB);
-          if (e.nhan) chu((a.x + b.x) / 2, yy - 7, e.nhan, 8, mau, 'middle', 0,
-                          huong < 0 ? 'tren' : 'duoi');
-          return;
+    /* ==================================================================
+     * ĐỊNH TUYẾN ỐNG — vuông góc và TUYỆT ĐỐI KHÔNG CẮT QUA THIẾT BỊ
+     * ------------------------------------------------------------------
+     * Bản cũ chỉ kiểm đoạn DỌC ở giữa, còn hai đoạn NGANG thì vẽ thẳng bất kể
+     * có gì chắn. Hai thiết bị cách nhau vài cột là tuyến đi xuyên qua tất cả
+     * những gì nằm giữa — đúng lỗi thấy trên bản Cụm RO 30 m³/h. Ở đây kiểm ĐỦ
+     * MỌI ĐOẠN trước khi vẽ, và ghi lại đoạn đã vẽ để tuyến sau còn né.
+     * Ống cắt ống là bình thường trên P&ID; ống cắt THIẾT BỊ thì không.
+     * ================================================================ */
+    function boxDoan(x1, y1, x2, y2) {
+      return { x1: Math.min(x1, x2) - 3, y1: Math.min(y1, y2) - 3,
+               x2: Math.max(x1, x2) + 3, y2: Math.max(y1, y2) + 3 };
+    }
+    function trongDoan(r, bq, neOng) {
+      for (var i = 0; i < chiem.length; i++) {
+        var c = chiem[i], t = String(c.ten || '');
+        if (bq && bq.indexOf(t) >= 0) continue;        // hai đầu của chính tuyến này
+        if (t.indexOf('chữ:') === 0) continue;         // nhãn vẽ sau, tự né
+        if (t.indexOf('ống ') === 0 && !neOng) continue;
+        if (dung(r, c, 0)) return false;
+      }
+      return true;
+    }
+    function trongCa(ds, bq, neOng) {
+      for (var i = 0; i < ds.length; i++) if (!trongDoan(ds[i], bq, neOng)) return false;
+      return true;
+    }
+    function veTuyen(diem, mau, ten) {
+      var i;
+      for (i = 0; i < diem.length - 1; i++)
+        ln(diem[i][0], diem[i][1], diem[i + 1][0], diem[i + 1][1], mau, 1.6);
+      for (i = 0; i < diem.length - 1; i++) {
+        var r = boxDoan(diem[i][0], diem[i][1], diem[i + 1][0], diem[i + 1][1]);
+        themChiem(r.x1, r.y1, r.x2, r.y2, 'ống ' + ten);
+      }
+    }
+    /** Mép trên và mép dưới của TOÀN BỘ thiết bị — để chọn làn đi vòng. */
+    function bienY() {
+      var lo = 1e9, hi = -1e9;
+      Object.keys(moc).forEach(function (t) {
+        var m = moc[t];
+        lo = Math.min(lo, m.y - m.h / 2); hi = Math.max(hi, m.y + m.h / 2);
+      });
+      return lo > hi ? { lo: 90, hi: 300 } : { lo: lo, hi: hi };
+    }
+    function timTuyen(a, b, bq, phiaUu, neOng) {
+      var vao = b.x1 - 9, f, xm, ds;
+      // 1) cùng cao độ và đoạn giữa trống → nối thẳng
+      if (Math.abs(a.y - b.y) < 5 && a.x2 < vao &&
+          trongCa([boxDoan(a.x2, a.y, vao, b.y)], bq, neOng))
+        return [[a.x2, a.y], [vao, b.y]];
+      // 2) bẻ một nhịp trong khoảng trống giữa hai thiết bị
+      var gap = b.x1 - a.x2;
+      if (gap > 26) {
+        var moc2 = [0.5, 0.44, 0.38, 0.32, 0.26, 0.2, 0.56, 0.62, 0.68, 0.74, 0.8];
+        for (var q = 0; q < moc2.length; q++) {
+          f = moc2[q]; xm = a.x2 + gap * f;
+          ds = [boxDoan(a.x2, a.y, xm, a.y), boxDoan(xm, a.y, xm, b.y),
+                boxDoan(xm, b.y, vao, b.y)];
+          if (trongCa(ds, bq, neOng))
+            return [[a.x2, a.y], [xm, a.y], [xm, b.y], [vao, b.y]];
         }
       }
-      vachao.push('Không tìm được đường trống để nối ' + tagA + ' → ' + tagB +
-                  ' — nới chiều cao khổ vẽ hoặc giãn khoảng cách giữa các hàng.');
+      // 3) đi vòng: ra khỏi thiết bị theo phương đứng, chạy trên một LÀN NGANG
+      //    nằm ngoài toàn bộ khối thiết bị, rồi vào thiết bị đích theo phương đứng
+      var bi = bienY();
+      var thu = phiaUu === 'tren' ? [-1, 1] : [1, -1];
+      for (var i = 0; i < thu.length; i++) {
+        var h = thu[i];
+        for (var d = 30; d <= 520; d += 13) {
+          var yy = h > 0 ? bi.hi + d : bi.lo - d;
+          if (yy < 56) break;
+          ds = [boxDoan(a.x, a.y + h * a.h / 2, a.x, yy),
+                boxDoan(a.x, yy, b.x, yy),
+                boxDoan(b.x, yy, b.x, b.y + h * b.h / 2)];
+          if (trongCa(ds, bq, neOng)) {
+            canH = Math.max(canH, yy + 70);
+            return [[a.x, a.y + h * a.h / 2], [a.x, yy], [b.x, yy],
+                    [b.x, b.y + h * b.h / 2]];
+          }
+        }
+      }
+      // 4) Có thiết bị nằm ngay dưới (hoặc trên) thì tuột thẳng xuống là đâm vào
+      //    nó. Ra khỏi thiết bị theo phương NGANG tới một rãnh đứng còn trống
+      //    rồi mới đi xuống làn ngang. Thiếu bước này thì cột nào xếp hai ba
+      //    thiết bị chồng nhau là mọi tuyến hồi lưu đều bí.
+      var biY = bienY();
+      for (var t3 = 0; t3 < 2; t3++) {
+        var h2 = (phiaUu === 'tren' ? [-1, 1] : [1, -1])[t3];
+        for (var e2 = 10; e2 <= 90; e2 += 10) {
+          var xA = a.x2 + e2, xB = b.x1 - e2;
+          for (var d2 = 30; d2 <= 520; d2 += 13) {
+            var y2 = h2 > 0 ? biY.hi + d2 : biY.lo - d2;
+            if (y2 < 56) break;
+            var ds3 = [boxDoan(a.x2, a.y, xA, a.y), boxDoan(xA, a.y, xA, y2),
+                       boxDoan(xA, y2, xB, y2), boxDoan(xB, y2, xB, b.y),
+                       boxDoan(xB, b.y, b.x1 - 9, b.y)];
+            if (trongCa(ds3, bq, neOng)) {
+              canH = Math.max(canH, y2 + 70);
+              return [[a.x2, a.y], [xA, a.y], [xA, y2], [xB, y2],
+                      [xB, b.y], [b.x1 - 9, b.y]];
+            }
+          }
+        }
+      }
+      return null;
+    }
+    /** Mũi tên đặt theo hướng của đoạn cuối, không mặc định nằm ngang. */
+    function muiTheo(p1, p2, mau) {
+      var dx = p2[0] - p1[0], dy = p2[1] - p1[1];
+      if (Math.abs(dx) >= Math.abs(dy)) {
+        muiVao(p2[0] + (dx >= 0 ? 9 : -9), p2[1], mau);
+        return;
+      }
+      var s = dy >= 0 ? 1 : -1, x = p2[0], y = p2[1] + s * 9;
+      out.push('<path d="M' + (x - 4.5) + ' ' + (y - s * 9) + ' L' + x + ' ' + y +
+        ' L' + (x + 4.5) + ' ' + (y - s * 9) + ' Z" fill="' + (mau || NAVY) + '"/>');
+    }
+
+    function dinhTuyen(tagA, tagB, mau, nhan, phiaUu) {
+      var a = moc[tagA], b = moc[tagB];
+      if (!a || !b) { vachao.push('Không nối được ' + tagA + ' → ' + tagB); return; }
+      var bq = [tagA, tagB];
+      // Lượt 1 né cả thiết bị lẫn ống đã vẽ cho sơ đồ sạch; không được thì lượt 2
+      // chấp nhận cắt ống khác — nhưng thiết bị thì không bao giờ.
+      var diem = timTuyen(a, b, bq, phiaUu, true) || timTuyen(a, b, bq, phiaUu, false);
+      if (!diem) {
+        vachao.push('Không tìm được đường nối ' + tagA + ' → ' + tagB +
+                    ' mà không cắt qua thiết bị — nới khổ vẽ (tham số h khi gọi ' +
+                    'SVWSPID.to) hoặc giãn khoảng cách hàng/cột.');
+        return;
+      }
+      veTuyen(diem, mau, tagA + '→' + tagB);
+      var n = diem.length;
+      muiTheo(diem[n - 2], diem[n - 1], mau);
+      if (nhan) {
+        var g = diem[n - 2], c = diem[n - 1];
+        nhanCho.push({ x: (g[0] + c[0]) / 2, y: Math.min(g[1], c[1]) - 7, s: nhan,
+                       fs: 8, mau: mau, dam: 0, huong: 'tren' });
+      }
+    }
+
+    function noi(tagA, tagB, e) {
+      e = e || {};
+      dinhTuyen(tagA, tagB, MAU[e.dong || 'conc'] || MAU.conc, e.nhan, e.phia);
     }
 
     // ------------------------------------------------------------- xuất
@@ -775,12 +920,28 @@
       noiKho();
       xaNhan();
       var loi = vachao.slice();
+      /* Phân loại chồng lấn — không phải cái nào cũng là lỗi:
+         · ống × ống: hai tuyến cắt nhau là bình thường trên P&ID, bỏ qua;
+         · ống × chính hai thiết bị nó nối: đó là cổ ống, bỏ qua;
+         · ống × thiết bị KHÁC: đây mới là lỗi "ống cắt ngang thiết bị";
+         · thiết bị × thiết bị, hoặc nhãn đè lên vật gì đó: lỗi vẽ như trước. */
+      function laOng(t) { return String(t).indexOf('ống ') === 0; }
+      function dauOng(t) { return String(t).slice(4).split('→'); }
       for (var i = 0; i < chiem.length; i++) {
         for (var j = i + 1; j < chiem.length; j++) {
-          if (dung(chiem[i], chiem[j], -1)) {
-            var t = 'Đè nhau: ' + chiem[i].ten + '  ×  ' + chiem[j].ten;
-            if (loi.indexOf(t) < 0) loi.push(t);
+          if (!dung(chiem[i], chiem[j], -1)) continue;
+          var ta = chiem[i].ten, tb = chiem[j].ten, t;
+          if (laOng(ta) && laOng(tb)) continue;
+          if (laOng(ta) || laOng(tb)) {
+            var o = laOng(ta) ? ta : tb, tb2 = laOng(ta) ? tb : ta;
+            if (dauOng(o).indexOf(tb2) >= 0) continue;
+            if (String(tb2).indexOf('chữ:') === 0) continue;   // nhãn tự né ở lượt sau
+            t = 'Ống ' + String(o).slice(4) + ' cắt ngang thiết bị ' + tb2 +
+                ' — nới khổ vẽ hoặc giãn khoảng cách hàng/cột.';
+          } else {
+            t = 'Đè nhau: ' + ta + '  ×  ' + tb;
           }
+          if (loi.indexOf(t) < 0) loi.push(t);
         }
       }
       // Chế độ tự xếp: kiểm luôn tính liền lạc của dây chuyền, không chỉ kiểm vẽ.
@@ -798,6 +959,27 @@
           loi.push('Có ' + luiSo + ' tuyến hồi lưu trên ' + hthong.nut.length +
                    ' thiết bị — kiểm lại chiều dòng chảy trong PIPES, nhiều khả năng ' +
                    'khai ngược from/to.');
+      }
+      // Động cơ có trong bảng điện mà không có trên sơ đồ = thiếu thiết bị.
+      if (dsTai && dsTai.length) {
+        var gon = {};
+        Object.keys(moc).forEach(function (t) {
+          gon[t.replace(/[-_\s.]+/g, '').toUpperCase()] = t;
+        });
+        var daNhac = {};
+        dsTai.forEach(function (t) {
+          var g = String(t.tag || '').replace(/[-_\s.]+/g, '').toUpperCase();
+          if (!g || gon[g]) return;
+          // Cụm 1 chạy 1 dừng khai một thiết bị P-101 nhưng tủ có hai lộ
+          // P-101A và P-101B — bỏ hậu tố chữ rồi đối chiếu lại.
+          var g2 = g.replace(/[A-Z]$/, '');
+          if (gon[g2] || daNhac[g2]) return;
+          daNhac[g2] = 1;
+          loi.push('Động cơ ' + t.tag + (t.ten ? ' (' + t.ten + ')' : '') +
+                   ' có trong bảng chọn thiết bị điện nhưng KHÔNG có trên P&ID — ' +
+                   'thiếu thiết bị trong khai báo EQUIP, hoặc thừa một lộ trong ' +
+                   'bảng điện. Hai bảng phải cùng một sổ thiết bị.');
+        });
       }
       // Đối chiếu P&ID với bảng I/O: bồn nào cũng phải có đo mức, cụm màng phải
       // có đo áp — thiếu là vận hành mù, không phải lỗi vẽ nhưng phải nhắc.
@@ -825,8 +1007,15 @@
                io: ioDaGan };
     }
 
+    /* Đối chiếu P&ID với BẢNG ĐIỆN. Một động cơ có trong bảng chọn thiết bị
+       điện mà không có mặt trên sơ đồ nghĩa là thiếu thiết bị trong khai báo —
+       đúng lỗi "thiếu bơm cấp" trên bản Cụm RO 30 m³/h: bảng thông số ghi bơm
+       cấp MMF 11 kW, tủ điện có lộ cho nó, mà P&ID thì không có cái bơm nào.
+       Không đối chiếu thì chẳng ai phát hiện, vì mỗi tab đọc một sổ khác nhau. */
+    function napTai(ds) { dsTai = (ds || []).slice(); return api2; }
+
     api2 = { hang: hang, heThong: heThong, dungCu: dungCu,
-             dungCuTuIO: dungCuTuIO, ghiChu: ghiChu,
+             dungCuTuIO: dungCuTuIO, napTai: napTai, ghiChu: ghiChu,
              noi: noi, noiKho: noiKho, chu: chu, ln: ln, ve: ve, kiemTra: kiemTra,
              xaNhan: xaNhan, moc: moc, MAU: MAU, W: W, H: H };
     return api2;

@@ -72,6 +72,10 @@
           "s": "std"
         },
         {
+          "t": "Tab 2 (bổ sung) — SỔ THIẾT BỊ PHẢI KHỚP BẢNG ĐIỆN, và cụm hoá chất không phải bồn nước. Gọi P.napTai(DL.danhSach()) trước khi kiểm: mỗi động cơ có trong bảng chọn thiết bị điện mà không có mặt trên P&ID sẽ bị báo lỗi. Đây là cách duy nhất bắt được lỗi THIẾU THIẾT BỊ — bản Cụm RO 30 m³/h từng phát hành với bảng thông số ghi bơm cấp MMF 11 kW, tủ điện có đủ hai lộ cho nó, mà P&ID thì không có cái bơm nào giữa bể chứa và cột lọc; không tab nào tự phát hiện vì mỗi tab đọc một sổ riêng. Cụm châm hoá chất khai type:\"dosing\" — thư viện vẽ bằng ký hiệu riêng (bồn pha + máy khuấy + bơm định lượng, màu hoá chất) và KHÔNG vẽ mũi tên “Nguồn cấp” cho nó, vì hoá chất đổ vào bằng tay chứ không có tuyến cấp. Khai nhầm thành tank thì ba cụm châm hiện lên như ba bể nước cấp thừa trên sơ đồ. Đường ống do thư viện tự định tuyến vuông góc và KHÔNG BAO GIỜ cắt qua thiết bị; nếu báo “không tìm được đường nối” thì nới khổ vẽ bằng tham số h khi gọi SVWSPID.to, đừng tự vẽ tay đè lên.",
+          "s": "std"
+        },
+        {
           "t": "Tab 3 — GA drawing: mặt bằng tỷ lệ 1:50 khổ A3, kích thước ghi bằng mm.",
           "s": "std"
         },

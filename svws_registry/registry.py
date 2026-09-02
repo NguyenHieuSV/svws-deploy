@@ -104,6 +104,7 @@ _MUC_DIEN = "Mức chi tiết bắt buộc của phần điện"
 _MUC_TAB8 = "Tab 8 — Commissioning (Chạy thử & nghiệm thu)"
 _MUC_LOGO = "LOGO SÓNG VIỆT PHẢI CÓ TRÊN MỌI TRANG"
 _MUC_PID2 = "Ba quy tắc KHAI BÁO để P&ID không sinh lỗi giả"
+_MUC_PID3 = "SỔ THIẾT BỊ PHẢI KHỚP BẢNG ĐIỆN"
 
 
 def _bo_sung_nhom(data: dict, dau_hieu: str, tien_to, tu_khoa: str) -> bool:
@@ -328,9 +329,12 @@ def init_db() -> None:
                          "LOGO SÓNG VIỆT PHẢI CÓ TRÊN MỌI TRANG", "nền tảng"):
             ghi.append("Logo và khung tên công ty trên mọi trang, mọi tab, "
                        "mọi tờ in — dùng thư viện SVWSKT")
-        if _bo_sung_muc(data, _MUC_PID2, "Tab 2 (bổ sung)", "2"):
+        if _bo_sung_muc(data, _MUC_PID2, "Tab 2 (bổ sung) — Ba quy tắc", "2"):
             ghi.append("Ba quy tắc khai báo cho P&ID: khai tb cho dụng cụ · "
                        "cụm bơm là một thiết bị · thiết bị phải có vào và ra")
+        if _bo_sung_muc(data, _MUC_PID3, "Tab 2 (bổ sung) — SỔ THIẾT BỊ", "2"):
+            ghi.append("P&ID đối chiếu với bảng điện (bắt lỗi thiếu thiết bị) · "
+                       "ký hiệu riêng cho cụm châm hoá chất")
         if _bo_sung_muc(data, _MUC_OM, "Tab 9 (bổ sung)", "9"):
             ghi.append("Sổ O&M sinh từ danh sách thiết bị (SVWSOM)")
         if _bo_sung_muc(data, _MUC_CAP, "Tab 6 (bổ sung)", "6"):
@@ -1069,6 +1073,15 @@ def ai_execute(payload: dict = Body(...)):
                 "      Bỏ tb thì thư viện phải đoán theo số vòng lặp, mà một hệ có tới "
                 "sáu thiết bị cùng mang số 101 (T-101 · P-101 · MMF-101 · GAC-101 · "
                 "CF-101 · RO-101) — đoán là có lúc sai.\n"
+                "      Sau khi khai xong, gọi P.napTai(DL.danhSach()) để đối chiếu "
+                "sổ thiết bị với bảng điện — động cơ nào có lộ trong tủ mà không có "
+                "trên P&ID sẽ bị báo lỗi. Đây là cách duy nhất bắt được lỗi THIẾU "
+                "THIẾT BỊ: đã từng phát hành bản có bơm cấp 11 kW trong bảng thông số "
+                "và trong tủ điện, mà trên sơ đồ không có cái bơm nào.\n"
+                "      Cụm châm hoá chất khai type:'dosing' — thư viện vẽ ký hiệu "
+                "riêng (bồn pha + khuấy + bơm định lượng) và KHÔNG vẽ mũi tên "
+                "“Nguồn cấp”, vì hoá chất đổ vào bằng tay. Khai nhầm thành tank thì "
+                "mỗi cụm châm hiện lên như một bể nước cấp thừa.\n"
                 "  (2) CỤM BƠM 1 CHẠY 1 DỪNG là MỘT thiết bị:\n"
                 "      {id:'P-101', tag:'P-101', type:'pump', soBom:2}   ✔\n"
                 "      {id:'P-101A', …}, {id:'P-101B', …}                 ✘\n"
