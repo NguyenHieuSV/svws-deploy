@@ -127,6 +127,18 @@
       for (var i = 0; i < TU.length; i++) if (gonTag(TU[i].ma) === g) return TU[i];
       return null;
     }
+    /**
+     * ĐIỂM CHÂM: tuyến hoá chất nối vào MỘT TUYẾN ỐNG khác, không phải vào một
+     * thiết bị. Ngoài hiện trường đây là chuyện thường — antiscalant châm vào
+     * đường ống ngay trước bơm cao áp, SBS châm vào đường sau lọc. Bắt phải nối
+     * vào thiết bị là ép người vẽ khai sai vị trí thật của điểm châm.
+     */
+    function diemCham(t) {
+      if (String(t.dv || '').toLowerCase() !== 'chem') return null;
+      var d = timTU(t.den);
+      return (d && d !== t && String(d.dv || '').toLowerCase() !== 'chem') ? d : null;
+    }
+
     function themLoi(bang, i, t, nang) {
       var k = bang + ':' + i;
       (loiDong[k] = loiDong[k] || []).push(t);
@@ -182,9 +194,13 @@
         daMa[g] = i;
         if (!t.tu || !t.den) { themLoi('TU', i, 'Thiếu đầu đi hoặc đầu đến.'); return; }
         if (!timTB(t.tu))
-          themLoi('TU', i, 'Không có thiết bị "' + t.tu + '" trong sổ thiết bị.');
-        if (!timTB(t.den))
-          themLoi('TU', i, 'Không có thiết bị "' + t.den + '" trong sổ thiết bị.');
+          themLoi('TU', i, 'Không có thiết bị "' + t.tu + '" trong sổ thiết bị — ' +
+                  'sửa ô "Từ" của dòng này, hoặc thêm thiết bị đó vào sổ 1.');
+        if (!timTB(t.den) && !diemCham(t))
+          themLoi('TU', i, 'Không có thiết bị "' + t.den + '" trong sổ thiết bị — ' +
+                  'sửa ô "Đến" của dòng này. Nếu đây là ĐIỂM CHÂM vào một tuyến ' +
+                  'ống thì dịch vụ của dòng phải là "Hoá chất" và ô "Đến" điền ' +
+                  'MÃ TUYẾN có thật (ví dụ L-03).');
         if (gonTag(t.tu) === gonTag(t.den))
           themLoi('TU', i, 'Tuyến nối thiết bị với chính nó.');
         if (!t.dv) themLoi('TU', i, 'Chưa khai dịch vụ (nước thô, sau lọc, RO, DI, ' +
@@ -199,7 +215,11 @@
       var vao = {}, ra = {};
       TU.forEach(function (t) {
         if (timTB(t.tu)) ra[gonTag(t.tu)] = (ra[gonTag(t.tu)] || 0) + 1;
-        if (timTB(t.den)) vao[gonTag(t.den)] = (vao[gonTag(t.den)] || 0) + 1;
+        // Điểm châm tính là một đường vào của thiết bị ở CUỐI tuyến bị châm —
+        // hoá chất đi cùng dòng nước vào đúng thiết bị đó.
+        var dch = diemCham(t);
+        var den = dch ? dch.den : t.den;
+        if (timTB(den)) vao[gonTag(den)] = (vao[gonTag(den)] || 0) + 1;
       });
       /* Điểm cấp nước nên khai HẲN thành một dòng loại "nguon" (mặt bích chờ
          của nhà máy). Đoán theo "thiết bị nào không có đường vào" là sai ngay
@@ -300,12 +320,18 @@
     /** Sổ tuyến → PIPES. Mã tuyến giữ nguyên để mục thử áp gọi đúng tên. */
     function PIPES() {
       return TU.map(function (t) {
-        var p = { from: t.tu, to: t.den, dn: t.dn, service: t.dv, line: t.ma };
+        // Điểm châm quy về thiết bị cuối tuyến bị châm: trên bản vẽ, hoá chất
+        // vào cùng chỗ với dòng nước nó châm vào, và ghi rõ châm ở tuyến nào.
+        var dch = diemCham(t);
+        var p = { from: t.tu, to: dch ? dch.den : t.den,
+                  dn: t.dn, service: t.dv, line: t.ma };
+        if (dch) p.ghi = 'Điểm châm trên tuyến ' + dch.ma +
+                         (t.ghi ? ' · ' + t.ghi : '');
         if (t.congTu) p.fromPort = t.congTu;
         if (t.congDen) p.toPort = t.congDen;
         if (t.vl) p.vl = t.vl;
         if (t.ap) p.ap = t.ap;
-        if (t.ghi) p.ghi = t.ghi;
+        else if (t.ghi) p.ghi = t.ghi;
         return p;
       });
     }
