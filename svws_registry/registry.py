@@ -108,6 +108,7 @@ _MUC_PID2 = "Ba quy tắc KHAI BÁO để P&ID không sinh lỗi giả"
 _MUC_PID3 = "SỔ THIẾT BỊ PHẢI KHỚP BẢNG ĐIỆN"
 _MUC_BASO = "BA SỔ GỐC là nguồn khai báo duy nhất"
 _MUC_ANTOAN = "MỖI TAB PHẢI DỰNG TRONG VÒNG BẢO VỆ"
+_MUC_TAB0 = "Tab 0 — BA SỔ GỐC"
 
 
 def _bo_sung_nhom(data: dict, dau_hieu: str, tien_to, tu_khoa: str) -> bool:
@@ -346,6 +347,9 @@ def init_db() -> None:
                          "MỖI TAB PHẢI DỰNG TRONG VÒNG BẢO VỆ", "nền tảng"):
             ghi.append("Mỗi tab dựng trong vòng bảo vệ — một lỗi không làm "
                        "trắng cả tool")
+        if _bo_sung_muc(data, _MUC_TAB0, "Tab 0 —", "0"):
+            ghi.append("Tab 0 — Ba sổ gốc: chỗ cố định để mở lại và sửa sổ "
+                       "ngay trong tool")
         if _bo_sung_muc(data, _MUC_OM, "Tab 9 (bổ sung)", "9"):
             ghi.append("Sổ O&M sinh từ danh sách thiết bị (SVWSOM)")
         if _bo_sung_muc(data, _MUC_CAP, "Tab 6 (bổ sung)", "6"):
@@ -874,7 +878,9 @@ def ai_execute(payload: dict = Body(...)):
                 "kỳ điều nào là tool bị đánh dấu CHƯA THEO CHUẨN và phải làm lại:\n"
                 "  1. SVWSSO.tao({thietBi, tuyen, dungCu, suaDuoc:true, khiDoi:…}) — "
                 "khai TẤT CẢ thiết bị và đường ống ở BA SỔ này, không rải trong mã.\n"
-                "  2. SO.gan(<phần tử>) — ba sổ phải SỬA ĐƯỢC ngay trong tool.\n"
+                "  2. SO.gan(<phần tử>) — ba sổ phải SỬA ĐƯỢC ngay trong tool, đặt ở "
+                "một TAB RIÊNG nhãn “0. Ba sổ” đứng TRƯỚC tab 1, kèm nút tải ba sổ ra "
+                "JSON. Sổ còn lỗi thì tool mở sẵn ở tab này chứ không mở ở tab 3D.\n"
                 "  3. SO.EQUIP() và SO.PIPES() — bản vẽ lấy thiết bị TỪ SỔ, không khai "
                 "tay lần thứ hai. Số cột lọc, số bơm trong cụm nằm ở ô sl của sổ.\n"
                 "  4. SVWSKT.dat({…}) — khung tên và logo công ty.\n"

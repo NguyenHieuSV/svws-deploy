@@ -64,6 +64,10 @@
       "title": "Cấu trúc 10 tab bắt buộc",
       "items": [
         {
+          "t": "Tab 0 — BA SỔ GỐC: ba sổ phải có CHỖ CỐ ĐỊNH và dễ tìm trong tool — một tab riêng nhãn “0. Ba sổ”, đặt TRƯỚC tab 1 (3D Layout), không giấu trong bảng thông số hay trong một hộp thoại. Đây là nơi người thiết kế quay lại sửa hệ mỗi khi cần, nên nó phải nằm ngay chỗ mắt tìm đầu tiên. Trong tab này: gọi SO.gan(<phần tử của tab>) để ba bảng sửa được hiện ra, kèm nút ⬇ Tải ba sổ (JSON) để nạp ngược về phiếu trong sổ đăng ký. Khi mở file, nếu SO.kiemTra().loi còn chỗ chưa đạt thì TOOL PHẢI MỞ SẴN Ở TAB 0 thay vì tab 3D — sổ còn sai thì mọi bản vẽ sinh ra từ nó đều sai theo, xem bản vẽ trước là xem nhầm. Nhãn tab hiện luôn số chỗ phải sửa, ví dụ “0. Ba sổ (3)”.",
+          "s": "std"
+        },
+        {
           "t": "Tab 1 — 3D Layout: bể tường trong suốt thấy đầy đủ nội thất; toolbar bật/tắt nhãn đồng bộ với checkbox layer; ống chỉ đi vuông góc theo trục X/Y/Z (rẽ 90°); ống gom trên rack phía trước theo tầng cao độ (nước/RAS +300, khí +550, hóa chất +900/+1200); bơm đặt inline trên rack.",
           "s": "std"
         },
