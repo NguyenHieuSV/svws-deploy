@@ -405,42 +405,42 @@
     }
     var COT = {
       TB: [
-        { k: 'tag', t: 'Tag', kieu: 'chu', r: 92 },
-        { k: 'ten', t: 'Tên thiết bị', kieu: 'chu', r: 168 },
-        { k: 'loai', t: 'Loại', kieu: 'chon', r: 158, chon: function () {
+        { k: 'tag', t: 'Tag', kieu: 'chu', r: 96 },
+        { k: 'ten', t: 'Tên thiết bị', kieu: 'chu', r: 178 },
+        { k: 'loai', t: 'Loại', kieu: 'chon', r: 152, chon: function () {
             return Object.keys(LOAI).map(function (k) { return [k, LOAI[k].ten]; }); } },
-        { k: 'sl', t: 'SL', kieu: 'so', r: 48, min: 1 },
-        { k: 'dau', t: 'Đấu nối trong cụm', kieu: 'chon', r: 196, chon: function () {
+        { k: 'sl', t: 'SL', kieu: 'so', r: 46, min: 1 },
+        { k: 'dau', t: 'Đấu nối trong cụm', kieu: 'chon', r: 166, chon: function () {
             return Object.keys(DAU).map(function (k) { return [k, DAU[k]]; }); } },
-        { k: 'd', t: 'Ø (mm)', kieu: 'so', r: 74 },
-        { k: 'h', t: 'H (mm)', kieu: 'so', r: 74 },
+        { k: 'd', t: 'Ø (mm)', kieu: 'so', r: 68 },
+        { k: 'h', t: 'H (mm)', kieu: 'so', r: 68 },
         { k: 'hLop', t: 'Cao lớp VL', kieu: 'so', r: 74 },
-        { k: 'kW', t: 'kW', kieu: 'so', r: 62 },
-        { k: 'kieuDien', t: 'Khởi động', kieu: 'chon', r: 88, chon: function () {
+        { k: 'kW', t: 'kW', kieu: 'so', r: 56 },
+        { k: 'kieuDien', t: 'Khởi động', kieu: 'chon', r: 92, chon: function () {
             return [['', '—'], ['DOL', 'DOL'], ['VFD', 'VFD']]; } },
-        { k: 'ghi', t: 'Ghi chú', kieu: 'chu', r: 150 }
+        { k: 'ghi', t: 'Ghi chú', kieu: 'chu', r: 138 }
       ],
       TU: [
-        { k: 'ma', t: 'Mã tuyến', kieu: 'chu', r: 82 },
-        { k: 'tu', t: 'Từ', kieu: 'goi', ds: 'tb', r: 104 },
-        { k: 'den', t: 'Đến', kieu: 'goi', ds: 'tb', r: 104 },
-        { k: 'dv', t: 'Dịch vụ', kieu: 'chon', r: 168, chon: function () {
+        { k: 'ma', t: 'Mã tuyến', kieu: 'chu', r: 84 },
+        { k: 'tu', t: 'Từ', kieu: 'goi', ds: 'tb', r: 108 },
+        { k: 'den', t: 'Đến', kieu: 'goi', ds: 'gan', r: 108 },
+        { k: 'dv', t: 'Dịch vụ', kieu: 'chon', r: 162, chon: function () {
             return chonTu(DICHVU); } },
-        { k: 'dn', t: 'DN', kieu: 'so', r: 62 },
-        { k: 'vl', t: 'Vật liệu', kieu: 'chu', r: 130 },
-        { k: 'ap', t: 'Áp làm việc', kieu: 'so', r: 78 },
-        { k: 'ghi', t: 'Ghi chú', kieu: 'chu', r: 150 }
+        { k: 'dn', t: 'DN', kieu: 'so', r: 56 },
+        { k: 'vl', t: 'Vật liệu', kieu: 'chu', r: 128 },
+        { k: 'ap', t: 'Áp (bar)', kieu: 'so', r: 72 },
+        { k: 'ghi', t: 'Ghi chú', kieu: 'chu', r: 170 }
       ],
       DC: [
         { k: 'tag', t: 'Tag', kieu: 'chu', r: 92 },
-        { k: 'mo', t: 'Mô tả', kieu: 'chu', r: 176 },
+        { k: 'mo', t: 'Mô tả', kieu: 'chu', r: 208 },
         { k: 'gan', t: 'Gắn vào', kieu: 'goi', ds: 'gan', r: 104 },
-        { k: 'tin', t: 'Tín hiệu', kieu: 'chon', r: 132, chon: function () {
+        { k: 'tin', t: 'Tín hiệu', kieu: 'chon', r: 128, chon: function () {
             return Object.keys(TINHIEU).map(function (k) { return [k, k + ' — ' + TINHIEU[k]]; }); } },
-        { k: 'dai', t: 'Dải đo', kieu: 'chu', r: 86 },
-        { k: 'dv', t: 'Đơn vị', kieu: 'chu', r: 66 },
-        { k: 'nguong', t: 'Ngưỡng / báo động', kieu: 'chu', r: 176 },
-        { k: 'ghi', t: 'Ghi chú', kieu: 'chu', r: 130 }
+        { k: 'dai', t: 'Dải đo', kieu: 'chu', r: 88 },
+        { k: 'dv', t: 'Đơn vị', kieu: 'chu', r: 64 },
+        { k: 'nguong', t: 'Ngưỡng / báo động', kieu: 'chu', r: 172 },
+        { k: 'ghi', t: 'Ghi chú', kieu: 'chu', r: 120 }
       ]
     };
     var SO_BANG = { TB: function () { return TB; }, TU: function () { return TU; },
@@ -463,9 +463,11 @@
       return v === '' || v == null ? '—' : v;
     }
 
+    /* Bề rộng đặt ở colgroup chứ không đặt trên từng ô: đặt trên ô thì mỗi dòng
+       tự quyết một kiểu, cột nhảy qua nhảy lại khi gõ. */
     function oSua(bang2, i, c, e) {
       var neo = ' data-b="' + bang2 + '" data-i="' + i + '" data-k="' + c.k + '"';
-      var rong = c.r ? ' style="width:' + c.r + 'px"' : '';
+      var rong = '';
       if (c.kieu === 'chon') {
         var ds = c.chon(), cur = String(e[c.k] == null ? '' : e[c.k]);
         return '<select class="svws-so-o"' + neo + rong + '>' +
@@ -507,16 +509,30 @@
       var cot = COT[ma], ds = SO_BANG[ma]();
       var h = '<h4 class="svws-so-tieu">' + esc(tieu) + '</h4>';
       if (ghi) h += '<div class="svws-so-ghi">' + esc(ghi) + '</div>';
+      var wKiem = suaDuoc ? 210 : 260;
+      var tong = 38 + wKiem + (suaDuoc ? 34 : 0);
+      cot.forEach(function (c) { tong += (c.r || 110); });
       h += '<div class="svws-so-cuon" data-bang="' + ma + '">' +
-        '<table class="svws-so"><thead><tr><th>#</th>' +
-        cot.map(function (c) { return '<th>' + esc(c.t) + '</th>'; }).join('') +
+        '<table class="svws-so" style="min-width:' + tong + 'px">' +
+        '<colgroup><col style="width:38px">' +
+        cot.map(function (c) {
+          return '<col style="width:' + (c.r || 110) + 'px">';
+        }).join('') + '<col style="width:' + wKiem + 'px">' +
+        (suaDuoc ? '<col style="width:34px">' : '') + '</colgroup>' +
+        '<thead><tr><th>#</th>' +
+        cot.map(function (c) {
+          return '<th' + (c.kieu === 'so' ? ' class="p"' : '') + '>' + esc(c.t) + '</th>';
+        }).join('') +
         '<th>Kiểm</th>' + (suaDuoc ? '<th></th>' : '') + '</tr></thead><tbody>';
       ds.forEach(function (e, i) {
         var xau = (loiDong[ma + ':' + i] || []).length;
         h += '<tr class="' + (xau ? 'svws-so-loi' : '') + '" data-b="' + ma +
           '" data-i="' + i + '"><td>' + (i + 1) + '</td>' +
           cot.map(function (c) {
-            return '<td>' + (suaDuoc ? oSua(ma, i, c, e) : esc(doc(ma, e, c))) + '</td>';
+            var lop = (c.k === 'tag' || c.k === 'ma' ? ' class="ma"' :
+                       c.kieu === 'so' ? ' class="p"' : '');
+            return '<td' + lop + '>' +
+              (suaDuoc ? oSua(ma, i, c, e) : esc(doc(ma, e, c))) + '</td>';
           }).join('') + oKiem(ma, i) +
           (suaDuoc ? '<td><button type="button" class="svws-so-xoa" data-b="' + ma +
             '" data-i="' + i + '" title="Xoá dòng này">✕</button></td>' : '') +
@@ -635,6 +651,15 @@
      * el: phần tử chứa · khiDoi được gọi sau mỗi thay đổi (đã hẹn nhịp).
      */
     function gan(el) {
+      // Tự nhúng CSS của chính mình. Để người gọi tự nhớ thì sớm muộn cũng có
+      // chỗ quên — và quên thì bảng ra bảng HTML trần: cột giãn theo chữ dài
+      // nhất, tràn ngang, nhìn như một rừng ô nhập liệu. Đã dính đúng lỗi đó.
+      if (global.document && !document.getElementById('svwsso-css')) {
+        var st = document.createElement('style');
+        st.id = 'svwsso-css';
+        st.textContent = CSS;
+        document.head.appendChild(st);
+      }
       cho = el;
       el.innerHTML = tatCa();
       if (!suaDuoc) return api;
@@ -701,41 +726,67 @@
   }
 
   var CSS =
-    '.svws-so{width:100%;border-collapse:collapse;font-size:11.5px;font-family:' +
-    FONT + ';margin:4px 0 14px;min-width:900px}' +
-    '.svws-so th{background:#0b2545;color:#fff;padding:6px 8px;text-align:left;' +
-    'font-weight:600;border:1px solid #0b2545;white-space:nowrap}' +
-    '.svws-so td{padding:5px 8px;border:1px solid #cfd8e3;vertical-align:top}' +
-    '.svws-so tbody tr:nth-child(even){background:#f4f8fb}' +
-    '.svws-so tr.svws-so-loi td{background:#fdeeec}' +
-    '.svws-so-nhac{color:#b3271e;font-size:10.5px;max-width:340px}' +
+    /* Trình bày như một CUỐN SỔ kỹ thuật: tiêu đề dính khi cuộn, số căn phải
+       và cùng bề ngang chữ số, ô nhập chỉ hiện viền khi cần — nhìn vào là đọc
+       được ngay, không phải một rừng khung nhập liệu. */
+    '.svws-so{border-collapse:collapse;width:100%;font-size:12.5px;font-family:' +
+    FONT + ';margin:2px 0 10px;font-variant-numeric:tabular-nums;table-layout:fixed}' +
+    '.svws-so th{background:#0b2545;color:#fff;padding:7px 9px;text-align:left;' +
+    'font-weight:600;font-size:10.5px;letter-spacing:.05em;text-transform:uppercase;' +
+    'white-space:nowrap;position:sticky;top:0;z-index:2}' +
+    '.svws-so th.p{text-align:right}' +
+    '.svws-so td{padding:4px 5px;border-bottom:1px solid #dbe4ee;vertical-align:middle;' +
+    'overflow:hidden}' +
+    '.svws-so tbody tr:last-child td{border-bottom:0}' +
+    '.svws-so tbody tr:nth-child(even){background:#f7fafd}' +
+    '.svws-so tbody tr:hover{background:#eef4fa}' +
+    '.svws-so td:first-child{color:#7d8ea0;font-size:11px;text-align:center;' +
+    'padding-left:0;padding-right:0}' +
+    '.svws-so td.ma .svws-so-o,.svws-so td.ma{font-family:"IBM Plex Mono",Consolas,' +
+    'monospace;font-weight:500;letter-spacing:-.01em}' +
+    '.svws-so tr.svws-so-loi{background:#fdefec !important}' +
+    '.svws-so tr.svws-so-loi:hover{background:#fbe4e0 !important}' +
+    '.svws-so-nhac{color:#a8231b;font-size:11px;line-height:1.4;white-space:normal;' +
+    'padding:5px 8px !important}' +
     '.svws-so-ok{color:#1f9d55;font-weight:700}' +
-    '.svws-so-tieu{margin:16px 0 4px;font:700 13.5px ' + FONT + ';color:#0b2545}' +
-    '.svws-so-ghi{font-size:11.5px;color:#33475b;font-style:italic;margin:0 0 6px}' +
-    '.svws-so-cuon{overflow-x:auto;max-width:100%}' +
-    '.svws-so-tt{padding:9px 12px;border-radius:5px;font:700 12.5px ' + FONT + ';' +
+    '.svws-so-tieu{margin:18px 0 3px;font:600 15px/1.3 ' + FONT + ';color:#0b2545}' +
+    '.svws-so-ghi{font-size:12.5px;color:#5b6b7d;margin:0 0 7px;max-width:80ch;' +
+    'line-height:1.5}' +
+    '.svws-so-cuon{overflow-x:auto;max-width:100%;border:1px solid #cfdae6;' +
+    'border-radius:5px;background:#fff}' +
+    '.svws-so-tt{padding:9px 13px;border-radius:5px;font:600 12.5px ' + FONT + ';' +
     'margin:8px 0}' +
     '.svws-so-tt.tot{background:#eaf7f0;color:#12603a;border-left:4px solid #1f9d55}' +
     '.svws-so-tt.xau{background:#fdeeec;color:#8c1d16;border-left:4px solid #b3271e}' +
-    '.svws-so-ds{margin:4px 0 12px 18px;font-size:11.5px;color:#8c1d16}' +
+    '.svws-so-ds{margin:4px 0 12px 18px;font-size:12px;color:#8c1d16;line-height:1.55}' +
     '.svws-so-ds.nhac{color:#7a5a1e}' +
-    '.svws-so-o{width:100%;min-width:46px;max-width:100%;box-sizing:border-box;font:inherit;' +
-    'font-size:11.5px;padding:3px 5px;border:1px solid transparent;border-radius:3px;' +
-    'background:transparent;color:inherit}' +
-    '.svws-so-o:hover{border-color:#cfd8e3;background:#fff}' +
+    /* Ô nhập: trong suốt cho tới khi rê chuột hoặc gõ — bảng đọc như sổ in,
+       nhưng bấm vào đâu cũng sửa được. */
+    '.svws-so-o{width:100%;box-sizing:border-box;font:inherit;font-size:12.5px;' +
+    'padding:4px 5px;border:1px solid transparent;border-radius:3px;' +
+    'background:transparent;color:#12263a;min-width:0}' +
+    '.svws-so-o:hover{border-color:#c3d2e0;background:#fff}' +
     '.svws-so-o:focus{outline:none;border-color:#0b2545;background:#fff;' +
-    'box-shadow:0 0 0 2px rgba(11,37,69,.12)}' +
-    '.svws-so-o.so{text-align:right;font-variant-numeric:tabular-nums}' +
-    '.svws-so td:has(.svws-so-o){padding:2px 3px}' +
+    'box-shadow:0 0 0 2px rgba(11,37,69,.13);position:relative;z-index:1}' +
+    '.svws-so td.p .svws-so-o{text-align:right}' +
+    'select.svws-so-o{appearance:none;-webkit-appearance:none;cursor:pointer;' +
+    'padding-right:16px;background-image:url("data:image/svg+xml;charset=utf-8,' +
+    '%3Csvg xmlns=\'http://www.w3.org/2000/svg\' viewBox=\'0 0 10 6\'%3E%3Cpath ' +
+    'fill=\'%235b6b7d\' d=\'M0 0h10L5 6z\'/%3E%3C/svg%3E");' +
+    'background-repeat:no-repeat;background-position:right 5px center;' +
+    'background-size:8px}' +
     '.svws-so-xoa{border:0;background:transparent;color:#b3271e;cursor:pointer;' +
-    'font-size:13px;line-height:1;padding:3px 6px;border-radius:3px}' +
+    'font-size:13px;line-height:1;padding:4px 6px;border-radius:3px;opacity:.35}' +
+    '.svws-so tr:hover .svws-so-xoa{opacity:1}' +
     '.svws-so-xoa:hover{background:#fdeeec}' +
-    '.svws-so-nut{display:flex;align-items:center;gap:10px;margin:-8px 0 14px}' +
+    '.svws-so-nut{display:flex;align-items:center;gap:11px;margin:6px 0 4px}' +
     '.svws-so-them{border:1px dashed #9fb4c8;background:transparent;color:#0b2545;' +
-    'cursor:pointer;font:600 11.5px ' + FONT + ';padding:5px 11px;border-radius:4px}' +
-    '.svws-so-them:hover{border-style:solid;background:#f4f8fb}' +
-    '.svws-so-nut span{font-size:11px;color:#5b6b7d}' +
-    '@media print{.svws-so-cuon{overflow:visible}.svws-so{min-width:0}' +
+    'cursor:pointer;font:600 12px ' + FONT + ';padding:5px 12px;border-radius:5px}' +
+    '.svws-so-them:hover{border-style:solid;background:#f2f7fc}' +
+    '.svws-so-nut span{font-size:11.5px;color:#5b6b7d}' +
+    '@media print{.svws-so-cuon{overflow:visible;border:0}' +
+    '.svws-so{min-width:0 !important;font-size:9.5px}' +
+    '.svws-so th{position:static}' +
     '.svws-so-nut,.svws-so-xoa{display:none}' +
     '.svws-so-o{border-color:transparent;background:transparent}}';
 

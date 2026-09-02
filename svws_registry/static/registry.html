@@ -127,6 +127,10 @@
   .dcard-actions{display:flex;gap:8px;padding:9px 13px 13px;flex-wrap:wrap;}
   .modal-bg{position:fixed;inset:0;background:rgba(11,37,69,.55);z-index:200;display:flex;align-items:center;justify-content:center;padding:20px;}
   .modal{background:#fff;border-radius:8px;max-width:860px;width:100%;max-height:90vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 12px 40px rgba(0,0,0,.35);}
+  /* Ba sổ là bảng kỹ thuật nhiều cột — nhốt vào 860px là phải kéo ngang liên
+     tục, đọc như đọc qua khe cửa. Cho nó gần hết bề ngang màn hình. */
+  .modal.rong{max-width:1560px;}
+  .modal.rong .modal-body{padding:14px 18px 18px;}
   .modal-head{background:var(--navy);color:#fff;padding:11px 16px;display:flex;align-items:center;gap:10px;}
   .modal-head h3{font-size:14.5px;font-weight:600;flex:1;}
   .modal-head button{background:transparent;border-color:rgba(255,255,255,.4);color:#fff;padding:3px 10px;}
@@ -573,7 +577,17 @@ function napSVWSSO(){
     if(window.SVWSSO) return ok(window.SVWSSO);
     const sc = document.createElement('script');
     sc.src = '/registry/svwsso.js' + LIB_V;
-    sc.onload = ()=>ok(window.SVWSSO);
+    sc.onload = ()=>{
+      // Nhúng CSS của thư viện MỘT LẦN ngay khi nạp. Quên bước này thì bảng ra
+      // bảng HTML trần: cột tự giãn theo chữ dài nhất, tràn ngang, nhìn như một
+      // rừng ô nhập liệu chứ không phải cuốn sổ.
+      if(!document.getElementById('svwsso-css')){
+        const st = document.createElement('style');
+        st.id = 'svwsso-css'; st.textContent = window.SVWSSO.CSS;
+        document.head.appendChild(st);
+      }
+      ok(window.SVWSSO);
+    };
     sc.onerror = ()=>hong(new Error('không nạp được svwsso.js'));
     document.head.appendChild(sc);
   });
@@ -647,9 +661,9 @@ async function suaBaSo(di){
        k0.soThietBi} thiết bị · ${k0.soTuyen} tuyến ống · ${k0.soDungCu
        } dụng cụ đo · ${k0.loi.length ? k0.loi.length+' chỗ phải sửa' : 'sạch lỗi'
        }</span></div>
-     <div id="baSoKhung" style="max-height:60vh;overflow:auto;margin-top:8px"></div>`;
+     <div id="baSoKhung" style="max-height:66vh;overflow:auto;margin-top:8px"></div>`;
   S.gan(document.getElementById('baSoKhung'));
-  modalBg.classList.remove('tab-hidden');
+  moModalRong();
 }
 async function xemBaSo(di){
   const d = data.designs[di], so = d.so;
@@ -661,8 +675,8 @@ async function xemBaSo(di){
   modalBody.innerHTML =
     `<div class="modal-note">Sổ này đi kèm mọi đề bài của phiếu. Muốn sửa thì mở
      tool, sửa trong đó rồi nạp lại file cấu hình.</div>
-     <div style="max-height:62vh;overflow:auto">${L.CSS_TAG}${S.tatCa()}</div>`;
-  modalBg.classList.remove('tab-hidden');
+     <div style="max-height:66vh;overflow:auto">${S.tatCa()}</div>`;
+  moModalRong();
 }
 function taiBaSo(di){
   const d = data.designs[di];
@@ -860,7 +874,17 @@ function composeFinal(partA){
 
 /* ================= MODAL ================= */
 const modalBg=document.getElementById('modalBg'), modalBody=document.getElementById('modalBody');
-function closeModal(){modalBg.classList.add('tab-hidden');}
+function closeModal(){
+  modalBg.classList.add('tab-hidden');
+  const m = modalBg.querySelector('.modal');
+  if(m) m.classList.remove('rong');
+}
+/* Bảng nhiều cột cần cửa sổ rộng; các hộp thoại khác giữ bề rộng đọc dễ. */
+function moModalRong(){
+  const m = modalBg.querySelector('.modal');
+  if(m) m.classList.add('rong');
+  modalBg.classList.remove('tab-hidden');
+}
 modalBg.addEventListener('click',e=>{if(e.target===modalBg)closeModal();});
 let curCode = '';
 function showFinal(promptText, titleSuffix){
