@@ -99,6 +99,9 @@
   .dso-dau{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:8px;}
   .dso-dau b{font-size:13px;color:var(--navy);}
   .dso-co{font-size:12px;color:#1F7A4D;font-weight:600;}
+  .dso-co.xau{color:#B3271E;}
+  .dso-nut button.ai{border-color:var(--navy);background:var(--navy);color:#fff;}
+  .dso-nut button.ai:hover{background:#153b6b;}
   .dso-khong{font-size:12px;color:#8A6414;}
   .dso-ngay{font-size:11.5px;color:#6B7C8D;margin-left:auto;}
   .dso-nut{display:flex;gap:8px;flex-wrap:wrap;}
@@ -516,17 +519,22 @@ function khoiBaSo(d, di){
           : `<span class="dso-khong">chưa có — đề bài sẽ để AI tự khai</span>`}
     </div>
     <div class="dso-nut">
-      <label class="dso-nap">⬆ Nạp từ file cấu hình của tool
+      ${n ? `<button onclick="suaBaSo(${di})">✎ Xem và sửa sổ</button>
+             <button onclick="taiBaSo(${di})">⬇ Tải sổ</button>`
+          : `<button class="ai" onclick="soanBaSo(${di})">🤖 Soạn ba sổ bằng AI</button>
+             <button onclick="soTrong(${di})">✎ Tự nhập</button>`}
+      <label class="dso-nap">⬆ Nạp từ file
         <input type="file" accept=".json,application/json" hidden
           onchange="napBaSo(${di}, this.files[0]); this.value='';">
       </label>
-      ${n ? `<button onclick="xemBaSo(${di})">👁 Xem sổ</button>
-             <button onclick="taiBaSo(${di})">⬇ Tải sổ</button>
-             <button class="del" onclick="xoaBaSo(${di})">✕ Bỏ sổ</button>` : ''}
+      ${n ? `<button class="del" onclick="xoaBaSo(${di})">✕ Bỏ sổ</button>` : ''}
     </div>
-    ${n ? '' : `<div class="dso-ghi">Mở tool → sửa ba sổ → bấm <b>Lưu JSON</b> →
-      nạp file đó vào đây. Từ lần sinh tool sau, đề bài mang sẵn ba sổ này và AI
-      không được khai lại.</div>`}
+    <div class="dso-ghi" id="dsoGhi${di}">${n
+      ? 'Sổ này đi kèm mọi đề bài của phiếu. Sửa ở đây, hoặc sửa trong tool rồi ' +
+        '<b>Lưu JSON</b> và nạp file đó về.'
+      : 'Chưa cần có tool trước: bấm <b>Soạn ba sổ bằng AI</b> để dựng từ mô tả ' +
+        'thiết kế ở trên, xem lại rồi sửa. Có sổ trước khi sinh tool thì đề bài ' +
+        'mang sẵn và AI không được khai lại.'}</div>
   </div>`;
 }
 /* Nhận cả file cấu hình đầy đủ của tool lẫn file chỉ có ba sổ. */
@@ -576,6 +584,72 @@ async function kiemBaSo(so){
     const L = await napSVWSSO();
     return L.tao(so).kiemTra();
   }catch(e){ return null; }
+}
+/* Soạn ba sổ từ chính mô tả trong phiếu. Không cần có tool trước — ba sổ chỉ
+   là dữ liệu, và có sổ TRƯỚC khi sinh tool thì đề bài mang sẵn, AI hết cửa bỏ
+   qua như đã xảy ra với bản Cụm RO 30 m³/h. */
+async function soanBaSo(di){
+  const d = data.designs[di];
+  const ghi = document.getElementById('dsoGhi'+di);
+  const moTa = designText(d);
+  if(moTa.replace(/—/g,'').trim().length < 80){
+    alert('Phiếu còn quá ít thông tin để soạn sổ.\n\n'+
+          'Điền Tên thiết kế, Công nghệ, Công suất và Thông số chính trước đã.');
+    return;
+  }
+  if(ghi) ghi.innerHTML = '⏳ Đang soạn ba sổ… (khoảng 30–60 giây)';
+  try{
+    const r = await fetch('/registry/api/baso', {method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({mo_ta: moTa})});
+    const j = await r.json();
+    if(!r.ok) throw new Error(j.detail || ('HTTP '+r.status));
+    const so = docBaSo(j);
+    if(!so) throw new Error('AI trả về dữ liệu không đúng dạng ba sổ.');
+    data.designs[di].so = so;
+    data.designs[di].soNgay = hnay();
+    data.designs[di].soGhi = j.ghi_chu || '';
+    touch(); renderDesigns();
+    suaBaSo(di);          // mở ra cho người dùng xem lại và sửa ngay
+  }catch(e){
+    if(ghi) ghi.innerHTML = '⚠ Không soạn được: ' + esc(e.message);
+  }
+}
+/* Sổ trống để tự gõ — đường thoát khi không muốn dùng AI. */
+function soTrong(di){
+  data.designs[di].so = {thietBi:[], tuyen:[], dungCu:[]};
+  data.designs[di].soNgay = hnay();
+  touch(); renderDesigns(); suaBaSo(di);
+}
+/* Mở ba sổ ở chế độ SỬA ĐƯỢC ngay trong sổ đăng ký — cùng bộ bảng mà tool dùng,
+   nên hai nơi không thể lệch nhau. */
+async function suaBaSo(di){
+  const d = data.designs[di];
+  const L = await napSVWSSO().catch(()=>null);
+  if(!L){ alert('Không nạp được thư viện để hiện sổ.'); return; }
+  const S = L.tao(Object.assign({suaDuoc:true, khiDoi: function(){
+    data.designs[di].so = S.xuat();
+    data.designs[di].soNgay = hnay();
+    touch();
+    const dem = document.getElementById('soDemBaSo');
+    if(dem){ const k = S.kiemTra();
+      dem.textContent = k.soThietBi+' thiết bị · '+k.soTuyen+' tuyến ống · '+
+        k.soDungCu+' dụng cụ đo · '+(k.loi.length ? k.loi.length+' chỗ phải sửa'
+        : 'sạch lỗi');
+      dem.className = 'dso-co' + (k.loi.length ? ' xau' : ''); }
+  }}, d.so || {thietBi:[],tuyen:[],dungCu:[]}));
+  const k0 = S.kiemTra();
+  document.getElementById('modalTitle').textContent = 'Ba sổ gốc — ' + (d.code||'');
+  modalBody.innerHTML =
+    `<div class="modal-note">Sửa thẳng trong ô — tự lưu vào phiếu.
+     ${d.soGhi ? '<br><b>AI ghi chú:</b> '+esc(d.soGhi) : ''}</div>
+     <div><span id="soDemBaSo" class="dso-co${k0.loi.length?' xau':''}">${
+       k0.soThietBi} thiết bị · ${k0.soTuyen} tuyến ống · ${k0.soDungCu
+       } dụng cụ đo · ${k0.loi.length ? k0.loi.length+' chỗ phải sửa' : 'sạch lỗi'
+       }</span></div>
+     <div id="baSoKhung" style="max-height:60vh;overflow:auto;margin-top:8px"></div>`;
+  S.gan(document.getElementById('baSoKhung'));
+  modalBg.classList.remove('tab-hidden');
 }
 async function xemBaSo(di){
   const d = data.designs[di], so = d.so;

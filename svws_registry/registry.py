@@ -1608,6 +1608,75 @@ def claude_proxy(payload: dict = Body(...)):
     return resp.json()
 
 
+@router.post("/api/baso")
+def ai_baso(payload: dict = Body(...)):
+    """Soạn BA SỔ GỐC từ mô tả thiết kế — trả về dữ liệu, không phải mã.
+
+    Vì sao có endpoint riêng: ba sổ chỉ là dữ liệu (vài KB JSON), soạn ở đây
+    nhanh và rẻ hơn nhiều so với sinh cả tool rồi moi sổ ra. Quan trọng hơn:
+    có sổ TRƯỚC khi sinh tool thì đề bài mang sẵn ba sổ, AI chỉ việc dán vào —
+    hết cửa bỏ qua như đã xảy ra.
+
+    Body: {mo_ta: "<mô tả thiết kế>"}
+    Trả:  {thietBi: [...], tuyen: [...], dungCu: [...], ghi_chu: "..."}
+    """
+    api_key = os.getenv("ANTHROPIC_API_KEY", "")
+    if not api_key:
+        raise HTTPException(503, "Server chưa cấu hình ANTHROPIC_API_KEY")
+    model = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-5")
+    mo_ta = (payload.get("mo_ta") or "").strip()
+    if len(mo_ta) < 20:
+        raise HTTPException(422, "Mô tả thiết kế quá ngắn để soạn được ba sổ")
+
+    sys_msg = (
+        "Bạn là kỹ sư trưởng của SVWS (công ty EPC xử lý nước, TP.HCM). Nhiệm vụ: "
+        "lập BA SỔ GỐC của một thiết kế, trả về JSON THUẦN, không kèm lời dẫn.\n\n"
+        "1) thietBi — mỗi thiết bị một dòng:\n"
+        "   tag  · mã thiết bị theo thông lệ (T-101, P-101, MMF-101, CF-101, RO-101…)\n"
+        "   ten  · tên tiếng Việt\n"
+        "   loai · MỘT trong: nguon (điểm đấu nối nước cấp của nhà máy) · tank · "
+        "vessel (cột lọc áp lực) · filter · mixedbed · cartridge (vỏ lọc tinh, bag "
+        "filter) · pump · dosing (cụm châm hoá chất) · roskid · edi · uv · panel\n"
+        "   sl   · SỐ ĐƠN VỊ trong cụm (2 cột lọc song song → sl:2; cụm bơm 1 chạy "
+        "1 dự phòng → sl:2). Đây là chỗ DUY NHẤT khai số lượng.\n"
+        "   dau  · cách đấu trong cụm khi sl>1: song (chạy đồng thời) · duty (1 chạy "
+        "1 dự phòng) · noitiep\n"
+        "   d, h · đường kính và chiều cao (mm); hLop · chiều cao lớp vật liệu lọc\n"
+        "   kW, kieuDien (DOL|VFD) · CHỈ cho thiết bị có động cơ (pump, dosing)\n"
+        "   vessels, mangMoi · cho cụm RO; soStack · cho EDI\n\n"
+        "2) tuyen — mỗi đường ống một dòng: ma (L-01, L-02…) · tu · den (dùng đúng "
+        "tag ở sổ thiết bị) · dv là dịch vụ, MỘT trong: raw · filtered · ro · di · "
+        "chem · air · waste · steam · drain · dn (đường kính danh nghĩa) · ap (áp "
+        "làm việc bar, chỉ khi là đoạn cao áp)\n\n"
+        "3) dungCu — mỗi dụng cụ đo một dòng: tag theo ISA (LIT-101, FIT-101, "
+        "PIT-102, CIT-101, TIT-101, LSL-102…) · mo (mô tả) · gan là NƠI GẮN: tag "
+        "thiết bị hoặc mã tuyến · tin là AI|DI|DO|AO · dai (dải đo) · dv (đơn vị) · "
+        "nguong (ngưỡng báo động, nếu có)\n\n"
+        "QUY TẮC BẮT BUỘC — sổ sẽ bị máy kiểm ngay:\n"
+        "- ĐÚNG MỘT dòng loai:'nguon' làm điểm cấp nước của nhà máy.\n"
+        "- Mọi thiết bị phải có ít nhất một tuyến vào và một tuyến ra, trừ bồn chứa "
+        "cuối dây chuyền và cụm châm hoá chất (hoá chất đổ vào bằng tay).\n"
+        "- Cụm bơm 1 chạy 1 dừng khai MỘT dòng sl:2 dau:'duty', KHÔNG tách P-101A "
+        "và P-101B.\n"
+        "- Mỗi bồn chứa phải có một dụng cụ đo mức (tag bắt đầu bằng L).\n"
+        "- Đừng bỏ sót thiết bị đã nêu trong mô tả: có bag filter thì phải có dòng "
+        "cartridge, có bơm cao áp thì phải có dòng pump kèm kW.\n\n"
+        "Trả về ĐÚNG dạng: {\"thietBi\":[…], \"tuyen\":[…], \"dungCu\":[…], "
+        "\"ghi_chu\":\"<những chỗ bạn phải giả định, tối đa 3 câu>\"}"
+    )
+    parsed = _goi_ai_json(api_key, model,
+                          "MÔ TẢ THIẾT KẾ:\n" + mo_ta[:20000],
+                          int(os.getenv("ANTHROPIC_BASO_TOKENS", "16000")),
+                          system=sys_msg, timeout=300.0)
+    for k in ("thietBi", "tuyen", "dungCu"):
+        if not isinstance(parsed.get(k), list):
+            parsed[k] = []
+    if not parsed["thietBi"]:
+        raise HTTPException(502, "AI không soạn được sổ thiết bị — "
+                                 "bổ sung mô tả công nghệ rồi thử lại.")
+    return parsed
+
+
 @router.post("/api/fix")
 def ai_fix(payload: dict = Body(...)):
     """Sửa lỗi cú pháp JS bằng PHÉP THAY THẾ CHUỖI, không chép lại cả file.
