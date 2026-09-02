@@ -1056,6 +1056,19 @@ function kiemChuan(html){
   return CAN_CO.filter(x => html.indexOf(x.ma) < 0);
 }
 
+/* Lược khối thư viện đã chèn trước khi gửi cho AI. AI chỉ cần thấy phần nó tự
+   viết; Three.js và bộ dựng SVWS là mã của mình, biết chắc đúng. Gửi cả cụm là
+   trả tiền đầu vào cho hơn 1 MB mã vô ích — khoảng 300.000 token mỗi lần bấm.
+   Phép thay thế AI trả về vẫn áp lên file ĐẦY ĐỦ, nên không ảnh hưởng kết quả. */
+function goiGon(html){
+  if(!html) return html;
+  return html.replace(/<script>([\s\S]*?)<\/script>/g, (m, than) =>
+    than.length > 120000
+      ? '<script>/* … Three.js r128 + bộ dựng SVWS đã lược bỏ ở đây: mã của công '
+        + 'ty, không phải chỗ cần sửa … */<\/script>'
+      : m);
+}
+
 function chayThuTool(html){
   return new Promise(resolve => {
     let xong = false;
@@ -1210,7 +1223,7 @@ async function repairDesign(){
   try{
     const r = await fetch(API + '/fix', {
       method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({html: brokenHTML, error: brokenErr})
+      body: JSON.stringify({html: goiGon(brokenHTML), error: brokenErr})
     });
     if(!r.ok){
       const e = await r.json().catch(()=>({detail:'HTTP '+r.status}));
