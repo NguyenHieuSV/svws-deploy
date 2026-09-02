@@ -397,13 +397,23 @@ def _phien_ban_lib() -> str:
     return str(m)
 
 
-@router.get("", response_class=HTMLResponse, include_in_schema=False)
-@router.get("/", response_class=HTMLResponse, include_in_schema=False)
-def page() -> str:
-    """Giao diện app (single-file HTML)."""
+@router.get("", include_in_schema=False)
+@router.get("/", include_in_schema=False)
+def page() -> Response:
+    """Giao diện app (single-file HTML).
+
+    KHÔNG cho cache. Chuẩn và prompt nằm ở server nên cập nhật tức thì, còn
+    DANH SÁCH THƯ VIỆN ĐỂ NHÚNG lại nằm trong HTML này. Trình duyệt giữ bản
+    HTML cũ là ra đúng thảm hoạ đã gặp: prompt mới bảo tool dùng SVWSSO,
+    trong khi bộ nhúng cũ không có file đó → "SVWSSO is not defined" →
+    trắng toàn bộ tab, mà người dùng không hiểu vì sao.
+    """
     if not _PAGE.exists():
         raise HTTPException(500, "Thiếu file static/registry.html trong module")
-    return _PAGE.read_text(encoding="utf-8").replace("__LIB_VER__", _phien_ban_lib())
+    return Response(
+        _PAGE.read_text(encoding="utf-8").replace("__LIB_VER__", _phien_ban_lib()),
+        media_type="text/html; charset=utf-8",
+        headers={"Cache-Control": "no-store, must-revalidate"})
 
 
 @router.get("/three.js", include_in_schema=False)
@@ -1618,7 +1628,11 @@ CHỈ trả JSON hợp lệ, không markdown, không giải thích ngoài JSON:
 ===== FILE =====
 {html}"""
 
-    parsed = _goi_ai_json(api_key, model, user_msg, 12000, timeout=300.0)
+    # File tool nay tới cả MB; 12.000 token là chạm trần ngay giữa chừng và
+    # câu trả lời không đọc được. Nới lên cho đủ chỗ suy nghĩ lẫn trả lời.
+    parsed = _goi_ai_json(api_key, model, user_msg,
+                          int(os.getenv('ANTHROPIC_FIX_TOKENS', '32000')),
+                          timeout=300.0)
     reps = [r for r in (parsed.get("replacements") or [])
             if isinstance(r, dict) and r.get("old") and r.get("new") is not None]
     if not reps:

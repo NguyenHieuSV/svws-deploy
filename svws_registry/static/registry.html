@@ -848,6 +848,17 @@ async function injectThree(html){
   if(dungSvws) ma += 'window.SVWS_LOGO=' + JSON.stringify(lg) + ';\n' + lib.svws;
   if(!ma) return {html, injected:false, already:true};
   // PHẢI dùng dạng hàm: mã thư viện chứa ký tự $ nên replace kiểu chuỗi sẽ hỏng
+  /* Tool gọi thư viện nào mà bó nhúng không có thư viện đó thì mở ra là trắng
+     mọi tab. Đây chính là lỗi đã xảy ra: chuẩn mới bảo dùng SVWSSO, còn trang
+     đang mở là bản cũ nên danh sách nhúng chưa có svwsso.js. Bắt ngay tại đây,
+     đừng để người dùng phát hiện lúc mở file. */
+  const thieu = TEN_LIB.filter(n =>
+    new RegExp('\\b' + n + '\\s*\\.').test(html) &&
+    !new RegExp('\\b' + n + '\\s*=').test(ma));
+  if(thieu.length) return {html, injected:false,
+    err:'Bó thư viện nhúng vào thiếu: ' + thieu.join(', ') +
+        '. Tải lại trang (Ctrl+F5) rồi thực hiện lại — nhiều khả năng trình duyệt '+
+        'đang giữ bản trang cũ.'};
   const tag = () => '<script>' + ma + '<\/script>';
   if(THREE_MARK.test(html)) return {html: html.replace(THREE_MARK, tag), injected:true};
   if(/<\/head>/i.test(html)) return {html: html.replace(/<\/head>/i, () => tag()+'</head>'), injected:true};
@@ -1033,7 +1044,7 @@ async function finalizeTool(html, headline, extraNote){
           ✔ Đã chạy thử: mở được, bấm hết ${thu.soTab} tab, không tab nào trắng, không lỗi.
         </div>`) : ''}
       <div style="font-size:12px;color:var(--muted);margin-top:4px">
-        ${res.injected ? '✔ Đã nhúng Three.js r128 + bộ dựng SVWS3D / SVWSPID / SVWSGA / SVWSDIEN / SVWSCHE / SVWSVT / SVWSCM / SVWSKT + logo công ty — file vẫn mở offline.'
+        ${res.injected ? '✔ Đã nhúng Three.js r128 + bộ dựng ' + TEN_LIB.join(' / ') + ' + logo công ty — file vẫn mở offline.'
           : res.already ? '✔ Tool tự mang sẵn Three.js.'
           : res.err ? '⚠ Không nạp được Three.js ('+esc(res.err)+') — bản vẽ 3D có thể không hiện.'
           : 'Tool này không dùng Three.js.'}
