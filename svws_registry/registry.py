@@ -1744,6 +1744,38 @@ def chi_phi(ngay: int = 30):
     return ra
 
 
+@router.get("/api/chiphi/bangke")
+def bang_ke(thang: str = ""):
+    """Bảng kê từng lần gọi trong một tháng, dạng CSV cho kế toán.
+
+    Kế toán cần hai việc mà bảng tổng trên màn hình không làm được: đối chiếu
+    với sao kê thẻ / hoá đơn của nhà cung cấp, và phân bổ chi phí về từng dự án.
+    Cột "phiếu thiết kế" chính là chỗ phân bổ.
+    """
+    thang = (thang or _now()[:7])[:7]
+    dong = ["Ngay gio,Viec,Phieu thiet ke,Model,Token vao,Token ra,Token cache,So tien USD"]
+    tong = 0.0
+    with Session(engine) as s:
+        rows = s.exec(select(RegistryUsage)
+                      .where(RegistryUsage.at >= thang)
+                      .where(RegistryUsage.at < thang + "\uffff")
+                      .order_by(RegistryUsage.id)).all()
+        for r in rows:
+            tong += r.usd
+            dong.append(",".join([
+                r.at[:19].replace("T", " "),
+                (r.viec or "").replace(",", " "),
+                (r.ma or "").replace(",", " "),
+                (r.model or "").replace(",", " "),
+                str(r.tv), str(r.tr), str(r.tcache), f"{r.usd:.6f}"]))
+    dong.append(f"TONG CONG,,,,,,,{tong:.6f}")
+    # BOM để Excel mở đúng dấu tiếng Việt
+    noi_dung = "\ufeff" + "\r\n".join(dong) + "\r\n"
+    return Response(noi_dung, media_type="text/csv; charset=utf-8",
+                    headers={"Content-Disposition":
+                             f'attachment; filename="chi-phi-ai-{thang}.csv"'})
+
+
 @router.post("/api/baso")
 def ai_baso(payload: dict = Body(...)):
     """Soạn BA SỔ GỐC từ mô tả thiết kế — trả về dữ liệu, không phải mã.

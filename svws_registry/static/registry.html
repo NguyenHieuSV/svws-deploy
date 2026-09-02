@@ -919,6 +919,9 @@ async function showChiPhi(){
         — ${g.vao||'?'} USD/triệu token vào, ${g.ra||'?'} USD/triệu token ra.
         Đây là sổ của app, cộng từ số token mỗi lần gọi; con số tổng nên đối chiếu
         với Console của Anthropic vì đơn giá có thể đổi.</div>
+      <div class="btn-row" style="margin-top:10px">
+        <button onclick="taiBangKe()">⬇ Tải bảng kê tháng này (CSV cho kế toán)</button>
+      </div>
       ${bangChiPhi(d.theo_viec, 'Theo loại việc', 'lần')}
       ${bangChiPhi(d.theo_phieu, 'Theo phiếu thiết kế', 'lần')}
       ${bangChiPhi(d.theo_ngay, 'Theo ngày', 'lần')}
@@ -933,6 +936,11 @@ async function showChiPhi(){
   }catch(e){
     modalBody.innerHTML = '<div class="ai-block">Không lấy được chi phí: '+esc(e.message)+'</div>';
   }
+}
+/* Bảng kê từng lần gọi cho kế toán đối chiếu và phân bổ về dự án. */
+function taiBangKe(){
+  const t = new Date().toISOString().slice(0,7);
+  window.open('/registry/api/chiphi/bangke?thang=' + t, '_blank');
 }
 function ngayGio(iso){
   try{ const d=new Date(iso);
