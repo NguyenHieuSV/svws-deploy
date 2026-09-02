@@ -58,6 +58,7 @@ _SVWSCHE = _HERE / "static" / "svwsche.js"   # bộ dựng bản vẽ chế tạ
 _SVWSVT = _HERE / "static" / "svwsvt.js"     # vật tư & phân tách thi công theo hình học
 _SVWSCM = _HERE / "static" / "svwscm.js"     # hồ sơ chạy thử & nghiệm thu (commissioning)
 _SVWSKT = _HERE / "static" / "svwskt.js"     # khung tên + logo công ty dùng chung
+_SVWSSO = _HERE / "static" / "svwsso.js"     # ba sổ gốc: thiết bị · tuyến ống · dụng cụ
 
 MAX_REVISIONS = 300  # giữ tối đa bao nhiêu bản lịch sử
 
@@ -380,7 +381,7 @@ def _phien_ban_lib() -> str:
         return v[:12]
     m = 0
     for f in (_THREE, _SVWS3D, _SVWSPID, _SVWSGA, _SVWSDIEN,
-              _SVWSCHE, _SVWSVT, _SVWSCM, _SVWSKT):
+              _SVWSCHE, _SVWSVT, _SVWSCM, _SVWSKT, _SVWSSO):
         if f.exists():
             m = max(m, int(f.stat().st_mtime))
     return str(m)
@@ -534,6 +535,26 @@ def svwskt_js():
     if not _SVWSKT.exists():
         raise HTTPException(500, "Thiếu static/svwskt.js trong module")
     return Response(_SVWSKT.read_text(encoding="utf-8"),
+                    media_type="application/javascript; charset=utf-8",
+                    headers={"Cache-Control": "no-cache"})
+
+
+@router.get("/svwsso.js", include_in_schema=False)
+def svwsso_js():
+    """Ba sổ gốc của một thiết kế: thiết bị · tuyến ống · dụng cụ đo.
+
+    Mọi lỗi nặng trên các bản vẽ sinh ra đều là lỗi KHAI BÁO chứ không phải lỗi
+    vẽ: thiếu bơm cấp, cụm châm hoá chất khai thành bể nước, cột lọc khai 2 mà
+    dựng 1, bầu đo gắn nhầm thiết bị. Khai báo lại nằm chìm trong mã JavaScript
+    nên người thiết kế không nhìn thấy và chỉ phát hiện khi bản vẽ đã ra sai.
+    Thư viện này đưa khai báo lên thành ba bảng đọc được, kiểm ngay trên bảng,
+    rồi SUY RA EQUIP + PIPES cho bản vẽ, danh sách tải cho tủ điện và bảng I/O
+    cho PLC — nên không thể có động cơ trong tủ mà không có thiết bị trên bản
+    vẽ, và bảng I/O không thể lệch với P&ID.
+    """
+    if not _SVWSSO.exists():
+        raise HTTPException(500, "Thiếu static/svwsso.js trong module")
+    return Response(_SVWSSO.read_text(encoding="utf-8"),
                     media_type="application/javascript; charset=utf-8",
                     headers={"Cache-Control": "no-cache"})
 

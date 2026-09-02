@@ -736,7 +736,28 @@
     return g;
   }
 
+  /* ĐIỂM ĐẤU NỐI NƯỚC CẤP (battery limit). Là mặt bích chờ có van chặn, không
+     phải một cái bồn — khai nó thành thiết bị riêng thì sổ tuyến có đầu đi rõ
+     ràng, và bộ kiểm biết đâu là điểm cấp thật thay vì đoán theo "thiết bị nào
+     không có đường vào" (đoán vậy sẽ sai khi bể cấp có tuyến tuần hoàn về). */
+  function nguonCap(o) {
+    var g = grp('nguon');
+    var dn = kt(o.dn, 100, 25, 600);
+    var m = mat('ss');
+    var tru = cyl(dn * 0.5, 700, mat('frame')); tru.position.y = 350; g.add(tru);
+    var bich = cyl(dn * 2.2, 40, m); bich.rotation.z = Math.PI / 2;
+    bich.position.set(0, 760, 0); g.add(bich);
+    var ong = cyl(dn, 260, m); ong.rotation.z = Math.PI / 2;
+    ong.position.set(150, 760, 0); g.add(ong);
+    g.userData.foot = { w: 600, d: 600 };
+    g.userData.h = 800;
+    g.userData.ports = { out: P(280, 760, 0, 1, 0, 0), in: P(280, 760, 0, 1, 0, 0) };
+    veCacNozzle(g, dn);
+    return g;
+  }
+
   var BUILDERS = {
+    nguon: nguonCap,
     tank: tank, vessel: vessel, filter: vessel, cartridge: cartridge,
     pump: pump, roskid: roSkid, ro: roSkid, panel: panel, dosing: dosing,
     uv: uvUnit, edi: ediStack, mixedbed: vessel
@@ -749,6 +770,7 @@
    */
   function chanDe(e) {
     var t = (e.type || 'tank').toLowerCase();
+    if (t === 'nguon') return { w: 600, d: 600 };
     if (t === 'tank') { var d = kt(e.d, 2000, 200, 20000);
       return { w: d + 160, d: d + 160, tron: true, D: d }; }
     if (t === 'vessel' || t === 'filter' || t === 'mixedbed') {
@@ -762,8 +784,10 @@
     if (t === 'pump') {                     // cụm 1 chạy 1 dừng chiếm rộng hơn
       var nb = Math.max(1, Math.min(6, +e.soBom || (e.dup ? 2 : 1)));
       var Wb = kt(e.W, 420, 150, 3000);
+      // +400 cho MỌI trường hợp, đúng bằng ham dựng hình. Trước đây bơm đơn
+      // để 250 nên mặt bằng GA chừa 670 mm mà khối 3D chiếm 820 mm.
       return { w: kt(e.L, 900, 200, 4000) + 250,
-               d: (nb - 1) * (Wb + 520) + Wb + (nb > 1 ? 400 : 250) }; }
+               d: (nb - 1) * (Wb + 520) + Wb + 400 }; }
     if (t === 'roskid' || t === 'ro') {     // EDI có nhánh riêng ở dưới
       var per = Math.min(12, Math.max(1, +e.memPerVessel || 6));
       var sz = coMang(e.size);
