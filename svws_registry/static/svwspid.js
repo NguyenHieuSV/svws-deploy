@@ -414,6 +414,23 @@
         nut[a].ra.push(i); nut[b].vao.push(i);
       });
 
+      /* NHẬN DẠNG LẠI CỤM CHÂM HOÁ CHẤT theo DỊCH VỤ ĐƯỜNG ỐNG, không tin vào
+         khai báo type. Một nút không có đường vào mà mọi đường ra đều mang hoá
+         chất thì đó là bồn pha hoá chất, dù AI khai nhầm là "tank". Không làm
+         bước này thì mỗi cụm châm hiện lên như một bể nước cấp có mũi tên
+         "Nguồn cấp" — bản Cụm RO 30 m³/h ra tới ba bể nước cấp vì lý do đó. */
+      nut.forEach(function (u) {
+        if (u.vao.length || !u.ra.length || u.loai === 'hoachat') return;
+        var toanHC = u.ra.every(function (ci) {
+          return /chem|hoa|hóa/i.test(String(canh[ci].p.service || canh[ci].p.dong || ''));
+        });
+        if (!toanHC) return;
+        u.loai = 'hoachat';
+        nhac.push('Thiết bị ' + u.id + ' khai type:"' + (u.e.type || '') +
+                  '" nhưng chỉ cấp ra đường hoá chất — đang vẽ bằng ký hiệu cụm ' +
+                  'châm. Sửa khai báo thành type:"dosing" cho đúng sổ thiết bị.');
+      });
+
       /* Tách TUYẾN HỒI LƯU trước, rồi mới xếp cột.
          Dòng hồi lưu (nước cô đặc quay về bể cấp) tạo thành vòng kín; nếu cứ
          nới cấp bậc theo vòng thì mỗi lượt lại đẩy cả vòng sang phải — 13 thiết
@@ -491,9 +508,11 @@
       });
 
       // ---- mũi tên nguồn cấp cho các nút không có đường vào
+      var diemCap = [];
       nut.forEach(function (u) {
         if (u.vao.length) return;
         var m = moc[u.e.tag]; if (!m) return;
+        if (u.loai !== 'hoachat') diemCap.push(u.id);
         // Cụm châm hoá chất KHÔNG có tuyến cấp — hoá chất đổ vào bồn pha bằng
         // tay. Vẽ mũi tên "Nguồn cấp" cho nó là biến cụm châm thành bể nước cấp
         // trên bản vẽ, đúng lỗi thấy trên bản Cụm RO 30 m³/h.
@@ -508,6 +527,16 @@
         nhanCho.push({ x: m.x1 - 30, y: m.y - 12, s: u.e.nguon || 'Nguồn cấp',
                        fs: 8, mau: MO, dam: 0, huong: 'tren' });
       });
+
+      /* Một dây chuyền xử lý nước có ĐÚNG MỘT điểm cấp. Nhiều mũi tên "Nguồn
+         cấp" nghĩa là có thiết bị bị bỏ quên chưa đấu ống vào, chứ không phải
+         hệ có nhiều nguồn — người đọc bản vẽ sẽ tưởng phải chuẩn bị mấy đường
+         nước cấp. */
+      if (diemCap.length > 1)
+        vachao.push('Sơ đồ có ' + diemCap.length + ' điểm cấp nước (' +
+                    diemCap.join(', ') + ') — một dây chuyền chỉ nên có MỘT. ' +
+                    'Các thiết bị còn lại đang thiếu đường ống vào trong PIPES, ' +
+                    'hoặc là cụm châm hoá chất khai nhầm loại (phải là type:"dosing").');
 
       // ---- ghi nhận để kiemTra() soi
       hthong = { nut: nut, canh: canh, cot: cot.length };
