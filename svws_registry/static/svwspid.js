@@ -137,6 +137,20 @@
         ln(x, y, x + 46, y); out.push(muiTen(x + 44, y));
         return { w: 52, h: 30, cx: x + 26 };
       },
+      /* ĐIỂM XẢ — lối vẽ quen thuộc trên P&ID: đường ống chạy tới rồi quặt
+         xuống một vạch đáy có gạch chéo, nghĩa là nước rời khỏi phạm vi bản
+         vẽ. Không vẽ nó thì tuyến xả treo lơ lửng giữa tờ giấy. */
+      xa: function (x, y) {
+        var cx = x + 26, day = y + 34;
+        ln(x, y, cx, y); ln(cx, y, cx, day);
+        // muiTen() chỉ vẽ được mũi chỉ sang phải; ở đây nước đi XUỐNG.
+        out.push('<path d="M' + (cx - 5) + ' ' + (day - 11) + ' L' + (cx + 5) +
+          ' ' + (day - 11) + ' L' + cx + ' ' + (day - 2) + ' Z" fill="' + NAVY + '"/>');
+        ln(cx - 22, day, cx + 22, day);
+        for (var i = 0; i < 4; i++)
+          ln(cx - 18 + i * 12, day + 10, cx - 10 + i * 12, day);
+        return { w: 52, h: 92, cx: cx };
+      },
       bon: function (x, y, e) {
         var w = 84, h = 92;
         out.push('<rect x="' + x + '" y="' + (y - h / 2) + '" width="' + w + '" height="' + h +
@@ -319,7 +333,7 @@
         canH = Math.max(canH, y + k.h / 2 + 130);
         return api;
       }
-      ['nguon', 'bon', 'hoachat', 'bom', 'cot', 'loc', 'ro', 'edi', 'uv', 'van']
+      ['nguon', 'xa', 'bon', 'hoachat', 'bom', 'cot', 'loc', 'ro', 'edi', 'uv', 'van']
         .forEach(function (t) {
         api[t] = function (e) { return dat(t, e); };
       });
@@ -339,6 +353,7 @@
     // ngay, không ai phải soát chồng lấn bằng mắt.
     // ==================================================================
     var LOAI_KH = {
+      nguon: 'nguon', xa: 'xa',
       tank: 'bon', be: 'bon', bon: 'bon',
       vessel: 'cot', filter: 'cot', mixedbed: 'cot', cot: 'cot',
       cartridge: 'loc', loc: 'loc',
@@ -596,6 +611,9 @@
       S: ['pump'], V: ['pump'], Z: ['pump']
     };
     var LOAI_BON = /^(tank|be|bon|bể|bồn)$/i;
+    /* Loại được phép KHÔNG có đường ra: bồn chứa (nước nằm lại) và điểm xả
+       (nước rời khỏi phạm vi bản vẽ). */
+    var LOAI_CUOI = /^(tank|be|bon|bể|bồn|xa|drain)$/i;
     /* mocLoai lưu "tank bon" — loại thiết bị GHÉP với tên ký hiệu, cách nhau
        khoảng trắng. So cả chuỗi thì không bao giờ khớp, phải so THEO TỪ. */
     function loaiCua(t) { return ' ' + String(mocLoai[t] || '').toLowerCase() + ' '; }
@@ -979,7 +997,9 @@
           if (!u.vao.length && !u.ra.length)
             loi.push('Thiết bị ' + u.id + ' không nối vào đường ống nào — ' +
                      'thiếu tuyến trong khai báo PIPES.' + goiYCum(u.id));
-          else if (!u.ra.length && !LOAI_BON.test(String(u.e.type || '').toLowerCase()))
+          // Bồn chứa giữ nước lại, còn điểm xả là chỗ nước RỜI KHỎI hệ — cả hai
+          // đều không phải trả lời câu "nước đi đâu".
+          else if (!u.ra.length && !LOAI_CUOI.test(String(u.e.type || '').toLowerCase()))
             loi.push('Thiết bị ' + u.id + ' chỉ có đường vào, không có đường ra — ' +
                      'nước vào rồi đi đâu?');
         });

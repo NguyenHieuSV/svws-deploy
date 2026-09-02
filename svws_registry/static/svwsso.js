@@ -51,6 +51,10 @@
      các thư viện dựng hình đang hiểu — một chỗ đổi tên, mọi tab theo. */
   var LOAI = {
     nguon:     { type: 'nguon',     ten: 'Điểm đấu nối nước cấp', dongCo: false, dem: false },
+    /* Nút biên ĐẦU RA. Nước rửa ngược, nước cô đặc, nước xả đáy không đi tới
+       một thiết bị nào cả — chúng ra hố ga. Không có loại này thì ô "đến" của
+       các tuyến xả đành bỏ trống và bộ kiểm báo thiếu đầu đến. */
+    xa:        { type: 'xa',        ten: 'Điểm xả / hố ga thoát nước', dongCo: false, dem: false },
     tank:      { type: 'tank',      ten: 'Bồn / bể chứa',        dongCo: false, dem: false },
     vessel:    { type: 'vessel',    ten: 'Cột lọc áp lực',       dongCo: false, dem: true },
     filter:    { type: 'filter',    ten: 'Thiết bị lọc',         dongCo: false, dem: true },
@@ -64,6 +68,20 @@
     blower:    { type: 'panel',     ten: 'Máy thổi khí',         dongCo: true,  dem: true },
     panel:     { type: 'panel',     ten: 'Tủ điện',              dongCo: false, dem: false }
   };
+  /* Loại nào chắc chắn sinh ra nước bỏ đi, và câu nhắc tương ứng. Bồn chứa
+     KHÔNG nằm trong bảng: xả đáy bồn thường là van tay đi máng hở, nhắc mọi
+     bồn sẽ thành tiếng ồn và người dùng bắt đầu bỏ qua cả cảnh báo thật. */
+  var CAN_XA = {
+    vessel:   'Cột lọc phải rửa ngược nhưng sổ tuyến chưa có đường xả rửa ' +
+              'ngược — thêm một tuyến dịch vụ "waste" đi tới một điểm xả.',
+    filter:   'Thiết bị lọc chưa có đường xả rửa ngược — thêm một tuyến dịch ' +
+              'vụ "waste" đi tới một điểm xả.',
+    mixedbed: 'Cột trao đổi ion phải xả nước tái sinh — chưa khai tuyến xả.',
+    roskid:   'Cụm màng phải xả nước cô đặc — chưa khai tuyến dịch vụ "waste" ' +
+              'đi ra (tới điểm xả, hoặc quay về bồn cấp nếu thiết kế tuần hoàn).',
+    edi:      'Cụm EDI phải xả dòng concentrate — chưa khai tuyến xả.'
+  };
+
   /* Cách đấu nối NỘI BỘ của một cụm nhiều đơn vị. */
   var DAU = {
     '':      'Đơn chiếc',
@@ -235,13 +253,19 @@
           return;
         }
         if (!vao[g]) {
+          if (e.loai === 'xa') {
+            themLoi('TB', i, 'Điểm xả chưa có tuyến nào đổ vào — nó chỉ có ý ' +
+                    'nghĩa khi là đầu đến của một tuyến xả.');
+            return;
+          }
           if (e.loai === 'dosing' || e.loai === 'nguon') return;
           if (coNguon.length)
             themLoi('TB', i, 'Không có đường ống vào, mà hệ đã có điểm cấp riêng (' +
                     coNguon[0].tag + ') — thiếu dòng trong sổ tuyến.');
           else diemCap.push(e.tag);
         }
-        if (!ra[g] && e.loai !== 'tank' && e.loai !== 'panel')
+        // Điểm xả là chỗ nước RỜI KHỎI hệ — hỏi nó "nước đi đâu" là vô nghĩa.
+        if (!ra[g] && e.loai !== 'tank' && e.loai !== 'panel' && e.loai !== 'xa')
           themLoi('TB', i, 'Chỉ có đường vào, không có đường ra — nước vào rồi đi đâu?');
       });
       if (coNguon.length > 1)
@@ -255,6 +279,23 @@
       if (!coNguon.length && !diemCap.length && TB.length)
         loi.push('[Dây chuyền] Không có điểm cấp nước nào — thêm một dòng loại ' +
                  '"nguon" (điểm đấu nối nước cấp của nhà máy) vào sổ thiết bị.');
+
+      /* Thiết bị nào cũng đẻ ra nước bỏ đi thì phải có tuyến chở nó đi. Thiếu
+         dòng ấy trong sổ, bản vẽ vẫn ra đẹp — chỉ là thiếu một đường ống có
+         thật, và tới lúc thi công mới phát hiện không biết đấu vào đâu. Đây là
+         CẢNH BÁO chứ không phải lỗi: có thiết kế gom xả bằng máng hở, không đi
+         đường ống, thì kỹ sư tự bỏ qua. */
+      var DV_XA = { waste: 1, drain: 1, reject: 1, conc: 1, backwash: 1 };
+      var coDuongXa = {};
+      TU.forEach(function (t) {
+        if (DV_XA[String(t.dv || '').toLowerCase()] && timTB(t.tu))
+          coDuongXa[gonTag(t.tu)] = 1;
+      });
+      TB.forEach(function (e, i) {
+        var nhac = CAN_XA[e.loai];
+        if (!nhac || coDuongXa[gonTag(e.tag)]) return;
+        themLoi('TB', i, nhac, false);
+      });
 
       // --- sổ dụng cụ đo
       var daDC = {};

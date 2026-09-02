@@ -756,8 +756,42 @@
     return g;
   }
 
+  /* ĐIỂM XẢ — hố thu có song chắn, nơi nước bỏ đi rời khỏi hệ. Dựng hẳn khối
+     cho nó vì mặt bằng GA cần biết hố ga chiếm chỗ nào: đặt cụm lọc chồng lên
+     hố thu là lỗi chỉ lộ ra khi đã đổ móng. */
+  function diemXa(o) {
+    var g = grp('xa');
+    var dn = kt(o.dn, 100, 25, 600);
+    var W = kt(o.W, 800, 300, 4000), D = kt(o.D, 800, 300, 4000);
+    var sau = 400;
+    var be = mat('concrete');
+    // thành hố: bốn tấm, chừa lòng rỗng để nhìn thấy là hố chứ không phải bệ
+    var day = box(W, 80, D, be); day.position.y = -sau; g.add(day);
+    [[-W / 2 + 40, 0], [W / 2 - 40, 0]].forEach(function (v) {
+      var t = box(80, sau, D, be); t.position.set(v[0], -sau / 2, 0); g.add(t);
+    });
+    [[0, -D / 2 + 40], [0, D / 2 - 40]].forEach(function (v) {
+      var t = box(W - 160, sau, 80, be); t.position.set(v[0], -sau / 2, v[1]); g.add(t);
+    });
+    // song chắn rác
+    var thanh = mat('frame');
+    for (var i = 0; i < 7; i++) {
+      var s = box(W - 160, 24, 40, thanh);
+      s.position.set(0, 12, -D / 2 + 90 + i * (D - 180) / 6);
+      g.add(s);
+    }
+    // ống xả chờ, chĩa lên để tuyến ống bắt vào
+    var ong = cyl(dn, 500, mat('pvc'));
+    ong.position.set(0, 250, 0); g.add(ong);
+    g.userData.foot = { w: W, d: D };
+    g.userData.h = 500;
+    g.userData.ports = { in: P(0, 480, 0, 0, 1, 0, dn), out: P(0, 480, 0, 0, 1, 0, dn) };
+    return g;
+  }
+
   var BUILDERS = {
     nguon: nguonCap,
+    xa: diemXa,
     tank: tank, vessel: vessel, filter: vessel, cartridge: cartridge,
     pump: pump, roskid: roSkid, ro: roSkid, panel: panel, dosing: dosing,
     uv: uvUnit, edi: ediStack, mixedbed: vessel
@@ -771,6 +805,7 @@
   function chanDe(e) {
     var t = (e.type || 'tank').toLowerCase();
     if (t === 'nguon') return { w: 600, d: 600 };
+    if (t === 'xa') return { w: kt(e.W, 800, 300, 4000), d: kt(e.D, 800, 300, 4000) };
     if (t === 'tank') { var d = kt(e.d, 2000, 200, 20000);
       return { w: d + 160, d: d + 160, tron: true, D: d }; }
     if (t === 'vessel' || t === 'filter' || t === 'mixedbed') {

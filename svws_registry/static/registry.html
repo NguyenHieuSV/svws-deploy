@@ -192,6 +192,8 @@
   <button onclick="exportJSON()">⬇ Xuất JSON</button>
   <button onclick="document.getElementById('jsonInput').click()">⬆ Nhập JSON</button>
   <input type="file" id="jsonInput" accept=".json" style="display:none">
+  <button onclick="moToolTuMay()" title="Chọn một file tool .html đã lưu trên máy và mở ra xem">📁 Mở tool đã lưu</button>
+  <input type="file" id="toolInput" accept=".html,.htm" style="display:none">
   <span class="spacer"></span>
   <span class="user-tag" id="userTag" onclick="changeUser()" title="Bấm để đổi tên">👤 …</span>
   <span class="count-note" id="countNote"></span>
@@ -314,6 +316,55 @@ async function dungLaiTool(){
   const res = await injectThree(go.html);
   return {ma: t.ma, html: res.html};
 }
+/* ====== MỞ MỘT TOOL ĐÃ LƯU TRÊN MÁY ======
+   Khác với "Mở lại" (chỉ nhớ được MỘT tool gần nhất, trong localStorage của
+   đúng trình duyệt này): nút này mở BẤT KỲ file tool nào đã lưu, kể cả tool
+   của đồng nghiệp gửi qua. */
+function chonFileKieuCu(){          // lối lùi cho trình duyệt không có picker
+  return new Promise(function(giao){
+    const inp = document.getElementById('toolInput');
+    inp.value = '';                 // chọn lại đúng file vừa chọn vẫn nổ change
+    inp.onchange = function(){ giao(inp.files[0] || null); };
+    inp.click();
+  });
+}
+async function moToolTuMay(){
+  let f = null;
+  try{
+    if(window.showOpenFilePicker){
+      /* `id` cố định là mấu chốt: Chrome ghi nhớ thư mục theo id, nên từ lần
+         thứ hai hộp chọn file mở thẳng vào thư mục tool của công ty. */
+      const [h] = await window.showOpenFilePicker({
+        id: 'svws-tool',
+        types: [{description: 'Tool thiết kế SVWS (.html)',
+                 accept: {'text/html': ['.html', '.htm']}}]
+      });
+      f = await h.getFile();
+    }
+  }catch(e){
+    if(e && e.name === 'AbortError') return;   // người dùng bấm Huỷ, không báo lỗi
+  }
+  if(!f) f = await chonFileKieuCu();
+  if(!f) return;
+  try{
+    let html = await f.text();
+    if(html.length < 500 || !/<html|<body|<script/i.test(html))
+      throw new Error('File này không phải trang HTML.');
+    /* File tải từ app đã nhúng sẵn thư viện nên nhúng lại là thừa — injectThree
+       tự nhận ra và trả nguyên văn. Nhưng nếu ai lỡ lưu bản CHƯA nhúng thì mở
+       ra sẽ trắng mọi tab; nhúng bù ở đây cứu được đúng trường hợp ấy. */
+    const res = await injectThree(html);
+    if(res.err) throw new Error(res.err);
+    const url = URL.createObjectURL(new Blob([res.html],
+                                   {type: 'text/html;charset=utf-8'}));
+    window.open(url, '_blank');
+    // Giữ blob một lúc cho tab mới kịp tải xong rồi mới trả bộ nhớ.
+    setTimeout(function(){ URL.revokeObjectURL(url); }, 120000);
+  }catch(e){
+    alert('Không mở được "' + f.name + '": ' + e.message);
+  }
+}
+
 async function moLaiToolCu(){
   const r = await dungLaiTool(); if(!r) return;
   if(execBlobUrl) URL.revokeObjectURL(execBlobUrl);

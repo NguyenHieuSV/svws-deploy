@@ -128,6 +128,7 @@ _MUC_PID3 = "SỔ THIẾT BỊ PHẢI KHỚP BẢNG ĐIỆN"
 _MUC_BASO = "BA SỔ GỐC là nguồn khai báo duy nhất"
 _MUC_ANTOAN = "MỖI TAB PHẢI DỰNG TRONG VÒNG BẢO VỆ"
 _MUC_TAB0 = "Tab 0 — BA SỔ GỐC"
+_MUC_BIEN = "NÚT BIÊN CỦA DÂY CHUYỀN PHẢI KHAI HẲN"
 
 
 def _bo_sung_nhom(data: dict, dau_hieu: str, tien_to, tu_khoa: str) -> bool:
@@ -366,6 +367,13 @@ def init_db() -> None:
                          "MỖI TAB PHẢI DỰNG TRONG VÒNG BẢO VỆ", "nền tảng"):
             ghi.append("Mỗi tab dựng trong vòng bảo vệ — một lỗi không làm "
                        "trắng cả tool")
+        # Điều khoản này ĐI KÈM thư viện: chỉ có nghĩa khi SVWSSO đã biết loại
+        # "xa". Thêm nó ngay trong lần deploy mang thư viện mới thì không bao
+        # giờ có khoảng thời gian chuẩn bảo khai một loại mà thư viện chưa hiểu.
+        if _bo_sung_nhom(data, _MUC_BIEN,
+                         "NÚT BIÊN CỦA DÂY CHUYỀN PHẢI KHAI HẲN", "nền tảng"):
+            ghi.append("Nút biên phải khai hẳn: điểm cấp (nguon) và điểm xả "
+                       "(xa) — nước rửa ngược, cô đặc, xả đáy phải có đầu đến")
         if _bo_sung_muc(data, _MUC_TAB0, "Tab 0 —", "0"):
             ghi.append("Tab 0 — Ba sổ gốc: chỗ cố định để mở lại và sửa sổ "
                        "ngay trong tool")

@@ -55,6 +55,10 @@
           "s": "std"
         },
         {
+          "t": "NÚT BIÊN CỦA DÂY CHUYỀN PHẢI KHAI HẲN — CẢ ĐẦU VÀO LẪN ĐẦU RA. Nước cấp đi vào hệ qua mặt bích chờ của nhà máy: khai một dòng sổ thiết bị loại \"nguon\" (chỉ MỘT). Nước bỏ đi thì rời khỏi hệ qua hố ga / mương thoát, mà hố ga không phải thiết bị nào trong dây chuyền: khai một dòng loại \"xa\" (được phép nhiều điểm xả — hố ga nước rửa lọc và hố ga nước cô đặc thường tách nhau). Mọi tuyến mang dịch vụ waste · drain · reject BẮT BUỘC có đầu đến thật: hoặc một điểm xả, hoặc một thiết bị nếu thiết kế cho tuần hoàn nước ấy quay về (ví dụ reject RO về bồn nước thô). CẤM để trống ô \"đến\". Cụ thể phải có tuyến xả cho: cột lọc rửa ngược (MMF, GAC, cột trao đổi ion), cụm màng xả cô đặc, cụm EDI xả concentrate. Thiếu chúng thì bản vẽ vẫn ra đẹp nhưng thiếu một đường ống CÓ THẬT, và tới lúc thi công mới phát hiện không biết đấu vào đâu — bộ kiểm của SVWSSO sẽ nhắc.",
+          "s": "std"
+        },
+        {
           "t": "MỖI TAB PHẢI DỰNG TRONG VÒNG BẢO VỆ — bọc bằng SVWSKT.veAnToan(el, '<tên tab>', function(){ …dựng tab… }). Một hàm dựng ném lỗi là cả script chết theo và MỌI TAB TRẮNG cùng lúc; người dùng chỉ thấy “app hỏng”, không biết hỏng ở đâu, và cả bộ hồ sơ thành vô dụng vì một dòng sai. Bọc lại thì chỉ tab đó hiện hộp lỗi kèm nguyên văn thông báo và dòng stack đầu tiên, chín tab kia vẫn dùng được, và người dùng dán được đúng dòng lỗi vào nút sửa lỗi bằng AI. Áp dụng cho CẢ hàm vẽ lần đầu LẪN hàm vẽ lại khi đổi tham số hay đổi ba sổ.",
           "s": "std"
         }
