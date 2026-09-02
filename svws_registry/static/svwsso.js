@@ -81,10 +81,13 @@
   // =========================================================================
   function tao(o) {
     o = o || {};
-    var TB = (o.thietBi || []).map(function (e, i) { return chuanTB(e, i); });
-    var TU = (o.tuyen || []).map(function (e, i) { return chuanTU(e, i); });
-    var DC = (o.dungCu || []).map(function (e, i) { return chuanDC(e, i); });
+    var TB, TU, DC;
     var loi = [], nhac = [], loiDong = {};    // loiDong: khoá dòng → mảng lỗi
+    var suaDuoc = !!o.suaDuoc;                // cho sửa ngay trong bảng?
+    var khiDoi = typeof o.khiDoi === 'function' ? o.khiDoi : null;
+    var cho = null;                           // phần tử đang chứa ba bảng
+    var hen = null;                           // hẹn giờ gọi khiDoi
+    var api = null;
 
     function chuanTB(e, i) {
       var l = String(e.loai || e.type || 'tank').toLowerCase();
@@ -110,6 +113,9 @@
                dai: e.dai || '', dv: e.dv || '', nguong: e.nguong || '',
                dc: e.dc || '', ghi: e.ghi || '', _i: i };
     }
+    TB = (o.thietBi || []).map(function (e, i) { return chuanTB(e, i); });
+    TU = (o.tuyen || []).map(function (e, i) { return chuanTU(e, i); });
+    DC = (o.dungCu || []).map(function (e, i) { return chuanDC(e, i); });
 
     function timTB(tag) {
       var g = gonTag(tag);
@@ -363,56 +369,153 @@
     }
 
     // -------------------------------------------------------------- BẢNG
-    function bang(ma, tieu, cot, dong, ghi) {
+    /* Mỗi sổ khai bằng một BẢNG CỘT: khoá dữ liệu, nhãn, kiểu ô. Nhờ có bảng
+       cột nên phần dựng ô đọc và phần dựng ô SỬA dùng chung một nguồn — thêm
+       một trường thì cả hai chế độ tự có, không phải nhớ sửa hai chỗ. */
+    function chonTu(bang2) {
+      var r = [['', '—']];
+      Object.keys(bang2).forEach(function (k) { if (k) r.push([k, bang2[k]]); });
+      return r;
+    }
+    var COT = {
+      TB: [
+        { k: 'tag', t: 'Tag', kieu: 'chu', r: 92 },
+        { k: 'ten', t: 'Tên thiết bị', kieu: 'chu', r: 168 },
+        { k: 'loai', t: 'Loại', kieu: 'chon', r: 158, chon: function () {
+            return Object.keys(LOAI).map(function (k) { return [k, LOAI[k].ten]; }); } },
+        { k: 'sl', t: 'SL', kieu: 'so', r: 48, min: 1 },
+        { k: 'dau', t: 'Đấu nối trong cụm', kieu: 'chon', r: 196, chon: function () {
+            return Object.keys(DAU).map(function (k) { return [k, DAU[k]]; }); } },
+        { k: 'd', t: 'Ø (mm)', kieu: 'so', r: 74 },
+        { k: 'h', t: 'H (mm)', kieu: 'so', r: 74 },
+        { k: 'hLop', t: 'Cao lớp VL', kieu: 'so', r: 74 },
+        { k: 'kW', t: 'kW', kieu: 'so', r: 62 },
+        { k: 'kieuDien', t: 'Khởi động', kieu: 'chon', r: 88, chon: function () {
+            return [['', '—'], ['DOL', 'DOL'], ['VFD', 'VFD']]; } },
+        { k: 'ghi', t: 'Ghi chú', kieu: 'chu', r: 150 }
+      ],
+      TU: [
+        { k: 'ma', t: 'Mã tuyến', kieu: 'chu', r: 82 },
+        { k: 'tu', t: 'Từ', kieu: 'goi', ds: 'tb', r: 104 },
+        { k: 'den', t: 'Đến', kieu: 'goi', ds: 'tb', r: 104 },
+        { k: 'dv', t: 'Dịch vụ', kieu: 'chon', r: 168, chon: function () {
+            return chonTu(DICHVU); } },
+        { k: 'dn', t: 'DN', kieu: 'so', r: 62 },
+        { k: 'vl', t: 'Vật liệu', kieu: 'chu', r: 130 },
+        { k: 'ap', t: 'Áp làm việc', kieu: 'so', r: 78 },
+        { k: 'ghi', t: 'Ghi chú', kieu: 'chu', r: 150 }
+      ],
+      DC: [
+        { k: 'tag', t: 'Tag', kieu: 'chu', r: 92 },
+        { k: 'mo', t: 'Mô tả', kieu: 'chu', r: 176 },
+        { k: 'gan', t: 'Gắn vào', kieu: 'goi', ds: 'gan', r: 104 },
+        { k: 'tin', t: 'Tín hiệu', kieu: 'chon', r: 132, chon: function () {
+            return Object.keys(TINHIEU).map(function (k) { return [k, k + ' — ' + TINHIEU[k]]; }); } },
+        { k: 'dai', t: 'Dải đo', kieu: 'chu', r: 86 },
+        { k: 'dv', t: 'Đơn vị', kieu: 'chu', r: 66 },
+        { k: 'nguong', t: 'Ngưỡng / báo động', kieu: 'chu', r: 176 },
+        { k: 'ghi', t: 'Ghi chú', kieu: 'chu', r: 130 }
+      ]
+    };
+    var SO_BANG = { TB: function () { return TB; }, TU: function () { return TU; },
+                    DC: function () { return DC; } };
+    var MAU_DONG = {
+      TB: function () { return chuanTB({ loai: 'tank' }, TB.length); },
+      TU: function () { return chuanTU({}, TU.length); },
+      DC: function () { return chuanDC({ tin: 'AI' }, DC.length); }
+    };
+
+    /* Hiển thị giá trị ở chế độ ĐỌC — cùng dữ liệu, khác cách trình bày. */
+    function doc(bang2, e, c) {
+      var v = e[c.k];
+      if (c.k === 'loai') return (LOAI[v] || {}).ten || v;
+      if (c.k === 'dau') return DAU[v] || v || DAU[''];
+      if (c.k === 'dv' && bang2 === 'TU') return DICHVU[v] || v || '—';
+      if (c.k === 'tin') return TINHIEU[v] || v;
+      if (c.k === 'dn') return v ? 'DN' + v : '—';
+      if (c.kieu === 'so') return v || '—';
+      return v === '' || v == null ? '—' : v;
+    }
+
+    function oSua(bang2, i, c, e) {
+      var neo = ' data-b="' + bang2 + '" data-i="' + i + '" data-k="' + c.k + '"';
+      var rong = c.r ? ' style="width:' + c.r + 'px"' : '';
+      if (c.kieu === 'chon') {
+        var ds = c.chon(), cur = String(e[c.k] == null ? '' : e[c.k]);
+        return '<select class="svws-so-o"' + neo + rong + '>' +
+          ds.map(function (x) {
+            return '<option value="' + esc(x[0]) + '"' +
+              (String(x[0]) === cur ? ' selected' : '') + '>' + esc(x[1]) + '</option>';
+          }).join('') + '</select>';
+      }
+      if (c.kieu === 'goi')
+        return '<input class="svws-so-o" list="svws-ds-' + c.ds + '"' + neo + rong +
+          ' value="' + esc(e[c.k]) + '">';
+      if (c.kieu === 'so')
+        return '<input class="svws-so-o so" type="number" step="any"' +
+          (c.min != null ? ' min="' + c.min + '"' : '') + neo + rong +
+          ' value="' + (e[c.k] ? esc(e[c.k]) : '') + '">';
+      return '<input class="svws-so-o"' + neo + rong + ' value="' + esc(e[c.k]) + '">';
+    }
+
+    /** Danh sách gợi ý cho ô "Từ / Đến" và "Gắn vào" — chống gõ sai tag. */
+    function dsGoiY() {
+      var tb = TB.map(function (e) { return e.tag; });
+      var tu = TU.map(function (t) { return t.ma; });
+      function ds(id, arr) {
+        return '<datalist id="svws-ds-' + id + '">' + arr.map(function (v) {
+          return '<option value="' + esc(v) + '"></option>';
+        }).join('') + '</datalist>';
+      }
+      return ds('tb', tb) + ds('gan', tb.concat(tu));
+    }
+
+    function oKiem(bang2, i) {
+      var e = loiDong[bang2 + ':' + i] || [];
+      return '<td class="svws-so-nhac">' +
+        (e.length ? e.map(esc).join('<br>') : '<span class="svws-so-ok">✓</span>') +
+        '</td>';
+    }
+
+    function bang(ma, tieu, ghi) {
+      var cot = COT[ma], ds = SO_BANG[ma]();
       var h = '<h4 class="svws-so-tieu">' + esc(tieu) + '</h4>';
       if (ghi) h += '<div class="svws-so-ghi">' + esc(ghi) + '</div>';
-      h += '<div class="svws-so-cuon"><table class="svws-so"><thead><tr>' +
-        cot.map(function (t) { return '<th>' + esc(t) + '</th>'; }).join('') +
-        '<th>Kiểm</th></tr></thead><tbody>';
-      dong.forEach(function (r, i) {
-        var e = loiDong[ma + ':' + i] || [];
-        h += '<tr class="' + (e.length ? 'svws-so-loi' : '') + '">' +
-          r.map(function (c) { return '<td>' + esc(c) + '</td>'; }).join('') +
-          '<td class="svws-so-nhac">' +
-          (e.length ? e.map(esc).join('<br>') : '<span class="svws-so-ok">✓</span>') +
-          '</td></tr>';
+      h += '<div class="svws-so-cuon" data-bang="' + ma + '">' +
+        '<table class="svws-so"><thead><tr><th>#</th>' +
+        cot.map(function (c) { return '<th>' + esc(c.t) + '</th>'; }).join('') +
+        '<th>Kiểm</th>' + (suaDuoc ? '<th></th>' : '') + '</tr></thead><tbody>';
+      ds.forEach(function (e, i) {
+        var xau = (loiDong[ma + ':' + i] || []).length;
+        h += '<tr class="' + (xau ? 'svws-so-loi' : '') + '" data-b="' + ma +
+          '" data-i="' + i + '"><td>' + (i + 1) + '</td>' +
+          cot.map(function (c) {
+            return '<td>' + (suaDuoc ? oSua(ma, i, c, e) : esc(doc(ma, e, c))) + '</td>';
+          }).join('') + oKiem(ma, i) +
+          (suaDuoc ? '<td><button type="button" class="svws-so-xoa" data-b="' + ma +
+            '" data-i="' + i + '" title="Xoá dòng này">✕</button></td>' : '') +
+          '</tr>';
       });
-      return h + '</tbody></table></div>';
+      h += '</tbody></table></div>';
+      if (suaDuoc) h += '<div class="svws-so-nut"><button type="button" ' +
+        'class="svws-so-them" data-b="' + ma + '">+ Thêm dòng</button>' +
+        '<span>' + ds.length + ' dòng</span></div>';
+      return h;
     }
 
     function bangThietBi() {
       return bang('TB', '1. SỔ THIẾT BỊ — có gì trong hệ',
-        ['#', 'Tag', 'Tên thiết bị', 'Loại', 'SL', 'Đấu nối trong cụm',
-         'Ø (mm)', 'H (mm)', 'kW', 'Khởi động', 'Ghi chú'],
-        TB.map(function (e, i) {
-          return [i + 1, e.tag, e.ten, (LOAI[e.loai] || {}).ten || e.loai,
-                  e.sl, DAU[e.dau] || e.dau || DAU[''],
-                  e.d || '—', e.h || '—', e.kW || '—', e.kieuDien || '—', e.ghi];
-        }),
         'Số lượng và cách đấu nối là thuộc tính của THIẾT BỊ, không phải của ' +
         'đường ống: hai cột lọc song song hay hai bơm 1 chạy 1 dừng đều là MỘT ' +
         'dòng ở đây, vì chúng dùng chung ống góp nên trên sơ đồ là một cụm.');
     }
     function bangTuyen() {
       return bang('TU', '2. SỔ TUYẾN ỐNG — nối với nhau ra sao',
-        ['#', 'Mã tuyến', 'Từ', 'Đến', 'Dịch vụ', 'DN', 'Vật liệu',
-         'Áp làm việc (bar)', 'Ghi chú'],
-        TU.map(function (t, i) {
-          return [i + 1, t.ma, t.tu, t.den, DICHVU[t.dv] || t.dv || '—',
-                  t.dn ? 'DN' + t.dn : '—', t.vl || 'theo dịch vụ',
-                  t.ap || '—', t.ghi];
-        }),
         'Chiều dài, số co và số van KHÔNG khai ở đây — chúng đo từ bản vẽ 3D. ' +
         'Sổ này chỉ nói nối cái gì với cái gì, chở dịch vụ gì, cỡ bao nhiêu.');
     }
     function bangDungCu() {
       return bang('DC', '3. SỔ DỤNG CỤ ĐO — đo cái gì, ở đâu',
-        ['#', 'Tag', 'Mô tả', 'Gắn vào', 'Tín hiệu', 'Dải đo', 'Đơn vị',
-         'Ngưỡng / báo động', 'Ghi chú'],
-        DC.map(function (k, i) {
-          return [i + 1, k.tag, k.mo, k.gan, TINHIEU[k.tin] || k.tin,
-                  k.dai || '—', k.dv || '—', k.nguong || '—', k.ghi];
-        }),
         'Gắn vào MỘT THIẾT BỊ (đo mức bồn) hoặc MỘT TUYẾN (đo lưu lượng trên ' +
         'đường ống). Bảng I/O của PLC sinh ra từ đây và tự cấp địa chỉ, nên ' +
         'P&ID với bảng I/O không thể lệch nhau.');
@@ -433,11 +536,134 @@
     }
     function tatCa() {
       kiemTra();                       // nạp loiDong trước khi dựng bảng
-      return bangLoi() + bangThietBi() + bangTuyen() + bangDungCu();
+      return (suaDuoc ? dsGoiY() : '') +
+        bangLoi() + bangThietBi() + bangTuyen() + bangDungCu();
     }
 
-    return {
-      kiemTra: kiemTra, tatCa: tatCa,
+    // ------------------------------------------------------- SỬA TẠI CHỖ
+    /* Ba sổ chỉ có ích khi sửa được ngay trong tool. Nguyên tắc dựng lại:
+       gõ trong ô thì CHỈ vẽ lại cột "Kiểm" và màu dòng — dựng lại cả bảng sau
+       mỗi phím là mất con trỏ, không gõ nổi. Thêm/xoá dòng mới dựng lại bảng.
+       Bản vẽ thì hẹn một nhịp rồi mới vẽ lại, vì dựng 3D tốn thời gian hơn
+       nhiều so với một lần gõ phím. */
+    function baoDoi(ngay) {
+      if (!khiDoi) return;
+      if (hen) { clearTimeout(hen); hen = null; }
+      if (ngay) { khiDoi(api); return; }
+      hen = setTimeout(function () { hen = null; khiDoi(api); }, 300);
+    }
+
+    /** Vẽ lại cột Kiểm và màu dòng, giữ nguyên con trỏ đang gõ. */
+    function veLaiKiem() {
+      if (!cho) return;
+      kiemTra();
+      ['TB', 'TU', 'DC'].forEach(function (b) {
+        var ds = cho.querySelectorAll('tr[data-b="' + b + '"]');
+        for (var i = 0; i < ds.length; i++) {
+          var tr = ds[i], j = +tr.getAttribute('data-i');
+          var e = loiDong[b + ':' + j] || [];
+          tr.className = e.length ? 'svws-so-loi' : '';
+          var o2 = tr.querySelector('.svws-so-nhac');
+          if (o2) o2.innerHTML = e.length ? e.map(esc).join('<br>')
+                                          : '<span class="svws-so-ok">✓</span>';
+        }
+      });
+      var tt = cho.querySelector('.svws-so-tt');
+      if (tt) { var m = document.createElement('div'); m.innerHTML = bangLoi();
+                tt.parentNode.replaceChild(m.firstChild, tt); }
+      capNhatDs();
+    }
+    /** Cập nhật danh sách gợi ý sau khi tag thiết bị hoặc mã tuyến đổi. */
+    function capNhatDs() {
+      if (!cho) return;
+      var m = document.createElement('div');
+      m.innerHTML = dsGoiY();
+      ['tb', 'gan'].forEach(function (id) {
+        var cu = cho.querySelector('#svws-ds-' + id);
+        var moi2 = m.querySelector('#svws-ds-' + id);
+        if (cu && moi2) cu.parentNode.replaceChild(moi2, cu);
+      });
+    }
+    /** Dựng lại toàn bộ ba bảng — dùng khi thêm hoặc xoá dòng. */
+    function veLai() {
+      if (!cho) return;
+      cho.innerHTML = tatCa();
+      baoDoi(true);
+    }
+
+    function datGiaTri(b, i, k, v) {
+      var ds = SO_BANG[b](), e = ds[i];
+      if (!e) return;
+      var cot = COT[b], c = null;
+      cot.forEach(function (x) { if (x.k === k) c = x; });
+      if (!c) return;
+      e[k] = c.kieu === 'so' ? so(v, 0) : String(v);
+      if (k === 'sl') e.sl = Math.max(1, so(v, 1));
+      if (k === 'kieuDien') e.kieuDien = String(v).toUpperCase();
+      if (k === 'tin') e.tin = String(v).toUpperCase();
+      if (k === 'dv' && b === 'TU') e.dv = String(v).toLowerCase();
+    }
+
+    /**
+     * Gắn ba sổ vào một phần tử và bật chế độ sửa.
+     * el: phần tử chứa · khiDoi được gọi sau mỗi thay đổi (đã hẹn nhịp).
+     */
+    function gan(el) {
+      cho = el;
+      el.innerHTML = tatCa();
+      if (!suaDuoc) return api;
+      el.addEventListener('input', function (ev) {
+        var t = ev.target;
+        if (!t || !t.getAttribute || !t.getAttribute('data-k')) return;
+        datGiaTri(t.getAttribute('data-b'), +t.getAttribute('data-i'),
+                  t.getAttribute('data-k'), t.value);
+        veLaiKiem();
+        baoDoi(false);
+      });
+      el.addEventListener('change', function (ev) {
+        var t = ev.target;
+        if (!t || !t.getAttribute || !t.getAttribute('data-k')) return;
+        baoDoi(true);
+      });
+      el.addEventListener('click', function (ev) {
+        var t = ev.target;
+        if (!t || !t.className) return;
+        if (String(t.className).indexOf('svws-so-them') >= 0) {
+          var b = t.getAttribute('data-b');
+          SO_BANG[b]().push(MAU_DONG[b]());
+          veLai();
+        } else if (String(t.className).indexOf('svws-so-xoa') >= 0) {
+          var b2 = t.getAttribute('data-b'), i2 = +t.getAttribute('data-i');
+          SO_BANG[b2]().splice(i2, 1);
+          veLai();
+        }
+      });
+      return api;
+    }
+
+    /** Ba sổ dạng dữ liệu thuần — để lưu vào file cấu hình JSON. */
+    function xuat() {
+      function gon(x) {
+        var r = {}, k;
+        for (k in x) if (x.hasOwnProperty(k) && k.charAt(0) !== '_' &&
+                         x[k] !== '' && x[k] !== 0) r[k] = x[k];
+        return r;
+      }
+      return { thietBi: TB.map(gon), tuyen: TU.map(gon), dungCu: DC.map(gon) };
+    }
+    /** Nạp lại ba sổ từ dữ liệu (mở file JSON) và vẽ lại. */
+    function nap(dat) {
+      dat = dat || {};
+      TB = (dat.thietBi || []).map(function (e, i) { return chuanTB(e, i); });
+      TU = (dat.tuyen || []).map(function (e, i) { return chuanTU(e, i); });
+      DC = (dat.dungCu || []).map(function (e, i) { return chuanDC(e, i); });
+      veLai();
+      return api;
+    }
+
+    api = {
+      kiemTra: kiemTra, tatCa: tatCa, gan: gan, veLai: veLai,
+      xuat: xuat, nap: nap,
       bangThietBi: bangThietBi, bangTuyen: bangTuyen, bangDungCu: bangDungCu,
       bangLoi: bangLoi,
       EQUIP: EQUIP, PIPES: PIPES, taiDien: taiDien, kenhIO: kenhIO,
@@ -445,6 +671,7 @@
       soTuyen: function () { return TU.slice(); },
       soDungCu: function () { return DC.slice(); }
     };
+    return api;
   }
 
   var CSS =
@@ -466,10 +693,28 @@
     '.svws-so-tt.xau{background:#fdeeec;color:#8c1d16;border-left:4px solid #b3271e}' +
     '.svws-so-ds{margin:4px 0 12px 18px;font-size:11.5px;color:#8c1d16}' +
     '.svws-so-ds.nhac{color:#7a5a1e}' +
-    '@media print{.svws-so-cuon{overflow:visible}.svws-so{min-width:0}}';
+    '.svws-so-o{width:100%;min-width:46px;max-width:100%;box-sizing:border-box;font:inherit;' +
+    'font-size:11.5px;padding:3px 5px;border:1px solid transparent;border-radius:3px;' +
+    'background:transparent;color:inherit}' +
+    '.svws-so-o:hover{border-color:#cfd8e3;background:#fff}' +
+    '.svws-so-o:focus{outline:none;border-color:#0b2545;background:#fff;' +
+    'box-shadow:0 0 0 2px rgba(11,37,69,.12)}' +
+    '.svws-so-o.so{text-align:right;font-variant-numeric:tabular-nums}' +
+    '.svws-so td:has(.svws-so-o){padding:2px 3px}' +
+    '.svws-so-xoa{border:0;background:transparent;color:#b3271e;cursor:pointer;' +
+    'font-size:13px;line-height:1;padding:3px 6px;border-radius:3px}' +
+    '.svws-so-xoa:hover{background:#fdeeec}' +
+    '.svws-so-nut{display:flex;align-items:center;gap:10px;margin:-8px 0 14px}' +
+    '.svws-so-them{border:1px dashed #9fb4c8;background:transparent;color:#0b2545;' +
+    'cursor:pointer;font:600 11.5px ' + FONT + ';padding:5px 11px;border-radius:4px}' +
+    '.svws-so-them:hover{border-style:solid;background:#f4f8fb}' +
+    '.svws-so-nut span{font-size:11px;color:#5b6b7d}' +
+    '@media print{.svws-so-cuon{overflow:visible}.svws-so{min-width:0}' +
+    '.svws-so-nut,.svws-so-xoa{display:none}' +
+    '.svws-so-o{border-color:transparent;background:transparent}}';
 
   global.SVWSSO = {
-    version: '0.9',
+    version: '1.0',
     tao: tao, CSS: CSS, CSS_TAG: '<style>' + CSS + '</style>',
     LOAI: LOAI, DAU: DAU, DICHVU: DICHVU, TINHIEU: TINHIEU
   };
