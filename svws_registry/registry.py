@@ -106,6 +106,7 @@ _MUC_TAB8 = "Tab 8 — Commissioning (Chạy thử & nghiệm thu)"
 _MUC_LOGO = "LOGO SÓNG VIỆT PHẢI CÓ TRÊN MỌI TRANG"
 _MUC_PID2 = "Ba quy tắc KHAI BÁO để P&ID không sinh lỗi giả"
 _MUC_PID3 = "SỔ THIẾT BỊ PHẢI KHỚP BẢNG ĐIỆN"
+_MUC_BASO = "BA SỔ GỐC là nguồn khai báo duy nhất"
 
 
 def _bo_sung_nhom(data: dict, dau_hieu: str, tien_to, tu_khoa: str) -> bool:
@@ -336,6 +337,10 @@ def init_db() -> None:
         if _bo_sung_muc(data, _MUC_PID3, "Tab 2 (bổ sung) — SỔ THIẾT BỊ", "2"):
             ghi.append("P&ID đối chiếu với bảng điện (bắt lỗi thiếu thiết bị) · "
                        "ký hiệu riêng cho cụm châm hoá chất")
+        if _bo_sung_nhom(data, _MUC_BASO,
+                         "BA SỔ GỐC là nguồn khai báo duy nhất", "nền tảng"):
+            ghi.append("Ba sổ gốc (thiết bị · tuyến ống · dụng cụ đo) sửa được "
+                       "trong tool và quay về được sổ đăng ký")
         if _bo_sung_muc(data, _MUC_OM, "Tab 9 (bổ sung)", "9"):
             ghi.append("Sổ O&M sinh từ danh sách thiết bị (SVWSOM)")
         if _bo_sung_muc(data, _MUC_CAP, "Tab 6 (bổ sung)", "6"):
@@ -852,8 +857,8 @@ def ai_execute(payload: dict = Body(...)):
                 "★★★ ĐIỀU QUAN TRỌNG NHẤT — ĐỌC TRƯỚC TIÊN ★★★\n"
                 "Bảy thư viện sau ĐÃ CÓ SẴN dưới dạng biến toàn cục khi file chạy, do hệ "
                 "thống tự chèn vào chỗ dấu <script>/*__SVWS_THREE__*/</script>:\n"
-                "  THREE · SVWSKT · SVWS3D · SVWSPID · SVWSGA · SVWSCHE · SVWSVT · SVWSDIEN · "
-                "SVWSCM  (kèm LOGO công ty thật ở biến window.SVWS_LOGO)\n"
+                "  THREE · SVWSKT · SVWSSO · SVWS3D · SVWSPID · SVWSGA · SVWSCHE · SVWSVT · "
+                "SVWSDIEN · SVWSCM  (kèm LOGO công ty thật ở window.SVWS_LOGO)\n"
                 "TUYỆT ĐỐI KHÔNG được tự viết lại chúng. KHÔNG viết "
                 "'const SVWSGA = (function(){…})();' hay bất kỳ khai báo nào đặt tên "
                 "trùng bảy tên trên — khai báo trong file sẽ CHE MẤT bản thật, và bản "
@@ -1085,6 +1090,31 @@ def ai_execute(payload: dict = Body(...)):
                 "bao nhiêu rồi hạ xuống đâu, có đánh dấu co 90°, vị trí giá đỡ, cao trình "
                 "giá và trình tự lắp. Nút in công đoạn PHẢI in cả bản vẽ này (lấy riêng "
                 "bằng V.veCongDoan(c) nếu cần), không chỉ in bảng vật tư.\n"
+                "- BA SỔ GỐC — khai báo TẤT CẢ ở đây, đừng rải trong mã:\n"
+                "    const SO = SVWSSO.tao({\n"
+                "      thietBi:[{tag,ten,loai,sl,dau,d,h,hLop,kW,kieuDien,ghi}…],\n"
+                "      tuyen:  [{ma,tu,den,dv,dn,ap,ghi}…],\n"
+                "      dungCu: [{tag,mo,gan,tin,dai,dv,nguong}…],\n"
+                "      suaDuoc:true, khiDoi: veLaiTatCa });\n"
+                "    SO.gan(elBaSo);            // ba bảng SỬA ĐƯỢC ngay trong tool\n"
+                "    const EQUIP = SO.EQUIP(), PIPES = SO.PIPES();\n"
+                "    SO.taiDien().forEach(t => DL.tai(t));   // tủ điện suy từ cột kW\n"
+                "    SO.kenhIO().forEach(m => IO.module(m)); // bảng I/O suy từ sổ đo\n"
+                "  loai: nguon · tank · vessel · filter · mixedbed · cartridge · pump · "
+                "dosing · roskid · edi · uv · panel.  dau: song (chạy đồng thời) · "
+                "duty (1 chạy 1 dự phòng) · noitiep.  gan: tag thiết bị HOẶC mã tuyến.\n"
+                "  Điểm cấp nước khai HẲN một dòng loai:'nguon' (mặt bích chờ của nhà "
+                "máy) — đừng để bể cấp tự làm điểm cấp, vì bể có tuyến tuần hoàn quay "
+                "về thì bộ kiểm không biết đâu là nguồn.\n"
+                "  veLaiTatCa phải dựng lại 3D · P&ID · tủ điện · bảng I/O từ SO, để "
+                "sửa một ô là mọi tab đổi theo. SO.kiemTra().loi PHẢI RỖNG mới phát hành.\n"
+                "  ★ NÚT LƯU JSON PHẢI GHI BA SỔ: "
+                "SVWSVT.xuatCauHinh(design, params, SO.xuat()) — trường \"so\" trong "
+                "file cấu hình. Người thiết kế nạp file đó về phiếu trong sổ đăng ký; "
+                "thiếu nó thì lần sinh tool sau mọi chỉnh sửa của họ bay sạch.\n"
+                "  ★ NẾU ĐỀ BÀI ĐÃ KÈM KHỐI 'BA SỔ GỐC ĐÃ CHỐT': dán y nguyên khối "
+                "JSON đó vào tool, TUYỆT ĐỐI KHÔNG tự nghĩ ra danh sách thiết bị hay "
+                "đường ống khác — đó là bản người thiết kế đã sửa và duyệt.\n"
                 "- BA QUY TẮC KHAI BÁO cho P&ID — làm đúng thì phần Kiểm tra P&ID "
                 "sạch lỗi ngay lượt đầu:\n"
                 "  (1) MỖI KÊNH ĐO khai rõ thiết bị nó gắn vào:\n"

@@ -94,6 +94,20 @@
   .des-tools .note{margin-left:auto;font-size:11.5px;color:var(--muted);}
   @media(max-width:720px){ .dname{display:none;} .dcode{min-width:120px;} }
   .dcard-head{display:flex;align-items:center;gap:10px;background:#EAF1F7;border-bottom:1px solid var(--line);padding:7px 13px;flex-wrap:wrap;}
+  .dso{margin:10px 0 4px;padding:10px 12px;border:1px solid #D8E2EC;border-radius:6px;
+       background:#F7FAFC;}
+  .dso-dau{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:8px;}
+  .dso-dau b{font-size:13px;color:var(--navy);}
+  .dso-co{font-size:12px;color:#1F7A4D;font-weight:600;}
+  .dso-khong{font-size:12px;color:#8A6414;}
+  .dso-ngay{font-size:11.5px;color:#6B7C8D;margin-left:auto;}
+  .dso-nut{display:flex;gap:8px;flex-wrap:wrap;}
+  .dso-nut button,.dso-nap{font:600 12px inherit;padding:5px 11px;border-radius:5px;
+       border:1px solid #B9C7D4;background:#fff;color:var(--navy);cursor:pointer;}
+  .dso-nut button:hover,.dso-nap:hover{background:#EEF4FA;}
+  .dso-nut button.del{border-color:#E2B6B2;color:#B3271E;}
+  .dso-nut button.del:hover{background:#FDEEEC;}
+  .dso-ghi{margin-top:8px;font-size:12px;color:#5B6B7D;line-height:1.5;}
   .dcard-code{font-weight:700;font-size:14px;color:var(--navy);background:transparent;border:none;border-bottom:1px dashed #B9C7D4;outline:none;font-family:inherit;min-width:160px;padding:2px 4px;}
   .dcard-code:focus{border-bottom-color:var(--cyan);}
   .dstatus{font-family:inherit;font-size:11px;font-weight:700;border-radius:99px;padding:3px 10px;border:1px solid var(--navy-2);color:var(--navy-2);background:#fff;cursor:pointer;}
@@ -470,6 +484,7 @@ function renderDesigns(){
         <div class="dfield full"><label>Thông số chính</label><textarea rows="2" oninput="autoGrow(this);data.designs[${di}].params=this.value;touch()">${esc(d.params)}</textarea></div>
         <div class="dfield full"><label>Yêu cầu riêng của thiết kế này</label><textarea rows="2" oninput="autoGrow(this);data.designs[${di}].notes=this.value;touch()">${esc(d.notes)}</textarea></div>
       </div>
+      ${khoiBaSo(d, di)}
       <div class="dcard-actions">
         <button class="ai" onclick="openAI(${di})">🤖 AI soạn đề bài</button>
         <button onclick="quickPrompt(${di})">📄 Đề bài nhanh (không AI)</button>
@@ -480,6 +495,113 @@ function renderDesigns(){
   document.querySelectorAll('#designs textarea').forEach(autoGrow);
   updateCount();
 }
+/* ================= BA SỔ GỐC CỦA PHIẾU THIẾT KẾ =================
+   Người thiết kế sửa ba sổ ngay trong tool. Nếu bản sửa đó không quay về đây
+   thì lần sinh lại tool sau, AI khai lại từ đầu và mọi chỉnh sửa bay sạch —
+   mà sinh lại tool là việc xảy ra thường xuyên. Nạp file cấu hình của tool
+   vào đây một lần là sổ được giữ, và mọi đề bài về sau đều mang nó theo. */
+function demSo(so){
+  if(!so) return null;
+  return {tb:(so.thietBi||[]).length, tu:(so.tuyen||[]).length,
+          dc:(so.dungCu||[]).length};
+}
+function khoiBaSo(d, di){
+  const n = demSo(d.so);
+  return `<div class="dso">
+    <div class="dso-dau">
+      <b>Ba sổ gốc</b>
+      ${n ? `<span class="dso-co">${n.tb} thiết bị · ${n.tu} tuyến ống ·
+             ${n.dc} dụng cụ đo</span>
+             <span class="dso-ngay">nạp ${ngayVN(d.soNgay)||'—'}</span>`
+          : `<span class="dso-khong">chưa có — đề bài sẽ để AI tự khai</span>`}
+    </div>
+    <div class="dso-nut">
+      <label class="dso-nap">⬆ Nạp từ file cấu hình của tool
+        <input type="file" accept=".json,application/json" hidden
+          onchange="napBaSo(${di}, this.files[0]); this.value='';">
+      </label>
+      ${n ? `<button onclick="xemBaSo(${di})">👁 Xem sổ</button>
+             <button onclick="taiBaSo(${di})">⬇ Tải sổ</button>
+             <button class="del" onclick="xoaBaSo(${di})">✕ Bỏ sổ</button>` : ''}
+    </div>
+    ${n ? '' : `<div class="dso-ghi">Mở tool → sửa ba sổ → bấm <b>Lưu JSON</b> →
+      nạp file đó vào đây. Từ lần sinh tool sau, đề bài mang sẵn ba sổ này và AI
+      không được khai lại.</div>`}
+  </div>`;
+}
+/* Nhận cả file cấu hình đầy đủ của tool lẫn file chỉ có ba sổ. */
+function docBaSo(j){
+  if(!j || typeof j !== 'object') return null;
+  const ng = j.so && typeof j.so === 'object' ? j.so : j;
+  if(!Array.isArray(ng.thietBi) || !Array.isArray(ng.tuyen)) return null;
+  return {thietBi:ng.thietBi, tuyen:ng.tuyen, dungCu:ng.dungCu||[]};
+}
+async function napBaSo(di, f){
+  if(!f) return;
+  let j;
+  try{ j = JSON.parse(await f.text()); }
+  catch(e){ alert('File không phải JSON hợp lệ: '+e.message); return; }
+  const so = docBaSo(j);
+  if(!so){
+    alert('Không thấy ba sổ trong file này.\n\nCần file cấu hình do tool lưu ra '+
+          '(có trường "so"), hoặc một file chỉ chứa {thietBi, tuyen, dungCu}.');
+    return;
+  }
+  const kt = await kiemBaSo(so);
+  if(kt && kt.loi.length &&
+     !confirm('Ba sổ này còn '+kt.loi.length+' chỗ chưa đạt:\n\n· '+
+              kt.loi.slice(0,6).join('\n· ')+
+              (kt.loi.length>6 ? '\n· …' : '')+
+              '\n\nVẫn nạp vào phiếu?')) return;
+  data.designs[di].so = so;
+  data.designs[di].soNgay = hnay();
+  touch(); renderDesigns();
+}
+/* Kiểm bằng chính thư viện mà tool dùng, để sổ đăng ký và tool nói cùng một giọng. */
+let soLibDaNap = null;
+function napSVWSSO(){
+  if(soLibDaNap) return soLibDaNap;
+  soLibDaNap = new Promise((ok, hong)=>{
+    if(window.SVWSSO) return ok(window.SVWSSO);
+    const sc = document.createElement('script');
+    sc.src = '/registry/svwsso.js' + LIB_V;
+    sc.onload = ()=>ok(window.SVWSSO);
+    sc.onerror = ()=>hong(new Error('không nạp được svwsso.js'));
+    document.head.appendChild(sc);
+  });
+  return soLibDaNap;
+}
+async function kiemBaSo(so){
+  try{
+    const L = await napSVWSSO();
+    return L.tao(so).kiemTra();
+  }catch(e){ return null; }
+}
+async function xemBaSo(di){
+  const d = data.designs[di], so = d.so;
+  const L = await napSVWSSO().catch(()=>null);
+  if(!L){ alert('Không nạp được thư viện để hiện sổ.'); return; }
+  const S = L.tao(so);
+  const kt = S.kiemTra();
+  document.getElementById('modalTitle').textContent = 'Ba sổ gốc — ' + (d.code||'');
+  modalBody.innerHTML =
+    `<div class="modal-note">Sổ này đi kèm mọi đề bài của phiếu. Muốn sửa thì mở
+     tool, sửa trong đó rồi nạp lại file cấu hình.</div>
+     <div style="max-height:62vh;overflow:auto">${L.CSS_TAG}${S.tatCa()}</div>`;
+  modalBg.classList.remove('tab-hidden');
+}
+function taiBaSo(di){
+  const d = data.designs[di];
+  dl(JSON.stringify({type:'svws-ba-so', code:d.code, so:d.so}, null, 1),
+    (d.code||'SVWS').replace(/[^\w\-\.]+/g,'_')+'-ba-so.json');
+}
+function xoaBaSo(di){
+  if(!confirm('Bỏ ba sổ khỏi phiếu "'+data.designs[di].code+'"?\n'+
+              'Lần sinh tool sau, AI sẽ khai lại từ đầu.')) return;
+  delete data.designs[di].so; delete data.designs[di].soNgay;
+  touch(); renderDesigns();
+}
+
 /* Đổi mã thì phải chuyển cả trạng thái đang mở sang mã mới, không thì phiếu tự đóng. */
 function doiMaPhieu(di, maMoi){
   const cu = data.designs[di].code;
@@ -620,6 +742,26 @@ function standardText(){
   });
   return L.join('\n');
 }
+/* Ba sổ vào ĐỀ BÀI dạng JSON nguyên văn. Diễn giải lại bằng lời thì AI hiểu
+   khác đi; đưa thẳng dữ liệu thì nó chỉ việc dán vào SVWSSO.tao(). */
+function baSoText(d){
+  if(!d.so) return '';
+  const n = demSo(d.so);
+  return ['','═════ BA SỔ GỐC ĐÃ CHỐT — DÙNG NGUYÊN VĂN, KHÔNG KHAI LẠI ═════',
+    'Người thiết kế đã sửa và duyệt ba sổ này trong tool ('+n.tb+' thiết bị, '+
+    n.tu+' tuyến ống, '+n.dc+' dụng cụ đo). TUYỆT ĐỐI KHÔNG tự nghĩ ra danh sách',
+    'thiết bị hay đường ống khác. Dán y nguyên khối JSON dưới đây vào tool rồi gọi:',
+    '',
+    '  const SO = SVWSSO.tao({ ...BA_SO, suaDuoc:true, khiDoi: veLaiTatCa });',
+    '  SO.gan(elBaSo);',
+    '  const EQUIP = SO.EQUIP(), PIPES = SO.PIPES();',
+    '',
+    'const BA_SO = ' + JSON.stringify(d.so) + ';',
+    '',
+    'Khi người dùng bấm Lưu JSON, file cấu hình PHẢI mang theo trường "so" lấy từ',
+    'SO.xuat() — thiếu nó thì lần sinh tool sau mọi chỉnh sửa bay sạch.',
+    '═════════════════════════════════════════════════════════════════'].join('\n');
+}
 function designText(d){
   return ['• Mã thiết kế: '+(d.code||'—'),
     '• Tên thiết kế: '+(d.name||'—'),
@@ -627,7 +769,8 @@ function designText(d){
     '• Công suất: '+(d.capacity||'—'),
     '• Dự án / Khách hàng: '+(d.project||'—'),
     '• Thông số chính:\n'+(d.params||'—').split('\n').map(x=>'    '+x).join('\n'),
-    '• Yêu cầu riêng:\n'+(d.notes||'—').split('\n').map(x=>'    '+x).join('\n')].join('\n');
+    '• Yêu cầu riêng:\n'+(d.notes||'—').split('\n').map(x=>'    '+x).join('\n'),
+    baSoText(d)].filter(Boolean).join('\n');
 }
 function composeFinal(partA){
   return ['ĐỀ BÀI: TẠO TOOL THIẾT KẾ THEO CHUẨN SVWS "3D DESIGN"',
@@ -666,15 +809,15 @@ let execBlobUrl = null, brokenHTML = null, brokenErr = '';
 // khoan dung: AI có thể viết thẻ kèm thuộc tính hoặc thừa khoảng trắng
 const THREE_MARK = /<script[^>]*>\s*\/\*\s*__SVWS_THREE__\s*\*\/\s*<\/script>/i;
 let libCache = null;
-const LIB_FILE = ['three.js','svwskt.js','svws3d.js','svwspid.js','svwsga.js',
-                  'svwsdien.js','svwsche.js','svwsvt.js','svwscm.js'];
+const LIB_FILE = ['three.js','svwskt.js','svwsso.js','svws3d.js','svwspid.js',
+                  'svwsga.js','svwsdien.js','svwsche.js','svwsvt.js','svwscm.js'];
+// Gắn phiên bản deploy vào URL: Cloudflare cache theo đuôi .js, kể cả câu trả
+// lời 404. Thêm thư viện mới mà giữ nguyên URL thì client còn nhận 404 cũ nhiều giờ.
+const LIB_V = '__LIB_VER__'.indexOf('LIB_VER') >= 0 ? '' : '?v=__LIB_VER__';
 
 async function napLib(){
   if(libCache) return libCache;
-  // Gắn phiên bản deploy vào URL: Cloudflare cache theo đuôi .js, kể cả 404.
-  // Thêm thư viện mới mà giữ nguyên URL thì client còn nhận 404 cũ nhiều giờ.
-  const v = '__LIB_VER__'.indexOf('LIB_VER') >= 0 ? '' : '?v=__LIB_VER__';
-  const rs = await Promise.all(LIB_FILE.map(t => fetch('/registry/'+t+v)));
+  const rs = await Promise.all(LIB_FILE.map(t => fetch('/registry/'+t+LIB_V)));
   rs.forEach((r,i) => { if(!r.ok) throw new Error(LIB_FILE[i]+' HTTP '+r.status); });
   const vb = await Promise.all(rs.map(r => r.text()));
   libCache = { three: vb[0], svws: vb.slice(1).join('\n;\n') };
@@ -687,7 +830,7 @@ async function napLib(){
    Bốn bộ dựng của SVWS (3D · P&ID · GA · ĐIỆN) cũng chèn ở đây; thiếu chúng thì
    tool báo "SVWSPID is not defined" và tab tương ứng ra trang trắng. */
 async function injectThree(html){
-  const dungSvws  = /\bSVWS(3D|PID|GA|DIEN|CHE|VT|CM|KT)\s*\./.test(html);
+  const dungSvws  = /\bSVWS(3D|PID|GA|DIEN|CHE|VT|CM|KT|SO)\s*\./.test(html);
   const dungThree = THREE_MARK.test(html) || /\bTHREE\s*\./.test(html)
                     || /\bSVWS3D\s*\./.test(html);
   if(!dungThree && !dungSvws) return {html, injected:false};
@@ -712,7 +855,7 @@ async function injectThree(html){
 }
 
 const TEN_LIB = ['SVWS3D','SVWSPID','SVWSGA','SVWSCHE','SVWSVT','SVWSDIEN',
-                 'SVWSCM','SVWSKT'];
+                 'SVWSCM','SVWSKT','SVWSSO'];
 
 /* Tìm dấu chấm phẩy kết thúc một câu lệnh, bỏ qua chuỗi và chú thích.
    Chỗ dễ sai: `${...}` trong chuỗi mẫu — phần trong ngoặc là MÃ chứ không phải

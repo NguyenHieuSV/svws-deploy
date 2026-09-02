@@ -1038,10 +1038,17 @@
      * đăng ký không đọc nổi. Dùng đúng hàm này để lưu, và nhận lại bằng
      * SVWSVT.docCauHinh() khi mở file.
      * ================================================================ */
-    function xuatCauHinh(design, params) {
+    /**
+     * File cấu hình của một thiết kế. THAM SỐ so LÀ QUAN TRỌNG NHẤT: đó là ba
+     * sổ gốc (thiết bị · tuyến ống · dụng cụ đo) mà người thiết kế đã sửa trong
+     * tool. Không mang nó theo thì mọi chỉnh sửa bay sạch ở lần sinh lại tool
+     * sau — mà sinh lại tool là việc xảy ra thường xuyên.
+     */
+    function xuatCauHinh(design, params, so3) {
       return {
         type: 'svws-3d-design',
         design: design || {},
+        so: so3 || null,
         params: params || {},
         stages: congDoanDayDu().map(function (c) {
           var s = { t: c.ma + ' · ' + c.ten, kind: c.kind,
