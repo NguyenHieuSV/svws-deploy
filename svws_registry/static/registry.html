@@ -932,6 +932,32 @@ function boThuVienTuViet(html){
    Cú pháp vẫn sạch, mở ra mới thấy tab trắng — và vì các tool dựng hết tab
    trong một lượt nên một lỗi ở tab 3 làm trắng luôn tab 4 đến 9.
    Ở đây nạp thật vào iframe ẩn, bấm hết các tab, thu lỗi và đếm tab rỗng. */
+/* Chạy thử bắt được tool CHẾT, nhưng không bắt được tool CHẠY MÀ SAI CHUẨN.
+   Vừa gặp đúng ca đó: tool mở ra đẹp, mọi tab có nội dung, nhưng AI bỏ qua ba
+   sổ nên số cột lọc khai 2 mà mô hình dựng 1, còn vỏ lọc tinh và bơm cao áp thì
+   không có trong sổ thiết bị — bản vẽ nói một đằng, bảng thông số nói một nẻo.
+   Mấy thứ dưới đây là những điều KHÔNG THỂ suy ra từ hình, phải soi trong mã. */
+const CAN_CO = [
+  {ma:'SVWSSO.tao(', ten:'Ba sổ gốc',
+   vi:'thiết bị · tuyến ống · dụng cụ đo phải khai trong ba sổ, không rải trong mã. '+
+      'Thiếu nó thì số lượng cột lọc, cụm bơm và thiết bị bị bỏ sót không ai bắt được.'},
+  {ma:'suaDuoc', ten:'Ba sổ sửa được tại chỗ',
+   vi:'phải gọi SVWSSO.tao({… suaDuoc:true, khiDoi:<hàm vẽ lại>}) rồi SO.gan(el) '+
+      'để người thiết kế sửa ngay trong tool.'},
+  {ma:'.EQUIP(', ten:'Bản vẽ lấy thiết bị từ sổ',
+   vi:'EQUIP và PIPES phải suy từ SO.EQUIP() / SO.PIPES(), không khai tay lần hai.'},
+  {ma:'SVWSKT.dat(', ten:'Khung tên và logo công ty',
+   vi:'mọi bản vẽ, tab và tờ in phải mang khung tên kèm logo Sóng Việt.'},
+  {ma:'veAnToan(', ten:'Vòng bảo vệ mỗi tab',
+   vi:'một hàm dựng ném lỗi không được làm trắng cả tool.'},
+  {ma:'.xuat()', ten:'Lưu ba sổ vào file cấu hình',
+   vi:'nút Lưu JSON phải ghi SO.xuat() vào trường "so"; thiếu thì lần sinh lại '+
+      'tool sau mọi chỉnh sửa của người thiết kế bay sạch.'}
+];
+function kiemChuan(html){
+  return CAN_CO.filter(x => html.indexOf(x.ma) < 0);
+}
+
 function chayThuTool(html){
   return new Promise(resolve => {
     let xong = false;
@@ -1006,6 +1032,7 @@ async function finalizeTool(html, headline, extraNote){
     }catch(e){}
   }
   html = res.html;
+  const thieuChuan = kiemChuan(html);
   if(thu && (thu.loi.length || thu.tabTrong.length)){
     // giữ lại để nút 🔧 gửi đúng file này kèm mô tả lỗi CHẠY (không phải cú pháp)
     brokenHTML = html;
@@ -1013,7 +1040,14 @@ async function finalizeTool(html, headline, extraNote){
       + (thu.loi.length ? 'Lỗi JavaScript lúc chạy: ' + thu.loi.slice(0,3).join(' | ') + '. ' : '')
       + (thu.tabTrong.length ? 'Các tab không hiện nội dung: ' + thu.tabTrong.join(', ') + '. ' : '')
       + 'Nguyên nhân hay gặp: gọi hàm không có trong thư viện SVWS3D/SVWSPID/SVWSGA/'
-      + 'SVWSCHE/SVWSVT/SVWSDIEN/SVWSCM/SVWSKT, hoặc hàm dựng một tab ném lỗi làm chết luôn các tab sau.';
+      + 'SVWSCHE/SVWSVT/SVWSDIEN/SVWSCM/SVWSKT/SVWSSO, hoặc hàm dựng một tab ném lỗi làm chết luôn các tab sau.';
+  }
+  if(thieuChuan.length){
+    brokenHTML = html;
+    brokenErr = (brokenErr ? brokenErr + ' ' : '') +
+      'Tool CHƯA THEO CHUẨN, thiếu: ' +
+      thieuChuan.map(x => x.ten + ' (' + x.ma + ')').join(' · ') + '. ' +
+      thieuChuan.map(x => x.vi).join(' ');
   }
   if(execBlobUrl) URL.revokeObjectURL(execBlobUrl);
   execBlobUrl = URL.createObjectURL(new Blob([html], {type:'text/html;charset=utf-8'}));
@@ -1030,6 +1064,19 @@ async function finalizeTool(html, headline, extraNote){
           : `⚠ AI đã tự viết lại ${go.daBo.length} thư viện (${esc(go.daBo.join(', '))}) đè lên bản chuẩn —
              đã gỡ phần tự viết để tool dùng đúng thư viện của công ty.`}
       </div>` : ''}
+      ${thieuChuan.length ? `
+        <div class="ai-block" style="border-left-color:var(--warn,#b8860b);margin-top:7px">
+          <b style="color:var(--warn,#b8860b)">⚠ Tool chạy được nhưng CHƯA THEO CHUẨN</b>
+          <div style="font-size:12px;margin-top:4px">Thiếu ${thieuChuan.length} điều bắt buộc:
+            ${thieuChuan.map(x=>'<br>• <b>'+esc(x.ten)+'</b> — '+esc(x.vi)).join('')}
+          </div>
+          <div style="font-size:12px;margin-top:5px">Hậu quả hay gặp: số lượng cột lọc
+            hoặc cụm bơm khai một đằng vẽ một nẻo, thiết bị bị bỏ sót khỏi bản vẽ mà
+            không phép kiểm nào bắt được.</div>
+          <div class="btn-row" style="margin-top:6px">
+            <button class="ai" onclick="repairDesign()">🔧 Nhờ AI làm lại cho đúng chuẩn</button>
+          </div>
+        </div>` : ''}
       ${thu ? (thu.loi.length || thu.tabTrong.length ? `
         <div class="ai-block" style="border-left-color:var(--err,#b3271e);margin-top:7px">
           <b style="color:var(--err,#b3271e)">⚠ Chạy thử tool phát hiện lỗi — ĐỪNG giao file này cho khách</b>
