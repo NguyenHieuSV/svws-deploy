@@ -144,6 +144,18 @@
   .modal-body textarea:focus{border-color:var(--cyan);background:#fff;outline:none;}
   #finalPrompt{font-family:"IBM Plex Mono",Consolas,monospace;font-size:11px;height:34vh;}
   .modal-note{font-size:12px;color:var(--muted);}
+  .cp-o{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;}
+  .cp-o>div{border:1px solid var(--line);border-radius:6px;padding:9px 12px;background:#F7FAFC;}
+  .cp-o i{display:block;font-style:normal;font-size:10.5px;color:var(--muted);
+       text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px;}
+  .cp-o b{font-size:19px;color:var(--navy);font-variant-numeric:tabular-nums;}
+  .cp-bang{width:100%;border-collapse:collapse;font-size:12px;margin-top:4px;
+       font-variant-numeric:tabular-nums;}
+  .cp-bang th{text-align:left;font-size:10px;text-transform:uppercase;color:var(--muted);
+       letter-spacing:.4px;padding:4px 7px;border-bottom:1px solid var(--line);}
+  .cp-bang td{padding:5px 7px;border-bottom:1px solid #EDF2F7;}
+  .cp-bang .p{text-align:right;}
+  .cp-bang .b{font-weight:700;color:var(--navy);}
   .btn-row{display:flex;gap:8px;flex-wrap:wrap;}
   .hist-row{display:flex;gap:10px;align-items:center;border-bottom:1px dashed var(--line);padding:7px 2px;font-size:12.5px;}
   .hist-row .t{color:var(--muted);min-width:150px;}
@@ -176,6 +188,7 @@
 
 <div class="toolbar">
   <button class="accent" onclick="openHistory()">🕘 Lịch sử</button>
+  <button onclick="showChiPhi()" id="btnChiPhi" title="Chi tiêu AI">💰 Chi phí</button>
   <button onclick="exportJSON()">⬇ Xuất JSON</button>
   <button onclick="document.getElementById('jsonInput').click()">⬆ Nhập JSON</button>
   <input type="file" id="jsonInput" accept=".json" style="display:none">
@@ -874,6 +887,58 @@ function composeFinal(partA){
 
 /* ================= MODAL ================= */
 const modalBg=document.getElementById('modalBg'), modalBody=document.getElementById('modalBody');
+/* Chi tiêu AI: sổ của chính app, cộng từ số token mỗi phản hồi trả về. Console
+   của Anthropic cho xem tổng của cả tổ chức nhưng không nói được tiền ấy tiêu
+   cho THIẾT KẾ NÀO — cái đó chỉ app mới biết. */
+function tienUSD(x){ return '$' + (x||0).toFixed(2); }
+function bangChiPhi(o, ten, nhan){
+  const ds = Object.entries(o||{}).sort((a,b)=>b[1].usd-a[1].usd).slice(0,12);
+  if(!ds.length) return '';
+  return `<div style="margin-top:12px"><label>${esc(ten)}</label>
+    <table class="cp-bang"><tbody>${ds.map(([k,v])=>
+      `<tr><td>${esc(k)}</td><td class="p">${v.lan} ${esc(nhan)}</td>
+       <td class="p b">${tienUSD(v.usd)}</td></tr>`).join('')}</tbody></table></div>`;
+}
+async function showChiPhi(){
+  document.getElementById('modalTitle').textContent = 'Chi phí AI';
+  modalBody.innerHTML = '<div class="modal-note"><span class="spin"></span>Đang tính…</div>';
+  modalBg.classList.remove('tab-hidden');
+  try{
+    const r = await fetch('/registry/api/chiphi?ngay=90');
+    const d = await r.json();
+    if(!r.ok) throw new Error(d.detail || ('HTTP '+r.status));
+    const g = d.don_gia[d.model_dang_dung] || {};
+    modalBody.innerHTML = `
+      <div class="cp-o">
+        <div><i>Hôm nay</i><b>${tienUSD(d.hom_nay)}</b></div>
+        <div><i>Tháng này</i><b>${tienUSD(d.thang_nay)}</b></div>
+        <div><i>90 ngày</i><b>${tienUSD(d.tong)}</b></div>
+        <div><i>Số lần gọi</i><b>${d.so_lan}</b></div>
+      </div>
+      <div class="modal-note">Model đang dùng: <b>${esc(d.model_dang_dung)}</b>
+        — ${g.vao||'?'} USD/triệu token vào, ${g.ra||'?'} USD/triệu token ra.
+        Đây là sổ của app, cộng từ số token mỗi lần gọi; con số tổng nên đối chiếu
+        với Console của Anthropic vì đơn giá có thể đổi.</div>
+      ${bangChiPhi(d.theo_viec, 'Theo loại việc', 'lần')}
+      ${bangChiPhi(d.theo_phieu, 'Theo phiếu thiết kế', 'lần')}
+      ${bangChiPhi(d.theo_ngay, 'Theo ngày', 'lần')}
+      ${d.gan_day.length ? `<div style="margin-top:12px"><label>Các lần gọi gần đây</label>
+        <table class="cp-bang"><thead><tr><th>Lúc</th><th>Việc</th><th>Phiếu</th>
+        <th class="p">Vào</th><th class="p">Ra</th><th class="p">Tiền</th></tr></thead>
+        <tbody>${d.gan_day.map(x=>`<tr><td>${esc(ngayGio(x.at))}</td>
+          <td>${esc(x.viec)}</td><td>${esc(x.ma||'—')}</td>
+          <td class="p">${x.tv.toLocaleString('vi')}</td>
+          <td class="p">${x.tr.toLocaleString('vi')}</td>
+          <td class="p b">${tienUSD(x.usd)}</td></tr>`).join('')}</tbody></table></div>` : ''}`;
+  }catch(e){
+    modalBody.innerHTML = '<div class="ai-block">Không lấy được chi phí: '+esc(e.message)+'</div>';
+  }
+}
+function ngayGio(iso){
+  try{ const d=new Date(iso);
+    return d.toLocaleString('vi-VN',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
+  }catch(e){ return iso; }
+}
 function closeModal(){
   modalBg.classList.add('tab-hidden');
   const m = modalBg.querySelector('.modal');

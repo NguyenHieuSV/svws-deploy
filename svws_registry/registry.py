@@ -80,6 +80,25 @@ class RegistryDoc(SQLModel, table=True):
     updated_by: str = ""
 
 
+class RegistryUsage(SQLModel, table=True):
+    """Mỗi lần gọi AI một dòng — để biết tiền tiêu cho việc gì, phiếu nào.
+
+    Đơn giá đổi theo thời gian nên LƯU LUÔN đơn giá lúc gọi: tính lại sau này
+    bằng bảng giá mới thì con số lịch sử sai, mà hoá đơn thì đã trả rồi.
+    """
+    __tablename__ = "svws_registry_usage"
+    id: Optional[int] = Field(default=None, primary_key=True)
+    at: str = Field(default_factory=_now, index=True)
+    viec: str = ""            # sinh-tool · soan-so · sua-loi · soan-de-bai · doc-sow
+    model: str = ""
+    ma: str = ""              # mã phiếu thiết kế, để quy tiền về từng thiết kế
+    tv: int = 0               # token đầu vào
+    tr: int = 0               # token đầu ra
+    tcache: int = 0           # token đọc từ cache (rẻ hơn)
+    usd: float = 0.0
+    ai: str = ""              # người bấm
+
+
 class RegistryRevision(SQLModel, table=True):
     """Mỗi lần lưu tạo 1 bản snapshot để tra lịch sử / khôi phục."""
     __tablename__ = "svws_registry_revision"
@@ -721,7 +740,8 @@ def _loi_ai_vn(status: int, body: str) -> str:
 
 
 def _goi_ai_json(api_key: str, model: str, content, max_tokens: int,
-                 system: str = "", timeout: float = 300.0, tra_tho: bool = False):
+                 system: str = "", timeout: float = 300.0, tra_tho: bool = False,
+                 viec: str = "", ma: str = ""):
     """Gọi Claude và ép câu trả lời về JSON.
 
     BẪY: token SUY NGHĨ (adaptive thinking) TÍNH VÀO max_tokens. Để trần thấp thì
@@ -750,6 +770,9 @@ def _goi_ai_json(api_key: str, model: str, content, max_tokens: int,
         raise HTTPException(502, _loi_ai_vn(resp.status_code, resp.text))
 
     out = resp.json()
+    u = out.get("usage") or {}
+    _ghi_dung(viec or "goi-ai", model, u.get("input_tokens"), u.get("output_tokens"),
+              u.get("cache_read_input_tokens"), ma)
     text = "\n".join(b.get("text", "") for b in out.get("content", [])
                      if b.get("type") == "text")
     stop = out.get("stop_reason")
@@ -773,6 +796,47 @@ def _goi_ai_json(api_key: str, model: str, content, max_tokens: int,
                                  f"Rút gọn file rồi thử lại, hoặc tăng trần token.")
     raise HTTPException(502, f"AI trả lời sai định dạng (stop={stop}, {used} token). "
                              f"Nội dung nhận được: {clean[:200] or '(rỗng)'}")
+
+
+# Đơn giá USD cho 1 triệu token, theo bảng giá công bố. Giá đổi thì sửa ở đây
+# hoặc đặt biến môi trường ANTHROPIC_GIA="model:vào:ra,model:vào:ra".
+_GIA = {
+    "claude-opus-5":   (5.0, 25.0),
+    "claude-opus-4-8": (5.0, 25.0),
+    "claude-sonnet-5": (2.0, 10.0),
+    "claude-sonnet-4-6": (3.0, 15.0),
+    "claude-haiku-4-5": (1.0, 5.0),
+    "claude-fable-5":  (10.0, 50.0),
+}
+
+
+def _gia_cua(model: str):
+    for cap in (os.getenv("ANTHROPIC_GIA") or "").split(","):
+        p = cap.split(":")
+        if len(p) == 3 and p[0].strip() == model:
+            try:
+                return float(p[1]), float(p[2])
+            except ValueError:
+                pass
+    return _GIA.get(model, (2.0, 10.0))
+
+
+def _ghi_dung(viec: str, model: str, tv, tr, tcache=0, ma: str = "", ai: str = ""):
+    """Ghi một lần gọi vào sổ chi tiêu. KHÔNG được làm hỏng việc chính: lỗi ghi
+    sổ thì bỏ qua, chứ đừng để chuyện kế toán làm chết việc sinh bản vẽ."""
+    try:
+        tv = int(tv or 0); tr = int(tr or 0); tcache = int(tcache or 0)
+        if not (tv or tr):
+            return
+        gv, gr = _gia_cua(model)
+        usd = (tv * gv + tr * gr + tcache * gv * 0.1) / 1_000_000
+        with Session(engine) as s:
+            s.add(RegistryUsage(viec=viec, model=model, ma=(ma or "")[:60],
+                                tv=tv, tr=tr, tcache=tcache,
+                                usd=round(usd, 6), ai=(ai or "")[:80]))
+            s.commit()
+    except Exception:
+        pass
 
 
 def _sections_summary(data: dict) -> str:
@@ -1367,6 +1431,11 @@ def ai_execute(payload: dict = Body(...)):
                 "- Lỗi mạng thì báo: 'Cần kết nối mạng để chỉnh bằng AI — các chức năng "
                 "còn lại vẫn chạy offline 100%.'")
 
+    # Mã phiếu lấy từ dòng đầu đề bài để quy tiền về đúng thiết kế.
+    m_ma = re.search(r"Mã thiết kế:\s*([^\n]+)", prompt)
+    ma_phieu = (m_ma.group(1).strip() if m_ma else "")[:60]
+    _dung = {}
+
     def gen():
         # Model suy nghĩ (adaptive thinking) có thể vài phút trước khi viết chữ
         # đầu tiên; Render cắt stream im lặng quá lâu → phải bơm "nhịp tim" (dấu
@@ -1410,6 +1479,13 @@ def ai_execute(payload: dict = Body(...)):
                     except json.JSONDecodeError:
                         continue
                     etype = ev.get("type")
+                    if etype == "message_start":
+                        # Token đầu vào chỉ báo một lần ở đây; đầu ra cộng dồn và
+                        # chốt ở message_delta.
+                        _dung["tv"] = ((ev.get("message") or {}).get("usage")
+                                       or {}).get("input_tokens", 0)
+                        _dung["tc"] = ((ev.get("message") or {}).get("usage")
+                                       or {}).get("cache_read_input_tokens", 0)
                     if etype == "content_block_delta":
                         delta = ev.get("delta", {})
                         if delta.get("type") == "text_delta":
@@ -1425,6 +1501,8 @@ def ai_execute(payload: dict = Body(...)):
                         # dấu này tự biến mất khi file lành lặn.
                         stop = (ev.get("delta") or {}).get("stop_reason")
                         used = (ev.get("usage") or {}).get("output_tokens", "?")
+                        _ghi_dung("sinh-tool", model, _dung.get("tv"), used,
+                                  _dung.get("tc"), ma_phieu)
                         if stop == "max_tokens":
                             them = ("Đây đã là mức tối đa model cho phép. "
                                     if max_tokens >= 128000 else
@@ -1624,6 +1702,48 @@ def claude_proxy(payload: dict = Body(...)):
     return resp.json()
 
 
+@router.get("/api/chiphi")
+def chi_phi(ngay: int = 30):
+    """Chi tiêu AI: hôm nay, tháng này, theo việc, theo phiếu, và các lần gần đây.
+
+    Đây là sổ của CHÍNH APP, cộng từ số token mà mỗi phản hồi trả về. Nó nói
+    được điều mà bảng chi tiêu của Anthropic không nói: tiền ấy tiêu cho thiết
+    kế nào. Con số tổng vẫn nên đối chiếu với Console vì đơn giá có thể đổi.
+    """
+    hnay = _now()[:10]
+    thang = _now()[:7]
+    moc = (datetime.datetime.now(datetime.timezone.utc) -
+           datetime.timedelta(days=max(1, min(ngay, 365)))).strftime("%Y-%m-%d")
+    ra = {"hom_nay": 0.0, "thang_nay": 0.0, "tong": 0.0, "so_lan": 0,
+          "theo_viec": {}, "theo_phieu": {}, "theo_ngay": {}, "gan_day": []}
+    with Session(engine) as s:
+        rows = s.exec(select(RegistryUsage)
+                      .where(RegistryUsage.at >= moc)
+                      .order_by(RegistryUsage.id.desc())).all()
+        for r in rows:
+            ra["tong"] += r.usd
+            ra["so_lan"] += 1
+            if r.at[:10] == hnay:
+                ra["hom_nay"] += r.usd
+            if r.at[:7] == thang:
+                ra["thang_nay"] += r.usd
+            for khoa, gia_tri in (("theo_viec", r.viec or "khác"),
+                                  ("theo_phieu", r.ma or "(không rõ phiếu)"),
+                                  ("theo_ngay", r.at[:10])):
+                o = ra[khoa].setdefault(gia_tri, {"usd": 0.0, "lan": 0})
+                o["usd"] = round(o["usd"] + r.usd, 4)
+                o["lan"] += 1
+        for r in rows[:40]:
+            ra["gan_day"].append({"at": r.at, "viec": r.viec, "ma": r.ma,
+                                  "model": r.model, "tv": r.tv, "tr": r.tr,
+                                  "usd": round(r.usd, 4)})
+    for k in ("hom_nay", "thang_nay", "tong"):
+        ra[k] = round(ra[k], 4)
+    ra["don_gia"] = {m: {"vao": g[0], "ra": g[1]} for m, g in _GIA.items()}
+    ra["model_dang_dung"] = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-5")
+    return ra
+
+
 @router.post("/api/baso")
 def ai_baso(payload: dict = Body(...)):
     """Soạn BA SỔ GỐC từ mô tả thiết kế — trả về dữ liệu, không phải mã.
@@ -1684,10 +1804,12 @@ def ai_baso(payload: dict = Body(...)):
         "Trả về ĐÚNG dạng: {\"thietBi\":[…], \"tuyen\":[…], \"dungCu\":[…], "
         "\"ghi_chu\":\"<những chỗ bạn phải giả định, tối đa 3 câu>\"}"
     )
+    m_ma = re.search(r"Mã thiết kế:\s*([^\n]+)", mo_ta)
     parsed = _goi_ai_json(api_key, model,
                           "MÔ TẢ THIẾT KẾ:\n" + mo_ta[:20000],
                           int(os.getenv("ANTHROPIC_BASO_TOKENS", "16000")),
-                          system=sys_msg, timeout=300.0)
+                          system=sys_msg, timeout=300.0, viec="soan-so",
+                          ma=(m_ma.group(1).strip() if m_ma else ""))
     for k in ("thietBi", "tuyen", "dungCu"):
         if not isinstance(parsed.get(k), list):
             parsed[k] = []
@@ -1736,7 +1858,7 @@ CHỈ trả JSON hợp lệ, không markdown, không giải thích ngoài JSON:
     # câu trả lời không đọc được. Nới lên cho đủ chỗ suy nghĩ lẫn trả lời.
     parsed = _goi_ai_json(api_key, model, user_msg,
                           int(os.getenv('ANTHROPIC_FIX_TOKENS', '32000')),
-                          timeout=300.0)
+                          timeout=300.0, viec="sua-loi")
     reps = [r for r in (parsed.get("replacements") or [])
             if isinstance(r, dict) and r.get("old") and r.get("new") is not None]
     if not reps:
