@@ -702,11 +702,14 @@
       return ds.join(' · ');
     }
 
-    /** Số lượng đặt hàng của một thiết bị (cụm bơm đôi = 2 cái). */
+    /** Số lượng đặt hàng của một thiết bị (cụm bơm đôi = 2 cái).
+     *  Mọi loại DỰNG THEO qty trong mô hình 3D đều phải đếm theo qty ở đây, nếu
+     *  không thì bản vẽ có 2 cột mà BOQ báo giá 1 — sai tiền ngay từ báo giá. */
     function soLuong(e) {
       var t = String(e.type || '').toLowerCase();
       if (t === 'pump') return soBomCua(e.id || e.tag);
-      if (t === 'vessel' || t === 'filter') return Math.max(1, +e.qty || 1);
+      if (t === 'vessel' || t === 'filter' || t === 'mixedbed' || t === 'cartridge')
+        return Math.max(1, +e.qty || 1);
       return 1;
     }
 

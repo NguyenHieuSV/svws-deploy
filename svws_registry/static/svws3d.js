@@ -208,50 +208,115 @@
     return g;
   }
 
-  function vessel(o) {   // cột lọc áp lực: thân trụ + 2 chỏm cầu + chân váy
+  /**
+   * Cột lọc áp lực. qty > 1 thì dựng ĐỦ SỐ CỘT xếp song song kèm ống góp vào và
+   * ống góp ra — "2 cột nối song song" phải nhìn thấy được trên hình.
+   *
+   * Vì sao phải sửa: chanDe() đã tính chỗ cho qty cột từ lâu (mặt bằng GA và bộ
+   * xếp layout đều chừa đủ chỗ), nhưng hàm dựng hình này luôn chỉ dựng MỘT cột.
+   * Kết quả là khai 2 cột MMF thì mặt bằng chừa chỗ cho 2 mà mô hình 3D hiện 1,
+   * hai bản vẽ nói hai chuyện — đúng lỗi thấy trên bản Cụm RO 30 m³/h.
+   */
+  function vessel(o) {
     var d = kt(o.d, 1000, 150, 8000), h = kt(o.h, 2000, 400, 12000);
     var skirt = kt(o.skirt, 350, 0, 2000);
+    var n = Math.max(1, Math.min(8, +o.qty || 1));
     var g = grp('vessel');
     var m = mat(laInox(o.material) ? 'ss' : 'frp');
     var body = h - d * 0.5;
-    var bd = cyl(d, body, m); bd.position.y = skirt + body / 2; g.add(bd);
-    var top = dome(d, m); top.position.y = skirt + body; g.add(top);
-    var bot = dome(d, m, true); bot.position.y = skirt; g.add(bot);
-    var sk = cyl(d * 0.82, skirt, mat('frame')); sk.position.y = skirt / 2; g.add(sk);
-    // lớp vật liệu lọc nhìn thấy qua thân (nếu khai báo)
-    if (o.media) {
-      var mh = body * 0.62;
-      var md = cyl(d - 60, mh, new THREE.MeshStandardMaterial(
-        { color: o.mediaColor || 0x6b5537, roughness: 0.95 }));
-      md.position.y = skirt + mh / 2; g.add(md);
-    }
     var hh = skirt + body + d / 2;
-    g.userData.foot = { w: d + 120, d: d + 120 };
+    // Bước và bề sâu cụm PHẢI khớp chanDe(), nếu không mô hình lại lệch mặt bằng.
+    var buoc = (d + 120) + 300;
+    var sauCum = n * (d + 120) + (n - 1) * 300;
+    var z0 = -sauCum / 2 + (d + 120) / 2;
+    var i, z;
+    for (i = 0; i < n; i++) {
+      z = z0 + i * buoc;
+      var bd = cyl(d, body, m); bd.position.set(0, skirt + body / 2, z); g.add(bd);
+      var top = dome(d, m); top.position.set(0, skirt + body, z); g.add(top);
+      var bot = dome(d, m, true); bot.position.set(0, skirt, z); g.add(bot);
+      var sk = cyl(d * 0.82, skirt, mat('frame'));
+      sk.position.set(0, skirt / 2, z); g.add(sk);
+      // lớp vật liệu lọc nhìn thấy qua thân (nếu khai báo)
+      if (o.media) {
+        var mh = body * 0.62;
+        var md = cyl(d - 60, mh, new THREE.MeshStandardMaterial(
+          { color: o.mediaColor || 0x6b5537, roughness: 0.95 }));
+        md.position.set(0, skirt + mh / 2, z); g.add(md);
+      }
+    }
+    if (n > 1) {
+      // Ống góp vào (trên) và góp ra (dưới) + nhánh rẽ vào từng cột: đây mới là
+      // thứ thể hiện "nối song song". Thiếu góp thì nhìn ra mấy cột rời nhau.
+      var dnG = Math.max(80, Math.round(d * 0.12));
+      var mG = mat('ss');
+      var yTren = hh + 260, yDuoi = Math.max(140, skirt * 0.5);
+      [yTren, yDuoi].forEach(function (yy) {
+        var gop = cyl(dnG, sauCum + 200, mG);
+        gop.rotation.x = Math.PI / 2;          // trục Y → trục Z
+        gop.position.set(0, yy, 0);
+        g.add(gop);
+      });
+      for (i = 0; i < n; i++) {
+        z = z0 + i * buoc;
+        var nh1 = cyl(dnG * 0.8, yTren - (skirt + body + d * 0.4), mG);
+        nh1.position.set(0, (yTren + skirt + body + d * 0.4) / 2, z); g.add(nh1);
+        var nh2 = cyl(dnG * 0.8, Math.max(60, skirt * 0.6 - yDuoi + 120), mG);
+        nh2.position.set(0, yDuoi + 30, z); g.add(nh2);
+      }
+      hh = yTren;
+    }
+    g.userData.foot = { w: d + 120, d: sauCum };
+    g.userData.qty = n;
     g.userData.h = hh;
+    // Cụm nhiều cột: đấu nối nằm trên ỐNG GÓP, không phải trên một cột riêng lẻ —
+    // ống ngoài vào góp rồi mới chia cho từng cột, đúng cách đấu song song.
+    var yRa = n > 1 ? Math.max(140, skirt * 0.5) : skirt * 0.55;
+    var zBien = n > 1 ? sauCum / 2 : d / 2;
     g.userData.ports = {
-      in:    P(0, hh + 30, 0, 0, 1, 0),               // nước vào: đỉnh, tâm
-      out:   P(0, skirt * 0.55, 0, 0, -1, 0),         // nước ra: đáy, qua đầu thu
-      bw_in: P(0, skirt * 0.8, d / 2, 0, 0, 1),       // rửa ngược vào: đáy bên
-      bw_out:P(0, hh - d * 0.45, -d / 2, 0, 0, -1),   // rửa ngược ra: đỉnh bên
+      in:    P(0, hh + 30, 0, 0, 1, 0),               // nước vào: đỉnh góp / đỉnh cột
+      out:   P(0, yRa, 0, 0, -1, 0),                  // nước ra: góp dưới / đầu thu đáy
+      bw_in: P(0, skirt * 0.8, zBien, 0, 0, 1),       // rửa ngược vào: đáy bên
+      bw_out:P(0, hh - d * 0.45, -zBien, 0, 0, -1),   // rửa ngược ra: đỉnh bên
       xa:    P(d * 0.28, skirt * 0.35, 0, 0, -1, 0)   // xả đáy
     };
     veCacNozzle(g, 80);
     return g;
   }
 
-  function cartridge(o) {  // lọc tinh dạng ống, thường cụm nhiều lõi
+  /** Lọc tinh / bag filter. qty > 1 thì dựng đủ số vỏ xếp song song. */
+  function cartridge(o) {
     var d = kt(o.d, 300, 80, 2000), h = kt(o.h, 900, 200, 4000);
+    var n = Math.max(1, Math.min(8, +o.qty || 1));
     var g = grp('cartridge');
     var m = mat('ss');
-    var b = cyl(d, h, m); b.position.y = h / 2 + 250; g.add(b);
-    g.add(dome(d, m).translateY(h + 250));
-    var leg = box(d * 0.7, 250, d * 0.7, mat('frame')); leg.position.y = 125; g.add(leg);
-    g.userData.foot = { w: d + 200, d: d + 200 };
-    g.userData.h = h + 250 + d / 2;
+    var buoc = d + 200 + 220;
+    var sauCum = n * (d + 200) + (n - 1) * 220;
+    var z0 = -sauCum / 2 + (d + 200) / 2;
+    for (var i = 0; i < n; i++) {
+      var z = z0 + i * buoc;
+      var b = cyl(d, h, m); b.position.set(0, h / 2 + 250, z); g.add(b);
+      var dm = dome(d, m); dm.position.set(0, h + 250, z); g.add(dm);
+      var leg = box(d * 0.7, 250, d * 0.7, mat('frame'));
+      leg.position.set(0, 125, z); g.add(leg);
+    }
+    if (n > 1) {
+      var dnG = Math.max(65, Math.round(d * 0.22));
+      [400, h + 250 + d / 2 + 140].forEach(function (yy) {
+        var gop = cyl(dnG, sauCum + 160, m);
+        gop.rotation.x = Math.PI / 2;
+        gop.position.set(0, yy, 0);
+        g.add(gop);
+      });
+    }
+    g.userData.foot = { w: d + 200, d: sauCum };
+    g.userData.qty = n;
+    g.userData.h = h + 250 + d / 2 + (n > 1 ? 140 : 0);
+    var zB = n > 1 ? sauCum / 2 : d / 2;
     g.userData.ports = {
-      in:  P(0, 400, d / 2, 0, 0, 1),                 // vào: đáy bên
-      out: P(0, h + 250 + d / 2, 0, 0, 1, 0),         // ra: đỉnh
-      xa:  P(0, 260, -d / 2, 0, 0, -1)                // xả
+      in:  P(0, 400, zB, 0, 0, 1),                    // vào: góp dưới / đáy bên
+      out: P(0, g.userData.h, 0, 0, 1, 0),            // ra: góp trên / đỉnh
+      xa:  P(0, 260, -zB, 0, 0, -1)                   // xả
     };
     veCacNozzle(g, 65);
     return g;
@@ -691,7 +756,9 @@
       var n = Math.max(1, +e.qty || 1);
       return { w: v + 120, d: (v + 120) * n + 300 * (n - 1), tron: true, D: v, qty: n }; }
     if (t === 'cartridge') { var c = kt(e.d, 300, 80, 2000);
-      return { w: c + 200, d: c + 200, tron: true, D: c }; }
+      var nc = Math.max(1, +e.qty || 1);
+      return { w: c + 200, d: nc * (c + 200) + (nc - 1) * 220, tron: true,
+               D: c, qty: nc }; }
     if (t === 'pump') {                     // cụm 1 chạy 1 dừng chiếm rộng hơn
       var nb = Math.max(1, Math.min(6, +e.soBom || (e.dup ? 2 : 1)));
       var Wb = kt(e.W, 420, 150, 3000);
@@ -1195,6 +1262,23 @@
        */
       kiemTra: function () {
         var loi = canhBao.slice();
+        /* Chân đế mà bản GA dùng phải TRÙNG chân đế của khối 3D. Hai hàm này
+           tính độc lập nhau, nên khi một bên biết đếm qty còn bên kia thì không,
+           mặt bằng chừa chỗ cho 2 cột mà mô hình chỉ hiện 1 — lỗi đã xảy ra
+           thật với cụm MMF. Kiểm ở đây thì lần sau nó không im lặng được. */
+        groups.equip.children.forEach(function (g) {
+          var e = g.userData.decl; if (!e) return;
+          var f = g.userData.foot || {}, c = chanDe(e);
+          if (Math.abs((f.w || 0) - c.w) > 2 || Math.abs((f.d || 0) - c.d) > 2)
+            loi.push('Thiết bị ' + (e.tag || e.id) + ': chân đế của khối 3D (' +
+                     Math.round(f.w) + '×' + Math.round(f.d) + ') khác chân đế bản GA (' +
+                     Math.round(c.w) + '×' + Math.round(c.d) +
+                     ') — hai bản vẽ sẽ lệch nhau, sửa hàm dựng hoặc hàm chanDe.');
+          var q = +e.qty || 1;
+          if (q > 1 && g.userData.qty && g.userData.qty !== q)
+            loi.push('Thiết bị ' + (e.tag || e.id) + ': khai qty=' + q +
+                     ' nhưng mô hình dựng ' + g.userData.qty + ' khối.');
+        });
         var hop = groups.equip.children.map(function (g) {
           return { id: (g.userData.decl || {}).id || '?',
                    box: new THREE.Box3().setFromObject(g) };
