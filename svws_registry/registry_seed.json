@@ -59,6 +59,10 @@
           "s": "std"
         },
         {
+          "t": "CỤM RO LÀ MỘT SKID, KHÔNG PHẢI BỐN MÓN RỜI. Vỏ lọc túi / cartridge bảo vệ màng, bơm cao áp và (nếu có) tủ điều khiển của cụm được lắp sẵn TRÊN CHÍNH KHUNG RO tại xưởng — ra công trường là một khối, một móng, ống liên kết giữa chúng là ống ngắn trên skid chứ không phải tuyến ống đi trên nền. Trong sổ thiết bị, các món này điền cột \"Nằm trên khung\" bằng tag của cụm RO (ví dụ RO-101). Chúng VẪN là dòng riêng — vẫn có tag, vẫn có tải điện trong tủ, vẫn nằm trên sổ tuyến ống — chỉ khác một điều: không được cấp chân đế riêng trên mặt bằng, và khối RO tự mọc thêm dải trước 820 mm để đỡ chúng. CẤM viết e.bom=0 / e.loc=false / e.tu=false để tắt các bộ phận này khỏi khối RO — đó chính là lỗi đã làm bản vẽ vẽ bơm cao áp đứng chơ vơ giữa nhà. Bơm cấp cột lọc (P-101) thì NGƯỢC LẠI: nó đứng trên nền riêng, không thuộc skid RO. Chỉ cụm có khung thép (roskid, edi) mới đỡ được thiết bị khác; bồn, cột lọc, bơm không đỡ được gì.",
+          "s": "std"
+        },
+        {
           "t": "MỖI TAB PHẢI DỰNG TRONG VÒNG BẢO VỆ — bọc bằng SVWSKT.veAnToan(el, '<tên tab>', function(){ …dựng tab… }). Một hàm dựng ném lỗi là cả script chết theo và MỌI TAB TRẮNG cùng lúc; người dùng chỉ thấy “app hỏng”, không biết hỏng ở đâu, và cả bộ hồ sơ thành vô dụng vì một dòng sai. Bọc lại thì chỉ tab đó hiện hộp lỗi kèm nguyên văn thông báo và dòng stack đầu tiên, chín tab kia vẫn dùng được, và người dùng dán được đúng dòng lỗi vào nút sửa lỗi bằng AI. Áp dụng cho CẢ hàm vẽ lần đầu LẪN hàm vẽ lại khi đổi tham số hay đổi ba sổ.",
           "s": "std"
         }

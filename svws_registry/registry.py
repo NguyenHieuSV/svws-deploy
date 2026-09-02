@@ -129,6 +129,7 @@ _MUC_BASO = "BA SỔ GỐC là nguồn khai báo duy nhất"
 _MUC_ANTOAN = "MỖI TAB PHẢI DỰNG TRONG VÒNG BẢO VỆ"
 _MUC_TAB0 = "Tab 0 — BA SỔ GỐC"
 _MUC_BIEN = "NÚT BIÊN CỦA DÂY CHUYỀN PHẢI KHAI HẲN"
+_MUC_SKID = "CỤM RO LÀ MỘT SKID"
 
 
 def _bo_sung_nhom(data: dict, dau_hieu: str, tien_to, tu_khoa: str) -> bool:
@@ -374,6 +375,9 @@ def init_db() -> None:
                          "NÚT BIÊN CỦA DÂY CHUYỀN PHẢI KHAI HẲN", "nền tảng"):
             ghi.append("Nút biên phải khai hẳn: điểm cấp (nguon) và điểm xả "
                        "(xa) — nước rửa ngược, cô đặc, xả đáy phải có đầu đến")
+        if _bo_sung_nhom(data, _MUC_SKID, "CỤM RO LÀ MỘT SKID", "nền tảng"):
+            ghi.append("Cụm RO là một skid: lọc túi/cartridge và bơm cao áp "
+                       "lắp trên khung RO — khai bằng cột \"Nằm trên khung\"")
         if _bo_sung_muc(data, _MUC_TAB0, "Tab 0 —", "0"):
             ghi.append("Tab 0 — Ba sổ gốc: chỗ cố định để mở lại và sửa sổ "
                        "ngay trong tool")

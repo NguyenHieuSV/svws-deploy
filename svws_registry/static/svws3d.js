@@ -941,6 +941,11 @@
    */
   function layout(items, opt) {
     opt = opt || {};
+    /* Thiết bị lắp sẵn trên khung của cụm khác KHÔNG chiếm chỗ riêng trên nền.
+       Trước đây bơm cao áp và vỏ lọc tinh của cụm RO bị xếp thành hai chân đế
+       rời, mỗi cái cách 900 mm lối bảo trì — mặt bằng phình gấp đôi so với
+       khối skid thật mà nhà máy nhận về. */
+    items = items.filter(function (e) { return !(e && e.tren); });
     var built = items.map(function (e) {
       var g = build(e);
       return { id: e.id, w: g.userData.foot.w, d: g.userData.foot.d };

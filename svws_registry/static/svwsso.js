@@ -115,7 +115,9 @@
                d: so(e.d, 0), h: so(e.h, 0), hLop: so(e.hLop, 0),
                kW: so(e.kW, 0), kieuDien: (e.kieuDien || '').toUpperCase(),
                vessels: so(e.vessels, 0), mangMoi: so(e.mangMoi, 0),
-               soStack: so(e.soStack, 0), ghi: e.ghi || '', _i: i };
+               soStack: so(e.soStack, 0),
+               tren: String(e.tren || e.moundedOn || '').trim(),
+               ghi: e.ghi || '', _i: i };
     }
     function chuanTU(e, i) {
       return { ma: e.ma || ('L-' + ('0' + (i + 1)).slice(-2)),
@@ -280,6 +282,25 @@
         loi.push('[Dây chuyền] Không có điểm cấp nước nào — thêm một dòng loại ' +
                  '"nguon" (điểm đấu nối nước cấp của nhà máy) vào sổ thiết bị.');
 
+      /* "Nằm trên khung" phải trỏ tới một cụm skid CÓ THẬT, và skid thì không
+         thể tự nằm trên chính nó hay nằm trên một thứ không có khung. */
+      TB.forEach(function (e, i) {
+        if (!e.tren) return;
+        var cha = timTB(e.tren);
+        if (!cha)
+          themLoi('TB', i, 'Khai nằm trên khung "' + e.tren + '" mà không có ' +
+                  'thiết bị nào mang tên đó.');
+        else if (gonTag(cha.tag) === gonTag(e.tag))
+          themLoi('TB', i, 'Không thể tự nằm trên khung của chính nó.');
+        else if (!/^(roskid|edi)$/.test(cha.loai))
+          themLoi('TB', i, 'Chỉ cụm có khung thép (cụm màng RO, cụm EDI) mới ' +
+                  'đỡ được thiết bị khác — "' + cha.tag + '" là ' +
+                  ((LOAI[cha.loai] || {}).ten || cha.loai) + '.');
+        else if (cha.tren)
+          themLoi('TB', i, 'Khung "' + cha.tag + '" lại nằm trên khung khác — ' +
+                  'lồng hai tầng thì không dựng được.');
+      });
+
       /* Thiết bị nào cũng đẻ ra nước bỏ đi thì phải có tuyến chở nó đi. Thiếu
          dòng ấy trong sổ, bản vẽ vẫn ra đẹp — chỉ là thiếu một đường ống có
          thật, và tới lúc thi công mới phát hiện không biết đấu vào đâu. Đây là
@@ -355,6 +376,23 @@
         if (e.vessels) r.vessels = e.vessels;
         if (e.mangMoi) r.mangMoi = e.mangMoi;
         if (e.soStack) r.soStack = e.soStack;
+        if (e.tren) r.tren = e.tren;      // → SVWS3D không cấp chân đế riêng
+        return r;
+      }).map(function (r, i, ds) {
+        /* Cụm skid tự bật đúng bộ phận theo những gì khai là nằm trên nó.
+           Nhờ vậy sổ chỉ cần nói MỘT lần "P-102 nằm trên khung RO-101" là cả
+           khối 3D, chân đế GA và bảng vật tư cùng hiểu như nhau. */
+        if (!/^(roskid|ro|edi)$/.test(r.type)) return r;
+        var con = ds.filter(function (x) {
+          return gonTag(x.tren || '') === gonTag(r.tag);
+        });
+        if (!con.length) return r;
+        var nBom = con.filter(function (x) { return x.type === 'pump'; })
+                      .reduce(function (a, x) { return a + Math.max(1, +x.soBom || 1); }, 0);
+        if (nBom) r.bom = nBom;
+        if (con.some(function (x) { return /cartridge|filter/.test(x.type); })) r.loc = true;
+        if (con.some(function (x) { return x.type === 'panel'; })) r.tu = true;
+        r.conTrenKhung = con.map(function (x) { return x.tag; });
         return r;
       });
     }
@@ -459,6 +497,9 @@
         { k: 'kW', t: 'kW', kieu: 'so', r: 56 },
         { k: 'kieuDien', t: 'Khởi động', kieu: 'chon', r: 92, chon: function () {
             return [['', '—'], ['DOL', 'DOL'], ['VFD', 'VFD']]; } },
+        /* Lắp sẵn trên khung của thiết bị khác. Bỏ trống = đứng trên nền
+           riêng. Điền tag cụm skid = không cấp chân đế riêng nữa. */
+        { k: 'tren', t: 'Nằm trên khung', kieu: 'goi', ds: 'tb', r: 122 },
         { k: 'ghi', t: 'Ghi chú', kieu: 'chu', r: 138 }
       ],
       TU: [
