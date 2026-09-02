@@ -1006,6 +1006,9 @@ async function injectThree(html){
                     || /\bSVWS3D\s*\./.test(html);
   if(!dungThree && !dungSvws) return {html, injected:false};
   const daCoThree = /Three\.js Authors|THREE\s*=\s*\{\}/.test(html);
+  // Nhúng chồng lần hai làm file phình thêm ~400 KB mỗi lượt sửa và tạo hai bản
+  // định nghĩa cùng tên. Có dấu hiệu bộ dựng thật rồi thì đừng nhúng lại.
+  const daCoSvws = /global\.SVWSSO\s*=|global\.SVWS3D\s*=/.test(html);
   let lib;
   try{ lib = await napLib(); }
   catch(e){ return {html, injected:false, err:e.message}; }
@@ -1016,7 +1019,7 @@ async function injectThree(html){
   // vẽ, mọi tab và mọi tờ in của tool đều mang nhận diện công ty; đổi logo trong
   // sổ là tool sinh sau đó đổi theo.
   const lg = (data && data.meta && data.meta.logo) || '';
-  if(dungSvws) ma += 'window.SVWS_LOGO=' + JSON.stringify(lg) + ';\n' + lib.svws;
+  if(dungSvws && !daCoSvws) ma += 'window.SVWS_LOGO=' + JSON.stringify(lg) + ';\n' + lib.svws;
   if(!ma) return {html, injected:false, already:true};
   // PHẢI dùng dạng hàm: mã thư viện chứa ký tự $ nên replace kiểu chuỗi sẽ hỏng
   /* Tool gọi thư viện nào mà bó nhúng không có thư viện đó thì mở ra là trắng
@@ -1218,8 +1221,10 @@ async function finalizeTool(html, headline, extraNote){
   html = res.html;
   const thieuChuan = kiemChuan(html);
   if(thu && (thu.loi.length || thu.tabTrong.length)){
-    // giữ lại để nút 🔧 gửi đúng file này kèm mô tả lỗi CHẠY (không phải cú pháp)
-    brokenHTML = html;
+    // Giữ BẢN AI VIẾT (chưa nhúng thư viện) làm bản làm việc, không giữ bản đã
+    // nhúng: bản đã nhúng nặng 1,4 MB mà hơn 1 MB là mã của chính mình. Giữ nó
+    // thì sớm muộn có chỗ đem đi gửi, và mỗi lượt sửa lại nhúng chồng thêm.
+    brokenHTML = go.html;
     brokenErr = 'Tool mở được nhưng chạy lỗi. '
       + (thu.loi.length ? 'Lỗi JavaScript lúc chạy: ' + thu.loi.slice(0,3).join(' | ') + '. ' : '')
       + (thu.tabTrong.length ? 'Các tab không hiện nội dung: ' + thu.tabTrong.join(', ') + '. ' : '')
@@ -1227,7 +1232,7 @@ async function finalizeTool(html, headline, extraNote){
       + 'SVWSCHE/SVWSVT/SVWSDIEN/SVWSCM/SVWSKT/SVWSSO, hoặc hàm dựng một tab ném lỗi làm chết luôn các tab sau.';
   }
   if(thieuChuan.length){
-    brokenHTML = html;
+    brokenHTML = go.html;
     brokenErr = (brokenErr ? brokenErr + ' ' : '') +
       'Tool CHƯA THEO CHUẨN, thiếu: ' +
       thieuChuan.map(x => x.ten + ' (' + x.ma + ')').join(' · ') + '. ' +
@@ -1297,6 +1302,8 @@ async function repairDesign(){
     const r = await fetch(API + '/fix', {
       method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({html: goiGon(brokenHTML), error: brokenErr})
+      // goiGon giữ lại làm LỚP CHẶN CUỐI: brokenHTML nay đã là bản chưa nhúng,
+      // nhưng nếu sau này ai đó gán nhầm bản đã nhúng vào đây thì vẫn không lọt.
     });
     if(!r.ok){
       const e = await r.json().catch(()=>({detail:'HTTP '+r.status}));

@@ -839,6 +839,42 @@ def _ghi_dung(viec: str, model: str, tv, tr, tcache=0, ma: str = "", ai: str = "
         pass
 
 
+_DAU_THUVIEN = ("Three.js Authors", "global.SVWS3D =", "global.SVWSSO =",
+                "global.SVWSPID =", "global.SVWSCM =")
+
+
+def _bo_thu_vien(html: str):
+    """Cắt mọi khối <script> quá lớn trước khi đưa cho AI.
+
+    Three.js và bộ dựng SVWS là mã của công ty, biết chắc đúng, không bao giờ là
+    chỗ cần sửa. Gửi kèm là trả tiền đầu vào cho hơn 1 MB mã vô ích — khoảng
+    300.000 token, gần bằng một lần sinh tool mới. Chặn ở đây thì mọi đường gọi
+    đều được bảo vệ, kể cả đường viết sau này.
+    """
+    if not html:
+        return html, 0
+    ra, i, bo = [], 0, 0
+    while True:
+        d = html.find("<script", i)
+        if d < 0:
+            ra.append(html[i:]); break
+        m = html.find(">", d)
+        c = html.find("</script>", m + 1) if m > 0 else -1
+        if m < 0 or c < 0:
+            ra.append(html[i:]); break
+        than = html[m + 1:c]
+        if len(than) > 120000 or any(t in than[:4000] for t in _DAU_THUVIEN):
+            bo += len(than)
+            ra.append(html[i:m + 1])
+            ra.append("/* … thư viện của công ty đã lược bỏ: mã đúng sẵn, "
+                      "không phải chỗ cần sửa … */")
+            ra.append("</script>")
+        else:
+            ra.append(html[i:c + 9])
+        i = c + 9
+    return "".join(ra), bo
+
+
 def _sections_summary(data: dict) -> str:
     lines = []
     for si, sec in enumerate(data.get("sections", []), 1):
@@ -1869,6 +1905,11 @@ def ai_fix(payload: dict = Body(...)):
     err = (payload.get("error") or "").strip()
     if len(html) < 200:
         raise HTTPException(422, 'Body thiếu "html"')
+    # Lớp chặn cuối: dù client gửi gì, thư viện của mình cũng không đi ra ngoài.
+    html, da_bo = _bo_thu_vien(html)
+    if da_bo:
+        print(f"[REGISTRY] Đã lược {da_bo:,} ký tự thư viện khỏi yêu cầu sửa lỗi "
+              f"(tiết kiệm khoảng {da_bo // 3500:,} nghìn token đầu vào)")
 
     user_msg = f"""File HTML dưới đây có LỖI CÚ PHÁP JavaScript nên mở ra trang trắng.
 Trình duyệt báo: {err}
