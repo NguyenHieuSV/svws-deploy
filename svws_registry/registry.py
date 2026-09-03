@@ -130,6 +130,8 @@ _MUC_ANTOAN = "MỖI TAB PHẢI DỰNG TRONG VÒNG BẢO VỆ"
 _MUC_TAB0 = "Tab 0 — BA SỔ GỐC"
 _MUC_BIEN = "NÚT BIÊN CỦA DÂY CHUYỀN PHẢI KHAI HẲN"
 _MUC_SKID = "CỤM RO LÀ MỘT SKID"
+_MUC_XABOT = "HỒI LƯU NƯỚC CÔ ĐẶC THÌ BẮT BUỘC CÓ ĐƯỜNG XẢ BỚT"
+_MUC_RUA = "LƯU LƯỢNG RỬA NGƯỢC PHẢI ĂN KHỚP VỚI SỔ THIẾT BỊ"
 
 
 def _bo_sung_nhom(data: dict, dau_hieu: str, tien_to, tu_khoa: str) -> bool:
@@ -378,6 +380,14 @@ def init_db() -> None:
         if _bo_sung_nhom(data, _MUC_SKID, "CỤM RO LÀ MỘT SKID", "nền tảng"):
             ghi.append("Cụm RO là một skid: lọc túi/cartridge và bơm cao áp "
                        "lắp trên khung RO — khai bằng cột \"Nằm trên khung\"")
+        if _bo_sung_nhom(data, _MUC_XABOT,
+                         "HỒI LƯU NƯỚC CÔ ĐẶC THÌ BẮT BUỘC", "nền tảng"):
+            ghi.append("Hồi lưu concentrate phải có đường xả bớt tính theo cân "
+                       "bằng muối; phân biệt thu hồi màng và thu hồi toàn hệ")
+        if _bo_sung_nhom(data, _MUC_RUA,
+                         "LƯU LƯỢNG RỬA NGƯỢC PHẢI ĂN KHỚP", "nền tảng"):
+            ghi.append("Rửa ngược không sục khí phải 25–30 m/h; ghi 12 m/h thì "
+                       "sổ phải có máy thổi khí. Vận tốc lọc tính theo cấp vào màng")
         if _bo_sung_muc(data, _MUC_TAB0, "Tab 0 —", "0"):
             ghi.append("Tab 0 — Ba sổ gốc: chỗ cố định để mở lại và sửa sổ "
                        "ngay trong tool")

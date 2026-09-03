@@ -63,6 +63,14 @@
           "s": "std"
         },
         {
+          "t": "HỒI LƯU NƯỚC CÔ ĐẶC THÌ BẮT BUỘC CÓ ĐƯỜNG XẢ BỚT. Nếu toàn bộ reject quay về bồn cấp, muối chỉ còn MỘT đường ra là permeate — mà permeate gần như không mang muối đi. Hệ khi ấy KHÔNG BAO GIỜ đạt trạng thái ổn định: TDS vòng tuần hoàn tăng mãi cho tới khi màng đóng cặn hoặc áp thẩm thấu vượt bơm cao áp. Phải khai một tuyến xả bớt (blowdown/bleed) từ nhánh reject ra điểm xả, kèm một dụng cụ đo độ dẫn điện nước cấp màng và một van điều khiển mở theo ngưỡng đó. Lưu lượng tính từ cân bằng muối, KHÔNG ĐƯỢC đoán: B = P·C0/(Cc − C0), với P là permeate, C0 là TDS nước thô, Cc = Ct/(1 − r) là TDS concentrate ứng với TDS nước cấp màng Ct mà thiết kế muốn giữ và thu hồi màng r. Và phải PHÂN BIỆT HAI CON SỐ THU HỒI trên mọi bản vẽ, bảng và bản chào: thu hồi MÀNG r = P/Qf, và thu hồi TOÀN HỆ = P/(P + B). Ghi nhầm một trong hai là cam kết sai lượng nước thô với khách hàng. Kèm theo, phải nêu giới hạn SiO₂ nước thô: nồng độ cô đặc của hệ là Cc/C0 lần, mà silica kết tủa quanh 150 mg/L, nên SiO₂ thô tối đa = 150·C0/Cc.",
+          "s": "std"
+        },
+        {
+          "t": "LƯU LƯỢNG RỬA NGƯỢC PHẢI ĂN KHỚP VỚI SỔ THIẾT BỊ. Rửa ngược chỉ bằng nước thì phải đủ vận tốc nở lớp vật liệu 20–30%: với lớp đôi anthracite + cát thạch anh ở 28–30 °C là 25–30 m/h. Con số 10–12 m/h thường thấy trong sách CHỈ đúng khi có sục khí rửa trước — và khi đó MÁY THỔI KHÍ PHẢI CÓ MỘT DÒNG TRONG SỔ THIẾT BỊ, kèm tải điện trong tủ. Cấm ghi 12 m/h trong khi sổ không có máy thổi khí. Đồng thời phải kiểm VẬN TỐC LỌC bằng lưu lượng THẬT đi qua cột — với tiền xử lý RO đó là lưu lượng CẤP VÀO MÀNG (P/r), không phải lưu lượng permeate — và phải nêu vận tốc khi một cột đang rửa ngược: nếu vượt 20 m/h thì bản vẽ phải nói rõ là rửa ngoài giờ sản xuất, hoặc tăng đường kính cột.",
+          "s": "std"
+        },
+        {
           "t": "MỖI TAB PHẢI DỰNG TRONG VÒNG BẢO VỆ — bọc bằng SVWSKT.veAnToan(el, '<tên tab>', function(){ …dựng tab… }). Một hàm dựng ném lỗi là cả script chết theo và MỌI TAB TRẮNG cùng lúc; người dùng chỉ thấy “app hỏng”, không biết hỏng ở đâu, và cả bộ hồ sơ thành vô dụng vì một dòng sai. Bọc lại thì chỉ tab đó hiện hộp lỗi kèm nguyên văn thông báo và dòng stack đầu tiên, chín tab kia vẫn dùng được, và người dùng dán được đúng dòng lỗi vào nút sửa lỗi bằng AI. Áp dụng cho CẢ hàm vẽ lần đầu LẪN hàm vẽ lại khi đổi tham số hay đổi ba sổ.",
           "s": "std"
         }
