@@ -61,7 +61,10 @@
        một thiết bị nào cả — chúng ra hố ga. Không có loại này thì ô "đến" của
        các tuyến xả đành bỏ trống và bộ kiểm báo thiếu đầu đến. */
     xa:        { type: 'xa',        ten: 'Điểm xả / hố ga thoát nước', dongCo: false, dem: false },
-    tank:      { type: 'tank',      ten: 'Bồn / bể chứa',        dongCo: false, dem: false },
+    /* dongCoTuChon: CÓ THỂ có động cơ. Bể phản ứng, bể trung hoà, bể tạo
+       bông đều có cánh khuấy — trong xử lý hoá lý thì bể khuấy ở đâu cũng
+       có. Bắt chúng không được khai kW là bắt sai. */
+    tank:      { type: 'tank',      ten: 'Bồn / bể chứa',        dongCo: false, dongCoTuChon: true, dem: false },
     vessel:    { type: 'vessel',    ten: 'Cột lọc áp lực',       dongCo: false, dem: true },
     filter:    { type: 'filter',    ten: 'Thiết bị lọc',         dongCo: false, dem: true },
     mixedbed:  { type: 'mixedbed',  ten: 'Cột trao đổi ion',     dongCo: false, dem: true },
@@ -78,8 +81,12 @@
        xả rửa ngược cho một cái không hề có hai thứ đó. */
     phanung:   { type: 'phanung',   ten: 'Thiết bị phản ứng (điện hoá / oxy hoá)',
                  dongCo: false, dien: true, dem: true },
-    blower:    { type: 'panel',     ten: 'Máy thổi khí',         dongCo: true,  dem: true },
-    panel:     { type: 'panel',     ten: 'Tủ điện',              dongCo: false, dem: false }
+    /* type 'blower', KHÔNG phải 'panel'. Ánh xạ cũ khiến P&ID không nhận
+       ra loại này rồi rơi về ký hiệu BỒN — máy thổi khí vẽ thành bồn chứa.
+       Nay nó dùng thân máy quay như bơm; chưa có ký hiệu riêng nhưng đúng
+       họ thiết bị. */
+    blower:    { type: 'blower',    ten: 'Máy thổi khí / quạt',  dongCo: true,  dem: true },
+    panel:     { type: 'panel',     ten: 'Tủ điện',              dongCo: false, dongCoTuChon: true, dem: false }
   };
   /* Loại nào chắc chắn sinh ra nước bỏ đi, và câu nhắc tương ứng. Bồn chứa
      KHÔNG nằm trong bảng: xả đáy bồn thường là van tay đi máng hở, nhắc mọi
@@ -209,7 +216,7 @@
                   'sẽ thiếu lộ cho nó.');
         // dien:true = ăn điện nhưng không qua khởi động từ (tủ chỉnh lưu
         // của cụm điện hoá, chấn lưu đèn UV). Khai kW cho chúng là ĐÚNG.
-        if (!L.dongCo && !L.dien && e.kW)
+        if (!L.dongCo && !L.dongCoTuChon && !L.dien && e.kW)
           themLoi('TB', i, 'Khai kW nhưng loại này không có động cơ — kiểm lại ' +
                   'loại thiết bị.', false);
         if (e.kW && !e.kieuDien)
@@ -278,7 +285,10 @@
                     'nghĩa khi là đầu đến của một tuyến xả.');
             return;
           }
-          if (e.loai === 'dosing' || e.loai === 'nguon') return;
+          /* Máy thổi khí và quạt HÚT KHÍ TRỜI — chúng không có đường ống
+             vào, y như cụm châm hoá chất đổ bằng tay. Đòi ống vào cho chúng là
+             đòi một thứ không tồn tại. */
+          if (e.loai === 'dosing' || e.loai === 'nguon' || e.loai === 'blower') return;
           if (coNguon.length)
             themLoi('TB', i, 'Không có đường ống vào, mà hệ đã có điểm cấp riêng (' +
                     coNguon[0].tag + ') — thiếu dòng trong sổ tuyến.');
@@ -513,8 +523,12 @@
         { k: 'h', t: 'H (mm)', kieu: 'so', r: 68 },
         { k: 'hLop', t: 'Cao lớp VL', kieu: 'so', r: 74 },
         { k: 'kW', t: 'kW', kieu: 'so', r: 56 },
+        /* KHAC dành cho tải ăn điện mà không qua khởi động từ kiểu động cơ:
+           bộ chỉnh lưu DC của cụm điện hoá, chấn lưu đèn UV, điện trở sưởi.
+           Không có lựa chọn này thì chúng buộc phải khai láo là DOL. */
         { k: 'kieuDien', t: 'Khởi động', kieu: 'chon', r: 92, chon: function () {
-            return [['', '—'], ['DOL', 'DOL'], ['VFD', 'VFD']]; } },
+            return [['', '—'], ['DOL', 'DOL'], ['VFD', 'VFD'],
+                    ['KHAC', 'Khác — không qua khởi động từ']]; } },
         /* Lắp sẵn trên khung của thiết bị khác. Bỏ trống = đứng trên nền
            riêng. Điền tag cụm skid = không cấp chân đế riêng nữa. */
         { k: 'tren', t: 'Nằm trên khung', kieu: 'goi', ds: 'tb', r: 122 },

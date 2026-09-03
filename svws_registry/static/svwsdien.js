@@ -370,7 +370,10 @@ lam(tongKW, 1) + '</td><td>3P</td><td>—</td><td>' + lam(tongI * 0.8, 1) +
         if (tag[t.tag]) loi.push('Trùng tag động cơ: ' + t.tag);
         tag[t.tag] = 1;
         if (!t.kW) loi.push(t.tag + ': chưa có công suất kW — không chọn được CB và cáp.');
-        if (t.kieu !== 'VFD' && t.kW >= 15)
+        /* Cảnh báo này chỉ đúng với ĐỘNG CƠ. Bộ chỉnh lưu, điện trở sưởi,
+           chấn lưu không có dòng khởi động 6·In — nhắc chúng đi dùng sao–tam
+           giác là nhắc một thứ vô nghĩa. */
+        if (t.kieu !== 'VFD' && t.kieu !== 'KHAC' && t.kW >= 15)
           canhBao.push(t.tag + ' (' + t.kW + ' kW) khởi động trực tiếp DOL — dòng khởi ' +
                        'động ~6·In gây sụt áp lưới; nên dùng sao–tam giác hoặc biến tần.');
       });

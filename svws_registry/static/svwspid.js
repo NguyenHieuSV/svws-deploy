@@ -377,7 +377,7 @@
       vessel: 'cot', filter: 'cot', mixedbed: 'cot', cot: 'cot',
       phanung: 'cot',
       cartridge: 'loc', loc: 'loc',
-      pump: 'bom', bom: 'bom',
+      pump: 'bom', bom: 'bom', blower: 'bom',
       roskid: 'ro', ro: 'ro',
       edi: 'edi',
       uv: 'uv',
@@ -547,7 +547,17 @@
       nut.forEach(function (u) {
         if (u.vao.length) return;
         var m = moc[u.e.tag]; if (!m) return;
-        if (u.loai !== 'hoachat') diemCap.push(u.id);
+        var laThoiKhi = String(u.e.type || '').toLowerCase() === 'blower';
+        if (u.loai !== 'hoachat' && !laThoiKhi) diemCap.push(u.id);
+        /* Máy thổi khí và quạt HÚT KHÍ TRỜI. Vẽ mũi tên "Nguồn cấp" cho chúng
+           là biến máy thổi khí thành một đường nước cấp thứ hai trên bản vẽ —
+           cùng một lỗi với cụm châm hoá chất ở ngay dưới đây. */
+        if (laThoiKhi) {
+          nhanCho.push({ x: m.x + m.w / 2, y: m.y + m.h / 2 + 14,
+                         s: u.e.nguon || 'Hút khí trời', fs: 7.6, mau: MO,
+                         dam: 0, huong: 'duoi' });
+          return;
+        }
         // Cụm châm hoá chất KHÔNG có tuyến cấp — hoá chất đổ vào bồn pha bằng
         // tay. Vẽ mũi tên "Nguồn cấp" cho nó là biến cụm châm thành bể nước cấp
         // trên bản vẽ, đúng lỗi thấy trên bản Cụm RO 30 m³/h.

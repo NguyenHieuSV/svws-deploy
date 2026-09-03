@@ -795,6 +795,8 @@
     // Thiết bị phản ứng dựng như một bình áp lực: cùng hình dáng thật,
     // khác ở chỗ không khai lớp vật liệu nên vessel() không vẽ lớp lọc nào.
     phanung: vessel,
+    // Máy thổi khí là máy quay có động cơ — thân bơm gần đúng hơn hộp tủ điện.
+    blower: pump,
     tank: tank, vessel: vessel, filter: vessel, cartridge: cartridge,
     pump: pump, roskid: roSkid, ro: roSkid, panel: panel, dosing: dosing,
     uv: uvUnit, edi: ediStack, mixedbed: vessel
@@ -820,7 +822,7 @@
       var nc = Math.max(1, +e.qty || 1);
       return { w: c + 200, d: nc * (c + 200) + (nc - 1) * 220, tron: true,
                D: c, qty: nc }; }
-    if (t === 'pump') {                     // cụm 1 chạy 1 dừng chiếm rộng hơn
+    if (t === 'pump' || t === 'blower') {   // cụm 1 chạy 1 dừng chiếm rộng hơn
       var nb = Math.max(1, Math.min(6, +e.soBom || (e.dup ? 2 : 1)));
       var Wb = kt(e.W, 420, 150, 3000);
       // +400 cho MỌI trường hợp, đúng bằng ham dựng hình. Trước đây bơm đơn
