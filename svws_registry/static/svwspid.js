@@ -303,9 +303,13 @@
        lỗi "đè nhau". Cắt ở đây: bản vẽ lấy phần đầu, sổ giữ nguyên toàn văn. */
     function nhanTB(e) {
       var g = String(e.ghi || '').replace(/\s+/g, ' ').trim();
-      if (g.length > 46) {
-        var c = g.lastIndexOf(' ', 46);
-        g = g.slice(0, c > 24 ? c : 46) + '…';
+      /* 24 ký tự, không phải 46: nhãn nằm ngay trên đầu ký hiệu, mà khoảng
+         cách giữa hai ký hiệu cạnh nhau chỉ tầm 150 px. Cắt 46 vẫn để MMF-101
+         và ACF-101 đè lên nhau. Một nhãn P&ID đúng nghĩa là "MMF-101 Ø1200 ×2,
+         5,5 m/h" — cỡ ống, số cụm, một con số vận hành; hết. */
+      if (g.length > 24) {
+        var c = g.lastIndexOf(' ', 24);
+        g = g.slice(0, c > 12 ? c : 24) + '…';
       }
       return e.tag + (g ? ' ' + g : '');
     }
