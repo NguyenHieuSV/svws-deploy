@@ -64,7 +64,14 @@
     dosing:    { type: 'dosing',    ten: 'Cụm châm hoá chất',    dongCo: true,  dem: true },
     roskid:    { type: 'roskid',    ten: 'Cụm màng RO',          dongCo: false, dem: false },
     edi:       { type: 'edi',       ten: 'Cụm EDI',              dongCo: false, dem: true },
-    uv:        { type: 'uv',        ten: 'Đèn UV',               dongCo: false, dem: false },
+    uv:        { type: 'uv',        ten: 'Đèn UV', dongCo: false, dien: true, dem: false },
+    /* Thiết bị PHẢN ỨNG — điện hoá (EC), oxy hoá, tiếp xúc. Không có lớp
+       vật liệu lọc nên không rửa ngược, và không có động cơ nhưng vẫn ăn
+       điện qua tủ chỉnh lưu. Trước đây thiếu hạng này nên nó bị nhét vào
+       "cột lọc áp lực", rồi bộ kiểm đòi chiều cao lớp vật liệu và đường
+       xả rửa ngược cho một cái không hề có hai thứ đó. */
+    phanung:   { type: 'phanung',   ten: 'Thiết bị phản ứng (điện hoá / oxy hoá)',
+                 dongCo: false, dien: true, dem: true },
     blower:    { type: 'panel',     ten: 'Máy thổi khí',         dongCo: true,  dem: true },
     panel:     { type: 'panel',     ten: 'Tủ điện',              dongCo: false, dem: false }
   };
@@ -194,13 +201,18 @@
         if (L.dongCo && !e.kW)
           themLoi('TB', i, 'Là thiết bị có động cơ nhưng chưa khai kW — tủ điện ' +
                   'sẽ thiếu lộ cho nó.');
-        if (!L.dongCo && e.kW)
+        // dien:true = ăn điện nhưng không qua khởi động từ (tủ chỉnh lưu
+        // của cụm điện hoá, chấn lưu đèn UV). Khai kW cho chúng là ĐÚNG.
+        if (!L.dongCo && !L.dien && e.kW)
           themLoi('TB', i, 'Khai kW nhưng loại này không có động cơ — kiểm lại ' +
                   'loại thiết bị.', false);
         if (e.kW && !e.kieuDien)
           themLoi('TB', i, 'Chưa chọn khởi động DOL hay biến tần (VFD).', false);
         if (/vessel|filter|mixedbed/.test(e.loai) && !e.d)
           themLoi('TB', i, 'Cột lọc chưa có đường kính — không tính được vận tốc lọc.');
+        if (e.loai === 'phanung' && (!e.d || !e.h))
+          themLoi('TB', i, 'Thiết bị phản ứng chưa đủ đường kính và chiều cao — ' +
+                  'không dựng được khối và không tính được thời gian lưu.');
         if (/vessel|filter/.test(e.loai) && !e.hLop)
           themLoi('TB', i, 'Chưa khai chiều cao lớp vật liệu — không tính được ' +
                   'thời gian tiếp xúc.', false);

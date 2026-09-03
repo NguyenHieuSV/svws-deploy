@@ -792,6 +792,9 @@
   var BUILDERS = {
     nguon: nguonCap,
     xa: diemXa,
+    // Thiết bị phản ứng dựng như một bình áp lực: cùng hình dáng thật,
+    // khác ở chỗ không khai lớp vật liệu nên vessel() không vẽ lớp lọc nào.
+    phanung: vessel,
     tank: tank, vessel: vessel, filter: vessel, cartridge: cartridge,
     pump: pump, roskid: roSkid, ro: roSkid, panel: panel, dosing: dosing,
     uv: uvUnit, edi: ediStack, mixedbed: vessel
@@ -808,7 +811,8 @@
     if (t === 'xa') return { w: kt(e.W, 800, 300, 4000), d: kt(e.D, 800, 300, 4000) };
     if (t === 'tank') { var d = kt(e.d, 2000, 200, 20000);
       return { w: d + 160, d: d + 160, tron: true, D: d }; }
-    if (t === 'vessel' || t === 'filter' || t === 'mixedbed') {
+    if (t === 'vessel' || t === 'filter' || t === 'mixedbed' ||
+        t === 'phanung') {
       var v = kt(e.d, 1000, 150, 8000);
       var n = Math.max(1, +e.qty || 1);
       return { w: v + 120, d: (v + 120) * n + 300 * (n - 1), tron: true, D: v, qty: n }; }

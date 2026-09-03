@@ -356,6 +356,7 @@
       nguon: 'nguon', xa: 'xa',
       tank: 'bon', be: 'bon', bon: 'bon',
       vessel: 'cot', filter: 'cot', mixedbed: 'cot', cot: 'cot',
+      phanung: 'cot',
       cartridge: 'loc', loc: 'loc',
       pump: 'bom', bom: 'bom',
       roskid: 'ro', ro: 'ro',
