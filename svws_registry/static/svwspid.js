@@ -296,6 +296,20 @@
         return { w: s * 2 + 6, h: s * 2, cx: x };
       }
     };
+    /* Nhãn thiết bị trên P&ID là NHÃN, không phải chỗ chép ghi chú kỹ thuật.
+       Ô "ghi" của sổ có thể dài cả đoạn — lý do chọn cỡ, luật áp dụng, việc
+       còn treo — và đó là chỗ đúng để viết những thứ ấy. Nhưng đổ nguyên đoạn
+       lên bản vẽ thì nhãn của ba thiết bị cạnh nhau đè lên nhau và bộ kiểm báo
+       lỗi "đè nhau". Cắt ở đây: bản vẽ lấy phần đầu, sổ giữ nguyên toàn văn. */
+    function nhanTB(e) {
+      var g = String(e.ghi || '').replace(/\s+/g, ' ').trim();
+      if (g.length > 46) {
+        var c = g.lastIndexOf(' ', 46);
+        g = g.slice(0, c > 24 ? c : 46) + '…';
+      }
+      return e.tag + (g ? ' ' + g : '');
+    }
+
     function muiTen(x, y) {
       return '<path d="M' + x + ' ' + (y - 5) + ' L' + (x + 9) + ' ' + y +
         ' L' + x + ' ' + (y + 5) + ' Z" fill="' + NAVY + '"/>';
@@ -321,7 +335,7 @@
           moc[e.tag] = { x: k.cx, y: y, w: k.w, h: k.h, x1: x, x2: x + k.w };
           mocLoai[e.tag] = String(e.type || '') + ' ' + loai;
           nhanCho.push({ x: k.cx, y: y - k.h / 2 - 8,
-                         s: e.tag + (e.ghi ? ' ' + e.ghi : ''),
+                         s: nhanTB(e),
                          fs: 9, mau: INK, dam: 1, huong: 'tren' });
         } else if (e.nhan) {
           nhanCho.push({ x: k.cx, y: y - 16, s: e.nhan, fs: 9, mau: MO,
@@ -386,7 +400,7 @@
       moc[e.tag] = { x: k.cx, y: y, w: k.w, h: k.h, x1: x, x2: x + k.w };
       mocLoai[e.tag] = String(e.type || '') + ' ' + loai;
       nhanCho.push({ x: k.cx, y: y - k.h / 2 - 8,
-                     s: e.tag + (e.ghi ? ' ' + e.ghi : ''),
+                     s: nhanTB(e),
                      fs: 9, mau: INK, dam: 1, huong: 'tren' });
       canW = Math.max(canW, x + k.w + 90);
       canH = Math.max(canH, y + k.h / 2 + 140);
