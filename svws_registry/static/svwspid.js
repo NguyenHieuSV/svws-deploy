@@ -303,13 +303,14 @@
        lỗi "đè nhau". Cắt ở đây: bản vẽ lấy phần đầu, sổ giữ nguyên toàn văn. */
     function nhanTB(e) {
       var g = String(e.ghi || '').replace(/\s+/g, ' ').trim();
-      /* 24 ký tự, không phải 46: nhãn nằm ngay trên đầu ký hiệu, mà khoảng
-         cách giữa hai ký hiệu cạnh nhau chỉ tầm 150 px. Cắt 46 vẫn để MMF-101
-         và ACF-101 đè lên nhau. Một nhãn P&ID đúng nghĩa là "MMF-101 Ø1200 ×2,
-         5,5 m/h" — cỡ ống, số cụm, một con số vận hành; hết. */
-      if (g.length > 24) {
-        var c = g.lastIndexOf(' ', 24);
-        g = g.slice(0, c > 12 ? c : 24) + '…';
+      /* 16 ký tự. Đo hẳn trên phiếu COA-REJ (13 cột trên khổ 1900 px): cắt 40
+         và 24 vẫn để MMF-101 đè ACF-101, phải xuống 18 mới hết — nên lấy 16
+         cho có biên. Con số này cũng đúng bằng ví dụ mà chính thư viện nêu ở
+         đầu file: "Ø1067 v=18,3 m/h". Nhãn P&ID là cỡ ống, số cụm, một con số
+         vận hành; lý do chọn cỡ thì nằm ở sổ, không nằm trên bản vẽ. */
+      if (g.length > 16) {
+        var c = g.lastIndexOf(' ', 16);
+        g = g.slice(0, c > 8 ? c : 16) + '…';
       }
       return e.tag + (g ? ' ' + g : '');
     }
