@@ -40,6 +40,12 @@
 
   var FONT = '"IBM Plex Sans","Segoe UI",Arial,sans-serif';
 
+  /* Sàn bề ngang của bảng sổ. Trên màn hình làm việc bình thường (khung ≥ mức
+     này) bảng co vừa khung, không có thanh trượt ngang. Hẹp hơn — điện thoại,
+     cửa sổ chia đôi — thì mới cho kéo ngang, vì ép 14 cột vào 600 px là biến
+     bảng thành vô dụng. */
+  var MIN_BANG = 900;
+
   function esc(s) {
     return String(s == null ? '' : s)
       .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -606,13 +612,21 @@
       var wKiem = suaDuoc ? 210 : 260;
       var tong = 38 + wKiem + (suaDuoc ? 34 : 0);
       cot.forEach(function (c) { tong += (c.r || 110); });
+      /* Bề rộng cột đặt theo TỈ LỆ chứ không theo px. Đặt px thì bảng luôn
+         rộng đúng bấy nhiêu dù khung có rộng bao nhiêu — sổ thiết bị chốt cứng
+         1.554 px trong khung 1.434 px là phải kéo ngang mọi lúc, đọc như đọc
+         qua khe cửa. Các con số r phía trên vẫn giữ nguyên ý nghĩa: chúng là
+         TỈ TRỌNG giữa các cột, không còn là kích thước tuyệt đối.
+         MIN_BANG là sàn: hẹp hơn mức này thì cột co lại đến mức không đọc nổi,
+         lúc đó thà cho kéo ngang còn hơn. */
+      function pc(v) { return (v / tong * 100).toFixed(3) + '%'; }
       h += '<div class="svws-so-cuon" data-bang="' + ma + '">' +
-        '<table class="svws-so" style="min-width:' + tong + 'px">' +
-        '<colgroup><col style="width:38px">' +
+        '<table class="svws-so" style="min-width:' + Math.min(tong, MIN_BANG) + 'px">' +
+        '<colgroup><col style="width:' + pc(38) + '">' +
         cot.map(function (c) {
-          return '<col style="width:' + (c.r || 110) + 'px">';
-        }).join('') + '<col style="width:' + wKiem + 'px">' +
-        (suaDuoc ? '<col style="width:34px">' : '') + '</colgroup>' +
+          return '<col style="width:' + pc(c.r || 110) + '">';
+        }).join('') + '<col style="width:' + pc(wKiem) + '">' +
+        (suaDuoc ? '<col style="width:' + pc(34) + '">' : '') + '</colgroup>' +
         '<thead><tr><th>#</th>' +
         cot.map(function (c) {
           return '<th' + (c.kieu === 'so' ? ' class="p"' : '') + '>' + esc(c.t) + '</th>';
@@ -827,7 +841,11 @@
     FONT + ';margin:2px 0 10px;font-variant-numeric:tabular-nums;table-layout:fixed}' +
     '.svws-so th{background:#0b2545;color:#fff;padding:7px 9px;text-align:left;' +
     'font-weight:600;font-size:10.5px;letter-spacing:.05em;text-transform:uppercase;' +
-    'white-space:nowrap;position:sticky;top:0;z-index:2}' +
+    /* Cột co theo khung nên tiêu đề phải XUỐNG DÒNG chứ không được cắt cụt:
+       'Nằm trên khung' thành hai dòng thì vẫn đọc được, còn nowrap là mất
+       chữ. */
+    'white-space:normal;line-height:1.25;overflow:hidden;position:sticky;' +
+    'top:0;z-index:2}' +
     '.svws-so th.p{text-align:right}' +
     '.svws-so td{padding:4px 5px;border-bottom:1px solid #dbe4ee;vertical-align:middle;' +
     'overflow:hidden}' +
