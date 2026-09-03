@@ -328,6 +328,38 @@ function chonFileKieuCu(){          // lối lùi cho trình duyệt không có 
     inp.click();
   });
 }
+/* Dấu hiệu nhận ra một khối <script> là THƯ VIỆN CỦA CÔNG TY chứ không phải
+   mã AI viết. Giống hệt bộ dấu mà lớp chặn ở server dùng, để hai nơi không bao
+   giờ hiểu khác nhau về "đâu là thư viện". */
+const DAU_THUVIEN = ['Three.js Authors', 'global.SVWS3D =', 'global.SVWSSO =',
+                     'global.SVWSPID =', 'global.SVWSCM =', 'global.SVWSKT ='];
+
+/* Bóc khối thư viện cũ ra khỏi một tool đã sinh, trả lại phần AI viết.
+   Quét thủ công thay vì dùng biểu thức chính quy: mã thư viện chứa đủ loại
+   chuỗi trông như thẻ đóng, regex nuốt nhầm là hỏng cả file. */
+function boThuVienNhung(html){
+  const ra = [];
+  let i = 0, boBot = 0;
+  for(;;){
+    const d = html.indexOf('<script', i);
+    if(d < 0){ ra.push(html.slice(i)); break; }
+    const m = html.indexOf('>', d);
+    const c = m > 0 ? html.indexOf('<\/script>', m + 1) : -1;
+    if(m < 0 || c < 0){ ra.push(html.slice(i)); break; }
+    const than = html.slice(m + 1, c);
+    const laThuVien = DAU_THUVIEN.some(t => than.indexOf(t) >= 0);
+    if(laThuVien){
+      // Trả lại đúng chỗ trống mà injectThree() biết cách điền vào.
+      ra.push(html.slice(i, d), '<script>/*__SVWS_THREE__*/<\/script>');
+      boBot += than.length;
+    }else{
+      ra.push(html.slice(i, c + 9));
+    }
+    i = c + 9;
+  }
+  return {html: ra.join(''), boBot: boBot};
+}
+
 async function moToolTuMay(){
   let f = null;
   try{
@@ -350,11 +382,16 @@ async function moToolTuMay(){
     let html = await f.text();
     if(html.length < 500 || !/<html|<body|<script/i.test(html))
       throw new Error('File này không phải trang HTML.');
-    /* File tải từ app đã nhúng sẵn thư viện nên nhúng lại là thừa — injectThree
-       tự nhận ra và trả nguyên văn. Nhưng nếu ai lỡ lưu bản CHƯA nhúng thì mở
-       ra sẽ trắng mọi tab; nhúng bù ở đây cứu được đúng trường hợp ấy. */
-    const res = await injectThree(html);
+    /* THAY thư viện thay vì giữ nguyên. Tool đóng băng bản thư viện lúc nó
+       được sinh, nên mọi lỗi đã sửa sau đó — bảng ba sổ phải kéo ngang, thiếu
+       ký hiệu điểm xả, thiếu loại thiết bị phản ứng — vẫn còn nguyên trong file
+       cũ. Bóc bản cũ ra, nhúng bản hiện hành vào: phần AI viết giữ từng chữ,
+       chỉ mã của công ty được thay, và không tốn một token nào. */
+    const bo = boThuVienNhung(html);
+    const res = await injectThree(bo.html);
     if(res.err) throw new Error(res.err);
+    if(bo.boBot) console.log('[SVWS] Đã thay ' +
+      Math.round(bo.boBot / 1024) + ' KB thư viện cũ bằng bản hiện hành.');
     const url = URL.createObjectURL(new Blob([res.html],
                                    {type: 'text/html;charset=utf-8'}));
     window.open(url, '_blank');
