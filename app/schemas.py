@@ -497,6 +497,7 @@ class TinhLuongVao(BaseModel):
 
 
 class HoSoLuongVao(BaseModel):
+    ap_dung_tu: str | None = None   # 'YYYY-MM' — tính lại các kỳ CHƯA CHỐT từ kỳ này theo hồ sơ mới
     ho_ten: str | None = None
     ma: str | None = None
     luong_co_ban: Decimal = Decimal(0)

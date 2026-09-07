@@ -1949,9 +1949,24 @@ def cap_nhat_ho_so(nv_id: int, data: HoSoLuongVao, db: Session = Depends(get_db)
         if trung:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Mã NV '{data.ma}' đã tồn tại")
         nv.ma = data.ma.strip()
-    ghi_audit(db, nd.id, "CAP_NHAT", "nhan_vien", nv.id, moi={"luong_co_ban": _f(nv.luong_co_ban)})
+    # "Bắt đầu từ kỳ": áp hồ sơ mới vào các KỲ CHƯA CHỐT từ kỳ đã chọn — bảng lương khớp ngay,
+    # các kỳ đã chốt (đã hạch toán) giữ nguyên.
+    tinh_lai = []
+    if data.ap_dung_tu:
+        for bl in (db.query(BangLuong).filter(BangLuong.nhan_vien_id == nv.id,
+                                              BangLuong.thang >= data.ap_dung_tu)
+                   .order_by(BangLuong.thang).all()):
+            ky = db.get(KyLuong, bl.thang)
+            if ky is not None and ky.trang_thai == "DA_CHOT":
+                continue
+            _ap_dung_tinh(db, nv, bl)
+            if ky is not None:
+                _cap_nhat_tong_ky(db, ky)
+            tinh_lai.append(bl.thang)
+    ghi_audit(db, nd.id, "CAP_NHAT", "nhan_vien", nv.id,
+              moi={"luong_co_ban": _f(nv.luong_co_ban), "tinh_lai": tinh_lai})
     db.commit()
-    return {"id": nv.id, "trang_thai": "DA_LUU"}
+    return {"id": nv.id, "trang_thai": "DA_LUU", "tinh_lai": tinh_lai}
 
 
 # ----- Kỳ lương: tạo & sinh bảng lương cho toàn bộ NV đang làm -----
