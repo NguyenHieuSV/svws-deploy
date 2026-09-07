@@ -1827,3 +1827,26 @@ def xoa_tai_lieu_ct(tep_id: int, db: Session = Depends(get_db),
     ghi_audit(db, nd.id, "XOA", "tep_dinh_kem", tep_id)
     db.commit()
     return {"id": tep_id, "trang_thai": "DA_XOA"}
+
+
+@router.post("/nhac-bcvh-thu")
+def gui_thu_nhac_bcvh(db: Session = Depends(get_db),
+                      nd: NguoiDung = Depends(yeu_cau(MODULE, "DUYET"))):
+    """📨 Gửi NGAY tin nhắc BCVH thiếu dữ liệu để kiểm tra webhook — không chờ 14h thứ Bảy.
+    Không có ngày thiếu thì gửi một tin xác nhận ngắn để biết webhook sống."""
+    kq = gui_nhac_bcvh_tuan(db)
+    if not kq.get("da_gui") and kq.get("ly_do") == "không có ngày thiếu dữ liệu":
+        url = (settings.gchat_webhook_bcvh or "").strip()
+        if url:
+            from ..chat_gateway import gui_webhook_rieng
+            try:
+                gui_webhook_rieng(url, "✅ SVWS: webhook nhóm Coats Operation - Report hoạt động tốt "
+                                       "— hiện không có ngày Báo cáo vận hành nào thiếu dữ liệu.")
+                kq = {"da_gui": True, "kenh": "Coats Operation - Report",
+                      "ghi_chu": "không có ngày thiếu — đã gửi tin xác nhận webhook"}
+            except Exception as e:
+                kq = {"da_gui": False, "ly_do": f"webhook lỗi {type(e).__name__}: {e}"}
+    ghi_audit(db, nd.id, "GUI_THU_BCVH", "bao_cao_vh", None,
+              moi={"da_gui": bool(kq.get("da_gui"))})
+    db.commit()
+    return kq
