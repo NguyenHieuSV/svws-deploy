@@ -280,10 +280,10 @@ def gui_nhac_bcvh_tuan(db: Session) -> dict:
     url = (settings.gchat_webhook_bcvh or "").strip()
     if url:
         from ..chat_gateway import gui_webhook_rieng
-        try:
-            gui_webhook_rieng(url, noi_dung)
-        except Exception as e:
-            return {"da_gui": False, "ly_do": f"webhook BCVH lỗi {type(e).__name__}: {e}",
+        kq_wh = gui_webhook_rieng(url, noi_dung)      # hàm TRẢ dict, không raise — phải đọc da_gui
+        if not kq_wh.get("da_gui"):
+            return {"da_gui": False,
+                    "ly_do": f"webhook BCVH lỗi: {kq_wh.get('loi') or 'không rõ'}",
                     "tong_ngay": tong_ngay}
         return {"da_gui": True, "kenh": "Coats Operation - Report",
                 "so_du_an": len(thieu), "tong_ngay": tong_ngay}
@@ -1839,13 +1839,13 @@ def gui_thu_nhac_bcvh(db: Session = Depends(get_db),
         url = (settings.gchat_webhook_bcvh or "").strip()
         if url:
             from ..chat_gateway import gui_webhook_rieng
-            try:
-                gui_webhook_rieng(url, "✅ SVWS: webhook nhóm Coats Operation - Report hoạt động tốt "
-                                       "— hiện không có ngày Báo cáo vận hành nào thiếu dữ liệu.")
+            kq_wh = gui_webhook_rieng(url, "✅ SVWS: webhook nhóm Coats Operation - Report hoạt động tốt "
+                                           "— hiện không có ngày Báo cáo vận hành nào thiếu dữ liệu.")
+            if kq_wh.get("da_gui"):
                 kq = {"da_gui": True, "kenh": "Coats Operation - Report",
                       "ghi_chu": "không có ngày thiếu — đã gửi tin xác nhận webhook"}
-            except Exception as e:
-                kq = {"da_gui": False, "ly_do": f"webhook lỗi {type(e).__name__}: {e}"}
+            else:
+                kq = {"da_gui": False, "ly_do": f"webhook lỗi: {kq_wh.get('loi') or 'không rõ'}"}
     ghi_audit(db, nd.id, "GUI_THU_BCVH", "bao_cao_vh", None,
               moi={"da_gui": bool(kq.get("da_gui"))})
     db.commit()
