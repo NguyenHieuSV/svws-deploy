@@ -1976,6 +1976,9 @@ def tao_ky_luong(data: KyLuongVao, db: Session = Depends(get_db),
         bl.cong_chuan = data.cong_chuan
         if moi:
             bl.cong_thuc_te = data.cong_chuan
+            # PHÂN BỔ mặc định theo hồ sơ NV (mẫu): thưởng chuyên cần + PC độc hại
+            bl.thuong_chuyen_can = getattr(nv, "thuong_chuyen_can", 0) or 0
+            bl.pc_doc_hai = getattr(nv, "pc_doc_hai", 0) or 0
         bl.trang_thai = "CHO_DUYET"
         db.flush()
         # kéo số liệu Working time & Overtime ĐÃ DUYỆT vào cột tăng ca + khấu trừ
@@ -2331,3 +2334,126 @@ def dong_bo_chuc_danh(db: Session = Depends(get_db),
         ghi_audit(db, nd.id, "DONG_BO_CD", "nhan_vien", None, moi={"so_thay_doi": len(thay_doi)})
         db.commit()
     return {"thay_doi": thay_doi, "khong_tai_khoan": khong_tk}
+
+
+# ---- 📥 Nhập CHẤM CÔNG + PHÂN BỔ theo kỳ từ file Excel (dùng mỗi tháng) ----
+_CC_COT = {   # tên cột chuẩn hóa -> trường phiếu lương theo kỳ
+    "ho ten": "ho_ten", "ho va ten": "ho_ten", "ten nhan vien": "ho_ten",
+    "ma nv": "ma", "manv": "ma",
+    "cong": "cong_thuc_te", "cong thuc te": "cong_thuc_te", "tong cong": "cong_thuc_te", "tong nc": "cong_thuc_te",
+    "nghi huong luong": "nghi_huong_luong",
+    "gio ot thuong": "gio_ot_thuong", "ot thuong": "gio_ot_thuong", "gio tang ca": "gio_ot_thuong",
+    "ot cuoi tuan": "gio_ot_cuoi_tuan", "gio ot cuoi tuan": "gio_ot_cuoi_tuan",
+    "ot le": "gio_ot_le", "gio ot le": "gio_ot_le",
+    "chuyen can": "thuong_chuyen_can", "thuong chuyen can": "thuong_chuyen_can",
+    "pc doc hai": "pc_doc_hai", "doc hai": "pc_doc_hai",
+    "pc cong tac": "pc_cong_tac", "cong tac": "pc_cong_tac",
+    "thuong htcv": "thuong_htcv", "htcv": "thuong_htcv", "thuong hoan thanh cong viec": "thuong_htcv",
+    "pc khac": "phu_cap_khac", "phu cap khac": "phu_cap_khac", "thuong khac": "phu_cap_khac",
+    "tam ung": "tam_ung", "khau tru khac": "khau_tru_khac",
+    "nghi khong phep": "ngay_nghi_kpep", "nghi kp": "ngay_nghi_kpep",
+    "di tre": "so_phut_di_tre", "phut di tre": "so_phut_di_tre",
+}
+
+
+@router.post("/ky-luong/{thang}/cham-cong-excel")
+async def nhap_cham_cong_excel(thang: str, file: UploadFile = File(...),
+                               db: Session = Depends(get_db),
+                               nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    """Cập nhật CHẤM CÔNG + PHÂN BỔ của kỳ từ Excel: khớp Mã NV/Họ tên; chỉ cột có
+    trong file mới được ghi; phiếu tính lại ngay. Nhân viên phải ĐÃ có phiếu trong kỳ."""
+    ky = db.get(KyLuong, thang)
+    if ky is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Kỳ chưa tạo — bấm Sinh/cập nhật bảng lương trước.")
+    if ky.trang_thai == "DA_CHOT":
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Kỳ đã chốt — Mở lại kỳ trước khi nhập.")
+    import io
+    from openpyxl import load_workbook
+    data = await file.read()
+    if len(data) > 10 * 1024 * 1024:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "File quá lớn (tối đa 10MB)")
+    try:
+        wb = load_workbook(io.BytesIO(data), read_only=True, data_only=True)
+    except Exception:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Không mở được file — cần .xlsx")
+    ws = wb.worksheets[0]
+    rows = list(ws.iter_rows(values_only=True))
+    wb.close()
+    cot, dong_bd = None, None
+    for i, r in enumerate(rows[:15]):
+        m = {}
+        for j, v in enumerate(r or ()):
+            f = _CC_COT.get(_hs_chuan(v))
+            if f and f not in m.values():
+                m[j] = f
+        if len(m) >= 2 and ("ho_ten" in m.values() or "ma" in m.values()):
+            cot, dong_bd = m, i + 1
+            break
+    if not cot:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Không tìm thấy dòng tiêu đề (cần cột Họ tên/Mã NV + Công, Giờ OT, Chuyên cần...)")
+
+    def sof(v):
+        if v is None or str(v).strip() == "":
+            return None
+        if isinstance(v, (int, float)):
+            return float(v)
+        t = str(v).strip().replace(" ", "").replace(".", "").replace(",", ".")
+        try:
+            return float(t)
+        except Exception:
+            return None
+
+    _TIEN = ("thuong_chuyen_can", "pc_doc_hai", "pc_cong_tac", "thuong_htcv",
+             "phu_cap_khac", "tam_ung", "khau_tru_khac")
+    cap_nhat, bo_qua, chi_tiet = 0, 0, []
+    for r in rows[dong_bd:]:
+        if not r or all(v is None or str(v).strip() == "" for v in r):
+            continue
+        it = {}
+        for j, f in cot.items():
+            v = r[j] if j < len(r) else None
+            if f in ("ho_ten", "ma"):
+                if v is not None and str(v).strip():
+                    it[f] = str(v).strip()
+            else:
+                x = sof(v)
+                if x is not None:
+                    it[f] = x
+        ten, ma = it.get("ho_ten", ""), it.get("ma", "")
+        if not ten and not ma:
+            continue
+        nv = None
+        if ma:
+            nv = db.query(NhanVien).filter(NhanVien.ma == ma).first()
+        if nv is None and ten:
+            nv = db.query(NhanVien).filter(NhanVien.ho_ten.ilike(ten)).first()
+        if nv is None:
+            bo_qua += 1; chi_tiet.append({"ten": ten or ma, "kq": "Không tìm thấy nhân viên"})
+            continue
+        bl = db.query(BangLuong).filter_by(nhan_vien_id=nv.id, thang=thang).first()
+        if bl is None:
+            bo_qua += 1
+            chi_tiet.append({"ten": nv.ho_ten, "kq": "Chưa có phiếu trong kỳ — bấm Sinh bảng / ➕ Thêm nhân sự trước"})
+            continue
+        doi = 0
+        for f, v in it.items():
+            if f in ("ho_ten", "ma"):
+                continue
+            if f == "so_phut_di_tre":
+                bl.so_phut_di_tre = int(v)
+            else:
+                setattr(bl, f, Decimal(str(round(v, 2))) if f not in _TIEN else Decimal(str(round(v))))
+            doi += 1
+        if doi:
+            _ap_dung_tinh(db, nv, bl)
+            cap_nhat += 1
+            chi_tiet.append({"ten": nv.ho_ten, "kq": f"Cập nhật {doi} cột — thực lĩnh {int(bl.thuc_linh or 0):,}".replace(",", ".") + " đ"})
+        else:
+            bo_qua += 1; chi_tiet.append({"ten": nv.ho_ten, "kq": "Không có số liệu"})
+    _cap_nhat_tong_ky(db, ky)
+    ghi_audit(db, nd.id, "NHAP_CC_EXCEL", "bang_luong", None,
+              moi={"thang": thang, "cap_nhat": cap_nhat})
+    db.commit()
+    return {"cap_nhat": cap_nhat, "bo_qua": bo_qua, "chi_tiet": chi_tiet}
