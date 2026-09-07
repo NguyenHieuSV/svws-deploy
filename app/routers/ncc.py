@@ -2131,7 +2131,7 @@ def ds_cong_no(nha_cung_cap_id: int | None = None, chua_tra: bool = False,
         ngay_tt = lan_tra.get(r.id)
         out.append({"id": r.id, "nha_cung_cap_id": r.nha_cung_cap_id,
                     "ngay_mua": str(ngay_mua) if ngay_mua else None,
-                    "tu_po": bool(r.don_mua_id),
+                    "tu_po": bool(r.don_mua_id), "don_mua_id": r.don_mua_id,
                     "ngay_tt_tiep": str(dm.ngay_tt_tiep) if (dm and dm.ngay_tt_tiep) else None,
                     "ma": ma, "ma_ban": ma_ban, "so_po": dm.so if dm else None,
                     "hang_hoa": ((" · ".join(hh_tens[r.don_mua_id][:2])
