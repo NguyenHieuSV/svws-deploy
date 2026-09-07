@@ -270,6 +270,9 @@ def tao_cong_no_khach(data: TaoCongNoVao, db: Session = Depends(get_db),
                     hddt_trang_thai="CHUA_PHAT_HANH", da_hach_toan=False, trang_thai="GHI_NHAN",
                     dien_giai=f"Công nợ đơn {dh.so or dh.id}")
         db.add(hd); db.flush()
+        # 🔗 Đồng bộ số HĐ về đơn — đơn tự rời bảng "chưa có PO/HĐ" ở tab Đơn hàng
+        if not str(dh.so_hoa_don or "").strip() and str(hd.so or "").strip():
+            dh.so_hoa_don = hd.so
         hd_id = hd.id
         cn = CongNo(loai="PHAI_THU", hoa_don_id=hd.id, khach_hang_id=dh.khach_hang_id,
                     don_hang_id=dh.id, so_tien=tong, da_thanh_toan=0, so_ct=so_hd[:60],
@@ -1603,6 +1606,9 @@ def _dam_bao_cong_no_don(db: Session, dh: DonHang, so_hoa_don, nd: NguoiDung, xo
                     hddt_trang_thai="CHUA_PHAT_HANH", da_hach_toan=False, trang_thai="GHI_NHAN",
                     dien_giai=f"Công nợ đơn {dh.so or dh.id}")
         db.add(hd); db.flush()
+        # 🔗 Đồng bộ số HĐ về đơn — đơn tự rời bảng "chưa có PO/HĐ" ở tab Đơn hàng
+        if not str(dh.so_hoa_don or "").strip() and str(hd.so or "").strip():
+            dh.so_hoa_don = hd.so
         cn = CongNo(loai="PHAI_THU", hoa_don_id=hd.id, khach_hang_id=dh.khach_hang_id,
                     don_hang_id=dh.id, so_tien=tong, da_thanh_toan=coc, so_ct=so_hd,
                     han=date.today() + timedelta(days=30),

@@ -1438,6 +1438,11 @@ def tao_hoa_don(data: HoaDonVao, db: Session = Depends(get_db),
                 trang_thai="GHI_NHAN")
     db.add(hd); db.flush()
     hd.so = data.so or f"{'HDB' if data.loai == 'BAN' else 'HDM'}-{date.today():%Y%m%d}-{hd.id}"
+    # 🔗 Đồng bộ số HĐ về đơn hàng bán — đơn tự rời bảng "chưa có PO/HĐ"
+    if data.loai == "BAN" and data.don_hang_id:
+        _dh = db.get(DonHang, data.don_hang_id)
+        if _dh is not None and not str(_dh.so_hoa_don or "").strip():
+            _dh.so_hoa_don = hd.so
     # sinh công nợ — 🔒 CHỈ hóa đơn BÁN (phải thu). Hóa đơn MUA KHÔNG sinh công nợ:
     # phải trả đi 1 CHIỀU từ mục NCC (nhận hàng PO / nhập ngoài) sang kế toán,
     # tránh 'đã chi nhưng vẫn treo nợ' khi ghi hóa đơn cho khoản đã thanh toán.
