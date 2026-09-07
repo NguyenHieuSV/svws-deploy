@@ -1698,9 +1698,13 @@ _HS_COT = {   # tên cột chuẩn hóa -> trường hồ sơ lương
     "email": "email", "mst": "ma_so_thue", "ma so thue": "ma_so_thue",
     "so tai khoan": "so_tai_khoan", "stk": "so_tai_khoan",
     "ngan hang": "ngan_hang",
+    "thuong chuyen can": "thuong_chuyen_can", "chuyen can": "thuong_chuyen_can",
+    "pc doc hai": "pc_doc_hai", "phu cap doc hai": "pc_doc_hai", "doc hai": "pc_doc_hai",
+    "loai luong": "loai_luong", "loai hop dong": "loai_hop_dong", "loai hd": "loai_hop_dong",
 }
 _HS_SO = ("luong_co_ban", "luong_dong_bh", "phu_cap_an", "phu_cap_di_lai",
-          "phu_cap_dien_thoai", "phu_cap_trach_nhiem", "so_phu_thuoc")
+          "phu_cap_dien_thoai", "phu_cap_trach_nhiem", "so_phu_thuoc",
+          "thuong_chuyen_can", "pc_doc_hai")
 
 
 @router.post("/ho-so-nhap-excel")
@@ -1757,6 +1761,12 @@ async def nhap_excel_ho_so(file: UploadFile = File(...), db: Session = Depends(g
             if v is None or str(v).strip() == "":
                 continue
             it[f] = so(v) if f in _HS_SO else str(v).strip()
+        if "loai_luong" in it:
+            it["loai_luong"] = ("NGAY" if any(k in _hs_chuan(it["loai_luong"])
+                                              for k in ("ngay", "cong nhat")) else "THANG")
+        if "loai_hop_dong" in it:
+            it["loai_hop_dong"] = ("THU_VIEC" if any(k in _hs_chuan(it["loai_hop_dong"])
+                                                     for k in ("thu viec", "thoi vu", "duoi 3")) else "CHINH_THUC")
         ten = (it.get("ho_ten") or "").strip()
         ma = (it.get("ma") or "").strip()
         if not ten and not ma:
@@ -1791,6 +1801,10 @@ async def nhap_excel_ho_so(file: UploadFile = File(...), db: Session = Depends(g
                           phu_cap_trach_nhiem=it.get("phu_cap_trach_nhiem") or 0,
                           ma_so_thue=it.get("ma_so_thue"), email=it.get("email"),
                           so_tai_khoan=it.get("so_tai_khoan"), ngan_hang=it.get("ngan_hang"),
+                          thuong_chuyen_can=it.get("thuong_chuyen_can") or 0,
+                          pc_doc_hai=it.get("pc_doc_hai") or 0,
+                          loai_luong=it.get("loai_luong") or "THANG",
+                          loai_hop_dong=it.get("loai_hop_dong") or "CHINH_THUC",
                           tk_chi_phi="642", trang_thai="DANG_LAM")
             db.add(nv); db.flush()
             tao_moi += 1
