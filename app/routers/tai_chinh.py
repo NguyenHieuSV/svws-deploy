@@ -367,7 +367,7 @@ def dong_tien_du_kien(tuan: int = 13, db: Session = Depends(get_db),
     trả theo hạn + chi cố định hàng tháng; số dư chạy từ tổng Số dư ngân hàng.
     Khoản quá hạn dồn vào tuần hiện tại; khoản không hạn / ngoài kỳ trả về riêng."""
     from datetime import timedelta
-    from ..models import BankTaiKhoan, ChiCoDinh
+    from ..models import BankTaiKhoan, ChiCoDinh, DonMua as _UtDm2
     tuan = max(4, min(26, tuan))
     hom_nay = date.today()
     start = hom_nay - timedelta(days=hom_nay.weekday())
@@ -375,6 +375,8 @@ def dong_tien_du_kien(tuan: int = 13, db: Session = Depends(get_db),
     thu = [0.0] * tuan
     chi = [0.0] * tuan
     cod = [0.0] * tuan
+    thu_ut = [0.0] * tuan
+    chi_ut = [0.0] * tuan
     kh_thu = kh_chi = nk_thu = nk_chi = 0.0
     for cn in db.query(CongNo).filter(CongNo.trang_thai != "THU_DU").all():
         con = float((cn.so_tien or 0) - (cn.da_thanh_toan or 0))
@@ -382,6 +384,19 @@ def dong_tien_du_kien(tuan: int = 13, db: Session = Depends(get_db),
             continue
         la_thu = cn.loai == "PHAI_THU"
         if cn.han is None:
+            # Hạn ƯỚC TÍNH = ngày chứng từ / nhận hàng + 30 ngày — vào lịch RIÊNG (uoc_tinh)
+            goc = cn.ngay_ct
+            if goc is None and getattr(cn, "don_mua_id", None):
+                _dm = db.get(_UtDm2, cn.don_mua_id)
+                if _dm is not None:
+                    goc = _dm.ngay_giao_thuc or _dm.ngay
+            han_ut = (goc or hom_nay) + timedelta(days=30)
+            iu = (han_ut - start).days // 7
+            if iu < 0:
+                iu = 0
+            if iu >= tuan:
+                iu = tuan - 1                    # xa hơn kỳ → dồn tuần cuối
+            (thu_ut if la_thu else chi_ut)[iu] += con
             if la_thu:
                 kh_thu += con
             else:
@@ -422,9 +437,13 @@ def dong_tien_du_kien(tuan: int = 13, db: Session = Depends(get_db),
                    "ket_thuc": str(start + timedelta(weeks=i, days=6)),
                    "thu": thu[i], "chi_cong_no": chi[i], "chi_co_dinh": cod[i],
                    "rong": rong, "so_du": run})
+    ut_ra = [{"bat_dau": ra[i]["bat_dau"], "ket_thuc": ra[i]["ket_thuc"],
+              "thu": thu_ut[i], "chi": chi_ut[i], "rong": thu_ut[i] - chi_ut[i]}
+             for i in range(tuan)]
     return {"so_du_dau": so_du, "tuan": ra,
             "khong_han": {"thu": kh_thu, "chi": kh_chi},
-            "ngoai_ky": {"thu": nk_thu, "chi": nk_chi}}
+            "ngoai_ky": {"thu": nk_thu, "chi": nk_chi},
+            "uoc_tinh": {"tuan": ut_ra, "tong_thu": sum(thu_ut), "tong_chi": sum(chi_ut)}}
 
 
 # ============ 🧾 Thuế & bắt buộc · 📈 Chỉ số dòng tiền · 🎯 Ngân sách ============
@@ -1242,6 +1261,33 @@ def du_bao_dong_tien(so_tuan: int = 13, db: Session = Depends(get_db),
     for w in weeks:
         w["chi"] += chi_co_dinh_tuan
 
+    # ƯỚC TÍNH RIÊNG cho khoản CHƯA có hạn: hạn tạm = ngày chứng từ / nhận hàng + 30 ngày.
+    # Trả thành bảng riêng (uoc_tinh) — KHÔNG cộng vào weeks chính.
+    from ..models import DonMua as _UtDm
+    ut = [{"tuan": i + 1, "tu_ngay": weeks[i]["tu_ngay"], "den_ngay": weeks[i]["den_ngay"],
+           "thu": 0.0, "chi": 0.0} for i in range(so_tuan)]
+    ut_thu = ut_chi = 0.0
+    for cn in db.query(CongNo).filter(CongNo.han.is_(None)).all():
+        if cn.loai == "PHAI_THU" and cn.trang_thai == "THU_DU":
+            continue
+        if cn.loai == "PHAI_TRA" and cn.trang_thai == "DA_TRA":
+            continue
+        con = _f((cn.so_tien or 0) - (cn.da_thanh_toan or 0))
+        if con <= 0:
+            continue
+        goc = cn.ngay_ct
+        if goc is None and getattr(cn, "don_mua_id", None):
+            _dm = db.get(_UtDm, cn.don_mua_id)
+            if _dm is not None:
+                goc = _dm.ngay_giao_thuc or _dm.ngay
+        han_ut = (goc or today) + timedelta(days=30)
+        wi = bucket(han_ut)                      # hạn ước tính xa hơn kỳ → dồn tuần cuối
+        if cn.loai == "PHAI_THU":
+            ut[wi]["thu"] += con; ut_thu += con
+        else:
+            ut[wi]["chi"] += con; ut_chi += con
+    for u in ut:
+        u["rong"] = u["thu"] - u["chi"]
     ton = opening
     min_ton = opening
     tuan_thieu_dau = None
@@ -1266,7 +1312,8 @@ def du_bao_dong_tien(so_tuan: int = 13, db: Session = Depends(get_db),
     return {"ngay": str(today), "so_tuan": so_tuan, "opening": opening, "weeks": weeks,
             "min_ton": min_ton, "tuan_thieu_dau": tuan_thieu_dau, "so_tuan_am": so_tuan_am,
             "chi_co_dinh_tuan": chi_co_dinh_tuan, "no_vay_trong_ky": vay_trong_ky,
-            "ar_khong_han": ar_khong_han, "ap_khong_han": ap_khong_han, "canh_bao": canh_bao}
+            "ar_khong_han": ar_khong_han, "ap_khong_han": ap_khong_han,
+            "uoc_tinh": {"weeks": ut, "tong_thu": ut_thu, "tong_chi": ut_chi}, "canh_bao": canh_bao}
 
 
 # ============ 🧾 ĐỐI SOÁT SAO KÊ NGÂN HÀNG ============
