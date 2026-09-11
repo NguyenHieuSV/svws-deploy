@@ -681,11 +681,21 @@ def _tinh_lai_lo_tong(db: Session) -> dict:
         if hid in po_cn_hd or str(hdg or "").startswith("Nhận hàng PO"):
             continue
         chi_hd_mua += float(htong or 0)
+    # ⚙️ CHI PHÍ VẬN HÀNH (mã OP-…): PO đã duyệt mang mã OP nhưng KHÔNG có đơn hàng bán cùng số —
+    # chi phí doanh nghiệp, tách dòng riêng (không nằm trong lãi/lỗ theo mã bán hàng).
+    _so_dh = {str(x).strip().lower() for (x,) in db.query(DonHang.so).filter(DonHang.so.isnot(None)).all()}
+    chi_op = 0.0
+    for (mb, tt) in db.query(DonMua.ma_ban, DonMua.tong_tien).filter(
+            DonMua.don_hang_id.is_(None), DonMua.ma_ban.isnot(None),
+            DonMua.trang_thai == "DA_DUYET").all():
+        k = str(mb or "").strip().lower()
+        if k.startswith("op") and k not in _so_dh:
+            chi_op += float(tt or 0)
     lai_gop = tong_dt - tong_cp
     return {"doanh_thu": tong_dt, "chi_phi_don": tong_cp, "lai_gop": lai_gop,
             "chi_thang": chi_thang, "chi_phi_khac": chi_khac,
             "chi_phi_hd_mua": chi_hd_mua,
-            "lai_lo": lai_gop - chi_khac - chi_hd_mua, "theo_ma": theo_ma, "ngay": str(hom_nay)}
+            "chi_phi_op": chi_op, "lai_lo": lai_gop - chi_khac - chi_hd_mua - chi_op, "theo_ma": theo_ma, "ngay": str(hom_nay)}
 
 
 def luu_lai_lo_hom_nay(db: Session) -> dict:

@@ -985,6 +985,7 @@ def de_xuat_mua_tu_du_toan(dt_id: int, db: Session = Depends(get_db),
         if _dh:
             dh_id = _dh.id
     ycm = YeuCauMua(hang_hoa_id=hh.id, so_luong=sl, ly_do=ly_do, don_hang_id=dh_id,
+                    ma_ban=(((da.ma or "").strip()[:40] or None) if da else None),
                     don_gia=x.don_gia or None, ghi_chu=(x.quy_cach or None),
                     nguoi_tao=nhan_vien_id_cua(db, nd.id), trang_thai="MOI")
     db.add(ycm); db.flush()

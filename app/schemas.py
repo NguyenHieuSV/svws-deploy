@@ -139,6 +139,7 @@ class DonMuaRa(BaseModel):
     da_dat_hang: bool = False
     dinh_ky: bool = False               # 🔁 mua định kỳ (xác nhận khi tạo đơn nghi trùng)
     hang_hoa: str | None = None         # tóm tắt tên mặt hàng của PO (danh sách)
+    ma_ban: str | None = None           # mã chuỗi (dự toán / dự án / OP) khi PO chưa gắn đơn bán
 
 
 class YeuCauMuaItemVao(BaseModel):

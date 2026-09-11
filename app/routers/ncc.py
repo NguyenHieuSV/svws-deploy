@@ -8,7 +8,7 @@ from datetime import date
 from pydantic import BaseModel as _NccCnBase
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form
 from sqlalchemy.orm import Session
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.exc import IntegrityError
 from ..database import get_db
 from ..rbac import yeu_cau, kiem_han_muc, chi_vai_tro
@@ -283,7 +283,7 @@ def _ycm_dict(db, y):
             "ngay_can": str(y.ngay_can) if y.ngay_can else None, "don_mua_id": y.don_mua_id,
             "ai_ncc_id": y.ai_ncc_id, "ai_goi_y": y.ai_goi_y,
             "dinh_kem_url": y.dinh_kem_url, "dinh_kem_file": y.dinh_kem_file,
-            "so_dong": len(items) or 1, "items": items}
+            "so_dong": len(items) or 1, "items": items, "ma_ban": getattr(y, "ma_ban", None)}
 
 
 @router.get("/yeu-cau-mua")
@@ -491,10 +491,16 @@ def tao_po_tu_de_xuat(ycm_id: int, data: TaoPoTuDeXuatVao, db: Session = Depends
                              don_gia=ycm.don_gia, nha_cung_cap_id=ycm.nha_cung_cap_id)]
     # CHẶN mua trùng theo mã bán hàng (CEO/ADMIN xác nhận mới mua bổ sung được)
     da_xac_nhan_trung = False
-    if ycm.don_hang_id or getattr(ycm, "cho_thue_ma", None):
+    # mã chuỗi hiệu lực: mã dự toán/dự án của đề xuất, hoặc số đơn bán đã gắn
+    _ma_eff = (getattr(ycm, "ma_ban", None) or "").strip() or None
+    if ycm.don_hang_id and not _ma_eff:
+        from ..models import DonHang as _TpDh
+        _dh0 = db.get(_TpDh, ycm.don_hang_id)
+        _ma_eff = ((_dh0.so or "").strip() or None) if _dh0 else None
+    if ycm.don_hang_id or getattr(ycm, "cho_thue_ma", None) or _ma_eff:
         da_xac_nhan_trung = _chan_mua_trung(
             db, nd, [l.hang_hoa_id for l in lines], don_hang_id=ycm.don_hang_id,
-            cho_thue_ma=getattr(ycm, "cho_thue_ma", None),
+            cho_thue_ma=getattr(ycm, "cho_thue_ma", None), ma_ban=_ma_eff,
             xac_nhan=getattr(data, "xac_nhan_trung", False))
     # gom dòng theo NCC (mỗi NCC -> 1 PO)
     nhom = {}
@@ -517,7 +523,7 @@ def tao_po_tu_de_xuat(ycm_id: int, data: TaoPoTuDeXuatVao, db: Session = Depends
         tong = Decimal(0)
         for _, sl, g in items_g:
             tong += Decimal(sl) * Decimal(g)
-        dm = DonMua(so=None, nha_cung_cap_id=ncc, don_hang_id=ycm.don_hang_id,
+        dm = DonMua(so=None, nha_cung_cap_id=ncc, don_hang_id=ycm.don_hang_id, ma_ban=(getattr(ycm, "ma_ban", None) or None),
                     ngay=date.today(), ngay_hen_giao=data.ngay_hen_giao or ycm.ngay_can,
                     tong_tien=tong, trang_thai="CHO_DUYET")
         db.add(dm); db.flush(); dm.so = f"PO-{date.today():%Y%m%d}-{dm.id}"
@@ -1706,10 +1712,27 @@ def xac_nhan_dat_hang(dm_id: int, db: Session = Depends(get_db),
 
 
 # ----- Kiểm soát mua trùng theo mã bán hàng -----
-def _po_da_mua(db, hang_hoa_id, don_hang_id=None, cho_thue_ma=None):
+def _po_da_mua(db, hang_hoa_id, don_hang_id=None, cho_thue_ma=None, ma_ban=None):
     """Các dòng PO (chưa bị từ chối) đã mua mặt hàng này cho CÙNG mã bán hàng."""
     kq = []
     dm_ids = set()
+    if ma_ban:
+        # PO mang cùng MÃ CHUỖI (dự toán / dự án / OP) hoặc gắn đơn bán có số trùng mã đó
+        from ..models import DonHang as _PdDh
+        _k = ma_ban.strip().lower()
+        _dh_ids = [i for (i,) in db.query(_PdDh.id).filter(func.lower(func.trim(_PdDh.so)) == _k).all()]
+        _dk = func.lower(func.trim(DonMua.ma_ban)) == _k
+        if _dh_ids:
+            _dk = or_(_dk, DonMua.don_hang_id.in_(_dh_ids))
+        for dm, ct in (db.query(DonMua, DonMuaCt)
+                       .join(DonMuaCt, DonMuaCt.don_mua_id == DonMua.id)
+                       .filter(DonMuaCt.hang_hoa_id == hang_hoa_id, _dk,
+                               DonMua.trang_thai != "TU_CHOI").all()):
+            if dm.id not in dm_ids:
+                dm_ids.add(dm.id)
+                kq.append({"so": dm.so or f"PO#{dm.id}", "ngay": str(dm.ngay or "")[:10],
+                           "so_luong": float(ct.so_luong), "so_luong_nhan": float(ct.so_luong_nhan or 0),
+                           "trang_thai": dm.trang_thai})
     if don_hang_id:
         for dm, ct in (db.query(DonMua, DonMuaCt)
                        .join(DonMuaCt, DonMuaCt.don_mua_id == DonMua.id)
@@ -1739,12 +1762,12 @@ def _po_da_mua(db, hang_hoa_id, don_hang_id=None, cho_thue_ma=None):
     return kq
 
 
-def _chan_mua_trung(db, nd, cap_hang_hoa, don_hang_id=None, cho_thue_ma=None, xac_nhan=False):
+def _chan_mua_trung(db, nd, cap_hang_hoa, don_hang_id=None, cho_thue_ma=None, xac_nhan=False, ma_ban=None):
     """CHẶN tạo PO trùng: mặt hàng đã có PO cho cùng mã bán hàng → lỗi 409.
     CEO/ADMIN gửi kèm xac_nhan_trung=True mới được mua bổ sung (ghi audit ở nơi gọi)."""
     canh_bao = []
     for hh_id in cap_hang_hoa:
-        trung = _po_da_mua(db, hh_id, don_hang_id, cho_thue_ma)
+        trung = _po_da_mua(db, hh_id, don_hang_id, cho_thue_ma, ma_ban)
         if trung:
             hh = db.get(HangHoa, hh_id)
             ct = "; ".join(f"{t['so']} ngày {t['ngay']} (SL {t['so_luong']:g}, đã nhận {t['so_luong_nhan']:g})"
@@ -1755,7 +1778,7 @@ def _chan_mua_trung(db, nd, cap_hang_hoa, don_hang_id=None, cho_thue_ma=None, xa
     la_qtv = getattr(getattr(nd, "vai_tro", None), "ma", None) in ("CEO", "ADMIN")
     if xac_nhan and la_qtv:
         return True   # QTV xác nhận mua bổ sung
-    ma = (f"mã bán hàng {cho_thue_ma}" if cho_thue_ma else "mã bán hàng này")
+    ma = (f"mã bán hàng {cho_thue_ma or ma_ban}" if (cho_thue_ma or ma_ban) else "mã bán hàng này")
     raise HTTPException(
         status.HTTP_409_CONFLICT,
         "⚠ TRÙNG MUA cho " + ma + ": " + " | ".join(canh_bao) +
@@ -1768,9 +1791,14 @@ def da_mua_theo_ma(don_hang_id: int, db: Session = Depends(get_db),
                    _=Depends(yeu_cau(MODULE, "XEM"))):
     """Lịch sử đã mua của một mã bán hàng: mọi dòng hàng thuộc các PO gắn mã này."""
     out = []
+    from ..models import DonHang as _DmDh
+    _dhx = db.get(_DmDh, don_hang_id)
+    _dk_dm = DonMua.don_hang_id == don_hang_id
+    if _dhx is not None and (_dhx.so or "").strip():
+        _dk_dm = or_(_dk_dm, func.lower(func.trim(DonMua.ma_ban)) == _dhx.so.strip().lower())
     for dm, ct in (db.query(DonMua, DonMuaCt)
                    .join(DonMuaCt, DonMuaCt.don_mua_id == DonMua.id)
-                   .filter(DonMua.don_hang_id == don_hang_id, DonMua.trang_thai != "TU_CHOI")
+                   .filter(_dk_dm, DonMua.trang_thai != "TU_CHOI")
                    .order_by(DonMua.id.desc()).all()):
         hh = db.get(HangHoa, ct.hang_hoa_id)
         ncc = db.get(NhaCungCap, dm.nha_cung_cap_id)
@@ -2837,6 +2865,8 @@ def _ma_ban_hang_po(db, dm):
         o = db.get(DonHang, dm.don_hang_id)
         if o and o.so:
             return o.so
+    if getattr(dm, "ma_ban", None):
+        return dm.ma_ban
     y = db.query(YeuCauMua).filter_by(don_mua_id=dm.id).first()
     if y and y.cho_thue_ma:
         return y.cho_thue_ma
@@ -3192,11 +3222,12 @@ class DtbMucVao(_NccCnBase):
     so_luong: float | None = None
     don_gia: float | None = None
     ghi_chu: str | None = None
+    hang_hoa_id: int | None = None
 
 
 def _dtb_ten_nguoi(db: Session, nd: NguoiDung) -> str:
     try:
-        nv_id = nhan_vien_id_cua(db, nd)
+        nv_id = nhan_vien_id_cua(db, nd.id)
         if nv_id:
             nv = db.get(_DtbNhanVien, nv_id)
             if nv and nv.ho_ten:
@@ -3204,6 +3235,24 @@ def _dtb_ten_nguoi(db: Session, nd: NguoiDung) -> str:
     except Exception:
         pass
     return nd.email
+
+
+def _dtb_dx_hieu_luc(db, m):
+    """Đề xuất CÒN HIỆU LỰC của 1 dòng dự toán — bị từ chối / đã xóa thì coi như chưa đề xuất."""
+    if not getattr(m, "yeu_cau_mua_id", None):
+        return None
+    y = db.get(YeuCauMua, m.yeu_cau_mua_id)
+    if y is None or y.trang_thai == "TU_CHOI":
+        return None
+    return y
+
+
+def _dtb_khoa_muc(db, m):
+    y = _dtb_dx_hieu_luc(db, m)
+    if y is not None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            f"Dòng '{m.ten}' đã chuyển sang đề xuất mua #{y.id} — muốn sửa/xóa thì "
+                            "từ chối hoặc xóa đề xuất đó để mở lại dòng.")
 
 
 @router.get("/du-toan-ban")
@@ -3227,6 +3276,8 @@ def dtb_tao(data: DuToanBanVao, db: Session = Depends(get_db),
     ma = (data.ma or "").strip()
     if not ma:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Nhập Mã hàng bán")
+    if len(ma) > 30:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Mã tối đa 30 ký tự (bằng giới hạn số đơn hàng / báo giá)")
     if db.query(DuToanBan).filter(func.lower(DuToanBan.ma) == ma.lower()).first():
         raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Mã hàng bán '{ma}' đã có dự toán")
     d = DuToanBan(ma=ma, khach_hang=(data.khach_hang or "").strip() or None,
@@ -3247,6 +3298,7 @@ def dtb_sua_muc(muc_id: int, data: DtbMucVao, db: Session = Depends(get_db),
     m = db.get(DuToanBanMuc, muc_id)
     if m is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy sản phẩm trong dự toán")
+    _dtb_khoa_muc(db, m)
     if data.ten is not None and data.ten.strip():
         m.ten = data.ten.strip()
     if data.quy_cach is not None:
@@ -3269,6 +3321,7 @@ def dtb_xoa_muc(muc_id: int, db: Session = Depends(get_db),
     m = db.get(DuToanBanMuc, muc_id)
     if m is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy sản phẩm trong dự toán")
+    _dtb_khoa_muc(db, m)
     db.delete(m); db.commit()
     return {"ok": True}
 
@@ -3280,7 +3333,13 @@ def dtb_them_muc(dt_id: int, data: DtbMucVao, db: Session = Depends(get_db),
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy dự toán")
     if not (data.ten or "").strip():
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Nhập tên sản phẩm / hạng mục")
-    m = DuToanBanMuc(du_toan_id=dt_id, ten=data.ten.strip(),
+    hh_id = None
+    if data.hang_hoa_id and db.get(HangHoa, data.hang_hoa_id) is not None:
+        hh_id = data.hang_hoa_id
+    else:
+        _hh = db.query(HangHoa).filter(func.lower(func.trim(HangHoa.ten)) == data.ten.strip().lower()).first()
+        hh_id = _hh.id if _hh else None
+    m = DuToanBanMuc(du_toan_id=dt_id, ten=data.ten.strip(), hang_hoa_id=hh_id,
                      quy_cach=(data.quy_cach or "").strip() or None,
                      don_vi=(data.don_vi or "").strip() or None,
                      so_luong=Decimal(str(data.so_luong or 0)),
@@ -3297,10 +3356,14 @@ def dtb_chi_tiet(dt_id: int, db: Session = Depends(get_db), _=Depends(yeu_cau("n
     d = db.get(DuToanBan, dt_id)
     if d is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy dự toán")
-    items = [{"id": r.id, "ten": r.ten, "quy_cach": r.quy_cach, "don_vi": r.don_vi,
-              "so_luong": float(r.so_luong or 0), "don_gia": float(r.don_gia or 0),
-              "thanh_tien": float(r.so_luong or 0) * float(r.don_gia or 0), "ghi_chu": r.ghi_chu}
-             for r in db.query(DuToanBanMuc).filter_by(du_toan_id=dt_id).order_by(DuToanBanMuc.id).all()]
+    items = []
+    for r in db.query(DuToanBanMuc).filter_by(du_toan_id=dt_id).order_by(DuToanBanMuc.id).all():
+        y = _dtb_dx_hieu_luc(db, r)
+        items.append({"id": r.id, "ten": r.ten, "quy_cach": r.quy_cach, "don_vi": r.don_vi,
+                      "so_luong": float(r.so_luong or 0), "don_gia": float(r.don_gia or 0),
+                      "thanh_tien": float(r.so_luong or 0) * float(r.don_gia or 0), "ghi_chu": r.ghi_chu,
+                      "hang_hoa_id": r.hang_hoa_id,
+                      "dx_id": y.id if y else None, "dx_trang_thai": y.trang_thai if y else None})
     return {"id": d.id, "ma": d.ma, "khach_hang": d.khach_hang, "mo_ta": d.mo_ta,
             "ngay": str(d.ngay) if d.ngay else None, "nguoi_tao": d.nguoi_tao,
             "items": items, "tong": sum(x["thanh_tien"] for x in items)}
@@ -3314,6 +3377,13 @@ def dtb_sua(dt_id: int, data: DuToanBanVao, db: Session = Depends(get_db),
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy dự toán")
     if data.ma and data.ma.strip():
         ma = data.ma.strip()
+        if len(ma) > 30:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Mã tối đa 30 ký tự (bằng giới hạn số đơn hàng / báo giá)")
+        if ma.lower() != (d.ma or "").strip().lower():
+            _dang = [x for x in db.query(DuToanBanMuc).filter_by(du_toan_id=dt_id).all() if _dtb_dx_hieu_luc(db, x)]
+            if _dang:
+                raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                    f"Không đổi mã được: đã có {len(_dang)} dòng chuyển sang đề xuất mua mang mã '{d.ma}'.")
         trung = db.query(DuToanBan).filter(func.lower(DuToanBan.ma) == ma.lower(),
                                            DuToanBan.id != dt_id).first()
         if trung:
@@ -3336,7 +3406,88 @@ def dtb_xoa(dt_id: int, db: Session = Depends(get_db),
     d = db.get(DuToanBan, dt_id)
     if d is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy dự toán")
+    _dang = [x for x in db.query(DuToanBanMuc).filter_by(du_toan_id=dt_id).all() if _dtb_dx_hieu_luc(db, x)]
+    if _dang:
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            f"Dự toán có {len(_dang)} dòng đang ở đề xuất mua — từ chối/xóa các đề xuất đó trước khi xóa dự toán.")
     db.query(DuToanBanMuc).filter_by(du_toan_id=dt_id).delete()
     ghi_audit(db, nd.id, "XOA", "du_toan_ban", dt_id, moi={"ma": d.ma})
     db.delete(d); db.commit()
     return {"ok": True}
+
+
+
+# ---------------------------------------------------------------------------
+#  🛒 DỰ TOÁN → ĐỀ XUẤT MUA: gộp các dòng đã chọn thành 1 đề xuất nhiều mặt hàng mang MÃ
+#  CHUỖI của dự toán (ma_ban) — vào hàng đợi duyệt theo hạn mức như mọi đề xuất khác.
+#  Chặn mua trùng + giá vốn nhận theo mã chuỗi; đơn bán cùng số tạo sau vẫn gom đủ PO.
+#  Mã OP- = chi phí vận hành doanh nghiệp (không có đơn bán) → dòng riêng ở Lãi/lỗ tổng.
+# ---------------------------------------------------------------------------
+class DtbDeXuatVao(_NccCnBase):
+    muc_ids: list[int]
+    ngay_can: str | None = None
+
+
+@router.post("/du-toan-ban/{dt_id}/de-xuat", status_code=201)
+def dtb_tao_de_xuat(dt_id: int, data: DtbDeXuatVao, db: Session = Depends(get_db),
+                    nd: NguoiDung = Depends(yeu_cau("ncc", "THAO_TAC"))):
+    from ..models import DonHang as _DxDh
+    d = db.get(DuToanBan, dt_id)
+    if d is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy dự toán")
+    ma = (d.ma or "").strip()
+    if not ma or len(ma) > 30:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Mã dự toán phải có và tối đa 30 ký tự — bấm ✏️ sửa mã trước khi đề xuất.")
+    ngay_can = None
+    if data.ngay_can:
+        try:
+            ngay_can = date.fromisoformat(data.ngay_can)
+        except ValueError:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Ngày cần hàng không hợp lệ")
+    chon = set(data.muc_ids or [])
+    mucs = [m for m in db.query(DuToanBanMuc).filter_by(du_toan_id=dt_id).order_by(DuToanBanMuc.id).all()
+            if m.id in chon]
+    if not mucs:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Chưa chọn dòng dự toán nào")
+    bo_qua, dong = [], []
+    for m in mucs:
+        y0 = _dtb_dx_hieu_luc(db, m)
+        if y0 is not None:
+            bo_qua.append(f"{m.ten} (đã ở đề xuất #{y0.id})")
+            continue
+        if not m.so_luong or Decimal(m.so_luong) <= 0:
+            bo_qua.append(f"{m.ten} (SL = 0)")
+            continue
+        dong.append(m)
+    if not dong:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Không còn dòng hợp lệ để đề xuất: " + "; ".join(bo_qua))
+    hang_moi, cap = 0, []
+    for m in dong:
+        hh = db.get(HangHoa, m.hang_hoa_id) if m.hang_hoa_id else None
+        if hh is None:
+            hh = db.query(HangHoa).filter(func.lower(func.trim(HangHoa.ten)) == m.ten.strip().lower()).first()
+        if hh is None:
+            hh = HangHoa(ma=None, ten=m.ten.strip()[:200], loai="VAT_TU", don_vi=m.don_vi)
+            db.add(hh); db.flush()
+            db.add(TonKho(hang_hoa_id=hh.id, so_luong=0, ton_min=0))
+            hang_moi += 1
+        m.hang_hoa_id = hh.id
+        cap.append((m, hh))
+    dh = db.query(_DxDh).filter(func.lower(func.trim(_DxDh.so)) == ma.lower()).first()
+    m0, hh0 = cap[0]
+    ycm = YeuCauMua(hang_hoa_id=hh0.id, so_luong=m0.so_luong, ly_do=f"Dự toán {ma}"[:200],
+                    don_hang_id=dh.id if dh else None, ma_ban=ma[:40],
+                    don_gia=(m0.don_gia or None), ngay_can=ngay_can, ghi_chu=(d.mo_ta or None),
+                    nguoi_tao=nhan_vien_id_cua(db, nd.id), trang_thai="MOI")
+    db.add(ycm); db.flush()
+    for m, hh in cap:
+        gc = " · ".join(x for x in ((m.quy_cach or "").strip(), (m.ghi_chu or "").strip()) if x) or None
+        db.add(YeuCauMuaCt(yeu_cau_mua_id=ycm.id, hang_hoa_id=hh.id, so_luong=m.so_luong,
+                           don_gia=(m.don_gia or None), ghi_chu=gc))
+        m.yeu_cau_mua_id = ycm.id
+    ghi_audit(db, nd.id, "TAO", "yeu_cau_mua", ycm.id,
+              moi={"tu_du_toan_ban": d.id, "ma": ma, "so_dong": len(cap), "hang_moi": hang_moi})
+    db.commit()
+    return {"yeu_cau_mua_id": ycm.id, "so_dong": len(cap), "hang_moi": hang_moi,
+            "bo_qua": bo_qua, "gan_don_hang": bool(dh)}

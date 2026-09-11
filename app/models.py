@@ -148,6 +148,7 @@ class YeuCauMua(Base):
     dinh_kem_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     dinh_kem_file: Mapped[str | None] = mapped_column(Text, nullable=True)
     cho_thue_ma: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    ma_ban: Mapped[str | None] = mapped_column(String(40), nullable=True)   # mig 117: mã chuỗi (dự toán / dự án / OP) — tách khỏi cho_thue_ma
 
 
 class YeuCauMuaCt(Base):
@@ -213,6 +214,7 @@ class DonMua(Base):
     lenh_bank_tien: Mapped[Decimal] = mapped_column(Numeric(18, 0), default=0)       # mig 83
     lenh_bank_luc: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)  # mig 83
     dinh_ky: Mapped[bool] = mapped_column(Boolean, default=False)                    # mig 105: mua định kỳ
+    ma_ban: Mapped[str | None] = mapped_column(String(40), nullable=True)            # mig 117: mã chuỗi kế thừa từ đề xuất
     ngay_dat_hang: Mapped[date | None] = mapped_column(Date, nullable=True)
     de_nghi_tt: Mapped[Decimal] = mapped_column(Numeric(18, 0), default=0)
     da_duyet_tt: Mapped[Decimal | None] = mapped_column(Numeric(18, 0), nullable=True)  # lũy kế ĐÃ DUYỆT chi
@@ -1493,3 +1495,5 @@ class DuToanBanMuc(Base):
     so_luong: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=0)
     don_gia: Mapped[Decimal] = mapped_column(Numeric(18, 0), default=0)
     ghi_chu: Mapped[str | None] = mapped_column(Text, nullable=True)
+    hang_hoa_id: Mapped[int | None] = mapped_column(ForeignKey("hang_hoa.id", ondelete="SET NULL"), nullable=True)        # mig 117
+    yeu_cau_mua_id: Mapped[int | None] = mapped_column(ForeignKey("yeu_cau_mua.id", ondelete="SET NULL"), nullable=True)  # mig 117

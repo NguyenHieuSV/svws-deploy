@@ -12,7 +12,7 @@ Nguyên tắc (chốt 2026-08-19 — "chi phí theo NGHĨA VỤ, không theo ti�
   • ĐÃ THU          = đã thanh toán trên công nợ PHẢI THU của mã (gồm cọc đã cấn)
                       + trả trước khách chưa cấn + cọc ghi trên đơn khi chưa có công nợ.
 """
-from sqlalchemy import func
+from sqlalchemy import func, or_, and_
 from sqlalchemy.orm import Session
 
 from .models import DonHang, DonMua, DonMuaCt, CongNo, HoaDon, PhieuThuChi
@@ -24,7 +24,13 @@ def _f(v) -> float:
 
 def chi_phi_ma(db: Session, dh: DonHang) -> dict:
     doanh_thu = _f(dh.tong_tien) + _f(dh.tien_thue)
-    pos = (db.query(DonMua).filter(DonMua.don_hang_id == dh.id,
+    # PO gắn đơn + PO chỉ mang MÃ CHUỖI trùng số đơn (sinh từ Dự toán / Dự án trước khi có
+    # đơn bán) — đơn bán cùng số tạo sau vẫn gom đủ giá vốn.
+    _dk_pos = DonMua.don_hang_id == dh.id
+    if (dh.so or "").strip():
+        _dk_pos = or_(_dk_pos, and_(DonMua.don_hang_id.is_(None),
+                                    func.lower(func.trim(DonMua.ma_ban)) == dh.so.strip().lower()))
+    pos = (db.query(DonMua).filter(_dk_pos,
                                    DonMua.trang_thai != "TU_CHOI").all())
     po_ids = [p.id for p in pos]
     gia_von_po = sum(_f(p.tong_tien) for p in pos if p.trang_thai == "DA_DUYET")
