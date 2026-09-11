@@ -501,7 +501,8 @@ def tao_po_tu_de_xuat(ycm_id: int, data: TaoPoTuDeXuatVao, db: Session = Depends
         da_xac_nhan_trung = _chan_mua_trung(
             db, nd, [l.hang_hoa_id for l in lines], don_hang_id=ycm.don_hang_id,
             cho_thue_ma=getattr(ycm, "cho_thue_ma", None), ma_ban=_ma_eff,
-            xac_nhan=getattr(data, "xac_nhan_trung", False))
+            xac_nhan=getattr(data, "xac_nhan_trung", False),
+            xac_nhan_lap=getattr(data, "xac_nhan_lap", False), so_luong_moi=_sl_theo_hh(lines))
     # gom dòng theo NCC (mỗi NCC -> 1 PO)
     nhom = {}
     for i, l in enumerate(lines):
@@ -523,7 +524,7 @@ def tao_po_tu_de_xuat(ycm_id: int, data: TaoPoTuDeXuatVao, db: Session = Depends
         tong = Decimal(0)
         for _, sl, g in items_g:
             tong += Decimal(sl) * Decimal(g)
-        dm = DonMua(so=None, nha_cung_cap_id=ncc, don_hang_id=ycm.don_hang_id, ma_ban=(getattr(ycm, "ma_ban", None) or None),
+        dm = DonMua(so=None, nha_cung_cap_id=ncc, don_hang_id=ycm.don_hang_id, ma_ban=(getattr(ycm, "ma_ban", None) or None), dinh_ky=bool(getattr(data, "xac_nhan_lap", False)),
                     ngay=date.today(), ngay_hen_giao=data.ngay_hen_giao or ycm.ngay_can,
                     tong_tien=tong, trang_thai="CHO_DUYET")
         db.add(dm); db.flush(); dm.so = f"PO-{date.today():%Y%m%d}-{dm.id}"
@@ -1762,29 +1763,225 @@ def _po_da_mua(db, hang_hoa_id, don_hang_id=None, cho_thue_ma=None, ma_ban=None)
     return kq
 
 
-def _chan_mua_trung(db, nd, cap_hang_hoa, don_hang_id=None, cho_thue_ma=None, xac_nhan=False, ma_ban=None):
-    """CHẶN tạo PO trùng: mặt hàng đã có PO cho cùng mã bán hàng → lỗi 409.
-    CEO/ADMIN gửi kèm xac_nhan_trung=True mới được mua bổ sung (ghi audit ở nơi gọi)."""
-    canh_bao = []
-    for hh_id in cap_hang_hoa:
-        trung = _po_da_mua(db, hh_id, don_hang_id, cho_thue_ma, ma_ban)
-        if trung:
-            hh = db.get(HangHoa, hh_id)
-            ct = "; ".join(f"{t['so']} ngày {t['ngay']} (SL {t['so_luong']:g}, đã nhận {t['so_luong_nhan']:g})"
-                           for t in trung[:3])
-            canh_bao.append(f"'{hh.ten if hh else hh_id}' đã mua trong {ct}")
-    if not canh_bao:
-        return False
-    la_qtv = getattr(getattr(nd, "vai_tro", None), "ma", None) in ("CEO", "ADMIN")
-    if xac_nhan and la_qtv:
-        return True   # QTV xác nhận mua bổ sung
-    ma = (f"mã bán hàng {cho_thue_ma or ma_ban}" if (cho_thue_ma or ma_ban) else "mã bán hàng này")
-    raise HTTPException(
-        status.HTTP_409_CONFLICT,
-        "⚠ TRÙNG MUA cho " + ma + ": " + " | ".join(canh_bao) +
-        (" — Bấm xác nhận để mua bổ sung." if la_qtv
-         else " — Chỉ CEO/ADMIN mới được xác nhận mua bổ sung; liên hệ quản trị nếu thật sự cần mua thêm."))
+# ---------------------------------------------------------------------------
+#  CHẶN MUA TRÙNG PHÂN TẦNG (chốt 2026-09-11)
+#  • TM-/DA-… và THIẾT BỊ trong mọi mã: mặt hàng đã có PO cùng mã → chặn, CEO/ADMIN xác nhận.
+#  • Mã VẬN HÀNH DV-/OP- với HÓA CHẤT / VẬT TƯ: mua lặp là bình thường —
+#      – còn PO cùng hàng CHƯA NHẬN ĐỦ / CHỜ DUYỆT → hỏi xác nhận (người lập tự xác nhận);
+#      – tổng mua trong THÁNG vượt ĐỊNH MỨC tiêu hao quá 10% → CEO/ADMIN xác nhận.
+#  Tháng = đuôi MMYY của mã (DV-COA-NT-0826, DV-COA-NT-0826-2 … cùng tháng 08/2026);
+#  định mức lấy từ dự án cho thuê cùng gốc (DV-COA-NT-2024) ở tab Định mức tiêu hao.
+# ---------------------------------------------------------------------------
+import re as _re_ma
 
+_MA_VAN_HANH = ("DV-", "OP-")
+_LOAI_MUA_LAP = ("HOA_CHAT", "VAT_TU")
+_DUNG_SAI_DINH_MUC = Decimal("0.10")
+
+
+def _sl_theo_hh(items):
+    out = {}
+    for it in items or []:
+        hid = getattr(it, "hang_hoa_id", None)
+        if hid:
+            out[hid] = out.get(hid, Decimal(0)) + Decimal(str(getattr(it, "so_luong", 0) or 0))
+    return out
+
+
+def _ma_hieu_luc(db, don_hang_id=None, cho_thue_ma=None, ma_ban=None):
+    """Mã chuỗi để phân tầng: mã cho thuê / mã dự toán-dự án / số đơn bán đã gắn."""
+    for m in (cho_thue_ma, ma_ban):
+        if m and str(m).strip():
+            return str(m).strip()
+    if don_hang_id:
+        from ..models import DonHang as _MhDh
+        dh = db.get(_MhDh, don_hang_id)
+        if dh and (dh.so or "").strip():
+            return dh.so.strip()
+    return None
+
+
+def _tach_ma_thang(ma):
+    """'DV-COA-NT-0826-3' → ('DV-COA-NT', '0826'); mã không có đuôi tháng-năm hợp lệ → (None, None)."""
+    m = _re_ma.match(r"^(.+?)-(\d{2})(\d{2})(?:-\d+)?$", (ma or "").strip())
+    if not m or not (1 <= int(m.group(2)) <= 12):
+        return None, None
+    return m.group(1), m.group(2) + m.group(3)
+
+
+def _codes_cung_thang(db, goc, mmyy):
+    """Mọi mã (số đơn bán / mã chuỗi PO / mã đề xuất) cùng GỐC + cùng tháng: X-0826, X-0826-2 …"""
+    from ..models import DonHang as _CtDh
+    tien_to = goc.lower() + "-" + mmyy
+    pat = _re_ma.compile("^" + _re_ma.escape(tien_to) + r"(?:-\d+)?$")
+    codes = set()
+    for cot in (_CtDh.so, DonMua.ma_ban, YeuCauMua.cho_thue_ma, YeuCauMua.ma_ban):
+        for (v,) in db.query(cot).filter(func.lower(cot).like(tien_to + "%")).distinct().all():
+            if v and pat.match(v.strip().lower()):
+                codes.add(v.strip().lower())
+    return codes
+
+
+def _po_ids_theo_codes(db, codes):
+    """PO (chưa bị từ chối) mang một trong các mã: gắn đơn bán / mã chuỗi PO / mã của đề xuất sinh ra PO."""
+    from ..models import DonHang as _PiDh
+    if not codes:
+        return set()
+    codes = {c.lower() for c in codes}
+    ids = set()
+    dh_ids = [i for (i,) in db.query(_PiDh.id).filter(func.lower(func.trim(_PiDh.so)).in_(codes)).all()]
+    if dh_ids:
+        ids |= {i for (i,) in db.query(DonMua.id).filter(DonMua.don_hang_id.in_(dh_ids),
+                                                           DonMua.trang_thai != "TU_CHOI").all()}
+    ids |= {i for (i,) in db.query(DonMua.id).filter(func.lower(func.trim(DonMua.ma_ban)).in_(codes),
+                                                       DonMua.trang_thai != "TU_CHOI").all()}
+    y_po = [i for (i,) in db.query(YeuCauMua.don_mua_id).filter(
+        YeuCauMua.don_mua_id.isnot(None),
+        or_(func.lower(func.trim(YeuCauMua.cho_thue_ma)).in_(codes),
+            func.lower(func.trim(YeuCauMua.ma_ban)).in_(codes))).all()]
+    if y_po:
+        ids |= {i for (i,) in db.query(DonMua.id).filter(DonMua.id.in_(y_po),
+                                                           DonMua.trang_thai != "TU_CHOI").all()}
+    return ids
+
+
+def _po_ids_pham_vi(db, ma_eff):
+    goc, mmyy = _tach_ma_thang(ma_eff)
+    codes = {ma_eff.strip().lower()}
+    if goc:
+        codes |= _codes_cung_thang(db, goc, mmyy)
+    return _po_ids_theo_codes(db, codes)
+
+
+def _po_cho_ve(db, po_ids, hang_hoa_id):
+    """Dòng PO cùng hàng còn CHỜ DUYỆT hoặc ĐÃ DUYỆT mà CHƯA NHẬN ĐỦ."""
+    out = []
+    if not po_ids:
+        return out
+    for dm, ct in (db.query(DonMua, DonMuaCt).join(DonMuaCt, DonMuaCt.don_mua_id == DonMua.id)
+                   .filter(DonMua.id.in_(po_ids), DonMuaCt.hang_hoa_id == hang_hoa_id)
+                   .order_by(DonMua.id.desc()).all()):
+        sl, nhan = Decimal(str(ct.so_luong or 0)), Decimal(str(ct.so_luong_nhan or 0))
+        if dm.trang_thai == "CHO_DUYET" or (dm.trang_thai == "DA_DUYET" and nhan < sl):
+            out.append(f"{dm.so or ('PO#' + str(dm.id))} ngày {str(dm.ngay or '')[:10]} "
+                       f"(SL {float(sl):g}, đã nhận {float(nhan):g}"
+                       + (", chờ duyệt" if dm.trang_thai == "CHO_DUYET" else "") + ")")
+    return out
+
+
+def _dinh_muc_thang(db, ma_eff, hang_hoa_id):
+    """(định mức tháng, PO ids trong kỳ, nhãn kỳ) cho mã vận hành — None nếu chưa khai định mức."""
+    from ..models import TaiSanChoThue, DinhMucTieuHao
+    goc, mmyy = _tach_ma_thang(ma_eff)
+    ts = None
+    if goc:                          # mã bán hàng theo tháng: DV-COA-NT-0826(-n) → dự án DV-COA-NT(-2024)
+        for t in db.query(TaiSanChoThue).filter(func.lower(TaiSanChoThue.ma).like(goc.lower() + "%")).all():
+            con = (t.ma or "").strip()[len(goc):]
+            if con == "" or _re_ma.fullmatch(r"-\d{4}", con):
+                ts = t
+                break
+        if ts is None:
+            return None
+        codes = _codes_cung_thang(db, goc, mmyy) | {ma_eff.strip().lower()}
+        po_ids = _po_ids_theo_codes(db, codes)
+        ky = f"tháng {mmyy[:2]}/20{mmyy[2:]} của {goc}"
+    else:                            # mã dự án cho thuê (không đuôi tháng): kỳ = tháng hiện tại theo ngày PO
+        ts = db.query(TaiSanChoThue).filter(func.lower(TaiSanChoThue.ma) == ma_eff.strip().lower()).first()
+        if ts is None:
+            return None
+        d1 = date.today().replace(day=1)
+        po_ids = _po_ids_theo_codes(db, {ma_eff.strip().lower()})
+        if po_ids:
+            po_ids = {i for (i,) in db.query(DonMua.id).filter(DonMua.id.in_(po_ids), DonMua.ngay >= d1).all()}
+        ky = f"tháng {d1:%m/%Y} của {ts.ma}"
+    dm = db.query(DinhMucTieuHao).filter_by(tai_san_id=ts.id, hang_hoa_id=hang_hoa_id).first()
+    if dm is None or not dm.dinh_muc_thang or Decimal(str(dm.dinh_muc_thang)) <= 0:
+        return None
+    return Decimal(str(dm.dinh_muc_thang)), po_ids, ky
+
+
+def _danh_gia_mua(db, cap_hang_hoa, don_hang_id=None, cho_thue_ma=None, ma_ban=None, so_luong_moi=None):
+    """ĐÁNH GIÁ (không chặn): trùng cứng / còn chờ về / vượt định mức tháng cho các mặt hàng sắp mua."""
+    ma_eff = _ma_hieu_luc(db, don_hang_id, cho_thue_ma, ma_ban)
+    van_hanh = bool(ma_eff) and ma_eff.upper().startswith(_MA_VAN_HANH)
+    kq = {"ma": ma_eff, "van_hanh": van_hanh, "trung": [], "vuot_dinh_muc": [], "cho_ve": [], "chi_tiet": []}
+    pham_vi = None
+    for hh_id in dict.fromkeys(cap_hang_hoa):
+        hh = db.get(HangHoa, hh_id)
+        ten = hh.ten if hh else f"#{hh_id}"
+        mua_lap = van_hanh and hh is not None and hh.loai in _LOAI_MUA_LAP
+        ct = {"hang_hoa_id": hh_id, "ten": ten, "loai": hh.loai if hh else None, "mua_lap": mua_lap}
+        if not mua_lap:
+            trung = _po_da_mua(db, hh_id, don_hang_id, cho_thue_ma, ma_ban)
+            if trung:
+                kq["trung"].append(f"'{ten}' đã mua trong " + "; ".join(
+                    f"{t['so']} ngày {t['ngay']} (SL {t['so_luong']:g}, đã nhận {t['so_luong_nhan']:g})"
+                    for t in trung[:3]))
+            kq["chi_tiet"].append(ct)
+            continue
+        if pham_vi is None:
+            pham_vi = _po_ids_pham_vi(db, ma_eff)
+        cho = _po_cho_ve(db, pham_vi, hh_id)
+        if cho:
+            kq["cho_ve"].append(f"'{ten}' còn chờ về: " + "; ".join(cho[:3]))
+        sl_moi = Decimal(str((so_luong_moi or {}).get(hh_id, 0) or 0))
+        dmr = _dinh_muc_thang(db, ma_eff, hh_id)
+        if dmr is not None:
+            dm_thang, po_ids, ky = dmr
+            da = Decimal(0)
+            if po_ids:
+                da = sum((Decimal(str(x.so_luong or 0)) for x in db.query(DonMuaCt).filter(
+                    DonMuaCt.don_mua_id.in_(po_ids), DonMuaCt.hang_hoa_id == hh_id).all()), Decimal(0))
+            tran = dm_thang * (1 + _DUNG_SAI_DINH_MUC)
+            dv = (hh.don_vi or "").strip()
+            ct.update({"ky": ky, "dinh_muc": float(dm_thang), "da_mua": float(da),
+                       "sl_moi": float(sl_moi), "tran": float(tran)})
+            if sl_moi > 0 and da + sl_moi > tran:
+                kq["vuot_dinh_muc"].append(
+                    f"'{ten}' {ky}: đã mua {float(da):g} + lần này {float(sl_moi):g} = {float(da + sl_moi):g} {dv}"
+                    f" — vượt định mức {float(dm_thang):g} {dv}/tháng (trần +10% = {float(tran):g} {dv})")
+        kq["chi_tiet"].append(ct)
+    return kq
+
+
+def _chan_mua_trung(db, nd, cap_hang_hoa, don_hang_id=None, cho_thue_ma=None, xac_nhan=False, ma_ban=None,
+                    xac_nhan_lap=False, so_luong_moi=None):
+    """CHẶN tạo PO theo kết quả _danh_gia_mua (phân tầng — xem khối chú thích ở trên).
+    Trả True khi CEO/ADMIN đã xác nhận vượt chốt cứng (nơi gọi ghi audit)."""
+    kq = _danh_gia_mua(db, cap_hang_hoa, don_hang_id, cho_thue_ma, ma_ban, so_luong_moi)
+    la_qtv = getattr(getattr(nd, "vai_tro", None), "ma", None) in ("CEO", "ADMIN")
+    ceo_ok = bool(xac_nhan and la_qtv)
+    nang = kq["trung"] or kq["vuot_dinh_muc"]
+    if nang and not ceo_ok:
+        phan = []
+        if kq["trung"]:
+            phan.append("⚠ TRÙNG MUA cho " + (f"mã bán hàng {kq['ma']}" if kq["ma"] else "mã bán hàng này")
+                        + ": " + " | ".join(kq["trung"]))
+        if kq["vuot_dinh_muc"]:
+            phan.append("⛔ VƯỢT ĐỊNH MỨC TIÊU HAO THÁNG (dung sai 10%): " + " | ".join(kq["vuot_dinh_muc"]))
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "  ·  ".join(phan) + (" — Bấm xác nhận để mua (CEO/ADMIN)." if la_qtv
+                                  else " — Chỉ CEO/ADMIN mới được xác nhận; liên hệ Giám đốc nếu thật sự cần mua."))
+    if kq["cho_ve"] and not (xac_nhan_lap or ceo_ok):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"⏳ CÒN HÀNG CHỜ VỀ (mã vận hành {kq['ma']}): " + " | ".join(kq["cho_ve"])
+            + " — xác nhận nếu đây là ĐỢT MUA MỚI, không phải đặt trùng đợt đang chờ về.")
+    return bool(nang) and ceo_ok
+
+
+@router.get("/kiem-tra-mua")
+def kiem_tra_mua(ma: str, hang_hoa_id: int, so_luong: float = 0, db: Session = Depends(get_db),
+                 _=Depends(yeu_cau(MODULE, "XEM"))):
+    """XEM TRƯỚC (không tạo gì): kết quả chặn trùng / chờ về / định mức tháng cho 1 mặt hàng + 1 mã."""
+    from ..models import DonHang as _KtDh, TaiSanChoThue as _KtTs
+    m = (ma or "").strip()
+    dh = db.query(_KtDh).filter(func.lower(func.trim(_KtDh.so)) == m.lower()).first()
+    ts = None if dh else db.query(_KtTs).filter(func.lower(_KtTs.ma) == m.lower()).first()
+    return _danh_gia_mua(db, [hang_hoa_id], don_hang_id=(dh.id if dh else None),
+                         cho_thue_ma=(m if ts else None), ma_ban=(None if (dh or ts) else m),
+                         so_luong_moi={hang_hoa_id: Decimal(str(so_luong or 0))})
 
 @router.get("/da-mua/{don_hang_id}")
 def da_mua_theo_ma(don_hang_id: int, db: Session = Depends(get_db),
@@ -1862,12 +2059,13 @@ def tao_don_mua(data: DonMuaVao, bo_qua_trung: bool = False,
     da_xac_nhan = False
     if data.don_hang_id:
         da_xac_nhan = _chan_mua_trung(db, nd, [ct.hang_hoa_id for ct in data.chi_tiet],
-                                      don_hang_id=data.don_hang_id, xac_nhan=data.xac_nhan_trung)
+                                      don_hang_id=data.don_hang_id, xac_nhan=data.xac_nhan_trung,
+                                      xac_nhan_lap=data.xac_nhan_lap, so_luong_moi=_sl_theo_hh(data.chi_tiet))
     tien_hang, tien_thue, tong = _tinh_tien_po(data.chi_tiet)
     dm = DonMua(so=data.so, nha_cung_cap_id=data.nha_cung_cap_id,
                 don_hang_id=data.don_hang_id, ngay_hen_giao=data.ngay_hen_giao,
                 ngay=date.today(), tien_hang=tien_hang, tien_thue=tien_thue,
-                tong_tien=tong, trang_thai="CHO_DUYET", dinh_ky=bool(bo_qua_trung))
+                tong_tien=tong, trang_thai="CHO_DUYET", dinh_ky=bool(bo_qua_trung or data.xac_nhan_lap))
     db.add(dm)
     db.flush()
     if not dm.so:
@@ -1911,7 +2109,10 @@ def sua_don_mua(dm_id: int, data: DonMuaVao, db: Session = Depends(get_db),
             kiem_tra = [ct.hang_hoa_id for ct in data.chi_tiet if ct.hang_hoa_id not in cu_ids]
         if kiem_tra:
             da_xac_nhan = _chan_mua_trung(db, nd, kiem_tra, don_hang_id=data.don_hang_id,
-                                          xac_nhan=data.xac_nhan_trung)
+                                          xac_nhan=data.xac_nhan_trung, xac_nhan_lap=data.xac_nhan_lap,
+                                          so_luong_moi=_sl_theo_hh([c for c in data.chi_tiet if c.hang_hoa_id in set(kiem_tra)]))
+            if data.xac_nhan_lap:
+                dm.dinh_ky = True
     cu = {"nha_cung_cap_id": dm.nha_cung_cap_id, "don_hang_id": dm.don_hang_id,
           "tong_tien": float(dm.tong_tien or 0), "trang_thai": dm.trang_thai,
           "so_dong": len(dm.chi_tiet)}

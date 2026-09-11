@@ -122,6 +122,7 @@ class DonMuaVao(BaseModel):
     ngay_hen_giao: date | None = None
     chi_tiet: list[DonMuaCtVao] = Field(min_length=1)
     xac_nhan_trung: bool = False   # CEO/ADMIN xác nhận mua bổ sung dù trùng mã bán hàng
+    xac_nhan_lap: bool = False     # người lập xác nhận MUA LẶP (mã DV-/OP-) dù còn PO cùng hàng chờ về
 
 
 class DonMuaRa(BaseModel):
@@ -172,6 +173,7 @@ class TaoPoTuDeXuatVao(BaseModel):
     don_gia: Decimal | None = None
     ngay_hen_giao: date | None = None
     xac_nhan_trung: bool = False   # CEO/ADMIN xác nhận mua bổ sung dù trùng mã bán hàng
+    xac_nhan_lap: bool = False     # người lập xác nhận MUA LẶP (mã DV-/OP-) dù còn PO cùng hàng chờ về
 
 
 class LyDoVao(BaseModel):
