@@ -1568,7 +1568,9 @@ def chi_tiet_don_hang(dh_id: int, db: Session = Depends(get_db),
                        "thue_suat": float(ct.thue_suat or 0)})
     co_hd = db.query(HoaDon).filter_by(don_hang_id=dh_id).first() is not None
     cn0 = _cong_no_cua_don(db, dh_id)
+    kh = db.get(KhachHang, dh.khach_hang_id) if dh.khach_hang_id else None
     return {"id": dh.id, "so": dh.so, "khach_hang_id": dh.khach_hang_id,
+            "khach": (kh.ten if kh else None),
             "ngay": str(dh.ngay) if dh.ngay else None, "tong_tien": float(dh.tong_tien or 0),
             "tien_thue": float(dh.tien_thue or 0),
             "so_hoa_don": dh.so_hoa_don or (cn0.so_ct if cn0 else None),
