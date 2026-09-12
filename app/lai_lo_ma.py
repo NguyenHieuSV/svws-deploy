@@ -98,3 +98,78 @@ def chi_phi_ma(db: Session, dh: DonHang) -> dict:
                           "tong_tien": _f(p.tong_tien), "trang_thai": p.trang_thai,
                           "trang_thai_nhan": p.trang_thai_nhan} for p in pos],
     }
+
+
+# ================= NHÓM MÃ GỐC + THÁNG · CHI PHÍ NGOÀI MÃ (dùng chung Overall Financial · Kiểm soát) =================
+import re as _re_nm
+
+
+def nhom_ma(ma):
+    """'DV-COA-NT-0826-02 (1)' → 'DV-COA-NT-0826' (gốc + tháng MMYY, viết hoa).
+    Đơn bán tách -01/-02/-BT… và PO chỉ ghi mã gốc cùng tháng đều rơi vào một nhóm.
+    Mã không có tháng (DA-…, TAISINH…) → None (không gom)."""
+    s = str(ma or "").strip()
+    if not s:
+        return None
+    parts = s.split("-")
+    for i, p in enumerate(parts):
+        p0 = p.strip()
+        if _re_nm.fullmatch(r"\d{4}", p0) and 1 <= int(p0[:2]) <= 12:
+            return "-".join(x.strip() for x in parts[:i + 1]).upper()
+    return None
+
+
+def chi_phi_ngoai_ma(db: Session) -> dict:
+    """Khoản chi ĐÃ DUYỆT không gắn đơn bán nào (PO không don_hang_id · công nợ nhập ngoài
+    thật — không sinh từ hóa đơn, không phải HĐ nhận hàng PO), chia theo mã:
+      ma_le      {mã thường: {ma, chi}}  mã có nhưng chưa có đơn bán → hiện thành dòng riêng
+      chi_op     mã OP-… (vận hành doanh nghiệp)
+      chi_chua_ma không có mã
+      chi_kho    mã KHO (mua dự trữ — tồn kho)"""
+    so_dh = {str(x).strip().lower() for (x,) in db.query(DonHang.so).filter(DonHang.so.isnot(None)).all()}
+    r = {"ma_le": {}, "chi_op": 0.0, "chi_chua_ma": 0.0, "chi_kho": 0.0}
+
+    def cong(mb, v):
+        k = str(mb or "").strip().lower()
+        if not k:
+            r["chi_chua_ma"] += v
+        elif k == "kho":
+            r["chi_kho"] += v
+        elif k.startswith("op"):
+            if k not in so_dh:
+                r["chi_op"] += v
+        elif k not in so_dh:
+            o = r["ma_le"].setdefault(k, {"ma": str(mb).strip(), "chi": 0.0})
+            o["chi"] += v
+
+    for (dhid, mb, tt) in db.query(DonMua.don_hang_id, DonMua.ma_ban, DonMua.tong_tien).filter(
+            DonMua.trang_thai == "DA_DUYET").all():
+        if not dhid:
+            cong(mb, _f(tt))
+    for (mbn, st, sct, hdid, dmid) in db.query(
+            CongNo.ma_ban_ngoai, CongNo.so_tien, CongNo.so_ct,
+            CongNo.hoa_don_id, CongNo.don_mua_id).filter(CongNo.loai == "PHAI_TRA").all():
+        if dmid or hdid or str(sct or "").upper().startswith("HDM-"):
+            continue
+        cong(mbn, _f(st))
+    return r
+
+
+def gom_theo_nhom(rows):
+    """rows có 'nhom' → [{nhom, so_ma, doanh_thu, tong_chi_phi, loi_nhuan, ty_suat, ma}] cho nhóm ≥ 2 mã."""
+    nh = {}
+    for x in rows:
+        k = x.get("nhom")
+        if k:
+            nh.setdefault(k, []).append(x)
+    out = []
+    for k, rs in nh.items():
+        if len(rs) < 2:
+            continue
+        dt = sum(_f(x.get("doanh_thu")) for x in rs)
+        cp = sum(_f(x.get("tong_chi_phi")) for x in rs)
+        out.append({"nhom": k, "so_ma": len(rs), "doanh_thu": dt, "tong_chi_phi": cp,
+                    "loi_nhuan": dt - cp, "ty_suat": round((dt - cp) / dt * 100, 1) if dt else None,
+                    "ma": [x.get("ma_ban") for x in rs]})
+    out.sort(key=lambda o: -o["doanh_thu"])
+    return out

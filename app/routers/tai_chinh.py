@@ -650,7 +650,7 @@ def _tinh_lai_lo_tong(db: Session) -> dict:
     from sqlalchemy import func
     from ..models import DonHang, DonMua, CongNo, ChiCoDinh
     from ..nhac_viec_service import gio_hien_tai
-    from ..lai_lo_ma import chi_phi_ma          # CÔNG THỨC CHUNG theo mã (app/lai_lo_ma.py)
+    from ..lai_lo_ma import chi_phi_ma, nhom_ma, chi_phi_ngoai_ma, gom_theo_nhom   # CÔNG THỨC CHUNG (app/lai_lo_ma.py)
     theo_ma, tong_dt, tong_cp = [], 0.0, 0.0
     for dh in db.query(DonHang).order_by(DonHang.id.desc()).all():
         cp = chi_phi_ma(db, dh)
@@ -661,6 +661,7 @@ def _tinh_lai_lo_tong(db: Session) -> dict:
         tong_dt += doanh_thu
         tong_cp += chi_phi
         theo_ma.append({"don_hang_id": dh.id, "ma_ban": dh.so or f"DH-{dh.id}",
+                        "nhom": nhom_ma(dh.so),
                         "doanh_thu": doanh_thu, "tong_chi_phi": chi_phi,
                         "loi_nhuan": doanh_thu - chi_phi,
                         "ty_suat": round((doanh_thu - chi_phi) / doanh_thu * 100, 1)
@@ -686,47 +687,13 @@ def _tinh_lai_lo_tong(db: Session) -> dict:
     # 🧩 và CHƯA PHÂN MÃ: khoản chi không mang mã (không vào được Lãi/Lỗ của mã nào)
     #    · KHO: mua dự trữ → tồn kho (tài sản), theo dõi riêng, KHÔNG trừ vào lãi/lỗ
     #    · MÃ LẺ: mã chưa có đơn bán trong app → vẫn hiện thành dòng riêng ở bảng theo mã
-    _so_dh = {str(x).strip().lower() for (x,) in db.query(DonHang.so).filter(DonHang.so.isnot(None)).all()}
-    chi_op = chi_chua_ma = chi_kho = 0.0
-    ma_le = {}
-    for (dhid, mb, tt) in db.query(DonMua.don_hang_id, DonMua.ma_ban, DonMua.tong_tien).filter(
-            DonMua.trang_thai == "DA_DUYET").all():
-        if dhid:
-            continue
-        k = str(mb or "").strip().lower()
-        v = float(tt or 0)
-        if not k:
-            chi_chua_ma += v
-        elif k == "kho":
-            chi_kho += v
-        elif k.startswith("op"):
-            if k not in _so_dh:
-                chi_op += v
-        elif k not in _so_dh:
-            g = ma_le.setdefault(k, {"ma": str(mb).strip(), "chi": 0.0})
-            g["chi"] += v
-    for (mbn, st, sct, hdid, dmid) in db.query(
-            CongNo.ma_ban_ngoai, CongNo.so_tien, CongNo.so_ct,
-            CongNo.hoa_don_id, CongNo.don_mua_id).filter(CongNo.loai == "PHAI_TRA").all():
-        if dmid or hdid:                      # của PO / của hóa đơn — đã tính ở nhánh khác
-            continue
-        if str(sct or "").upper().startswith("HDM-"):   # HĐ nhận hàng PO còn mồ côi
-            continue
-        k = str(mbn or "").strip().lower()
-        v = float(st or 0)
-        if not k:
-            chi_chua_ma += v
-        elif k == "kho":
-            chi_kho += v
-        elif k.startswith("op"):
-            if k not in _so_dh:
-                chi_op += v
-        elif k not in _so_dh:
-            g = ma_le.setdefault(k, {"ma": str(mbn).strip(), "chi": 0.0})
-            g["chi"] += v
+    _ngoai = chi_phi_ngoai_ma(db)          # cùng một hàm với Kiểm soát → hai nơi ra cùng số
+    chi_op, chi_chua_ma, chi_kho = _ngoai["chi_op"], _ngoai["chi_chua_ma"], _ngoai["chi_kho"]
+    ma_le = _ngoai["ma_le"]
     for k, g in sorted(ma_le.items(), key=lambda x: -x[1]["chi"]):
         tong_cp += g["chi"]
-        theo_ma.append({"don_hang_id": None, "ma_ban": g["ma"], "doanh_thu": 0.0,
+        theo_ma.append({"don_hang_id": None, "ma_ban": g["ma"], "nhom": nhom_ma(g["ma"]),
+                        "doanh_thu": 0.0,
                         "tong_chi_phi": g["chi"], "loi_nhuan": -g["chi"], "ty_suat": None,
                         "chua_co_don_ban": True})
     lai_gop = tong_dt - tong_cp
@@ -736,7 +703,7 @@ def _tinh_lai_lo_tong(db: Session) -> dict:
             "chi_phi_op": chi_op, "chi_chua_ma": chi_chua_ma, "chi_kho": chi_kho,
             "so_ma_le": len(ma_le),
             "lai_lo": lai_gop - chi_khac - chi_hd_mua - chi_op - chi_chua_ma,
-            "theo_ma": theo_ma, "ngay": str(hom_nay)}
+            "theo_ma": theo_ma, "theo_nhom": gom_theo_nhom(theo_ma), "ngay": str(hom_nay)}
 
 
 def luu_lai_lo_hom_nay(db: Session) -> dict:
@@ -777,7 +744,9 @@ def lai_lo_record(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"
     theo_thang = [dict(v, thang=k, tam_tinh=(k == thang_nay))
                   for k, v in sorted(thang.items(), reverse=True)]
     theo_ma = t.pop("theo_ma")
-    return {"tong": t, "theo_ngay": theo_ngay, "theo_ma": theo_ma, "theo_thang": theo_thang}
+    theo_nhom = t.pop("theo_nhom", [])
+    return {"tong": t, "theo_ngay": theo_ngay, "theo_ma": theo_ma, "theo_nhom": theo_nhom,
+            "theo_thang": theo_thang}
 
 
 @router.get("/dashboard")

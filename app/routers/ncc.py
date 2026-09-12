@@ -2490,18 +2490,26 @@ def chi_phi_theo_don(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "X
     + hóa đơn mua gắn mã không qua PO. Lợi nhuận = doanh thu (gồm VAT) − tổng chi phí.
     Đã trả / Còn phải trả là dòng tiền, không ảnh hưởng lợi nhuận."""
     from ..models import DonHang
-    from ..lai_lo_ma import chi_phi_ma
+    from ..lai_lo_ma import chi_phi_ma, nhom_ma, chi_phi_ngoai_ma
     out = []
     for dh in db.query(DonHang).order_by(DonHang.id.desc()).all():
         cp = chi_phi_ma(db, dh)
         if cp["doanh_thu"] == 0 and cp["tong_chi_phi"] == 0:
             continue                      # bỏ đơn rỗng (chưa có doanh thu lẫn chi phí)
-        out.append({"don_hang_id": dh.id, "ma_ban": dh.so or f"DH-{dh.id}",
+        out.append({"don_hang_id": dh.id, "ma_ban": dh.so or f"DH-{dh.id}", "nhom": nhom_ma(dh.so),
                     "doanh_thu": cp["doanh_thu"],
                     "gia_von_po": cp["gia_von_po"], "chi_phi_khac": cp["chi_phi_khac"],
                     "thanh_toan_mua": cp["da_tra_ncc"], "cong_no_phai_tra": cp["con_phai_tra"],
                     "tong_chi_phi": cp["tong_chi_phi"], "loi_nhuan": cp["loi_nhuan"],
                     "ty_suat": cp["ty_suat"]})
+    # 🏷 mã CHƯA CÓ ĐƠN BÁN (PO / công nợ ngoài mang mã gốc, mã cũ…) — cùng nguồn với Lãi/Lỗ tổng,
+    # để nhóm gốc+tháng gom đủ chi phí (đơn con -01/-02 + PO mã gốc)
+    for k, g in sorted(chi_phi_ngoai_ma(db)["ma_le"].items(), key=lambda x: -x[1]["chi"]):
+        out.append({"don_hang_id": None, "ma_ban": g["ma"], "nhom": nhom_ma(g["ma"]),
+                    "doanh_thu": 0.0, "gia_von_po": g["chi"], "chi_phi_khac": 0.0,
+                    "thanh_toan_mua": 0.0, "cong_no_phai_tra": 0.0,
+                    "tong_chi_phi": g["chi"], "loi_nhuan": -g["chi"], "ty_suat": None,
+                    "chua_co_don_ban": True})
     return out
 
 
