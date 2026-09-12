@@ -4020,6 +4020,53 @@ def dtb_chi_tiet(dt_id: int, db: Session = Depends(get_db), _=Depends(yeu_cau("n
             "so_dong_thuc": sum(1 for x in items if x["gia_thuc"] is not None)}
 
 
+class DtbKhopKhoVao(_NccCnBase):
+    ap_dung: bool = False
+    chon: list[dict] | None = None   # [{id, hang_hoa_id, doi_ten: bool, lay_gia: bool}]
+
+
+@router.post("/du-toan-ban/{dt_id}/khop-kho")
+def dtb_khop_kho(dt_id: int, data: DtbKhopKhoVao, db: Session = Depends(get_db),
+                 nd: NguoiDung = Depends(yeu_cau("ncc", "THAO_TAC"))):
+    """🔗 Khớp dòng dự toán với mặt hàng kho (gợi ý gần giống, không phân biệt dấu);
+    ap_dung → gán hang_hoa_id, tùy chọn đổi tên theo kho + lấy giá đầu vào."""
+    from ..gia_dau_vao import goi_y_khop_kho, bang_gia
+    d = db.get(DuToanBan, dt_id)
+    if d is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy dự toán")
+    mucs = db.query(DuToanBanMuc).filter_by(du_toan_id=dt_id).order_by(DuToanBanMuc.id).all()
+    if not data.ap_dung:
+        dong = [(m.id, m.ten, m.hang_hoa_id, m.don_gia, _dtb_dx_hieu_luc(db, m) is not None) for m in mucs]
+        gy = goi_y_khop_kho(db, dong)
+        return {"ma": d.ma, "goi_y": gy, "so_chua_khop": sum(1 for r in gy if not r["da_khop"]),
+                "so_co_ung_vien": sum(1 for r in gy if not r["da_khop"] and r["ung_vien"])}
+    by_id = {m.id: m for m in mucs}
+    ids = {int(c.get("hang_hoa_id") or 0) for c in (data.chon or []) if c.get("hang_hoa_id")}
+    gia = bang_gia(db, ids) if ids else {}
+    n_khop = n_ten = n_gia = 0
+    for c in (data.chon or []):
+        m = by_id.get(int(c.get("id") or 0))
+        hh = db.get(HangHoa, int(c.get("hang_hoa_id") or 0)) if c.get("hang_hoa_id") else None
+        if m is None or hh is None or _dtb_dx_hieu_luc(db, m) is not None:
+            continue
+        cu = {"ten": m.ten, "hang_hoa_id": m.hang_hoa_id, "don_gia": float(m.don_gia or 0)}
+        m.hang_hoa_id = hh.id
+        n_khop += 1
+        if c.get("doi_ten"):
+            m.ten = hh.ten[:250]
+            if not m.don_vi and hh.don_vi:
+                m.don_vi = hh.don_vi
+            n_ten += 1
+        g = gia.get(hh.id)
+        if c.get("lay_gia") and g and g.get("gia_de_xuat") is not None:
+            m.don_gia = Decimal(str(round(g["gia_de_xuat"])))
+            n_gia += 1
+        ghi_audit(db, nd.id, "KHOP_KHO", "du_toan_ban_muc", m.id, cu=cu,
+                  moi={"hang_hoa_id": hh.id, "ten": m.ten, "don_gia": float(m.don_gia or 0)})
+    db.commit()
+    return {"da_khop": n_khop, "da_doi_ten": n_ten, "da_lay_gia": n_gia}
+
+
 class DtbCapNhatGiaVao(_NccCnBase):
     ap_dung: bool = False          # False → chỉ xem trước
     muc_ids: list[int] | None = None   # ap_dung=True: chỉ áp cho các dòng này (None = mọi dòng có giá)

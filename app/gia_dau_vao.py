@@ -154,3 +154,82 @@ def goi_y_cap_nhat(db: Session, dong, ma_theo_doi=None):
              "ty_le": (round((moi - cu) / cu * 100, 1) if (moi is not None and cu) else None)}
         out.append(r)
     return out
+
+
+# ================= 🔗 KHỚP TÊN VỚI KHO — gợi ý mặt hàng gần giống =================
+import re as _re
+import unicodedata as _ud
+from difflib import SequenceMatcher as _SM
+
+_TU_BO = {"cai", "bo", "chiec", "m", "kg", "lit", "the", "and", "va", "of", "cho", "loai", "type"}
+
+
+def _khong_dau(s: str) -> str:
+    s = _ud.normalize("NFD", str(s or ""))
+    s = "".join(c for c in s if _ud.category(c) != "Mn")
+    return s.replace("đ", "d").replace("Đ", "D")
+
+
+def _chuan(s: str) -> str:
+    s = _khong_dau(s).lower()
+    s = _re.sub(r"[^a-z0-9\.\-/ ]+", " ", s)
+    return _re.sub(r"\s+", " ", s).strip()
+
+
+def _tokens(s: str) -> set:
+    return {t for t in _re.split(r"[\s/\-]+", _chuan(s)) if t and t not in _TU_BO}
+
+
+def diem_giong(a: str, b: str) -> float:
+    """0..1 — kết hợp độ giống chuỗi và độ trùng từ (không phân biệt dấu / hoa thường)."""
+    ca, cb = _chuan(a), _chuan(b)
+    if not ca or not cb:
+        return 0.0
+    if ca == cb:
+        return 1.0
+    r = _SM(None, ca, cb).ratio()
+    ta, tb = _tokens(a), _tokens(b)
+    j = (len(ta & tb) / len(ta | tb)) if (ta and tb) else 0.0
+    bao = 0.85 if (ca in cb or cb in ca) else 0.0   # tên này nằm trọn trong tên kia
+    return max(r, j, bao)
+
+
+def ung_vien_kho(db: Session, tens, n=3, nguong=0.45):
+    """{tên gốc: [{hang_hoa_id, ten, don_vi, diem, chinh_xac}]} — tối đa n ứng viên / tên."""
+    kho = [(hid, ten, dv) for (hid, ten, dv) in db.query(HangHoa.id, HangHoa.ten, HangHoa.don_vi).all()
+           if ten and ten.strip()]
+    out = {}
+    for t0 in tens:
+        t = str(t0 or "").strip()
+        if not t:
+            out[t0] = []
+            continue
+        cs = []
+        for hid, ten, dv in kho:
+            d = diem_giong(t, ten)
+            if d >= nguong:
+                cs.append({"hang_hoa_id": hid, "ten": ten, "don_vi": dv, "diem": round(d, 3),
+                           "chinh_xac": _chuan(t) == _chuan(ten)})
+        cs.sort(key=lambda c: (-c["chinh_xac"], -c["diem"], c["ten"]))
+        out[t0] = cs[:n]
+    return out
+
+
+def goi_y_khop_kho(db: Session, dong):
+    """dong = [(id, ten, hang_hoa_id|None, don_gia, khoa)] → [{id, ten, hang_hoa_id, da_khop, khoa,
+    don_gia, ung_vien:[{... + gia_de_xuat, nguon}]}] — ứng viên kèm giá đầu vào để chọn nhanh."""
+    chua = [t for (_, t, h, _, _) in dong if not h]
+    uv = ung_vien_kho(db, chua) if chua else {}
+    ids = {c["hang_hoa_id"] for cs in uv.values() for c in cs}
+    bg = bang_gia(db, ids) if ids else {}
+    out = []
+    for (mid, ten, hid, dg, khoa) in dong:
+        cs = []
+        if not hid:
+            for c in uv.get(ten, []):
+                gg = bg.get(c["hang_hoa_id"])
+                cs.append(dict(c, gia_de_xuat=(gg["gia_de_xuat"] if gg else None),
+                               nguon=(gg["nguon"] if gg else None)))
+        out.append({"id": mid, "ten": ten, "hang_hoa_id": hid, "da_khop": bool(hid),
+                    "khoa": bool(khoa), "don_gia": _f(dg), "ung_vien": cs})
+    return out

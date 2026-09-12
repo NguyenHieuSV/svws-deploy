@@ -1179,6 +1179,7 @@ class DuAnDuToan(Base):
     don_gia: Mapped[Decimal] = mapped_column(Numeric(18, 0), default=0)
     ghi_chu: Mapped[str | None] = mapped_column(String(300), nullable=True)
     thu_tu: Mapped[int] = mapped_column(Integer, default=0)
+    hang_hoa_id: Mapped[int | None] = mapped_column(ForeignKey("hang_hoa.id", ondelete="SET NULL"), nullable=True)  # mig 118
 
 
 # ---------- Mô tả công việc (JD) & KPI theo vị trí + đánh giá theo kỳ ----------

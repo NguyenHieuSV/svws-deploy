@@ -968,6 +968,7 @@ class NgayNghiOtVao(BaseModel):
 class DuToanVao(BaseModel):
     loai: str | None = None          # THIET_BI | VAT_TU | NHAN_SU | CHI_PHI_KHAC
     ten: str | None = None
+    hang_hoa_id: int | None = None   # liên kết mặt hàng kho (chọn từ danh sách / 🔗 khớp)
     quy_cach: str | None = None
     don_vi: str | None = None
     so_luong: Decimal | None = None

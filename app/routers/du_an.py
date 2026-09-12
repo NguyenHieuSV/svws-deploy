@@ -755,7 +755,8 @@ def _dt_ra(x):
     dg = _f(x.don_gia) if x.don_gia is not None else 0
     return {"id": x.id, "loai": x.loai, "ten": x.ten, "quy_cach": x.quy_cach,
             "don_vi": x.don_vi, "so_luong": sl, "don_gia": dg,
-            "thanh_tien": round(sl * dg), "ghi_chu": x.ghi_chu, "thu_tu": x.thu_tu}
+            "thanh_tien": round(sl * dg), "ghi_chu": x.ghi_chu, "thu_tu": x.thu_tu,
+            "hang_hoa_id": getattr(x, "hang_hoa_id", None)}
 
 
 @router.get("/{da_id}/du-toan")
@@ -766,13 +767,14 @@ def ds_du_toan(da_id: int, db: Session = Depends(get_db), _=Depends(yeu_cau(MODU
         DuAnDuToan.thu_tu, DuAnDuToan.id).all()
     ds = [_dt_ra(x) for x in rs]
     # 💲 giá gợi ý theo mua thật + giá mua thật dưới mã dự án (khớp tên với danh mục kho)
-    ten_map = hang_hoa_theo_ten(db, [x.ten for x in rs])
-    ids = set(ten_map.values())
+    ten_map = hang_hoa_theo_ten(db, [x.ten for x in rs if not x.hang_hoa_id])
+    hh_cua = {x.id: (x.hang_hoa_id or ten_map.get(str(x.ten or "").strip().lower())) for x in rs}
+    ids = {h for h in hh_cua.values() if h}
     gia = bang_gia(db, ids) if ids else {}
     ma_da = (getattr(da, "ma", None) or "") if da else ""
     thuc = gia_thuc_theo_ma(db, ma_da, ids) if (ids and ma_da) else {}
     for r in ds:
-        h = ten_map.get(str(r["ten"] or "").strip().lower())
+        h = hh_cua.get(r["id"])
         g = gia.get(h) if h else None
         t = thuc.get(h) if h else None
         r["hang_hoa_id"] = h
@@ -801,7 +803,7 @@ def boq_cap_nhat_gia(da_id: int, data: BoqCapNhatGiaVao, db: Session = Depends(g
     from ..gia_dau_vao import goi_y_cap_nhat
     _da_404(db, da_id)
     rs = db.query(DuAnDuToan).filter_by(du_an_id=da_id).order_by(DuAnDuToan.thu_tu, DuAnDuToan.id).all()
-    dong = [(x.id, x.ten, None, x.don_gia, "Đã đề xuất mua #" in (x.ghi_chu or "")) for x in rs]
+    dong = [(x.id, x.ten, x.hang_hoa_id, x.don_gia, "Đã đề xuất mua #" in (x.ghi_chu or "")) for x in rs]
     goi_y = goi_y_cap_nhat(db, dong)
     da_ap = 0
     if data.ap_dung:
@@ -811,6 +813,8 @@ def boq_cap_nhat_gia(da_id: int, data: BoqCapNhatGiaVao, db: Session = Depends(g
             if g["khoa"] or not g["co_gia"] or (chon is not None and g["id"] not in chon):
                 continue
             x = by_id[g["id"]]
+            if g["hang_hoa_id"] and not x.hang_hoa_id:
+                x.hang_hoa_id = g["hang_hoa_id"]
             if float(x.don_gia or 0) == float(g["don_gia_moi"]):
                 continue
             x.don_gia = Decimal(str(round(g["don_gia_moi"])))
@@ -836,9 +840,15 @@ def them_du_toan(da_id: int, data: DuToanVao, db: Session = Depends(get_db),
         loai = "CHI_PHI_KHAC"
     base = db.query(func.coalesce(func.max(DuAnDuToan.thu_tu), 0)).filter(
         DuAnDuToan.du_an_id == da_id).scalar() or 0
+    from ..models import HangHoa as _ThHh
+    hh_id = data.hang_hoa_id if (data.hang_hoa_id and db.get(_ThHh, data.hang_hoa_id)) else None
+    if hh_id is None:   # tên trùng đúng danh mục kho → tự liên kết
+        _h = db.query(_ThHh).filter(func.lower(func.trim(_ThHh.ten)) == data.ten.strip().lower()).first()
+        hh_id = _h.id if _h else None
     x = DuAnDuToan(du_an_id=da_id, loai=loai, ten=data.ten.strip(), quy_cach=data.quy_cach,
                    don_vi=data.don_vi, so_luong=data.so_luong if data.so_luong is not None else 1,
-                   don_gia=data.don_gia or 0, ghi_chu=data.ghi_chu, thu_tu=base + 1)
+                   don_gia=data.don_gia or 0, ghi_chu=data.ghi_chu, thu_tu=base + 1,
+                   hang_hoa_id=hh_id)
     db.add(x); db.commit()
     return _dt_ra(x)
 
@@ -849,12 +859,58 @@ def sua_du_toan(dt_id: int, data: DuToanVao, db: Session = Depends(get_db),
     x = db.get(DuAnDuToan, dt_id)
     if x is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy dòng dự toán")
-    for k in ("loai", "ten", "quy_cach", "don_vi", "so_luong", "don_gia", "ghi_chu", "thu_tu"):
+    for k in ("loai", "ten", "quy_cach", "don_vi", "so_luong", "don_gia", "ghi_chu", "thu_tu", "hang_hoa_id"):
         v = getattr(data, k)
         if v is not None:
             setattr(x, k, v)
     db.commit()
     return _dt_ra(x)
+
+
+class BoqKhopKhoVao(BaseModel):
+    ap_dung: bool = False
+    chon: list[dict] | None = None   # [{id, hang_hoa_id, doi_ten: bool, lay_gia: bool}]
+
+
+@router.post("/{da_id}/du-toan/khop-kho")
+def boq_khop_kho(da_id: int, data: BoqKhopKhoVao, db: Session = Depends(get_db),
+                 nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    """🔗 Khớp dòng BOQ với mặt hàng kho: gợi ý ứng viên gần giống (không phân biệt dấu),
+    ap_dung → gán hang_hoa_id; tùy chọn đổi tên theo kho, lấy giá đầu vào."""
+    from ..gia_dau_vao import goi_y_khop_kho, bang_gia
+    from ..models import HangHoa as _KkHh
+    _da_404(db, da_id)
+    rs = db.query(DuAnDuToan).filter_by(du_an_id=da_id).order_by(DuAnDuToan.thu_tu, DuAnDuToan.id).all()
+    if not data.ap_dung:
+        dong = [(x.id, x.ten, x.hang_hoa_id, x.don_gia, "Đã đề xuất mua #" in (x.ghi_chu or "")) for x in rs]
+        gy = goi_y_khop_kho(db, dong)
+        return {"goi_y": gy, "so_chua_khop": sum(1 for r in gy if not r["da_khop"]),
+                "so_co_ung_vien": sum(1 for r in gy if not r["da_khop"] and r["ung_vien"])}
+    by_id = {x.id: x for x in rs}
+    ids = {int(c.get("hang_hoa_id") or 0) for c in (data.chon or []) if c.get("hang_hoa_id")}
+    gia = bang_gia(db, ids) if ids else {}
+    n_khop = n_ten = n_gia = 0
+    for c in (data.chon or []):
+        x = by_id.get(int(c.get("id") or 0))
+        hh = db.get(_KkHh, int(c.get("hang_hoa_id") or 0)) if c.get("hang_hoa_id") else None
+        if x is None or hh is None:
+            continue
+        cu = {"ten": x.ten, "hang_hoa_id": x.hang_hoa_id, "don_gia": float(x.don_gia or 0)}
+        x.hang_hoa_id = hh.id
+        n_khop += 1
+        if c.get("doi_ten"):
+            x.ten = hh.ten[:250]
+            if not x.don_vi and hh.don_vi:
+                x.don_vi = hh.don_vi
+            n_ten += 1
+        g = gia.get(hh.id)
+        if c.get("lay_gia") and g and g.get("gia_de_xuat") is not None:
+            x.don_gia = Decimal(str(round(g["gia_de_xuat"])))
+            n_gia += 1
+        ghi_audit(db, nd.id, "KHOP_KHO", "du_an_du_toan", x.id, cu=cu,
+                  moi={"hang_hoa_id": hh.id, "ten": x.ten, "don_gia": float(x.don_gia or 0)})
+    db.commit()
+    return {"da_khop": n_khop, "da_doi_ten": n_ten, "da_lay_gia": n_gia}
 
 
 @router.delete("/du-toan/{dt_id}")
@@ -1023,7 +1079,9 @@ def de_xuat_mua_tu_du_toan(dt_id: int, db: Session = Depends(get_db),
                             f"Dòng này đã được đề xuất mua rồi ({x.ghi_chu.split('Đã đề xuất mua ')[-1]}) "
                             "— xem ở mục Đề xuất mua hàng.")
     da = db.get(DuAn, x.du_an_id)
-    hh = db.query(HangHoa).filter(HangHoa.ten.ilike(x.ten)).first()
+    hh = db.get(HangHoa, x.hang_hoa_id) if getattr(x, "hang_hoa_id", None) else None
+    if hh is None:
+        hh = db.query(HangHoa).filter(HangHoa.ten.ilike(x.ten)).first()
     hh_moi = False
     if hh is None:
         hh = HangHoa(ma=None, ten=x.ten, loai="VAT_TU", don_vi=x.don_vi, gia_ban=x.don_gia or 0)
@@ -1031,6 +1089,7 @@ def de_xuat_mua_tu_du_toan(dt_id: int, db: Session = Depends(get_db),
         if db.query(TonKho).filter_by(hang_hoa_id=hh.id).first() is None:
             db.add(TonKho(hang_hoa_id=hh.id, so_luong=0)); db.flush()
         hh_moi = True
+    x.hang_hoa_id = hh.id
     sl = x.so_luong or 1
     ly_do = f"Dự toán dự án {(da.ma or da.ten) if da else ('#' + str(x.du_an_id))}"[:200]
     # Mã dự án lấy theo số báo giá nên thường trùng SỐ ĐƠN HÀNG bán — tự gắn để
