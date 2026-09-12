@@ -818,8 +818,8 @@ def op_don_dep(thuc_hien: bool = False, db: Session = Depends(get_db),
         cn_thu = db.query(CongNo).filter(CongNo.don_hang_id == dh.id, CongNo.loai != "PHAI_TRA").all()
         hd_ban = db.query(HoaDon).filter(HoaDon.don_hang_id == dh.id, HoaDon.loai != "MUA").all()
         hd_mua = db.query(HoaDon).filter(HoaDon.don_hang_id == dh.id, HoaDon.loai == "MUA").all()
-        bt = db.query(ButToan).filter(ButToan.don_hang_id == dh.id).count()
-        ptc = db.query(PhieuThuChi).filter(PhieuThuChi.don_hang_id == dh.id).count()
+        bts = db.query(ButToan).filter(ButToan.don_hang_id == dh.id).all()
+        ptcs = db.query(PhieuThuChi).filter(PhieuThuChi.don_hang_id == dh.id).all()
         pk = db.query(PhieuKho).filter(PhieuKho.don_hang_id == dh.id).count()
         ch = db.query(CoHoi).filter(CoHoi.don_hang_id == dh.id).all()
         ktc = db.query(KtHoaDonCho).filter(KtHoaDonCho.don_hang_id == dh.id).count()
@@ -828,18 +828,15 @@ def op_don_dep(thuc_hien: bool = False, db: Session = Depends(get_db),
             chan.append(f"{len(hd_ban)} hóa đơn bán")
         if cn_thu:
             chan.append(f"{len(cn_thu)} công nợ phải thu")
-        if bt:
-            chan.append(f"{bt} bút toán")
-        if ptc:
-            chan.append(f"{ptc} phiếu thu/chi")
+        if any(p.loai == "THU" for p in ptcs):
+            chan.append("phiếu THU tiền (đơn có thu thật)")
         if pk:
             chan.append(f"{pk} phiếu kho")
-        if float(dh.tong_tien or 0) > 0:
-            chan.append(f"đơn có giá trị {float(dh.tong_tien):,.0f}đ")
         r = {"id": dh.id, "so": ma, "tong_tien": float(dh.tong_tien or 0),
              "so_po": len(pos), "tien_po": sum(float(p.tong_tien or 0) for p in pos),
              "so_de_xuat": len(ycms), "so_cong_no_tra": len(cn_tra),
              "so_hoa_don_mua": len(hd_mua), "so_co_hoi": len(ch), "so_hd_cho": ktc,
+             "so_phieu_chi": len(ptcs), "so_but_toan": len(bts),
              "giu_lai_vi": chan, "xoa": not chan}
         out.append(r)
         if not thuc_hien or chan:
@@ -860,11 +857,18 @@ def op_don_dep(thuc_hien: bool = False, db: Session = Depends(get_db),
             h.don_hang_id = None              # (vẫn được trừ ở «Chi phí HĐ mua ngoài PO»)
         for c in ch:
             c.don_hang_id = None
+        nhan = f"[{ma}] "
+        for x in ptcs + bts:                  # phiếu chi ngân hàng / bút toán của các PO này:
+            x.don_hang_id = None              # gỡ liên kết, ghi mã vào diễn giải để không mất vết
+            if ma.lower() not in str(x.dien_giai or "").lower():
+                x.dien_giai = (nhan + str(x.dien_giai or ""))[:200]
         db.query(KtHoaDonCho).filter(KtHoaDonCho.don_hang_id == dh.id).update(
             {"don_hang_id": None}, synchronize_session=False)
         ghi_audit(db, nd.id, "XOA", "don_hang", dh.id,
-                  cu={"so": ma, "op_gia": True, "po": [p.so for p in pos],
-                      "de_xuat": len(ycms), "cong_no_tra": len(cn_tra), "hoa_don_mua": len(hd_mua)},
+                  cu={"so": ma, "op_gia": True, "tong_tien_gia": float(dh.tong_tien or 0),
+                      "khach_hang_id": dh.khach_hang_id, "po": [p.so for p in pos],
+                      "de_xuat": len(ycms), "cong_no_tra": len(cn_tra), "hoa_don_mua": len(hd_mua),
+                      "phieu_chi": [p.so for p in ptcs], "but_toan": [b.id for b in bts]},
                   moi={"chuyen_sang_ma_chuoi": ma})
         db.delete(dh)
     if thuc_hien:

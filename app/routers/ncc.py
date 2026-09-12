@@ -3171,8 +3171,17 @@ def noi_cong_no_ve_po(data: NoiPoVao, db: Session = Depends(get_db),
                        else ("TRA_MOT_PHAN" if da > 0 else "CHUA_TRA"))
     if cn.so_ct and not dm.so_hoa_don:
         dm.so_hoa_don = cn.so_ct[:60]
-    n_tt = (db.query(ThanhToan).filter_by(cong_no_id=cn.id)
-            .update({"cong_no_id": khac.id}, synchronize_session=False))
+    # lịch sử trả tiền: bản giữ lại chưa có lần trả nào → chuyển sang; đã có → các lần
+    # trả của bản trùng là ghi lặp, gỡ đi (ghi đủ vào audit) để "Đã trả NCC" không nhân đôi
+    tt_trung = [{"ngay": str(t.ngay), "so_tien": float(t.so_tien or 0)}
+                for t in db.query(ThanhToan).filter_by(cong_no_id=cn.id).all()]
+    if db.query(ThanhToan).filter_by(cong_no_id=khac.id).first() is None:
+        n_tt = (db.query(ThanhToan).filter_by(cong_no_id=cn.id)
+                .update({"cong_no_id": khac.id}, synchronize_session=False))
+    else:
+        db.query(ThanhToan).filter_by(cong_no_id=cn.id).delete(synchronize_session=False)
+        n_tt = 0
+    cu["lan_tt_ban_trung"] = tt_trung
     n_pc = (db.query(PhieuThuChi).filter_by(cong_no_id=cn.id)
             .update({"cong_no_id": khac.id}, synchronize_session=False))
     db.query(LenhChiBank).filter_by(cong_no_id=cn.id).delete(synchronize_session=False)
