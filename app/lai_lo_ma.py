@@ -45,9 +45,13 @@ def chi_phi_ma(db: Session, dh: DonHang) -> dict:
                                      CongNo.don_mua_id.in_(po_ids)).all()) if po_ids else []
     cn_ngoai = []
     if dh.so:
-        cn_ngoai = (db.query(CongNo)
+        # chỉ khoản NHẬP NGOÀI thật (không sinh từ hóa đơn trong hệ thống, không phải hóa đơn
+        # nhận hàng PO) — khoản có hóa đơn đã được tính ở nhánh hóa đơn, tính nữa là 2 lần
+        cn_ngoai = [c for c in (db.query(CongNo)
                     .filter(CongNo.loai == "PHAI_TRA", CongNo.don_mua_id.is_(None),
+                            CongNo.hoa_don_id.is_(None),
                             func.lower(CongNo.ma_ban_ngoai) == dh.so.lower()).all())
+                    if not str(c.so_ct or "").upper().startswith("HDM-")]
     chi_ngoai_cn = sum(_f(c.so_tien) for c in cn_ngoai)
     # hóa đơn MUA gắn mã KHÔNG qua PO (email / nhập tay) — bỏ hóa đơn tự sinh khi nhận hàng PO
     hd_po = {c.hoa_don_id for c in cn_po if c.hoa_don_id}

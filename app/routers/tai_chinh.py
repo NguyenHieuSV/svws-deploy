@@ -708,7 +708,7 @@ def _tinh_lai_lo_tong(db: Session) -> dict:
     for (mbn, st, sct, hdid, dmid) in db.query(
             CongNo.ma_ban_ngoai, CongNo.so_tien, CongNo.so_ct,
             CongNo.hoa_don_id, CongNo.don_mua_id).filter(CongNo.loai == "PHAI_TRA").all():
-        if dmid or hdid:                      # của PO / của hóa đơn — đã tính ở trên
+        if dmid or hdid:                      # của PO / của hóa đơn — đã tính ở nhánh khác
             continue
         if str(sct or "").upper().startswith("HDM-"):   # HĐ nhận hàng PO còn mồ côi
             continue

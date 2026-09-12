@@ -2967,7 +2967,7 @@ def chi_phi_chua_ma(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XE
             g["so_tien"] += float(p.tong_tien or 0)
             g["nguon"].add("PO")
 
-    cn_khong_ma, hdm_mo_coi, nghi_trung = [], [], []
+    cn_khong_ma, hdm_mo_coi, nghi_trung, cn_tu_hd = [], [], [], []
     for c in cns:
         if c.don_mua_id:
             continue
@@ -2987,6 +2987,11 @@ def chi_phi_chua_ma(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XE
             continue
         if cap:
             nghi_trung.append(cd)
+        if c.hoa_don_id:
+            # chi phí đã nằm ở HÓA ĐƠN MUA (Kế toán) — gán mã ở hóa đơn, gán tại đây sẽ tính 2 lần
+            if not m:
+                cn_tu_hd.append(cd)
+            continue
         if not m:
             cn_khong_ma.append(cd)
         elif m.upper() != MA_KHO and not m.lower().startswith("op") and m.lower() not in so_dh:
@@ -3009,10 +3014,12 @@ def chi_phi_chua_ma(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XE
     return {
         "po_khong_ma": po_khong_ma, "po_kho": po_kho, "cn_khong_ma": cn_khong_ma,
         "ma_le": ds_ma_le, "nghi_trung": nghi_trung, "hdm_mo_coi": hdm_mo_coi,
+        "cn_tu_hd": cn_tu_hd,
         "tong": {"po_khong_ma": tong(po_khong_ma), "po_kho": tong(po_kho),
                  "cn_khong_ma": tong(cn_khong_ma),
                  "ma_le": round(sum(r["so_tien"] for r in ds_ma_le)),
-                 "nghi_trung": tong(nghi_trung), "hdm_mo_coi": tong(hdm_mo_coi)},
+                 "nghi_trung": tong(nghi_trung), "hdm_mo_coi": tong(hdm_mo_coi),
+                 "cn_tu_hd": tong(cn_tu_hd)},
         "ma_goi_y_chung": sorted({r["ma"] for r in ds_ma_le} | set(dh_so.values()))[:400],
     }
 
@@ -3073,6 +3080,10 @@ def gan_ma_chi_phi(data: GanMaVao, db: Session = Depends(get_db),
             cn = db.get(CongNo, mid)
             if cn is None or cn.loai != "PHAI_TRA":
                 continue
+            if cn.hoa_don_id:                  # chi phí nằm ở hóa đơn → gán mã tại hóa đơn
+                raise HTTPException(status.HTTP_409_CONFLICT,
+                                    "Khoản này sinh từ HÓA ĐƠN MUA — gán mã cho hóa đơn ở mục "
+                                    "Kế toán, gán tại đây sẽ tính chi phí 2 lần.")
             cu = {"ma_ban_ngoai": cn.ma_ban_ngoai}
             cn.ma_ban_ngoai = ma[:60]
             ghi_audit(db, nd.id, "GAN_MA", "cong_no", cn.id, cu=cu, moi={"ma_ban_ngoai": ma})
