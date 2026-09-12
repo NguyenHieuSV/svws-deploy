@@ -2968,6 +2968,26 @@ def chi_phi_chua_ma(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XE
             g["nguon"].add("PO")
 
     cn_khong_ma, hdm_mo_coi, nghi_trung, cn_tu_hd = [], [], [], []
+    from ..models import HoaDon as _CcHd
+    po_theo_so = {str(p.so or "").strip().lower(): p for p in pos if p.so}
+    po_theo_id = {p.id: p for p in pos}
+
+    def po_cua_hdm(c):
+        """Công nợ nhận hàng PO → PO đúng của nó, đọc từ diễn giải hóa đơn (không đoán theo tiền)."""
+        if not c.hoa_don_id:
+            return None, None
+        hd = db.get(_CcHd, c.hoa_don_id)
+        dg = str(getattr(hd, "dien_giai", "") or "")
+        m0 = _re_ma.search(r"Nhận hàng PO\s+(\S+)", dg)
+        if not m0:
+            return None, dg
+        k = m0.group(1).strip().rstrip(",;")
+        p = po_theo_so.get(k.lower()) or (po_theo_id.get(int(k)) if k.isdigit() else None)
+        if p is None:
+            return None, dg
+        return {"don_mua_id": p.id, "so": p.so, "ngay": str(p.ngay or "")[:10],
+                "tong_tien": float(p.tong_tien or 0), "trang_thai": p.trang_thai,
+                "lech_ngay": 0, "chac_chan": True}, dg
     for c in cns:
         if c.don_mua_id:
             continue
@@ -2983,6 +3003,11 @@ def chi_phi_chua_ma(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XE
               "ma": m or None, "po_trung": cap,
               "goi_y": goi_y(c.nha_cung_cap_id, set(), c.ngay_ct)}
         if so_ct.upper().startswith("HDM-"):
+            po_dung, dg = po_cua_hdm(c)
+            if po_dung:
+                cd["po_trung"] = po_dung          # PO đúng theo hóa đơn — chắc chắn
+            if dg:
+                cd["hang_hoa"] = dg[:80]
             hdm_mo_coi.append(cd)                 # hóa đơn nhận hàng PO chưa nối về PO
             continue
         if cap:
@@ -3137,6 +3162,10 @@ def noi_cong_no_ve_po(data: NoiPoVao, db: Session = Depends(get_db),
         khac.so_ct = cn.so_ct
     if cn.han and not khac.han:
         khac.han = cn.han
+    if cn.hoa_don_id and not khac.hoa_don_id:     # hóa đơn mua theo công nợ của PO
+        khac.hoa_don_id = cn.hoa_don_id
+    if cn.ma_ban_ngoai and not khac.ma_ban_ngoai:
+        khac.ma_ban_ngoai = cn.ma_ban_ngoai
     tong_k = Decimal(khac.so_tien or 0)
     khac.trang_thai = ("DA_TRA" if (tong_k > 0 and da >= tong_k)
                        else ("TRA_MOT_PHAN" if da > 0 else "CHUA_TRA"))

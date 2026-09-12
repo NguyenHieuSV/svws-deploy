@@ -797,6 +797,83 @@ def xoa_don_hang(dh_id: int, db: Session = Depends(get_db),
     return {"ok": True, "so": so_cu}
 
 
+# ============ ⚙️ DỌN "ĐƠN HÀNG OP GIẢ" — chi phí vận hành không có đơn bán ============
+@router.post("/don-hang/op-don-dep")
+def op_don_dep(thuc_hien: bool = False, db: Session = Depends(get_db),
+               nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
+    """Trước đây chi phí vận hành (mã OP-…) phải tạo một ĐƠN HÀNG BÁN giả để gắn PO.
+    Nay PO/đề xuất/công nợ mang thẳng mã chuỗi OP-… (dòng riêng «Chi phí vận hành OP»
+    trong Lãi/Lỗ tổng) nên đơn giả không còn cần: chuyển mọi liên kết sang mã chuỗi rồi
+    xóa đơn. thuc_hien=false → chỉ XEM TRƯỚC. Đơn có hóa đơn bán / công nợ phải thu /
+    phiếu kho / bút toán / phiếu thu-chi thì GIỮ LẠI (không phải đơn giả thuần)."""
+    from sqlalchemy import func as _f
+    from ..models import (DonMua, YeuCauMua, CongNo, HoaDon, ButToan, PhieuThuChi, CoHoi,
+                          PhieuKho, KtHoaDonCho)
+    out = []
+    for dh in db.query(DonHang).filter(_f.lower(DonHang.so).like("op-%")).order_by(DonHang.id).all():
+        ma = (dh.so or "").strip()
+        pos = db.query(DonMua).filter(DonMua.don_hang_id == dh.id).all()
+        ycms = db.query(YeuCauMua).filter(YeuCauMua.don_hang_id == dh.id).all()
+        cn_tra = db.query(CongNo).filter(CongNo.don_hang_id == dh.id, CongNo.loai == "PHAI_TRA").all()
+        cn_thu = db.query(CongNo).filter(CongNo.don_hang_id == dh.id, CongNo.loai != "PHAI_TRA").all()
+        hd_ban = db.query(HoaDon).filter(HoaDon.don_hang_id == dh.id, HoaDon.loai != "MUA").all()
+        hd_mua = db.query(HoaDon).filter(HoaDon.don_hang_id == dh.id, HoaDon.loai == "MUA").all()
+        bt = db.query(ButToan).filter(ButToan.don_hang_id == dh.id).count()
+        ptc = db.query(PhieuThuChi).filter(PhieuThuChi.don_hang_id == dh.id).count()
+        pk = db.query(PhieuKho).filter(PhieuKho.don_hang_id == dh.id).count()
+        ch = db.query(CoHoi).filter(CoHoi.don_hang_id == dh.id).all()
+        ktc = db.query(KtHoaDonCho).filter(KtHoaDonCho.don_hang_id == dh.id).count()
+        chan = []
+        if hd_ban:
+            chan.append(f"{len(hd_ban)} hóa đơn bán")
+        if cn_thu:
+            chan.append(f"{len(cn_thu)} công nợ phải thu")
+        if bt:
+            chan.append(f"{bt} bút toán")
+        if ptc:
+            chan.append(f"{ptc} phiếu thu/chi")
+        if pk:
+            chan.append(f"{pk} phiếu kho")
+        if float(dh.tong_tien or 0) > 0:
+            chan.append(f"đơn có giá trị {float(dh.tong_tien):,.0f}đ")
+        r = {"id": dh.id, "so": ma, "tong_tien": float(dh.tong_tien or 0),
+             "so_po": len(pos), "tien_po": sum(float(p.tong_tien or 0) for p in pos),
+             "so_de_xuat": len(ycms), "so_cong_no_tra": len(cn_tra),
+             "so_hoa_don_mua": len(hd_mua), "so_co_hoi": len(ch), "so_hd_cho": ktc,
+             "giu_lai_vi": chan, "xoa": not chan}
+        out.append(r)
+        if not thuc_hien or chan:
+            continue
+        # chuyển liên kết sang MÃ CHUỖI OP-… rồi xóa đơn giả
+        for p in pos:
+            p.don_hang_id = None
+            p.ma_ban = ma[:40]
+        for y in ycms:
+            y.don_hang_id = None
+            if not (y.ma_ban or "").strip():
+                y.ma_ban = ma[:40]
+        for c in cn_tra:
+            c.don_hang_id = None
+            if not (c.ma_ban_ngoai or "").strip():
+                c.ma_ban_ngoai = ma[:60]
+        for h in hd_mua:                      # hóa đơn mua gắn đơn giả → về hóa đơn không mã
+            h.don_hang_id = None              # (vẫn được trừ ở «Chi phí HĐ mua ngoài PO»)
+        for c in ch:
+            c.don_hang_id = None
+        db.query(KtHoaDonCho).filter(KtHoaDonCho.don_hang_id == dh.id).update(
+            {"don_hang_id": None}, synchronize_session=False)
+        ghi_audit(db, nd.id, "XOA", "don_hang", dh.id,
+                  cu={"so": ma, "op_gia": True, "po": [p.so for p in pos],
+                      "de_xuat": len(ycms), "cong_no_tra": len(cn_tra), "hoa_don_mua": len(hd_mua)},
+                  moi={"chuyen_sang_ma_chuoi": ma})
+        db.delete(dh)
+    if thuc_hien:
+        db.commit()
+    return {"thuc_hien": thuc_hien, "so_don": len(out),
+            "da_xoa": sum(1 for r in out if r["xoa"]) if thuc_hien else 0,
+            "giu_lai": sum(1 for r in out if not r["xoa"]), "don": out}
+
+
 # ----- Báo giá soạn theo mẫu (lưu tạm & xuất PDF) -----
 @router.get("/bao-gia-form", response_model=list[BaoGiaFormRa])
 def ds_bao_gia_form(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
