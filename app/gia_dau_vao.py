@@ -190,7 +190,10 @@ def diem_giong(a: str, b: str) -> float:
     r = _SM(None, ca, cb).ratio()
     ta, tb = _tokens(a), _tokens(b)
     j = (len(ta & tb) / len(ta | tb)) if (ta and tb) else 0.0
-    bao = 0.85 if (ca in cb or cb in ca) else 0.0   # tên này nằm trọn trong tên kia
+    # tên này nằm trọn trong tên kia — phải trọn TỪ ("EDI" ⊂ "Module EDI"; "Đá" ⊄ "dây điện")
+    def _tron_tu(ngan, dai):
+        return _re.search(r"(^| )" + _re.escape(ngan) + r"( |$)", dai) is not None
+    bao = 0.85 if (_tron_tu(ca, cb) or _tron_tu(cb, ca)) else 0.0
     return max(r, j, bao)
 
 
