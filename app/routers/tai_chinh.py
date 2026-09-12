@@ -683,19 +683,60 @@ def _tinh_lai_lo_tong(db: Session) -> dict:
         chi_hd_mua += float(htong or 0)
     # ⚙️ CHI PHÍ VẬN HÀNH (mã OP-…): PO đã duyệt mang mã OP nhưng KHÔNG có đơn hàng bán cùng số —
     # chi phí doanh nghiệp, tách dòng riêng (không nằm trong lãi/lỗ theo mã bán hàng).
+    # 🧩 và CHƯA PHÂN MÃ: khoản chi không mang mã (không vào được Lãi/Lỗ của mã nào)
+    #    · KHO: mua dự trữ → tồn kho (tài sản), theo dõi riêng, KHÔNG trừ vào lãi/lỗ
+    #    · MÃ LẺ: mã chưa có đơn bán trong app → vẫn hiện thành dòng riêng ở bảng theo mã
     _so_dh = {str(x).strip().lower() for (x,) in db.query(DonHang.so).filter(DonHang.so.isnot(None)).all()}
-    chi_op = 0.0
-    for (mb, tt) in db.query(DonMua.ma_ban, DonMua.tong_tien).filter(
-            DonMua.don_hang_id.is_(None), DonMua.ma_ban.isnot(None),
+    chi_op = chi_chua_ma = chi_kho = 0.0
+    ma_le = {}
+    for (dhid, mb, tt) in db.query(DonMua.don_hang_id, DonMua.ma_ban, DonMua.tong_tien).filter(
             DonMua.trang_thai == "DA_DUYET").all():
+        if dhid:
+            continue
         k = str(mb or "").strip().lower()
-        if k.startswith("op") and k not in _so_dh:
-            chi_op += float(tt or 0)
+        v = float(tt or 0)
+        if not k:
+            chi_chua_ma += v
+        elif k == "kho":
+            chi_kho += v
+        elif k.startswith("op"):
+            if k not in _so_dh:
+                chi_op += v
+        elif k not in _so_dh:
+            g = ma_le.setdefault(k, {"ma": str(mb).strip(), "chi": 0.0})
+            g["chi"] += v
+    for (mbn, st, sct, hdid, dmid) in db.query(
+            CongNo.ma_ban_ngoai, CongNo.so_tien, CongNo.so_ct,
+            CongNo.hoa_don_id, CongNo.don_mua_id).filter(CongNo.loai == "PHAI_TRA").all():
+        if dmid or hdid:                      # của PO / của hóa đơn — đã tính ở trên
+            continue
+        if str(sct or "").upper().startswith("HDM-"):   # HĐ nhận hàng PO còn mồ côi
+            continue
+        k = str(mbn or "").strip().lower()
+        v = float(st or 0)
+        if not k:
+            chi_chua_ma += v
+        elif k == "kho":
+            chi_kho += v
+        elif k.startswith("op"):
+            if k not in _so_dh:
+                chi_op += v
+        elif k not in _so_dh:
+            g = ma_le.setdefault(k, {"ma": str(mbn).strip(), "chi": 0.0})
+            g["chi"] += v
+    for k, g in sorted(ma_le.items(), key=lambda x: -x[1]["chi"]):
+        tong_cp += g["chi"]
+        theo_ma.append({"don_hang_id": None, "ma_ban": g["ma"], "doanh_thu": 0.0,
+                        "tong_chi_phi": g["chi"], "loi_nhuan": -g["chi"], "ty_suat": None,
+                        "chua_co_don_ban": True})
     lai_gop = tong_dt - tong_cp
     return {"doanh_thu": tong_dt, "chi_phi_don": tong_cp, "lai_gop": lai_gop,
             "chi_thang": chi_thang, "chi_phi_khac": chi_khac,
             "chi_phi_hd_mua": chi_hd_mua,
-            "chi_phi_op": chi_op, "lai_lo": lai_gop - chi_khac - chi_hd_mua - chi_op, "theo_ma": theo_ma, "ngay": str(hom_nay)}
+            "chi_phi_op": chi_op, "chi_chua_ma": chi_chua_ma, "chi_kho": chi_kho,
+            "so_ma_le": len(ma_le),
+            "lai_lo": lai_gop - chi_khac - chi_hd_mua - chi_op - chi_chua_ma,
+            "theo_ma": theo_ma, "ngay": str(hom_nay)}
 
 
 def luu_lai_lo_hom_nay(db: Session) -> dict:

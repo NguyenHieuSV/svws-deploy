@@ -119,6 +119,7 @@ class DonMuaVao(BaseModel):
     nha_cung_cap_id: int
     so: str | None = None
     don_hang_id: int | None = None
+    ma_ban: str | None = None      # MÃ CHI PHÍ khi không gắn đơn bán: mã chuỗi · OP-… · KHO
     ngay_hen_giao: date | None = None
     chi_tiet: list[DonMuaCtVao] = Field(min_length=1)
     xac_nhan_trung: bool = False   # CEO/ADMIN xác nhận mua bổ sung dù trùng mã bán hàng
