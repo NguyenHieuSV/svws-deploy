@@ -105,18 +105,9 @@ import re as _re_nm
 
 
 def nhom_ma(ma):
-    """'DV-COA-NT-0826-02 (1)' → 'DV-COA-NT-0826' (gốc + tháng MMYY, viết hoa).
-    Đơn bán tách -01/-02/-BT… và PO chỉ ghi mã gốc cùng tháng đều rơi vào một nhóm.
-    Mã không có tháng (DA-…, TAISINH…) → None (không gom)."""
-    s = str(ma or "").strip()
-    if not s:
-        return None
-    parts = s.split("-")
-    for i, p in enumerate(parts):
-        p0 = p.strip()
-        if _re_nm.fullmatch(r"\d{4}", p0) and 1 <= int(p0[:2]) <= 12:
-            return "-".join(x.strip() for x in parts[:i + 1]).upper()
-    return None
+    """'DV-COA-NT-0826-02 (1)' → 'DV-COA-NT-0826' — dùng BỘ ĐỌC CHUNG app/ma_code.py."""
+    from .ma_code import nhom
+    return nhom(ma)
 
 
 def chi_phi_ngoai_ma(db: Session) -> dict:

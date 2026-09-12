@@ -10,6 +10,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from ..database import get_db
 from ..rbac import yeu_cau, kiem_han_muc, chi_vai_tro
+import re as _re_mod
+_re_ma_bg = _re_mod.compile(r"^(TM|DA|DV|OP)-")   # số báo giá mang tiền tố mã bán hàng → áp quy luật mã
 from ..deps import nhan_vien_id_cua
 from ..audit import ghi_audit
 from ..kho_service import xuat_ton
@@ -885,8 +887,11 @@ def ds_bao_gia_form(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XE
 
 
 @router.post("/bao-gia-form", response_model=BaoGiaFormRa, status_code=201)
-def tao_bao_gia_form(data: BaoGiaFormVao, db: Session = Depends(get_db),
+def tao_bao_gia_form(data: BaoGiaFormVao, ep_ma: bool = False, db: Session = Depends(get_db),
                      nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    if _re_ma_bg.match((data.so or "").strip().upper()):   # số hợp đồng / số khác không áp quy luật
+        from ..ma_code import bat_buoc as _bb_ma
+        data.so = _bb_ma(data.so, nd, ep_ma, nhan="Số báo giá")
     bgf = BaoGiaForm(so=data.so, khach_hang_id=data.khach_hang_id,
                      noi_dung=data.noi_dung, trang_thai=data.trang_thai or "NHAP",
                      nguoi_tao=nhan_vien_id_cua(db, nd.id))
@@ -897,11 +902,14 @@ def tao_bao_gia_form(data: BaoGiaFormVao, db: Session = Depends(get_db),
 
 
 @router.patch("/bao-gia-form/{bgf_id}", response_model=BaoGiaFormRa)
-def sua_bao_gia_form(bgf_id: int, data: BaoGiaFormVao, db: Session = Depends(get_db),
+def sua_bao_gia_form(bgf_id: int, data: BaoGiaFormVao, ep_ma: bool = False, db: Session = Depends(get_db),
                      nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
     bgf = db.get(BaoGiaForm, bgf_id)
     if bgf is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy báo giá nháp")
+    if _re_ma_bg.match((data.so or "").strip().upper()) and (data.so or "").strip() != (bgf.so or "").strip():
+        from ..ma_code import bat_buoc as _bb_ma
+        data.so = _bb_ma(data.so, nd, ep_ma, nhan="Số báo giá")
     bgf.so = data.so
     bgf.khach_hang_id = data.khach_hang_id
     bgf.noi_dung = data.noi_dung
@@ -1363,10 +1371,13 @@ def ds_bao_gia(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM")))
 
 
 @router.post("/bao-gia", response_model=BaoGiaRa, status_code=201)
-def tao_bao_gia(data: BaoGiaVao, db: Session = Depends(get_db),
+def tao_bao_gia(data: BaoGiaVao, ep_ma: bool = False, db: Session = Depends(get_db),
                 nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
     if db.get(KhachHang, data.khach_hang_id) is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy khách hàng")
+    if _re_ma_bg.match((data.so or "").strip().upper()):   # số báo giá TM/DA/DV/OP = mã bán hàng sau này
+        from ..ma_code import bat_buoc as _bb_ma
+        data.so = _bb_ma(data.so, nd, ep_ma, nhan="Số báo giá")
     tong = sum(ct.so_luong * ct.don_gia for ct in data.chi_tiet)
     bg = BaoGia(so=data.so, khach_hang_id=data.khach_hang_id,
                 nguoi_tao=nhan_vien_id_cua(db, nd.id), ngay=date.today(),
@@ -1453,7 +1464,7 @@ class DonHangTrucTiepVao(_DHBase):
 
 
 @router.post("/don-hang", response_model=DonHangRa, status_code=201)
-def tao_don_hang_truc_tiep(data: DonHangTrucTiepVao, db: Session = Depends(get_db),
+def tao_don_hang_truc_tiep(data: DonHangTrucTiepVao, ep_ma: bool = False, db: Session = Depends(get_db),
                            nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
     """Tạo đơn hàng bán trực tiếp từ PO/HĐ khách gửi (không qua báo giá nội bộ).
     Sản phẩm chưa có trong kho được tự thêm (SAN_PHAM, tồn 0) để mã đơn bán
@@ -1464,6 +1475,9 @@ def tao_don_hang_truc_tiep(data: DonHangTrucTiepVao, db: Session = Depends(get_d
     if not data.chi_tiet:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Đơn hàng cần ít nhất 1 dòng sản phẩm")
     so = (data.so or "").strip() or None
+    if so:                                     # mã bán hàng phải đúng quy luật (app/ma_code.py)
+        from ..ma_code import bat_buoc as _bb_ma
+        so = _bb_ma(so, nd, ep_ma, nhan="Mã đơn hàng")
     if so and db.query(DonHang).filter_by(so=so).first() is not None:
         raise HTTPException(status.HTTP_400_BAD_REQUEST,
                             f"Mã đơn hàng '{so}' đã tồn tại — chọn mã khác hoặc bỏ trống để tự tạo.")
@@ -1783,7 +1797,7 @@ def dat_thanh_toan_coc(dh_id: int, data: TtCocVao, db: Session = Depends(get_db)
 
 
 @router.put("/don-hang/{dh_id}", response_model=DonHangRa)
-def sua_don_hang(dh_id: int, data: DonHangTrucTiepVao, db: Session = Depends(get_db),
+def sua_don_hang(dh_id: int, data: DonHangTrucTiepVao, ep_ma: bool = False, db: Session = Depends(get_db),
                  nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
     """Sửa đơn hàng bán (ngày, mã, khách, dòng sản phẩm). Chặn khi đã xuất kho
     hoặc đã lập hóa đơn — giữ vết kho & kế toán."""
@@ -1803,6 +1817,9 @@ def sua_don_hang(dh_id: int, data: DonHangTrucTiepVao, db: Session = Depends(get
     if not data.chi_tiet:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Đơn hàng cần ít nhất 1 dòng sản phẩm")
     so = (data.so or "").strip() or None
+    if so and so != (dh.so or "").strip():     # đổi mã → mã mới phải đúng quy luật
+        from ..ma_code import bat_buoc as _bb_ma
+        so = _bb_ma(so, nd, ep_ma, nhan="Mã đơn hàng")
     if so and db.query(DonHang).filter(DonHang.so == so, DonHang.id != dh_id).first() is not None:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Mã đơn hàng '{so}' đã tồn tại")
     lines = []

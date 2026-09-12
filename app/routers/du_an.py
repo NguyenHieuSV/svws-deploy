@@ -72,8 +72,11 @@ def xoa_du_an(da_id: int, db: Session = Depends(get_db),
 
 # ----- THAO_TAC: tạo dự án -----
 @router.post("", response_model=DuAnRa, status_code=201)
-def tao_du_an(data: DuAnVao, db: Session = Depends(get_db),
+def tao_du_an(data: DuAnVao, ep_ma: bool = False, db: Session = Depends(get_db),
               nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    if (data.ma or "").strip():                 # mã dự án = mã bán hàng → đúng quy luật
+        from ..ma_code import bat_buoc as _bb_ma
+        data.ma = _bb_ma(data.ma, nd, ep_ma, nhan="Mã dự án")
     da = DuAn(ma=data.ma, ten=data.ten, khach_hang_id=data.khach_hang_id,
               qcvn=data.qcvn, deadline=data.deadline, du_toan=0, chi_phi_thuc_te=0,
               trang_thai="MOI")

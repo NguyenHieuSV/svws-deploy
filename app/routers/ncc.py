@@ -51,9 +51,10 @@ def _chuan_ma(v) -> str:
     return str(v or "").strip()[:40]
 
 
-def _bat_buoc_ma(don_hang_id, ma_ban):
+def _bat_buoc_ma(don_hang_id, ma_ban, nd=None, ep=False):
     """PO không gắn đơn bán thì BẮT BUỘC có mã chi phí — không có mã, khoản chi này
-    không vào được Lãi/Lỗ của mã nào (đó là lỗ hổng đã từng làm rơi ~3,4 tỷ)."""
+    không vào được Lãi/Lỗ của mã nào (đó là lỗ hổng đã từng làm rơi ~3,4 tỷ).
+    Mã phải đúng QUY LUẬT (app/ma_code.py); KHO miễn; CEO/ADMIN ep=True lưu ngoại lệ."""
     if don_hang_id:
         return None
     ma = _chuan_ma(ma_ban)
@@ -62,15 +63,16 @@ def _bat_buoc_ma(don_hang_id, ma_ban):
                             "⛔ THIẾU MÃ CHI PHÍ: chọn Mã đơn bán, hoặc nhập mã chuỗi "
                             "(TM-/DA-/DV-…), mã vận hành OP-…, hoặc KHO nếu mua dự trữ. "
                             "Không có mã thì khoản chi này không vào Lãi/Lỗ của mã nào.")
-    return ma
+    if ma.upper() == MA_KHO:
+        return MA_KHO
+    from ..ma_code import bat_buoc as _bb_ma
+    return _bb_ma(ma, nd, ep, nhan="Mã chi phí")
 
 
 def _doi_duoi_thang(ma, ngay):
-    """Mã có đuôi MMYY → đổi sang tháng của khoản chi: DV-X-0626 + 08/2026 → DV-X-0826."""
-    goc, mmyy = _tach_ma_thang(ma)
-    if not goc or not ngay:
-        return ma
-    return f"{goc}-{ngay:%m%y}"
+    """Mã có tháng MMYY → đổi sang tháng của khoản chi: DV-X-0626-01 + 08/2026 → DV-X-0826-01."""
+    from ..ma_code import doi_thang
+    return doi_thang(ma, ngay)
 
 
 def _hh_cua_po(db, po_ids):
@@ -799,7 +801,7 @@ class TuBgFileVao(_NccCnBase):
 
 
 @router.post("/don-mua/tu-bao-gia-file/{tep_id}")
-def tao_po_tu_bao_gia_file(tep_id: int, data: TuBgFileVao | None = None,
+def tao_po_tu_bao_gia_file(tep_id: int, data: TuBgFileVao | None = None, ep_ma: bool = False,
                            db: Session = Depends(get_db),
                            nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
     """AI đọc file báo giá đã lưu và tự tạo PO nháp (chờ duyệt) cho NCC của file:
@@ -831,7 +833,7 @@ def tao_po_tu_bao_gia_file(tep_id: int, data: TuBgFileVao | None = None,
                             "AI không tìm thấy dòng sản phẩm nào trong file báo giá.")
     dm = DonMua(nha_cung_cap_id=ncc.id, trang_thai="CHO_DUYET",
                 don_hang_id=don_hang_id,
-                ma_ban=_bat_buoc_ma(don_hang_id, data.ma_ban if data else None),
+                ma_ban=_bat_buoc_ma(don_hang_id, data.ma_ban if data else None, nd, ep_ma),
                 ngay_hen_giao=ngay_hen_giao)
     db.add(dm); db.flush()
     dm.so = f"PO-{date.today():%Y%m%d}-{dm.id}"
@@ -1901,18 +1903,17 @@ def _ma_hieu_luc(db, don_hang_id=None, cho_thue_ma=None, ma_ban=None):
 
 
 def _tach_ma_thang(ma):
-    """'DV-COA-NT-0826-3' → ('DV-COA-NT', '0826'); mã không có đuôi tháng-năm hợp lệ → (None, None)."""
-    m = _re_ma.match(r"^(.+?)-(\d{2})(\d{2})(?:-\d+)?$", (ma or "").strip())
-    if not m or not (1 <= int(m.group(2)) <= 12):
-        return None, None
-    return m.group(1), m.group(2) + m.group(3)
+    """'DV-COA-NT-0826-3' / 'DV-D12-0926-BT' → ('DV-COA-NT', '0826') — BỘ ĐỌC CHUNG app/ma_code.py
+    (chặn mua trùng · định mức tháng · gom nhóm · gợi ý mã cùng một cách hiểu)."""
+    from ..ma_code import goc_thang
+    return goc_thang(ma)
 
 
 def _codes_cung_thang(db, goc, mmyy):
     """Mọi mã (số đơn bán / mã chuỗi PO / mã đề xuất) cùng GỐC + cùng tháng: X-0826, X-0826-2 …"""
     from ..models import DonHang as _CtDh
     tien_to = goc.lower() + "-" + mmyy
-    pat = _re_ma.compile("^" + _re_ma.escape(tien_to) + r"(?:-\d+)?$")
+    pat = _re_ma.compile("^" + _re_ma.escape(tien_to) + r"(?:-.+)?$")   # mọi hậu tố: -2, -02-1, -BT…
     codes = set()
     for cot in (_CtDh.so, DonMua.ma_ban, YeuCauMua.cho_thue_ma, YeuCauMua.ma_ban):
         for (v,) in db.query(cot).filter(func.lower(cot).like(tien_to + "%")).distinct().all():
@@ -2125,7 +2126,7 @@ def _tinh_tien_po(dong):
 
 # ----- THAO_TAC: tạo đơn mua (nháp -> chờ duyệt). NV_MUA tạo được, chưa tự duyệt. -----
 @router.post("/don-mua", response_model=DonMuaRa, status_code=201)
-def tao_don_mua(data: DonMuaVao, bo_qua_trung: bool = False,
+def tao_don_mua(data: DonMuaVao, bo_qua_trung: bool = False, ep_ma: bool = False,
                 db: Session = Depends(get_db),
                 nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
     ncc = db.get(NhaCungCap, data.nha_cung_cap_id)
@@ -2133,7 +2134,7 @@ def tao_don_mua(data: DonMuaVao, bo_qua_trung: bool = False,
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy NCC")
     if ncc.blacklist:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "NCC đang trong blacklist")
-    _ma_moi = _bat_buoc_ma(data.don_hang_id, getattr(data, "ma_ban", None))
+    _ma_moi = _bat_buoc_ma(data.don_hang_id, getattr(data, "ma_ban", None), nd, ep_ma)
     # ⚠ NGHI TRÙNG PO: cùng NCC trong 14 ngày, giá trị xấp xỉ ±2% — xác nhận rõ mới tạo.
     # Mua DỊCH VỤ ĐỊNH KỲ là hợp lệ: xác nhận xong đơn được gắn nhãn 🔁 Định kỳ.
     if not bo_qua_trung:
@@ -2183,7 +2184,7 @@ def tao_don_mua(data: DonMuaVao, bo_qua_trung: bool = False,
 
 
 @router.put("/don-mua/{dm_id}", response_model=DonMuaRa)
-def sua_don_mua(dm_id: int, data: DonMuaVao, db: Session = Depends(get_db),
+def sua_don_mua(dm_id: int, data: DonMuaVao, ep_ma: bool = False, db: Session = Depends(get_db),
                 nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
     """Sửa PO khi còn CHỜ DUYỆT (hoặc bị TỪ CHỐI — sửa xong quay lại chờ duyệt).
     PO đã duyệt/đã đặt hàng/đã nhận hàng không sửa được để giữ vết duyệt & kế toán."""
@@ -2200,7 +2201,7 @@ def sua_don_mua(dm_id: int, data: DonMuaVao, db: Session = Depends(get_db),
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy NCC")
     if ncc.blacklist:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "NCC đang trong blacklist")
-    _ma_moi = _bat_buoc_ma(data.don_hang_id, getattr(data, "ma_ban", None) or dm.ma_ban)
+    _ma_moi = _bat_buoc_ma(data.don_hang_id, getattr(data, "ma_ban", None) or dm.ma_ban, nd, ep_ma)
     da_xac_nhan = False
     if data.don_hang_id:
         if data.don_hang_id != dm.don_hang_id:
@@ -2734,6 +2735,8 @@ def ai_nhap_cong_no_ncc(data: AiNhapNccVao, db: Session = Depends(get_db),
     thieu_ma = 0
     nghi_trung = 0
     da_noi_po = 0
+    ma_sai = ma_da_sua = 0
+    ma_sai_vd = []
     for r in data.rows:
         so_ct = str(r.get("so_hoa_don") or "").strip()[:60] or None
         if not so_ct:                          # bắt buộc có số hóa đơn mới đưa vào công nợ
@@ -2776,6 +2779,20 @@ def ai_nhap_cong_no_ncc(data: AiNhapNccVao, db: Session = Depends(get_db),
         if not ma:                             # ③ bắt buộc có mã chi phí
             thieu_ma += 1
             continue
+        if ma.upper() == MA_KHO:
+            ma = MA_KHO
+        else:                                  # ④ mã phải đúng quy luật (tự sửa được thì sửa)
+            from ..ma_code import kiem_tra as _kt_ma
+            _ok, _loi, _gy = _kt_ma(ma)
+            if not _ok:
+                if _gy and _kt_ma(_gy)[0] and not r.get("giu_ma"):
+                    ma = _gy                   # 'dv-coa-nt-0926 (1)' → 'DV-COA-NT-0926-1'
+                    ma_da_sua += 1
+                else:
+                    ma_sai += 1
+                    if len(ma_sai_vd) < 5:
+                        ma_sai_vd.append(f"{ma}: {', '.join(_loi)}")
+                    continue
         gc = []
         if so_ct:
             gc.append("HĐ " + so_ct)
@@ -2795,7 +2812,8 @@ def ai_nhap_cong_no_ncc(data: AiNhapNccVao, db: Session = Depends(get_db),
                    "bo_qua_thieu_ma": thieu_ma, "bo_qua_nghi_trung": nghi_trung})
     db.commit()
     return {"da_tao": tao, "bo_qua_thieu_hd": bo_qua, "da_noi_po": da_noi_po,
-            "bo_qua_thieu_ma": thieu_ma, "bo_qua_nghi_trung": nghi_trung}
+            "bo_qua_thieu_ma": thieu_ma, "bo_qua_nghi_trung": nghi_trung,
+            "bo_qua_ma_sai": ma_sai, "ma_sai_vd": ma_sai_vd, "ma_da_sua": ma_da_sua}
 
 
 class DepTrungNccVao(_NccCnBase):
@@ -3044,7 +3062,10 @@ def chi_phi_chua_ma(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XE
     def tong(rs, khoa="so_tien"):
         return round(sum(float(r.get(khoa) or 0) for r in rs))
 
+    ma_sai = _quet_ma_sai(db)
+
     return {
+        "ma_sai": ma_sai,
         "po_khong_ma": po_khong_ma, "po_kho": po_kho, "cn_khong_ma": cn_khong_ma,
         "ma_le": ds_ma_le, "nghi_trung": nghi_trung, "hdm_mo_coi": hdm_mo_coi,
         "cn_tu_hd": cn_tu_hd,
@@ -3057,8 +3078,88 @@ def chi_phi_chua_ma(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XE
     }
 
 
+def _cac_cot_ma(db):
+    """Mọi cột đang chứa MÃ trong hệ thống: (nhãn, model, cột, kiểu) — dùng để quét mã sai và đổi mã."""
+    from ..models import (DonHang, BaoGia, BaoGiaForm, DuAn, DuToanBan, ChiPhiVanHanh, TaiSanChoThue)
+    return [("Đơn bán", DonHang, DonHang.so, "THANG"),
+            ("Báo giá", BaoGia, BaoGia.so, "THANG"),
+            ("Báo giá soạn", BaoGiaForm, BaoGiaForm.so, "THANG"),
+            ("Dự án", DuAn, DuAn.ma, "THANG"),
+            ("Dự toán hàng bán", DuToanBan, DuToanBan.ma, "THANG"),
+            ("PO (mã chuỗi)", DonMua, DonMua.ma_ban, "THANG"),
+            ("Đề xuất mua", YeuCauMua, YeuCauMua.ma_ban, "THANG"),
+            ("Đề xuất (mã cho thuê)", YeuCauMua, YeuCauMua.cho_thue_ma, "NAM"),
+            ("Công nợ nhập ngoài", CongNo, CongNo.ma_ban_ngoai, "THANG"),
+            ("Chi phí vận hành", ChiPhiVanHanh, ChiPhiVanHanh.ma_ban_hang, "THANG"),
+            ("Dự án cho thuê (mã mẹ)", TaiSanChoThue, TaiSanChoThue.ma, "NAM")]
+
+
+def _la_ma_tu_sinh(v):
+    """Mã hệ thống tự đặt (DH-YYYYMMDD-n, BG-…, PO-…) — không áp quy luật."""
+    return bool(_re_ma.match(r"^(DH|BG|PO|BGF)-\d{6,}", str(v or "").strip().upper()))
+
+
+def _quet_ma_sai(db):
+    """Mọi mã sai quy luật đang tồn tại, gộp theo mã: {ma, loi, goi_y, noi: {nhãn: số dòng}}."""
+    from ..ma_code import kiem_tra
+    gom = {}
+    for nhan, model, cot, kieu in _cac_cot_ma(db):
+        for (v, so) in db.query(cot, func.count()).filter(cot.isnot(None)).group_by(cot).all():
+            s = str(v or "").strip()
+            if not s or s.upper() == MA_KHO or _la_ma_tu_sinh(s):
+                continue
+            if nhan.startswith("Báo giá") and not _re_ma.match(r"^(TM|DA|DV|OP)-", s.upper()):
+                continue                      # số hợp đồng / số báo giá kiểu khác: không áp quy luật
+            ok, loi, gy = kiem_tra(s, bat_buoc_thang=(kieu == "THANG"), cho_phep_nam=(kieu == "NAM"))
+            if ok:
+                continue
+            o = gom.setdefault(s, {"ma": s, "loi": loi, "goi_y": gy, "noi": {}, "so_dong": 0})
+            o["noi"][nhan] = o["noi"].get(nhan, 0) + int(so)
+            o["so_dong"] += int(so)
+    return sorted(gom.values(), key=lambda o: (-o["so_dong"], o["ma"]))
+
+
+class DoiMaVao(_NccCnBase):
+    ma_cu: str
+    ma_moi: str
+    ep_ma: bool = False
+
+
+@router.post("/doi-ma")
+def doi_ma(data: DoiMaVao, db: Session = Depends(get_db),
+           nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
+    """Đổi một MÃ lan sang MỌI bảng đang dùng nó (đơn bán, báo giá, dự án, dự toán, PO, đề xuất,
+    công nợ ngoài, chi phí vận hành, mã mẹ cho thuê). Mã mới phải đúng quy luật (ep_ma = ngoại lệ)."""
+    from ..ma_code import bat_buoc as _bb_ma
+    cu = str(data.ma_cu or "").strip()
+    moi = str(data.ma_moi or "").strip()
+    if not cu or not moi:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Thiếu mã cũ / mã mới")
+    if cu.lower() == moi.lower():
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Mã mới trùng mã cũ")
+    moi = _bb_ma(moi, nd, data.ep_ma, bat_buoc_thang=False, nhan="Mã mới")
+    if len(moi) > 30:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Mã tối đa 30 ký tự")
+    # không được đổi thành mã đã là ĐỊNH DANH của bản ghi khác (đơn bán / báo giá / dự án / dự toán)
+    for nhan, model, cot, kieu in _cac_cot_ma(db)[:5]:
+        if db.query(model).filter(func.lower(func.trim(cot)) == moi.lower()).first() is not None \
+                and db.query(model).filter(func.lower(func.trim(cot)) == cu.lower()).first() is not None:
+            raise HTTPException(status.HTTP_409_CONFLICT,
+                                f"'{moi}' đã là mã của một {nhan} khác — đổi sang mã đó sẽ gộp 2 bản ghi. Chọn mã khác.")
+    ket_qua = {}
+    for nhan, model, cot, kieu in _cac_cot_ma(db):
+        so = (db.query(model).filter(func.lower(func.trim(cot)) == cu.lower())
+              .update({cot.key: moi[:cot.type.length] if getattr(cot.type, "length", None) else moi},
+                      synchronize_session=False))
+        if so:
+            ket_qua[nhan] = int(so)
+    ghi_audit(db, nd.id, "DOI_MA", "don_hang", 0, cu={"ma": cu}, moi={"ma": moi, "so_dong": ket_qua})
+    db.commit()
+    return {"ma_cu": cu, "ma_moi": moi, "da_doi": ket_qua, "tong": sum(ket_qua.values())}
+
+
 class GanMaVao(_NccCnBase):
-    muc: list[dict] = []          # [{loai: "po" | "cong_no", id, ma}]
+    muc: list[dict] = []          # [{loai: "po" | "cong_no", id, ma, ep_ma?}]
 
 
 @router.post("/chi-phi-chua-ma/gan")
@@ -3067,11 +3168,13 @@ def gan_ma_chi_phi(data: GanMaVao, db: Session = Depends(get_db),
     """Gán MÃ CHI PHÍ hàng loạt — gán xong khoản chi tự chạy vào Lãi/Lỗ của mã đó.
     Mã trùng số đơn bán thì gắn luôn đơn bán để mọi bảng cùng nhìn thấy."""
     so_dh, _ = _so_don_hang_map(db)
+    from ..ma_code import bat_buoc as _bb_ma
     n_po = n_cn = 0
     for m in (data.muc or []):
         ma = _chuan_ma(m.get("ma"))
         if not ma:
             continue
+        ma = MA_KHO if ma.upper() == MA_KHO else _bb_ma(ma, nd, bool(m.get("ep_ma")), nhan="Mã gán")
         try:
             mid = int(m.get("id") or 0)
         except Exception:
@@ -3909,13 +4012,15 @@ def dtb_danh_sach(db: Session = Depends(get_db), _=Depends(yeu_cau("ncc", "XEM")
 
 
 @router.post("/du-toan-ban")
-def dtb_tao(data: DuToanBanVao, db: Session = Depends(get_db),
+def dtb_tao(data: DuToanBanVao, ep_ma: bool = False, db: Session = Depends(get_db),
             nd: NguoiDung = Depends(yeu_cau("ncc", "THAO_TAC"))):
     ma = (data.ma or "").strip()
     if not ma:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Nhập Mã hàng bán")
     if len(ma) > 30:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Mã tối đa 30 ký tự (bằng giới hạn số đơn hàng / báo giá)")
+    from ..ma_code import bat_buoc as _bb_ma
+    ma = _bb_ma(ma, nd, ep_ma, nhan="Mã dự toán")
     if db.query(DuToanBan).filter(func.lower(DuToanBan.ma) == ma.lower()).first():
         raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Mã hàng bán '{ma}' đã có dự toán")
     d = DuToanBan(ma=ma, khach_hang=(data.khach_hang or "").strip() or None,
@@ -4117,7 +4222,7 @@ def dtb_cap_nhat_gia(dt_id: int, data: DtbCapNhatGiaVao, db: Session = Depends(g
 
 
 @router.put("/du-toan-ban/{dt_id}")
-def dtb_sua(dt_id: int, data: DuToanBanVao, db: Session = Depends(get_db),
+def dtb_sua(dt_id: int, data: DuToanBanVao, ep_ma: bool = False, db: Session = Depends(get_db),
             nd: NguoiDung = Depends(yeu_cau("ncc", "THAO_TAC"))):
     d = db.get(DuToanBan, dt_id)
     if d is None:
@@ -4127,6 +4232,8 @@ def dtb_sua(dt_id: int, data: DuToanBanVao, db: Session = Depends(get_db),
         if len(ma) > 30:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "Mã tối đa 30 ký tự (bằng giới hạn số đơn hàng / báo giá)")
         if ma.lower() != (d.ma or "").strip().lower():
+            from ..ma_code import bat_buoc as _bb_ma
+            ma = _bb_ma(ma, nd, ep_ma, nhan="Mã dự toán")
             _dang = [x for x in db.query(DuToanBanMuc).filter_by(du_toan_id=dt_id).all() if _dtb_dx_hieu_luc(db, x)]
             if _dang:
                 raise HTTPException(status.HTTP_400_BAD_REQUEST,

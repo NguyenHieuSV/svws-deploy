@@ -105,6 +105,7 @@
   <a class="sub" href="#m-khac">Tài liệu · Cấu hình</a>
   <a href="#luong-nghiep-vu">6. Luồng nghiệp vụ điển hình</a>
   <a href="#ma-ban-hang">7. Mã bán hàng &amp; lãi/lỗ</a>
+  <a class="sub" href="#quy-tac-ma">Quy tắc đặt mã</a>
   <a href="#ai">8. Trợ lý AI &amp; tự động hóa</a>
   <a href="#faq">9. Câu hỏi thường gặp</a>
 </nav>
@@ -335,6 +336,31 @@
   <p style="text-align:center;font-weight:700">Doanh thu − Giá vốn − Chi phí = Lợi nhuận từng mã</p>
   <p>Kết quả xem ở Kế toán → tab <b>Lãi/lỗ mã bán</b>, và với cho thuê là tab <b>Báo cáo vận hành</b> (lãi/lỗ theo tháng).</p>
   <div class="warn">Quên gắn mã bán hàng là nguyên nhân phổ biến nhất khiến báo cáo lãi/lỗ thiếu chi phí. Hãy tạo thói quen chọn mã ngay khi lập chứng từ.</div>
+
+  <h3 id="quy-tac-ma">Quy tắc đặt mã (áp dụng từ 12/09/2026)</h3>
+  <p>Mã bán hàng là dữ liệu <b>máy đọc</b>: hệ thống dựa vào mã để chặn mua trùng, tính định mức tiêu hao theo tháng,
+  gom lãi/lỗ theo công trình-tháng, gợi ý mã cho khoản chi và đổi đuôi tháng. Vì vậy mã phải theo <b>một cấu trúc duy nhất</b>:</p>
+  <p style="text-align:center;font-weight:700;font-size:16px">LOẠI - KHÁCH [- ĐỊA ĐIỂM] - MMYY [- SỐ] [- HẠNG MỤC]</p>
+  <table>
+    <tr><th style="width:150px">Thành phần</th><th>Quy định</th><th style="width:260px">Ví dụ</th></tr>
+    <tr><td><b>LOẠI</b></td><td>Một trong 4: <b>TM</b> thương mại (bán thiết bị, vật tư) · <b>DA</b> dự án (thi công, EPC) · <b>DV</b> dịch vụ vận hành (theo tháng) · <b>OP</b> chi phí vận hành doanh nghiệp (không có đơn bán)</td><td>TM · DA · DV · OP</td></tr>
+    <tr><td><b>KHÁCH</b></td><td>Tên viết tắt khách hàng, có thể thêm địa điểm/hệ thống (<i>COA-NT</i> = COA, nhà máy NT). Chữ hoa, không dấu.</td><td>SIC · IIVI · COA-NT · D12</td></tr>
+    <tr><td><b>MMYY</b></td><td>Tháng phát sinh: 2 số tháng (01–12) + 2 số năm. <b>Bắt buộc.</b> TM/DA: tháng ký; DV: tháng dịch vụ; OP: tháng chi.</td><td>0926 = tháng 09/2026</td></tr>
+    <tr><td><b>SỐ</b></td><td>Số thứ tự khi cùng khách có nhiều đơn trong tháng: 01, 02…</td><td>-01 · -02</td></tr>
+    <tr><td><b>HẠNG MỤC</b></td><td>Tùy chọn, viết tắt ngắn: LOC (lọc), BT (bảo trì), HCHAT (hóa chất)…</td><td>-LOC · -BT</td></tr>
+  </table>
+  <ul>
+    <li>Chỉ dùng <b>A–Z, 0–9 và dấu gạch ngang</b>. Không dấu tiếng Việt, không khoảng trắng, không ngoặc, không dấu chấm. Tối đa 30 ký tự.</li>
+    <li>Hệ thống <b>chặn</b> mã sai ngay khi lưu (đơn bán, báo giá, dự toán, dự án, PO, công nợ) và <b>đề nghị mã đã sửa</b>
+      — ví dụ <code>DV-COA-NT-0826-02 (1)</code> → <code>DV-COA-NT-0826-02-1</code>. Khi gõ mã, dưới ô nhập hiện cách hệ thống hiểu mã đó.</li>
+    <li>CEO/ADMIN có thể lưu mã ngoại lệ (gõ <code>EP</code> khi được hỏi) — chỉ dùng cho trường hợp thật sự đặc biệt.</li>
+    <li><b>Mã gốc + tháng</b> là khóa gom nhóm: <code>DV-COA-NT-0826</code>, <code>DV-COA-NT-0826-01</code>, <code>DV-COA-NT-0826-02</code> và PO chỉ ghi <code>DV-COA-NT-0826</code> đều hiện thành <b>một nhóm</b> trong Lãi/Lỗ theo mã.</li>
+    <li><b>Dịch vụ vận hành (DV)</b>: mỗi tháng một mã theo tháng (<code>DV-COA-RO-0926</code>); nhiều hóa đơn trong tháng thì thêm -01, -02. Dự án cho thuê giữ <b>mã mẹ theo năm</b> (<code>DV-COA-RO-2024</code>) để khai định mức tiêu hao — mã tháng sinh ra từ mã mẹ.</li>
+    <li><b>PO mua dự trữ</b> dùng từ khóa <code>KHO</code> thay cho mã; khi xuất dùng cho mã nào thì gán lại mã đó.</li>
+    <li>Mã cũ sai quy luật: xem <b>Nhà cung cấp → Kiểm soát → 🧩 Chi phí chưa vào mã → ⑧ Mã sai quy luật</b>, sửa một lần là đổi ở mọi bảng.</li>
+  </ul>
+  <p style="background:#f0fdf4;border-left:4px solid #16a34a;padding:8px 12px;border-radius:6px">Ví dụ đúng: <code>TM-SIC-0926-01-LOC</code> · <code>DA-IIVI-0126-WAF</code> · <code>DV-COA-NT-0926-02</code> · <code>OP-SV-0926</code>.
+  Ví dụ sai: <code>DA-IIVI-WAF-02 PS</code> (khoảng trắng, thiếu tháng) · <code>TM-NHMT-TBĐO</code> (có dấu, thiếu tháng) · <code>DV-COH.NT-EDI-0826</code> (dấu chấm).</p>
 </section>
 
 <section id="ai">
