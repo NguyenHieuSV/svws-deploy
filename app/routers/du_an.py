@@ -14,6 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File,
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import func
+from pydantic import BaseModel
 from ..database import get_db
 from ..config import settings
 from ..luu_tru import luu, xoa, ton_tai, phan_hoi_tai
@@ -759,13 +760,69 @@ def _dt_ra(x):
 
 @router.get("/{da_id}/du-toan")
 def ds_du_toan(da_id: int, db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
-    _da_404(db, da_id)
+    from ..gia_dau_vao import bang_gia, gia_thuc_theo_ma, hang_hoa_theo_ten
+    da = _da_404(db, da_id)
     rs = db.query(DuAnDuToan).filter_by(du_an_id=da_id).order_by(
         DuAnDuToan.thu_tu, DuAnDuToan.id).all()
     ds = [_dt_ra(x) for x in rs]
+    # 💲 giá gợi ý theo mua thật + giá mua thật dưới mã dự án (khớp tên với danh mục kho)
+    ten_map = hang_hoa_theo_ten(db, [x.ten for x in rs])
+    ids = set(ten_map.values())
+    gia = bang_gia(db, ids) if ids else {}
+    ma_da = (getattr(da, "ma", None) or "") if da else ""
+    thuc = gia_thuc_theo_ma(db, ma_da, ids) if (ids and ma_da) else {}
+    for r in ds:
+        h = ten_map.get(str(r["ten"] or "").strip().lower())
+        g = gia.get(h) if h else None
+        t = thuc.get(h) if h else None
+        r["hang_hoa_id"] = h
+        r["gia_goi_y"] = g["gia_de_xuat"] if g else None
+        r["nguon_goi_y"] = g["nguon"] if g else None
+        r["gia_thuc"] = t["don_gia"] if t else None
+        r["po_thuc"] = t["so_po"] if t else None
+        r["po_thuc_tt"] = t["trang_thai"] if t else None
+        r["chenh_thuc"] = (t["don_gia"] - r["don_gia"]) if t else None
     tong_loai = {l: sum(d["thanh_tien"] for d in ds if d["loai"] == l) for l in _DT_LOAI}
     return {"danh_sach": ds, "tong_theo_loai": tong_loai,
-            "tong_cong": sum(d["thanh_tien"] for d in ds)}
+            "tong_cong": sum(d["thanh_tien"] for d in ds),
+            "so_dong_thuc": sum(1 for d in ds if d["gia_thuc"] is not None)}
+
+
+class BoqCapNhatGiaVao(BaseModel):
+    ap_dung: bool = False
+    muc_ids: list[int] | None = None
+
+
+@router.post("/{da_id}/du-toan/cap-nhat-gia")
+def boq_cap_nhat_gia(da_id: int, data: BoqCapNhatGiaVao, db: Session = Depends(get_db),
+                     nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    """⟳ Cập nhật đơn giá BOQ dự án theo MUA THỰC TẾ (khớp tên với danh mục kho).
+    Dòng đã đề xuất mua bị khóa. ap_dung=False chỉ trả bảng so sánh."""
+    from ..gia_dau_vao import goi_y_cap_nhat
+    _da_404(db, da_id)
+    rs = db.query(DuAnDuToan).filter_by(du_an_id=da_id).order_by(DuAnDuToan.thu_tu, DuAnDuToan.id).all()
+    dong = [(x.id, x.ten, None, x.don_gia, "Đã đề xuất mua #" in (x.ghi_chu or "")) for x in rs]
+    goi_y = goi_y_cap_nhat(db, dong)
+    da_ap = 0
+    if data.ap_dung:
+        chon = set(data.muc_ids) if data.muc_ids else None
+        by_id = {x.id: x for x in rs}
+        for g in goi_y:
+            if g["khoa"] or not g["co_gia"] or (chon is not None and g["id"] not in chon):
+                continue
+            x = by_id[g["id"]]
+            if float(x.don_gia or 0) == float(g["don_gia_moi"]):
+                continue
+            x.don_gia = Decimal(str(round(g["don_gia_moi"])))
+            g["da_ap"] = True
+            da_ap += 1
+        ghi_audit(db, nd.id, "CAP_NHAT", "du_an_du_toan", da_id,
+                  moi={"cap_nhat_gia_theo_mua_that": da_ap})
+        db.commit()
+    return {"goi_y": goi_y, "da_ap": da_ap,
+            "so_co_gia": sum(1 for g in goi_y if g["co_gia"] and not g["khoa"]),
+            "so_khoa": sum(1 for g in goi_y if g["khoa"]),
+            "so_chua_co_gia": sum(1 for g in goi_y if not g["co_gia"])}
 
 
 @router.post("/{da_id}/du-toan")

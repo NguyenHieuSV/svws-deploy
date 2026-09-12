@@ -27,7 +27,23 @@ def _ra(hh: HangHoa) -> HangHoaRa:
         ton_min=hh.ton.ton_min if hh.ton else Decimal(0),
         ton_max=hh.ton.ton_max if hh.ton else None,
         ngay_nhap=hh.ngay_nhap,
+        gia_von=hh.gia_von,
     )
+
+
+@router.get("/gia-dau-vao")
+def ds_gia_dau_vao(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
+    """💲 BẢNG GIÁ ĐẦU VÀO tự học từ mua thật (PO đã duyệt) + báo giá còn hiệu lực + giá vốn.
+    Dùng để điền giá cho Dự toán hàng bán / BOQ dự án và so dự toán với giá mua thật."""
+    from ..gia_dau_vao import bang_gia
+    bg = bang_gia(db)
+    rows = []
+    for hid, o in bg.items():
+        r = dict(o)
+        r["hang_hoa_id"] = hid
+        rows.append(r)
+    rows.sort(key=lambda r: str(r.get("ten") or "").lower())
+    return {"so_mat_hang": len(rows), "rows": rows}
 
 
 # ----- XEM: danh sách hàng hóa kèm tồn + mã đơn hàng đang gắn -----

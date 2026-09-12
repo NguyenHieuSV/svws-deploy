@@ -3665,7 +3665,8 @@ def _xep_hang_ncc(db: Session, hang_hoa_id: int, so_luong) -> dict:
     # 1) Giá gần nhất của mặt hàng theo từng NCC (lấy theo PO mới nhất)
     gia_gan = {}
     q = (db.query(DonMuaCt, DonMua).join(DonMua, DonMuaCt.don_mua_id == DonMua.id)
-           .filter(DonMuaCt.hang_hoa_id == hang_hoa_id).all())
+           .filter(DonMuaCt.hang_hoa_id == hang_hoa_id,
+                   DonMua.trang_thai == "DA_DUYET").all())      # chỉ giá MUA THẬT (đã duyệt)
     for ct, dm in q:
         cur = gia_gan.get(dm.nha_cung_cap_id)
         if cur is None or dm.id > cur[0]:
@@ -3985,17 +3986,79 @@ def dtb_chi_tiet(dt_id: int, db: Session = Depends(get_db), _=Depends(yeu_cau("n
     d = db.get(DuToanBan, dt_id)
     if d is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy dự toán")
+    from ..gia_dau_vao import bang_gia, gia_thuc_theo_ma, hang_hoa_theo_ten
+    mucs = db.query(DuToanBanMuc).filter_by(du_toan_id=dt_id).order_by(DuToanBanMuc.id).all()
+    ten_map = hang_hoa_theo_ten(db, [m.ten for m in mucs if not m.hang_hoa_id])
+    hh_cua = {m.id: (m.hang_hoa_id or ten_map.get(str(m.ten or "").strip().lower())) for m in mucs}
+    ids = {h for h in hh_cua.values() if h}
+    gia = bang_gia(db, ids) if ids else {}
+    thuc = gia_thuc_theo_ma(db, d.ma, ids) if ids else {}
     items = []
-    for r in db.query(DuToanBanMuc).filter_by(du_toan_id=dt_id).order_by(DuToanBanMuc.id).all():
+    for r in mucs:
         y = _dtb_dx_hieu_luc(db, r)
+        h = hh_cua.get(r.id)
+        g = gia.get(h) if h else None
+        t = thuc.get(h) if h else None
+        dg = float(r.don_gia or 0)
         items.append({"id": r.id, "ten": r.ten, "quy_cach": r.quy_cach, "don_vi": r.don_vi,
-                      "so_luong": float(r.so_luong or 0), "don_gia": float(r.don_gia or 0),
-                      "thanh_tien": float(r.so_luong or 0) * float(r.don_gia or 0), "ghi_chu": r.ghi_chu,
+                      "so_luong": float(r.so_luong or 0), "don_gia": dg,
+                      "thanh_tien": float(r.so_luong or 0) * dg, "ghi_chu": r.ghi_chu,
                       "hang_hoa_id": r.hang_hoa_id,
-                      "dx_id": y.id if y else None, "dx_trang_thai": y.trang_thai if y else None})
+                      "dx_id": y.id if y else None, "dx_trang_thai": y.trang_thai if y else None,
+                      # 💲 giá gợi ý theo mua thật / báo giá + giá mua thật dưới mã này
+                      "gia_goi_y": g["gia_de_xuat"] if g else None,
+                      "nguon_goi_y": g["nguon"] if g else None,
+                      "gia_thuc": t["don_gia"] if t else None,
+                      "po_thuc": t["so_po"] if t else None,
+                      "po_thuc_tt": t["trang_thai"] if t else None,
+                      "sl_thuc": t["so_luong"] if t else None,
+                      "chenh_thuc": (t["don_gia"] - dg) if t else None})
     return {"id": d.id, "ma": d.ma, "khach_hang": d.khach_hang, "mo_ta": d.mo_ta,
             "ngay": str(d.ngay) if d.ngay else None, "nguoi_tao": d.nguoi_tao,
-            "items": items, "tong": sum(x["thanh_tien"] for x in items)}
+            "items": items, "tong": sum(x["thanh_tien"] for x in items),
+            "tong_thuc": sum((x["gia_thuc"] or 0) * x["so_luong"] for x in items if x["gia_thuc"] is not None),
+            "so_dong_thuc": sum(1 for x in items if x["gia_thuc"] is not None)}
+
+
+class DtbCapNhatGiaVao(_NccCnBase):
+    ap_dung: bool = False          # False → chỉ xem trước
+    muc_ids: list[int] | None = None   # ap_dung=True: chỉ áp cho các dòng này (None = mọi dòng có giá)
+
+
+@router.post("/du-toan-ban/{dt_id}/cap-nhat-gia")
+def dtb_cap_nhat_gia(dt_id: int, data: DtbCapNhatGiaVao, db: Session = Depends(get_db),
+                     nd: NguoiDung = Depends(yeu_cau("ncc", "THAO_TAC"))):
+    """⟳ Cập nhật đơn giá dự toán theo MUA THỰC TẾ (PO đã duyệt gần nhất / báo giá còn hiệu lực).
+    Dòng đã chuyển đề xuất bị khóa — không đổi. ap_dung=False chỉ trả bảng so sánh."""
+    from ..gia_dau_vao import goi_y_cap_nhat
+    d = db.get(DuToanBan, dt_id)
+    if d is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy dự toán")
+    mucs = db.query(DuToanBanMuc).filter_by(du_toan_id=dt_id).order_by(DuToanBanMuc.id).all()
+    dong = [(m.id, m.ten, m.hang_hoa_id, m.don_gia, _dtb_dx_hieu_luc(db, m) is not None) for m in mucs]
+    goi_y = goi_y_cap_nhat(db, dong)
+    da_ap = 0
+    if data.ap_dung:
+        chon = set(data.muc_ids) if data.muc_ids else None
+        by_id = {m.id: m for m in mucs}
+        for g in goi_y:
+            if g["khoa"] or not g["co_gia"] or (chon is not None and g["id"] not in chon):
+                continue
+            m = by_id[g["id"]]
+            if float(m.don_gia or 0) == float(g["don_gia_moi"]):
+                continue
+            m.don_gia = Decimal(str(round(g["don_gia_moi"])))
+            if g["hang_hoa_id"] and not m.hang_hoa_id:
+                m.hang_hoa_id = g["hang_hoa_id"]
+            g["da_ap"] = True
+            da_ap += 1
+        ghi_audit(db, nd.id, "CAP_NHAT", "du_toan_ban", d.id,
+                  moi={"cap_nhat_gia_theo_mua_that": da_ap})
+        db.commit()
+    return {"ma": d.ma, "goi_y": goi_y, "da_ap": da_ap,
+            "so_co_gia": sum(1 for g in goi_y if g["co_gia"] and not g["khoa"]),
+            "so_khoa": sum(1 for g in goi_y if g["khoa"]),
+            "so_chua_co_gia": sum(1 for g in goi_y if not g["co_gia"])}
 
 
 @router.put("/du-toan-ban/{dt_id}")

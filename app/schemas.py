@@ -39,6 +39,7 @@ class HangHoaRa(BaseModel):
     ton_max: Decimal | None = None
     ma_don_hang: str | None = None   # mã đơn hàng bán đang gắn (qua dòng đơn hàng / PO)
     ngay_nhap: date | None = None    # ngày nhập kho (phiếu NHẬP mới nhất, fallback nhập tay)
+    gia_von: Decimal | None = None   # giá mua gần nhất tự học khi nhận hàng PO
 
 
 class HangHoaSua(BaseModel):
