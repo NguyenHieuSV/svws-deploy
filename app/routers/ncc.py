@@ -3135,13 +3135,14 @@ def doi_ma(data: DoiMaVao, db: Session = Depends(get_db),
     moi = str(data.ma_moi or "").strip()
     if not cu or not moi:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Thiếu mã cũ / mã mới")
-    if cu.lower() == moi.lower():
+    if cu == moi:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Mã mới trùng mã cũ")
+    chi_doi_hoa = (cu.lower() == moi.lower())      # chỉ đổi hoa/thường: cùng bản ghi, không có xung đột
     moi = _bb_ma(moi, nd, data.ep_ma, bat_buoc_thang=False, nhan="Mã mới")
     if len(moi) > 30:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Mã tối đa 30 ký tự")
     # không được đổi thành mã đã là ĐỊNH DANH của bản ghi khác (đơn bán / báo giá / dự án / dự toán)
-    for nhan, model, cot, kieu in _cac_cot_ma(db)[:5]:
+    for nhan, model, cot, kieu in ([] if chi_doi_hoa else _cac_cot_ma(db)[:5]):
         if db.query(model).filter(func.lower(func.trim(cot)) == moi.lower()).first() is not None \
                 and db.query(model).filter(func.lower(func.trim(cot)) == cu.lower()).first() is not None:
             raise HTTPException(status.HTTP_409_CONFLICT,
