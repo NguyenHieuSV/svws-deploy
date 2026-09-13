@@ -125,6 +125,7 @@ class DonMuaVao(BaseModel):
     chi_tiet: list[DonMuaCtVao] = Field(min_length=1)
     xac_nhan_trung: bool = False   # CEO/ADMIN xác nhận mua bổ sung dù trùng mã bán hàng
     xac_nhan_lap: bool = False     # người lập xác nhận MUA LẶP (mã DV-/OP-) dù còn PO cùng hàng chờ về
+    xac_nhan_du_toan: bool = False # người lập xác nhận PO VƯỢT/NGOÀI dự toán → chỉ CEO duyệt
 
 
 class DonMuaRa(BaseModel):
@@ -143,6 +144,7 @@ class DonMuaRa(BaseModel):
     dinh_ky: bool = False               # 🔁 mua định kỳ (xác nhận khi tạo đơn nghi trùng)
     hang_hoa: str | None = None         # tóm tắt tên mặt hàng của PO (danh sách)
     ma_ban: str | None = None           # mã chuỗi (dự toán / dự án / OP) khi PO chưa gắn đơn bán
+    vuot_du_toan: str | None = None     # ⛔ lý do vượt/ngoài dự toán (chỉ CEO/ADMIN duyệt)
 
 
 class YeuCauMuaItemVao(BaseModel):
@@ -168,6 +170,7 @@ class YeuCauMuaVao(BaseModel):
     don_hang_id: int | None = None
     ngay_can: date | None = None
     dinh_kem_url: str | None = None
+    xac_nhan_du_toan: bool = False   # người lập xác nhận đề xuất VƯỢT/NGOÀI dự toán → hàng chờ CEO duyệt
 
 
 class TaoPoTuDeXuatVao(BaseModel):
@@ -176,6 +179,7 @@ class TaoPoTuDeXuatVao(BaseModel):
     ngay_hen_giao: date | None = None
     xac_nhan_trung: bool = False   # CEO/ADMIN xác nhận mua bổ sung dù trùng mã bán hàng
     xac_nhan_lap: bool = False     # người lập xác nhận MUA LẶP (mã DV-/OP-) dù còn PO cùng hàng chờ về
+    xac_nhan_du_toan: bool = False # người lập xác nhận PO VƯỢT/NGOÀI dự toán → chỉ CEO duyệt
 
 
 class LyDoVao(BaseModel):
@@ -198,6 +202,7 @@ class YeuCauMuaRa(BaseModel):
     ai_goi_y: str | None = None
     dinh_kem_url: str | None = None
     dinh_kem_file: str | None = None
+    vuot_du_toan: str | None = None
 
 
 # ---------- Dự án ----------

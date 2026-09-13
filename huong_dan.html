@@ -359,6 +359,12 @@
     <li><b>PO mua dự trữ</b> dùng từ khóa <code>KHO</code> thay cho mã; khi xuất dùng cho mã nào thì gán lại mã đó.</li>
     <li>Mã cũ sai quy luật: xem <b>Nhà cung cấp → Kiểm soát → 🧩 Chi phí chưa vào mã → ⑧ Mã sai quy luật</b>, sửa một lần là đổi ở mọi bảng.</li>
   </ul>
+  <h3 id="kiem-soat-du-toan">Kiểm soát mua hàng theo dự toán — “chặn và chờ duyệt”</h3>
+  <p>Mã đã có <b>Dự toán hàng bán</b> hoặc <b>BOQ dự án</b> thì mỗi mặt hàng chỉ được đề xuất / lập PO tối đa bằng
+  <b>dự toán dòng + 10%</b> (tính lũy kế cả PO và đề xuất còn hiệu lực của mã đó). Vượt mức, hoặc mặt hàng
+  <b>không có trong dự toán</b>: hệ thống <b>chặn</b> ngay lúc lập, nêu rõ dòng nào vượt bao nhiêu; người lập
+  xác nhận “mua có chủ đích” thì đề xuất/PO được tạo với nhãn <b>⛔ Vượt dự toán</b> và <b>chỉ CEO/ADMIN duyệt được</b>.
+  Mã chưa có dự toán nào thì không kiểm soát. Đề xuất sinh trực tiếp từ dự toán (tick dòng → 🛒) luôn nằm trong dự toán.</p>
   <p style="background:#f0fdf4;border-left:4px solid #16a34a;padding:8px 12px;border-radius:6px">Ví dụ đúng: <code>TM-SIC-0926-01-LOC</code> · <code>DA-IIVI-0126-WAF</code> · <code>DV-COA-NT-0926-02</code> · <code>OP-SV-0926</code>.
   Ví dụ sai: <code>DA-IIVI-WAF-02 PS</code> (khoảng trắng, thiếu tháng) · <code>TM-NHMT-TBĐO</code> (có dấu, thiếu tháng) · <code>DV-COH.NT-EDI-0826</code> (dấu chấm).</p>
 </section>

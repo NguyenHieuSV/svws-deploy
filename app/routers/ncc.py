@@ -101,6 +101,28 @@ def _so_don_hang_map(db):
     return theo_so, theo_id
 
 
+def _chan_vuot_du_toan(db, ma, lines, xac_nhan=False, bo_qua_ycm=None, bo_qua_dm=None):
+    """Kiểm soát theo DỰ TOÁN — 'chặn và chờ duyệt': vượt dung sai / ngoài dự toán → 409 nếu chưa
+    xác nhận; đã xác nhận → trả lý do để gắn cờ vuot_du_toan (chỉ CEO/ADMIN duyệt)."""
+    if not ma:
+        return None
+    from ..du_toan_ks import kiem_tra as _kt_dt
+    vp, mo_ta = _kt_dt(db, ma, lines, bo_qua_ycm=bo_qua_ycm, bo_qua_dm=bo_qua_dm)
+    if not vp:
+        return None
+    if not xac_nhan:
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            mo_ta + " — Xác nhận có chủ đích thì đề xuất/PO vào HÀNG CHỜ DUYỆT, "
+                                    "chỉ CEO/ADMIN duyệt được.")
+    return mo_ta[:300]
+
+
+def _chi_ceo_duyet_vuot(nd, ly_do, nhan):
+    if ly_do and not getattr(getattr(nd, "vai_tro", None), "ma", None) in ("CEO", "ADMIN"):
+        raise HTTPException(status.HTTP_403_FORBIDDEN,
+                            f"⛔ {nhan} này VƯỢT/NGOÀI DỰ TOÁN — chỉ CEO/ADMIN duyệt được. Lý do: {ly_do}")
+
+
 def _po_nghi_trung(db, ncc_id, so_tien, ngay, pos=None):
     """Hóa đơn nhập ngoài có thể chính là HĐ của một PO (cùng NCC, cùng số tiền ±1.000đ,
     lệch ngày ≤ 30). Nối vào PO thay vì tạo công nợ thứ hai — tránh đếm chi phí 2 lần."""
@@ -377,7 +399,8 @@ def _ycm_dict(db, y):
             "ngay_can": str(y.ngay_can) if y.ngay_can else None, "don_mua_id": y.don_mua_id,
             "ai_ncc_id": y.ai_ncc_id, "ai_goi_y": y.ai_goi_y,
             "dinh_kem_url": y.dinh_kem_url, "dinh_kem_file": y.dinh_kem_file,
-            "so_dong": len(items) or 1, "items": items, "ma_ban": getattr(y, "ma_ban", None)}
+            "so_dong": len(items) or 1, "items": items, "ma_ban": getattr(y, "ma_ban", None),
+            "vuot_du_toan": getattr(y, "vuot_du_toan", None)}
 
 
 @router.get("/yeu-cau-mua")
@@ -480,17 +503,21 @@ def tao_de_xuat(data: YeuCauMuaVao, db: Session = Depends(get_db),
             it.nha_cung_cap_id = sp.nha_cung_cap_id
     primary = items[0]
     ncc_chung = data.nha_cung_cap_id or next((it.nha_cung_cap_id for it in items if it.nha_cung_cap_id), None)
+    # 📋 KIỂM SOÁT THEO DỰ TOÁN của mã đơn bán (nếu mã có dự toán): chặn & chờ CEO duyệt
+    _ma_dt = _ma_hieu_luc(db, don_hang_id=data.don_hang_id)
+    _vuot = _chan_vuot_du_toan(db, _ma_dt, [(it.hang_hoa_id, it.so_luong, it.don_gia) for it in items],
+                               xac_nhan=getattr(data, "xac_nhan_du_toan", False))
     ycm = YeuCauMua(hang_hoa_id=primary.hang_hoa_id, so_luong=primary.so_luong, ly_do=data.ly_do,
                     nha_cung_cap_id=ncc_chung, don_hang_id=data.don_hang_id,
                     don_gia=primary.don_gia, ngay_can=data.ngay_can, ghi_chu=data.ghi_chu,
-                    dinh_kem_url=data.dinh_kem_url,
+                    dinh_kem_url=data.dinh_kem_url, vuot_du_toan=_vuot,
                     nguoi_tao=nhan_vien_id_cua(db, nd.id), trang_thai="MOI")
     db.add(ycm); db.flush()
     for it in items:
         db.add(YeuCauMuaCt(yeu_cau_mua_id=ycm.id, hang_hoa_id=it.hang_hoa_id,
                            so_luong=it.so_luong, don_gia=it.don_gia, thue_suat=it.thue_suat,
                            ghi_chu=it.ghi_chu, nha_cung_cap_id=it.nha_cung_cap_id))
-    ghi_audit(db, nd.id, "TAO", "yeu_cau_mua", ycm.id, moi={"so_dong": len(items)})
+    ghi_audit(db, nd.id, "TAO", "yeu_cau_mua", ycm.id, moi={"so_dong": len(items), "vuot_du_toan": _vuot})
     db.commit(); db.refresh(ycm)
     return ycm
 
@@ -532,6 +559,7 @@ def duyet_de_xuat(ycm_id: int, db: Session = Depends(get_db),
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đề xuất")
     if ycm.trang_thai != "MOI":
         raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Đề xuất đang ở trạng thái {ycm.trang_thai}")
+    _chi_ceo_duyet_vuot(nd, getattr(ycm, "vuot_du_toan", None), "Đề xuất")
     ycm.trang_thai = "DA_DUYET"; ycm.nguoi_duyet = nhan_vien_id_cua(db, nd.id)
     from ..nhac_viec_service import gio_hien_tai
     ycm.ngay_duyet = gio_hien_tai().date()          # ngày duyệt thực tế (giờ VN)
@@ -618,12 +646,16 @@ def tao_po_tu_de_xuat(ycm_id: int, data: TaoPoTuDeXuatVao, db: Session = Depends
             raise HTTPException(status.HTTP_400_BAD_REQUEST,
                                 f"Thiếu đơn giá cho mặt hàng #{l.hang_hoa_id}")
         nhom.setdefault(ncc, []).append((l.hang_hoa_id, l.so_luong, g))
+    # 📋 PO theo giá thật vs DỰ TOÁN (bỏ chính đề xuất này khỏi phần đã dùng): chặn & chờ CEO duyệt
+    _vuot_po = _chan_vuot_du_toan(db, _ma_eff, [(hh, sl, g) for its in nhom.values() for (hh, sl, g) in its],
+                                  xac_nhan=getattr(data, "xac_nhan_du_toan", False), bo_qua_ycm=ycm.id)
     pos = []
     for ncc, items_g in nhom.items():
         tong = Decimal(0)
         for _, sl, g in items_g:
             tong += Decimal(sl) * Decimal(g)
         dm = DonMua(so=None, nha_cung_cap_id=ncc, don_hang_id=ycm.don_hang_id, ma_ban=_ma_po, dinh_ky=bool(getattr(data, "xac_nhan_lap", False)),
+                    vuot_du_toan=_vuot_po,
                     ngay=date.today(), ngay_hen_giao=data.ngay_hen_giao or ycm.ngay_can,
                     tong_tien=tong, trang_thai="CHO_DUYET")
         db.add(dm); db.flush(); dm.so = f"PO-{date.today():%Y%m%d}-{dm.id}"
@@ -2163,7 +2195,11 @@ def tao_don_mua(data: DonMuaVao, bo_qua_trung: bool = False, ep_ma: bool = False
                                       don_hang_id=data.don_hang_id, xac_nhan=data.xac_nhan_trung,
                                       xac_nhan_lap=data.xac_nhan_lap, so_luong_moi=_sl_theo_hh(data.chi_tiet))
     tien_hang, tien_thue, tong = _tinh_tien_po(data.chi_tiet)
-    dm = DonMua(so=data.so, nha_cung_cap_id=data.nha_cung_cap_id,
+    # 📋 KIỂM SOÁT THEO DỰ TOÁN: chặn & chờ CEO duyệt
+    _vuot_po = _chan_vuot_du_toan(db, _ma_hieu_luc(db, don_hang_id=data.don_hang_id, ma_ban=_ma_moi),
+                                  [(ct.hang_hoa_id, ct.so_luong, ct.don_gia) for ct in data.chi_tiet],
+                                  xac_nhan=getattr(data, "xac_nhan_du_toan", False))
+    dm = DonMua(so=data.so, nha_cung_cap_id=data.nha_cung_cap_id, vuot_du_toan=_vuot_po,
                 don_hang_id=data.don_hang_id, ma_ban=_ma_moi, ngay_hen_giao=data.ngay_hen_giao,
                 ngay=date.today(), tien_hang=tien_hang, tien_thue=tien_thue,
                 tong_tien=tong, trang_thai="CHO_DUYET", dinh_ky=bool(bo_qua_trung or data.xac_nhan_lap))
@@ -2256,6 +2292,8 @@ def duyet_don_mua(dm_id: int, db: Session = Depends(get_db),
                             f"⛔ THIẾU MÃ CHI PHÍ: {dm.so or ('PO#' + str(dm.id))} chưa gắn mã nào. "
                             "Vào Nhà cung cấp → Kiểm soát → 🧩 Chi phí chưa vào mã để gán mã "
                             "(mã bán hàng · OP-… · KHO) rồi duyệt lại.")
+    # ★ Tầng 1b: PO vượt/ngoài dự toán → chỉ CEO/ADMIN duyệt
+    _chi_ceo_duyet_vuot(nd, getattr(dm, "vuot_du_toan", None), "PO")
     # ★ Tầng thứ hai: số tiền có nằm trong hạn mức duyệt của vai trò không?
     kiem_han_muc(db, nd, LOAI_DUYET, dm.tong_tien)
     # ★ Tầng thứ ba: kiểm soát HẠN MỨC CÔNG NỢ của NCC (dư nợ + đơn này không vượt trần)
