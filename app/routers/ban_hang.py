@@ -1644,7 +1644,20 @@ def xoa_bao_gia(bg_id: int, db: Session = Depends(get_db),
 
 @router.get("/don-hang", response_model=list[DonHangRa])
 def ds_don_hang(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
-    return db.query(DonHang).order_by(DonHang.id.desc()).all()
+    """Danh sách đơn bán kèm TRẢ TRƯỚC theo quy tắc chung: max(cọc trên đơn, tạm ứng phiếu thu
+    đã duyệt chưa cấn) — Overall Financial, danh mục trả trước và Lãi/Lỗ theo mã cùng một số."""
+    from ..lai_lo_ma import tra_truoc_theo_don
+    rows = db.query(DonHang).order_by(DonHang.id.desc()).all()
+    tt = tra_truoc_theo_don(db, [o.id for o in rows]) if rows else {}
+    out = []
+    for o in rows:
+        r = DonHangRa.model_validate(o)
+        t = tt.get(o.id) or {}
+        r.tam_ung = Decimal(str(round(t.get("tam_ung", 0))))
+        r.tra_truoc = Decimal(str(round(t.get("tra_truoc", float(o.thanh_toan_coc or 0)))))
+        r.nguon_tra_truoc = t.get("nguon")
+        out.append(r)
+    return out
 
 
 @router.get("/don-hang/{dh_id}/chi-tiet")

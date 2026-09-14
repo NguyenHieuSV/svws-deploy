@@ -437,6 +437,9 @@ class DonHangRa(BaseModel):
     trang_thai: str
     thanh_toan_coc: Decimal = Decimal(0)
     so_hoa_don: str | None = None        # số HĐ xuất cho khách (theo dõi công nợ)
+    tam_ung: Decimal = Decimal(0)        # tạm ứng phiếu thu ĐÃ DUYỆT chưa cấn trừ (tiền thật vào quỹ)
+    tra_truoc: Decimal = Decimal(0)      # = max(cọc, tạm ứng) — quy tắc chung
+    nguon_tra_truoc: str | None = None   # cọc trên đơn · phiếu thu · cả hai
 
 
 # ---------- Kế toán & Tài chính ----------

@@ -22,6 +22,31 @@ def _f(v) -> float:
     return float(v or 0)
 
 
+def tra_truoc_theo_don(db: Session, dh_ids=None) -> dict:
+    """TIỀN KHÁCH TRẢ TRƯỚC của từng đơn — QUY TẮC CHUNG (chốt 13/09/2026):
+         trả trước = max(cọc ghi trên đơn, tạm ứng phiếu thu ĐÃ DUYỆT chưa cấn trừ)
+    Hai đường ghi cùng một khoản tiền (cọc gõ tay trên đơn · phiếu thu tạm ứng có tiền vào quỹ)
+    → lấy số lớn hơn, không cộng dồn (tránh trừ 2 lần). Trả {id: {coc, tam_ung, tra_truoc, nguon}}."""
+    q = db.query(DonHang.id, DonHang.thanh_toan_coc)
+    if dh_ids is not None:
+        q = q.filter(DonHang.id.in_(list(dh_ids)))
+    out = {i: {"coc": _f(c), "tam_ung": 0.0} for (i, c) in q.all()}
+    qt = (db.query(PhieuThuChi.don_hang_id, func.coalesce(func.sum(PhieuThuChi.so_tien - PhieuThuChi.da_can_tru), 0))
+          .filter(PhieuThuChi.loai == "THU", PhieuThuChi.la_tam_ung.is_(True),
+                  PhieuThuChi.trang_thai == "DA_DUYET", PhieuThuChi.don_hang_id.isnot(None))
+          .group_by(PhieuThuChi.don_hang_id))
+    if dh_ids is not None:
+        qt = qt.filter(PhieuThuChi.don_hang_id.in_(list(dh_ids)))
+    for (i, t) in qt.all():
+        if i in out:
+            out[i]["tam_ung"] = max(_f(t), 0.0)
+    for o in out.values():
+        o["tra_truoc"] = max(o["coc"], o["tam_ung"])
+        o["nguon"] = (("cả hai" if (o["coc"] and o["tam_ung"]) else ("phiếu thu" if o["tam_ung"] else "cọc trên đơn"))
+                      if o["tra_truoc"] else None)
+    return out
+
+
 def chi_phi_ma(db: Session, dh: DonHang) -> dict:
     doanh_thu = _f(dh.tong_tien) + _f(dh.tien_thue)
     # PO gắn đơn + PO chỉ mang MÃ CHUỖI trùng số đơn (sinh từ Dự toán / Dự án trước khi có
@@ -81,8 +106,10 @@ def chi_phi_ma(db: Session, dh: DonHang) -> dict:
                     .filter(PhieuThuChi.don_hang_id == dh.id, PhieuThuChi.loai == "THU",
                             PhieuThuChi.la_tam_ung.is_(True),
                             PhieuThuChi.trang_thai == "DA_DUYET").scalar())
+    # QUY TẮC CHUNG (tra_truoc_theo_don): chưa có công nợ → trả trước = max(cọc, tạm ứng) — không cộng
+    # dồn 2 đường ghi của cùng khoản tiền; đã có công nợ → cọc đã cấn vào da_thanh_toan, chỉ cộng tạm ứng còn dư
     coc_don = _f(dh.thanh_toan_coc) if not cn_thu else 0.0
-    da_thu = da_thu_cn + max(tu_thu_clt, 0.0) + coc_don
+    da_thu = da_thu_cn + (max(tu_thu_clt, coc_don) if not cn_thu else max(tu_thu_clt, 0.0))
 
     return {
         "doanh_thu": doanh_thu,
