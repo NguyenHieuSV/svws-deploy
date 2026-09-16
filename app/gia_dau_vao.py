@@ -242,3 +242,40 @@ def goi_y_khop_kho(db: Session, dong):
         out.append({"id": mid, "ten": ten, "hang_hoa_id": hid, "da_khop": bool(hid),
                     "khoa": bool(khoa), "don_gia": _f(dg), "ung_vien": cs})
     return out
+
+
+def tim_theo_ten(db: Session, q: str, gioi_han: int = 40) -> list:
+    """🔎 Dò mặt hàng theo TÊN (không dấu, không phân biệt hoa thường; mọi từ khóa phải xuất hiện,
+    thứ tự tùy ý) → kèm giá đầu vào: giá đề xuất + nguồn, giá mua gần nhất (PO · NCC · ngày), báo giá,
+    giá bán DM. Dùng khi lập dự toán mà không nhớ mã / tên đầy đủ."""
+    tks = [t for t in _chuan(q).split(" ") if t]
+    if not tks:
+        return []
+    ung = []
+    for hid, ten, dv in db.query(HangHoa.id, HangHoa.ten, HangHoa.don_vi).all():
+        c = _chuan(ten)
+        if all(t in c for t in tks):
+            # ưu tiên: khớp đầu tên > khớp trọn từ > khớp giữa
+            diem = (2 if c.startswith(tks[0]) else 0) + (1 if _tron_tu_bat_ky(tks, c) else 0)
+            ung.append((diem, hid, ten, dv))
+    ung.sort(key=lambda x: (-x[0], x[2]))
+    ung = ung[:gioi_han]
+    bg = bang_gia(db, [u[1] for u in ung]) if ung else {}
+    out = []
+    for diem, hid, ten, dv in ung:
+        o = bg.get(hid) or {}
+        out.append({"hang_hoa_id": hid, "ten": ten, "don_vi": dv,
+                    "gia_de_xuat": o.get("gia_de_xuat"), "nguon": o.get("nguon"),
+                    "gia_gan_nhat": o.get("gia_gan_nhat"), "ngay_gan_nhat": o.get("ngay_gan_nhat"),
+                    "so_po_gan_nhat": o.get("so_po_gan_nhat"), "ncc_gan_nhat": o.get("ncc_gan_nhat"),
+                    "so_lan_mua": o.get("so_lan_mua", 0),
+                    "bao_gia": (o.get("bao_gia") or {}).get("don_gia") if o.get("bao_gia") else None,
+                    "gia_ban": o.get("gia_ban")})
+    # có giá lên trước, rồi theo điểm khớp
+    out.sort(key=lambda r: (0 if r["gia_de_xuat"] else 1))
+    return out
+
+
+def _tron_tu_bat_ky(tks, c):
+    words = set(c.replace("/", " ").replace("-", " ").split(" "))
+    return any(t in words for t in tks)

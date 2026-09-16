@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from ..database import get_db
-from ..rbac import yeu_cau, chi_vai_tro
+from ..rbac import yeu_cau, chi_vai_tro, yeu_cau_bat_ky
 from ..deps import nhan_vien_id_cua
 from ..kho_service import nhap_ton, xuat_ton
 from ..audit import ghi_audit
@@ -29,6 +29,14 @@ def _ra(hh: HangHoa) -> HangHoaRa:
         ngay_nhap=hh.ngay_nhap,
         gia_von=hh.gia_von,
     )
+
+
+@router.get("/tim-gia")
+def tim_gia_theo_ten(q: str = "", db: Session = Depends(get_db),
+                     _=Depends(yeu_cau_bat_ky(("kho", "XEM"), ("ncc", "XEM"), ("ban_hang", "XEM"), ("du_an", "XEM")))):
+    """🔎 Tìm mặt hàng theo vài ký tự trong tên → giá đầu vào để điền vào dự toán / BOQ."""
+    from ..gia_dau_vao import tim_theo_ten
+    return {"q": q, "rows": tim_theo_ten(db, q)}
 
 
 @router.get("/gia-dau-vao")

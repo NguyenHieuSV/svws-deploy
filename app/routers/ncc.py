@@ -4093,6 +4093,8 @@ def dtb_sua_muc(muc_id: int, data: DtbMucVao, db: Session = Depends(get_db),
         m.so_luong = Decimal(str(data.so_luong))
     if data.don_gia is not None:
         m.don_gia = Decimal(str(data.don_gia))
+    if data.hang_hoa_id is not None and db.get(HangHoa, data.hang_hoa_id) is not None:
+        m.hang_hoa_id = data.hang_hoa_id          # 🔎 liên kết mặt hàng khi chọn từ Tìm giá / khớp kho
     db.commit()
     return {"ok": True}
 
