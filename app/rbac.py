@@ -38,6 +38,24 @@ def yeu_cau(module: str, muc_toi_thieu: str):
     return kiem_tra
 
 
+def yeu_cau_bat_ky(*cap):
+    """Đủ quyền ở BẤT KỲ cặp (module, mức) nào thì qua — cho nghiệp vụ dùng chung giữa 2 phân hệ
+    (vd Dự toán hàng bán: Bán hàng và Đề xuất mua hàng cùng một nguồn)."""
+    kiem = [yeu_cau(m, muc) for (m, muc) in cap]
+
+    def kiem_tra(nguoi_dung: NguoiDung = Depends(lay_nguoi_dung_hien_tai),
+                 db: Session = Depends(get_db)) -> NguoiDung:
+        loi = None
+        for k in kiem:
+            try:
+                return k(nguoi_dung, db)
+            except HTTPException as e:
+                loi = e
+        raise loi or HTTPException(status.HTTP_403_FORBIDDEN, "Không đủ quyền")
+
+    return kiem_tra
+
+
 # ---------- Phê duyệt theo HẠN MỨC TIỀN (đọc bảng han_muc_duyet) ----------
 # Mô hình "trần" (ceiling): vai trò duyệt được nếu số tiền <= nguong_den
 # (NULL = không giới hạn). Vai trò cấp cao (trần lớn hơn) bao hàm cấp thấp.

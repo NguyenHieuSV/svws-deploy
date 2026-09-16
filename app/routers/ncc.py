@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func, or_
 from sqlalchemy.exc import IntegrityError
 from ..database import get_db
-from ..rbac import yeu_cau, kiem_han_muc, chi_vai_tro
+from ..rbac import yeu_cau, kiem_han_muc, chi_vai_tro, yeu_cau_bat_ky
 from ..deps import nhan_vien_id_cua
 from ..audit import ghi_audit
 from ..models import (NguoiDung, NhaCungCap, DonMua, DonMuaCt, DanhGiaNcc, YeuCauMua, YeuCauMuaCt,
@@ -4036,7 +4036,7 @@ def _dtb_khoa_muc(db, m):
 
 
 @router.get("/du-toan-ban")
-def dtb_danh_sach(db: Session = Depends(get_db), _=Depends(yeu_cau("ncc", "XEM"))):
+def dtb_danh_sach(db: Session = Depends(get_db), _=Depends(yeu_cau_bat_ky(("ncc", "XEM"), ("ban_hang", "XEM")))):
     tong_map = {}
     for dt_id, sl, dg in db.query(DuToanBanMuc.du_toan_id, DuToanBanMuc.so_luong, DuToanBanMuc.don_gia).all():
         t, n = tong_map.get(dt_id, (0.0, 0))
@@ -4052,7 +4052,7 @@ def dtb_danh_sach(db: Session = Depends(get_db), _=Depends(yeu_cau("ncc", "XEM")
 
 @router.post("/du-toan-ban")
 def dtb_tao(data: DuToanBanVao, ep_ma: bool = False, db: Session = Depends(get_db),
-            nd: NguoiDung = Depends(yeu_cau("ncc", "THAO_TAC"))):
+            nd: NguoiDung = Depends(yeu_cau_bat_ky(("ncc", "THAO_TAC"), ("ban_hang", "THAO_TAC")))):
     ma = (data.ma or "").strip()
     if not ma:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Nhập Mã hàng bán")
@@ -4076,7 +4076,7 @@ def dtb_tao(data: DuToanBanVao, ep_ma: bool = False, db: Session = Depends(get_d
 # để "muc" không bị bắt nhầm vào tham số số nguyên dt_id.
 @router.put("/du-toan-ban/muc/{muc_id}")
 def dtb_sua_muc(muc_id: int, data: DtbMucVao, db: Session = Depends(get_db),
-                nd: NguoiDung = Depends(yeu_cau("ncc", "THAO_TAC"))):
+                nd: NguoiDung = Depends(yeu_cau_bat_ky(("ncc", "THAO_TAC"), ("ban_hang", "THAO_TAC")))):
     m = db.get(DuToanBanMuc, muc_id)
     if m is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy sản phẩm trong dự toán")
@@ -4099,7 +4099,7 @@ def dtb_sua_muc(muc_id: int, data: DtbMucVao, db: Session = Depends(get_db),
 
 @router.delete("/du-toan-ban/muc/{muc_id}")
 def dtb_xoa_muc(muc_id: int, db: Session = Depends(get_db),
-                nd: NguoiDung = Depends(yeu_cau("ncc", "THAO_TAC"))):
+                nd: NguoiDung = Depends(yeu_cau_bat_ky(("ncc", "THAO_TAC"), ("ban_hang", "THAO_TAC")))):
     m = db.get(DuToanBanMuc, muc_id)
     if m is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy sản phẩm trong dự toán")
@@ -4110,7 +4110,7 @@ def dtb_xoa_muc(muc_id: int, db: Session = Depends(get_db),
 
 @router.post("/du-toan-ban/{dt_id}/muc")
 def dtb_them_muc(dt_id: int, data: DtbMucVao, db: Session = Depends(get_db),
-                 nd: NguoiDung = Depends(yeu_cau("ncc", "THAO_TAC"))):
+                 nd: NguoiDung = Depends(yeu_cau_bat_ky(("ncc", "THAO_TAC"), ("ban_hang", "THAO_TAC")))):
     if db.get(DuToanBan, dt_id) is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy dự toán")
     if not (data.ten or "").strip():
@@ -4134,7 +4134,7 @@ def dtb_them_muc(dt_id: int, data: DtbMucVao, db: Session = Depends(get_db),
 
 
 @router.get("/du-toan-ban/{dt_id}")
-def dtb_chi_tiet(dt_id: int, db: Session = Depends(get_db), _=Depends(yeu_cau("ncc", "XEM"))):
+def dtb_chi_tiet(dt_id: int, db: Session = Depends(get_db), _=Depends(yeu_cau_bat_ky(("ncc", "XEM"), ("ban_hang", "XEM")))):
     d = db.get(DuToanBan, dt_id)
     if d is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy dự toán")
@@ -4179,7 +4179,7 @@ class DtbKhopKhoVao(_NccCnBase):
 
 @router.post("/du-toan-ban/{dt_id}/khop-kho")
 def dtb_khop_kho(dt_id: int, data: DtbKhopKhoVao, db: Session = Depends(get_db),
-                 nd: NguoiDung = Depends(yeu_cau("ncc", "THAO_TAC"))):
+                 nd: NguoiDung = Depends(yeu_cau_bat_ky(("ncc", "THAO_TAC"), ("ban_hang", "THAO_TAC")))):
     """🔗 Khớp dòng dự toán với mặt hàng kho (gợi ý gần giống, không phân biệt dấu);
     ap_dung → gán hang_hoa_id, tùy chọn đổi tên theo kho + lấy giá đầu vào."""
     from ..gia_dau_vao import goi_y_khop_kho, bang_gia
@@ -4226,7 +4226,7 @@ class DtbCapNhatGiaVao(_NccCnBase):
 
 @router.post("/du-toan-ban/{dt_id}/cap-nhat-gia")
 def dtb_cap_nhat_gia(dt_id: int, data: DtbCapNhatGiaVao, db: Session = Depends(get_db),
-                     nd: NguoiDung = Depends(yeu_cau("ncc", "THAO_TAC"))):
+                     nd: NguoiDung = Depends(yeu_cau_bat_ky(("ncc", "THAO_TAC"), ("ban_hang", "THAO_TAC")))):
     """⟳ Cập nhật đơn giá dự toán theo MUA THỰC TẾ (PO đã duyệt gần nhất / báo giá còn hiệu lực).
     Dòng đã chuyển đề xuất bị khóa — không đổi. ap_dung=False chỉ trả bảng so sánh."""
     from ..gia_dau_vao import goi_y_cap_nhat
@@ -4262,7 +4262,7 @@ def dtb_cap_nhat_gia(dt_id: int, data: DtbCapNhatGiaVao, db: Session = Depends(g
 
 @router.put("/du-toan-ban/{dt_id}")
 def dtb_sua(dt_id: int, data: DuToanBanVao, ep_ma: bool = False, db: Session = Depends(get_db),
-            nd: NguoiDung = Depends(yeu_cau("ncc", "THAO_TAC"))):
+            nd: NguoiDung = Depends(yeu_cau_bat_ky(("ncc", "THAO_TAC"), ("ban_hang", "THAO_TAC")))):
     d = db.get(DuToanBan, dt_id)
     if d is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy dự toán")
@@ -4295,7 +4295,7 @@ def dtb_sua(dt_id: int, data: DuToanBanVao, ep_ma: bool = False, db: Session = D
 
 @router.delete("/du-toan-ban/{dt_id}")
 def dtb_xoa(dt_id: int, db: Session = Depends(get_db),
-            nd: NguoiDung = Depends(yeu_cau("ncc", "DUYET"))):
+            nd: NguoiDung = Depends(yeu_cau_bat_ky(("ncc", "DUYET"), ("ban_hang", "DUYET")))):
     d = db.get(DuToanBan, dt_id)
     if d is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy dự toán")
@@ -4323,7 +4323,7 @@ class DtbDeXuatVao(_NccCnBase):
 
 @router.post("/du-toan-ban/{dt_id}/de-xuat", status_code=201)
 def dtb_tao_de_xuat(dt_id: int, data: DtbDeXuatVao, db: Session = Depends(get_db),
-                    nd: NguoiDung = Depends(yeu_cau("ncc", "THAO_TAC"))):
+                    nd: NguoiDung = Depends(yeu_cau_bat_ky(("ncc", "THAO_TAC"), ("ban_hang", "THAO_TAC")))):
     from ..models import DonHang as _DxDh
     d = db.get(DuToanBan, dt_id)
     if d is None:
