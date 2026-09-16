@@ -5,6 +5,7 @@ Nguồn (theo thứ tự tin cậy):
   • dòng PO ĐÃ DUYỆT (bỏ chờ duyệt / từ chối) — giá mua gần nhất, bình quân 3 lần gần nhất
   • báo giá NCC còn hiệu lực — ưu tiên khi MỚI HƠN lần mua gần nhất
   • giá vốn đã học (hang_hoa.gia_von — ghi khi nhận hàng PO)
+  • GIÁ BÁN DANH MỤC KHO (hang_hoa.gia_ban) — nguồn cuối, chỉ khi chưa có giá mua/báo giá nào
 Hóa đơn / thanh toán chỉ có tổng tiền, không có đơn giá theo mặt hàng nên KHÔNG dùng làm nguồn.
 """
 from datetime import date
@@ -53,16 +54,17 @@ def bang_gia(db: Session, hang_hoa_ids=None) -> dict:
         o["bao_gia"] = {"don_gia": _f(bg.don_gia), "ngay": str(bg.ngay or "")[:10],
                         "hieu_luc_den": str(bg.hieu_luc_den) if bg.hieu_luc_den else None,
                         "ncc": ncc_ten.get(bg.nha_cung_cap_id)}
-    qh = db.query(HangHoa.id, HangHoa.gia_von, HangHoa.ten, HangHoa.don_vi)
+    qh = db.query(HangHoa.id, HangHoa.gia_von, HangHoa.ten, HangHoa.don_vi, HangHoa.gia_ban)
     if ids:
         qh = qh.filter(HangHoa.id.in_(ids))
-    for hid, gv, ten, dv in qh.all():
+    for hid, gv, ten, dv, gb in qh.all():
         o = out.get(hid)
         if o is None:
-            if not gv:
+            if not gv and _f(gb) <= 0:
                 continue
             o = out.setdefault(hid, {"lich_su": []})
         o["gia_von"] = _f(gv) if gv else None
+        o["gia_ban"] = _f(gb) if _f(gb) > 0 else None
         o["ten"], o["don_vi"] = ten, dv
     for hid, o in out.items():
         ls = o["lich_su"]
@@ -85,8 +87,12 @@ def bang_gia(db: Session, hang_hoa_ids=None) -> dict:
         elif o.get("gia_von"):
             o["gia_de_xuat"] = o["gia_von"]
             o["nguon"] = "giá vốn đã học khi nhận hàng"
+        elif o.get("gia_ban"):
+            o["gia_de_xuat"] = o["gia_ban"]
+            o["nguon"] = "giá bán danh mục kho (chưa có giá mua / báo giá)"
         else:
             o["gia_de_xuat"], o["nguon"] = None, None
+        o.setdefault("gia_ban", None)
         o.setdefault("bao_gia", None)
     return out
 
