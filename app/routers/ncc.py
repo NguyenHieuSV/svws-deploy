@@ -2319,11 +2319,31 @@ def duyet_don_mua(dm_id: int, db: Session = Depends(get_db),
 @router.get("/don-mua/{dm_id}", response_model=DonMuaChiTietRa)
 def chi_tiet_don_mua(dm_id: int, db: Session = Depends(get_db),
                      _=Depends(yeu_cau(MODULE, "XEM"))):
-    """Chi tiết PO kèm số lượng đã nhận từng dòng (để biết còn phải nhận bao nhiêu)."""
+    """Chi tiết PO kèm số lượng đã nhận từng dòng (để biết còn phải nhận bao nhiêu),
+    TÊN hàng hóa, NCC, mã bán hàng hiệu lực và tình trạng thanh toán — dùng cho màn Lệnh chi."""
     dm = db.get(DonMua, dm_id)
     if dm is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đơn mua")
-    return dm
+    ra = DonMuaChiTietRa.model_validate(dm)
+    ids = [c.hang_hoa_id for c in dm.chi_tiet]
+    hh = {i: (t, dv) for (i, t, dv) in db.query(HangHoa.id, HangHoa.ten, HangHoa.don_vi)
+          .filter(HangHoa.id.in_(ids)).all()} if ids else {}
+    for c in ra.chi_tiet:
+        t = hh.get(c.hang_hoa_id)
+        if t:
+            c.ten, c.don_vi = t[0], t[1]
+    ncc = db.get(NhaCungCap, dm.nha_cung_cap_id)
+    cn = db.query(CongNo).filter_by(don_mua_id=dm.id).first()
+    ra.ngay = dm.ngay
+    ra.ncc_ten = ncc.ten if ncc else None
+    ra.ma_ban = _ma_ban_hang_po(db, dm)
+    ra.so_hoa_don = dm.so_hoa_don
+    ra.de_nghi_tt = Decimal(dm.de_nghi_tt or 0)
+    ra.da_thanh_toan = Decimal(cn.da_thanh_toan or 0) if cn else Decimal(0)
+    ra.tt_du = bool(dm.tt_du)
+    ra.dinh_ky = bool(getattr(dm, "dinh_ky", False))
+    ra.vuot_du_toan = getattr(dm, "vuot_du_toan", None)
+    return ra
 
 
 def _bao_dam_ton(db: Session, hang_hoa_id: int):

@@ -734,6 +734,8 @@ class DonMuaCtRa(BaseModel):
     don_gia: Decimal
     thue_suat: Decimal = 0
     so_luong_nhan: Decimal
+    ten: str | None = None               # tên hàng hóa (điền ở endpoint chi tiết PO)
+    don_vi: str | None = None
 
 
 class DonMuaChiTietRa(BaseModel):
@@ -750,6 +752,16 @@ class DonMuaChiTietRa(BaseModel):
     ngay_hen_giao: date | None = None
     ngay_giao_thuc: date | None = None
     chi_tiet: list[DonMuaCtRa]
+    # bổ sung cho màn xem lệnh chi / PO
+    ngay: date | None = None
+    ncc_ten: str | None = None
+    ma_ban: str | None = None            # mã đơn bán / mã chuỗi hiệu lực của PO
+    so_hoa_don: str | None = None
+    de_nghi_tt: Decimal = Decimal(0)     # lũy kế đề nghị thanh toán
+    da_thanh_toan: Decimal = Decimal(0)  # đã trả thật (công nợ)
+    tt_du: bool = False
+    dinh_ky: bool = False
+    vuot_du_toan: str | None = None
 
 
 # ---------- Kế toán: Quỹ tiền + Phiếu thu/chi ----------
