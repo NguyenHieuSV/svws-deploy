@@ -1436,9 +1436,23 @@ def ds_duyet_chi_bank(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "
     """Tab Duyệt chi Ngân Hàng: lệnh chờ duyệt · đã duyệt chờ thực chi · lịch sử thực chi."""
     from ..models import LenhChiBank
     rows = db.query(LenhChiBank).order_by(LenhChiBank.id.desc()).limit(600).all()
+    lich_su = [_lcb_dict(db, r) for r in rows if r.trang_thai == "DA_CHI"]
+    # 💰 THỰC CHI của từng lệnh = tiền trên PHIẾU CHI sinh từ lệnh (đúng số của đợt khi PO trả nhiều lần);
+    # lệnh công nợ / lệnh cũ chưa lưu phiếu → lấy số tiền lệnh.
+    from ..models import PhieuThuChi as _PtcLs
+    ids = [x["id"] for x in lich_su]
+    theo_lenh = {}
+    if ids:
+        for (lid, st) in (db.query(_PtcLs.lenh_chi_id, func.sum(_PtcLs.so_tien))
+                          .filter(_PtcLs.lenh_chi_id.in_(ids), _PtcLs.loai == "CHI",
+                                  _PtcLs.trang_thai.notin_(["HUY", "TU_CHOI", "DA_DAO"]))
+                          .group_by(_PtcLs.lenh_chi_id).all()):
+            theo_lenh[lid] = float(st or 0)
+    for x in lich_su:
+        x["thuc_chi"] = theo_lenh.get(x["id"], x["so_tien"])
     return {"cho_duyet": [_lcb_dict(db, r) for r in rows if r.trang_thai == "CHO_DUYET"],
             "da_duyet": [_lcb_dict(db, r) for r in rows if r.trang_thai == "DA_DUYET"],
-            "lich_su": [_lcb_dict(db, r) for r in rows if r.trang_thai == "DA_CHI"]}
+            "lich_su": lich_su}
 
 
 @router.post("/duyet-chi-bank/gui-thu")
