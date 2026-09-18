@@ -789,6 +789,13 @@ def dashboard(db: Session = Depends(get_db), _=Depends(yeu_cau("dashboard", "XEM
     mh_cho_nhan = db.query(func.count(DonMua.id)) \
                     .filter(DonMua.trang_thai == "DA_DUYET", DonMua.trang_thai_nhan != "DU").scalar()
 
+    # --- 💵 Đã tạm ứng mua hàng: đã trả tiền NCC nhưng chưa nhận hàng & chưa có hóa đơn ---
+    from ..tam_ung_mua import tam_ung_mua_hang
+    try:
+        _tu = tam_ung_mua_hang(db)
+    except Exception:
+        _tu = {"tong": 0, "so_po": 0, "so_phieu": 0, "so_tre_giao": 0}
+
     # --- Kho: hàng dưới tồn tối thiểu ---
     kho_duoi_min = db.query(func.count(TonKho.id)) \
                      .filter(TonKho.ton_min > 0, TonKho.so_luong < TonKho.ton_min).scalar()
@@ -799,10 +806,21 @@ def dashboard(db: Session = Depends(get_db), _=Depends(yeu_cau("dashboard", "XEM
         "ban_hang": {"so_don": int(bh_so_don), "gia_tri_don": float(bh_gia_tri),
                      "so_don_chua_xuat": int(bh_chua_xuat), "so_bao_gia_cho": int(bh_bao_gia_cho)},
         "mua_hang": {"so_po": int(mh_so_po), "gia_tri_po": float(mh_gia_tri),
-                     "so_po_cho_duyet": int(mh_cho_duyet), "so_po_cho_nhan": int(mh_cho_nhan)},
+                     "so_po_cho_duyet": int(mh_cho_duyet), "so_po_cho_nhan": int(mh_cho_nhan),
+                     "tam_ung_mua": float(_tu["tong"]), "so_po_tam_ung": int(_tu["so_po"]),
+                     "so_phieu_tam_ung": int(_tu["so_phieu"]),
+                     "so_tam_ung_tre_giao": int(_tu["so_tre_giao"])},
         "kho": {"so_duoi_min": int(kho_duoi_min)},
         "canh_bao": {"congno_qua_han": int(congno_qh)},
     }
+
+
+@router.get("/tam-ung-mua-hang")
+def ds_tam_ung_mua_hang(db: Session = Depends(get_db), _=Depends(yeu_cau("dashboard", "XEM"))):
+    """💵 Danh mục ĐÃ TẠM ỨNG MUA HÀNG: PO đã trả tiền nhưng chưa nhận hàng & chưa có hóa đơn
+    + phiếu chi tạm ứng NCC chưa cấn trừ (bấm thẻ trên Overall Financial)."""
+    from ..tam_ung_mua import tam_ung_mua_hang
+    return tam_ung_mua_hang(db)
 
 
 @router.get("/daily-remind")
