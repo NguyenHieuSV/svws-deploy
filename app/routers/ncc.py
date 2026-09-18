@@ -1476,6 +1476,72 @@ def _lcb_dict(db, r):
             "so_tien_chi": dot_chi}
 
 
+def _thuc_chi_ngoai_lenh(db, lich_su):
+    """Khoản ĐÃ TRẢ NCC nhưng KHÔNG đi qua lệnh chi ngân hàng (ghi trực tiếp ở Thanh toán mua hàng / 💳 công nợ
+    trước khi có luồng Duyệt chi · PO cũ chưa có dòng công nợ). Mỗi PO / khoản công nợ một dòng:
+    phần ngoài lệnh = «đã thanh toán» trên sổ công nợ − tổng thực chi của các lệnh ĐÃ CHI."""
+    from ..models import ThanhToan as _TTn, HoaDon as _HDn, DonHang as _DHn
+    lenh_po, lenh_cn = {}, {}
+    for x in lich_su:
+        v = float(x.get("thuc_chi", x.get("so_tien") or 0) or 0)
+        if x.get("don_mua_id"):
+            lenh_po[x["don_mua_id"]] = lenh_po.get(x["don_mua_id"], 0.0) + v
+        elif x.get("cong_no_id"):
+            lenh_cn[x["cong_no_id"]] = lenh_cn.get(x["cong_no_id"], 0.0) + v
+    cns = db.query(CongNo).filter(CongNo.loai == "PHAI_TRA").all()
+    cn_po = {}
+    for c in cns:
+        if c.don_mua_id:
+            cn_po.setdefault(c.don_mua_id, []).append(c)
+    ngay_tt = {}
+    for (cid, ng) in db.query(_TTn.cong_no_id, func.max(_TTn.ngay)).group_by(_TTn.cong_no_id).all():
+        ngay_tt[cid] = ng
+    ncc_ten = {i: t for (i, t) in db.query(NhaCungCap.id, NhaCungCap.ten).all()}
+    out = []
+    for dm in db.query(DonMua).filter(DonMua.trang_thai != "TU_CHOI").all():
+        cl = cn_po.get(dm.id) or []
+        if cl:
+            da = sum(float(c.da_thanh_toan or 0) for c in cl)
+        else:       # PO cũ chưa có công nợ: lũy kế đã duyệt chi, không có thì số đã ghi trả
+            da = float((dm.da_duyet_tt if dm.da_duyet_tt is not None else dm.de_nghi_tt) or 0)
+        ngoai = da - lenh_po.get(dm.id, 0.0)
+        if ngoai <= 1:
+            continue
+        tong = float(dm.tong_tien or 0)
+        ds_ngay = [ngay_tt[c.id] for c in cl if ngay_tt.get(c.id)] + [d for d in (dm.ngay_tt_du, dm.ngay_tt) if d]
+        ngay = max(ds_ngay) if ds_ngay else dm.ngay
+        pct = round(da / tong * 100) if tong > 0 else None
+        out.append({"id": None, "ngoai_lenh": True, "don_mua_id": dm.id, "cong_no_id": None, "nguon": "PO",
+                    "so": dm.so or f"PO-{dm.id}", "so_hoa_don": dm.so_hoa_don, "ma_don_ban": _ma_ban_hang_po(db, dm),
+                    "ncc_ten": ncc_ten.get(dm.nha_cung_cap_id), "tong_tien": tong, "so_tien": ngoai, "thuc_chi": ngoai,
+                    "chi_luc": str(ngay) if ngay else None, "nguoi_duyet": None, "trang_thai": "NGOAI_LENH",
+                    "loai_lenh": "NGOAI_LENH",
+                    "loai_nhan": "✍ Ghi trực tiếp — không qua lệnh chi"
+                                 + (f" · PO đã trả {pct}%" if (pct is not None and pct < 100) else "")})
+    hd_dh = {}
+    for c in cns:
+        if c.don_mua_id:
+            continue
+        ngoai = float(c.da_thanh_toan or 0) - lenh_cn.get(c.id, 0.0)
+        if ngoai <= 1:
+            continue
+        ma = (c.ma_ban_ngoai or "").strip() or None
+        if not ma and c.hoa_don_id:
+            if c.hoa_don_id not in hd_dh:
+                hd = db.get(_HDn, c.hoa_don_id)
+                dh = db.get(_DHn, hd.don_hang_id) if (hd is not None and hd.don_hang_id) else None
+                hd_dh[c.hoa_don_id] = (dh.so if dh else None)
+            ma = hd_dh[c.hoa_don_id]
+        ngay = ngay_tt.get(c.id) or c.ngay_ct
+        out.append({"id": None, "ngoai_lenh": True, "don_mua_id": None, "cong_no_id": c.id, "nguon": "CONG_NO",
+                    "so": f"CN-{c.id}", "so_hoa_don": c.so_ct, "ma_don_ban": ma,
+                    "ncc_ten": ncc_ten.get(c.nha_cung_cap_id), "tong_tien": float(c.so_tien or 0),
+                    "so_tien": ngoai, "thuc_chi": ngoai, "chi_luc": str(ngay) if ngay else None,
+                    "nguoi_duyet": None, "trang_thai": "NGOAI_LENH", "loai_lenh": "NGOAI_LENH",
+                    "loai_nhan": "✍ Ghi trực tiếp — không qua lệnh chi"})
+    return out
+
+
 @router.get("/duyet-chi-bank")
 def ds_duyet_chi_bank(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
     """Tab Duyệt chi Ngân Hàng: lệnh chờ duyệt · đã duyệt chờ thực chi · lịch sử thực chi."""
@@ -1495,9 +1561,13 @@ def ds_duyet_chi_bank(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "
             theo_lenh[lid] = float(st or 0)
     for x in lich_su:
         x["thuc_chi"] = theo_lenh.get(x["id"], x["so_tien"])
+    try:
+        ngoai_lenh = _thuc_chi_ngoai_lenh(db, lich_su)
+    except Exception:
+        ngoai_lenh = []
     return {"cho_duyet": [_lcb_dict(db, r) for r in rows if r.trang_thai == "CHO_DUYET"],
             "da_duyet": [_lcb_dict(db, r) for r in rows if r.trang_thai == "DA_DUYET"],
-            "lich_su": lich_su}
+            "lich_su": lich_su, "ngoai_lenh": ngoai_lenh}
 
 
 @router.post("/duyet-chi-bank/gui-thu")
