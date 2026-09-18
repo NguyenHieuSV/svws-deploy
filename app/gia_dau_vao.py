@@ -284,27 +284,38 @@ def goi_y_mua_cu(db: Session, dong, n: int = 3) -> dict:
     dong = [(k, t, h) for (k, t, h) in dong if str(t or "").strip()]
     if not dong:
         return {}
-    kho = [(hid, ten, dv, _tokens(ten)) for (hid, ten, dv)
-           in db.query(HangHoa.id, HangHoa.ten, HangHoa.don_vi).all() if ten and ten.strip()]
+    def _ds_tu(x):                             # từ khóa THEO THỨ TỰ (bỏ từ đệm) — từ đầu = danh từ chính: bơm · bồn · vỏ · tủ…
+        return [t for t in _re.split(r"[\s/\-]+", _chuan(x)) if t and t not in _TU_BO]
 
-    def _khop(a: str, tb: set) -> bool:        # từ khóa a của dòng dự toán có trong tên mặt hàng?
+    kho = []
+    for (hid, ten, dv) in db.query(HangHoa.id, HangHoa.ten, HangHoa.don_vi).all():
+        if ten and ten.strip():
+            lt = _ds_tu(ten)
+            if lt:
+                kho.append((hid, ten, dv, set(lt), lt[0]))
+
+    def _khop(a: str, tb: set) -> bool:        # trùng TRỌN từ; từ dài ≥ 4 ký tự cho phép trùng phần đầu (cartridge ~ cartridges)
         if a in tb:
             return True
-        return len(a) >= 3 and any((b.startswith(a) or a.startswith(b)) for b in tb if len(b) >= 3)
+        return len(a) >= 4 and any((b.startswith(a) or a.startswith(b)) for b in tb if len(b) >= 4)
 
     so_bo = {}
     for khoa, ten, hid in dong:
-        ta = _tokens(ten)
-        if not ta:
+        la = _ds_tu(ten)
+        if not la:
             continue
+        dau = la[0]
         cs = []
-        for kid, kten, kdv, tb in kho:
-            if kid == hid or not tb:
+        for kid, kten, kdv, tb, kdau in kho:
+            if kid == hid:
                 continue
-            trung = sum(1 for a in ta if _khop(a, tb))
-            if not trung:
+            phu = sum(1 for a in la if _khop(a, tb)) / len(la)
+            if not phu:
                 continue
-            diem = max(diem_giong(ten, kten), 0.9 * trung / len(ta))
+            # phải chứa DANH TỪ CHÍNH của dòng dự toán ("Bồn…" không nhận "Bông lọc", "Vỏ lọc…" không nhận "Sỏi lọc")
+            if dau not in tb and phu < 0.75:
+                continue
+            diem = 0.6 * phu + (0.25 if kdau == dau else 0.0) + 0.15 * _SM(None, _chuan(ten), _chuan(kten)).ratio()
             if diem >= 0.4:
                 cs.append((diem, kid, kten, kdv))
         so_bo[khoa] = cs
