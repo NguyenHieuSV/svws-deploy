@@ -764,7 +764,7 @@ def _dt_ra(x):
 
 @router.get("/{da_id}/du-toan")
 def ds_du_toan(da_id: int, db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
-    from ..gia_dau_vao import bang_gia, gia_thuc_theo_ma, hang_hoa_theo_ten
+    from ..gia_dau_vao import bang_gia, gia_thuc_theo_ma, hang_hoa_theo_ten, goi_y_mua_cu
     da = _da_404(db, da_id)
     rs = db.query(DuAnDuToan).filter_by(du_an_id=da_id).order_by(
         DuAnDuToan.thu_tu, DuAnDuToan.id).all()
@@ -776,6 +776,14 @@ def ds_du_toan(da_id: int, db: Session = Depends(get_db), _=Depends(yeu_cau(MODU
     gia = bang_gia(db, ids) if ids else {}
     ma_da = (getattr(da, "ma", None) or "") if da else ""
     thuc = gia_thuc_theo_ma(db, ma_da, ids) if (ids and ma_da) else {}
+    # 💡 dòng Thiết bị / Vật tư CHƯA có giá gợi ý → dò giá từ MUA HÀNG CŨ theo tên gần giống
+    thieu = [(x.id, x.ten, hh_cua.get(x.id)) for x in rs
+             if x.loai in ("THIET_BI", "VAT_TU")
+             and not (gia.get(hh_cua.get(x.id)) or {}).get("gia_de_xuat")]
+    try:
+        mua_cu = goi_y_mua_cu(db, thieu) if thieu else {}
+    except Exception:
+        mua_cu = {}
     for r in ds:
         h = hh_cua.get(r["id"])
         g = gia.get(h) if h else None
@@ -787,6 +795,8 @@ def ds_du_toan(da_id: int, db: Session = Depends(get_db), _=Depends(yeu_cau(MODU
         r["po_thuc"] = t["so_po"] if t else None
         r["po_thuc_tt"] = t["trang_thai"] if t else None
         r["chenh_thuc"] = (t["don_gia"] - r["don_gia"]) if t else None
+        r["ung_vien_gia"] = (mua_cu.get(r["id"]) or {}).get("rows") or []
+        r["ung_vien_tong"] = (mua_cu.get(r["id"]) or {}).get("tong") or 0
     tong_loai = {l: sum(d["thanh_tien"] for d in ds if d["loai"] == l) for l in _DT_LOAI}
     return {"danh_sach": ds, "tong_theo_loai": tong_loai,
             "tong_cong": sum(d["thanh_tien"] for d in ds),
