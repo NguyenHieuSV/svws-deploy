@@ -145,6 +145,14 @@ def _hh_co_dinh_muc(db, ma_eff) -> set:
             .filter(DinhMucTieuHao.tai_san_id == ts.id).all() if dmuc and Decimal(str(dmuc)) > 0}
 
 
+@router.get("/du-toan-bat-buoc")
+def tra_du_toan_bat_buoc(ma: str = "", db: Session = Depends(get_db),
+                         _=Depends(yeu_cau_bat_ky((MODULE, "XEM"), ("ban_hang", "XEM")))):
+    """Tra cứu (chỉ đọc): mã có bắt buộc dự toán không — miễn vì sao, lũy kế đã mua, ngưỡng miễn."""
+    from ..du_toan_ks import trang_thai_ma
+    return trang_thai_ma(db, ma)
+
+
 def _chi_ceo_duyet_vuot(nd, ly_do, nhan):
     if ly_do and not getattr(getattr(nd, "vai_tro", None), "ma", None) in ("CEO", "ADMIN"):
         loai = "thuộc MÃ CHƯA CÓ DỰ TOÁN" if str(ly_do).startswith("⛔ MÃ CHƯA") else "VƯỢT/NGOÀI DỰ TOÁN"

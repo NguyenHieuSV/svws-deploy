@@ -8,8 +8,11 @@ Mã có dự toán (Dự toán hàng bán và/hoặc BOQ dự án cùng mã) th�
 Mã CHƯA có dự toán nào (CEO chốt 18/09/2026 — "mức 2"): mã loại TM · DA · DV bắt buộc có dự toán.
 Chưa có → chặn lúc lập, xác nhận có chủ đích → cờ vuot_du_toan ("⛔ MÃ CHƯA CÓ DỰ TOÁN…") → chỉ CEO/ADMIN duyệt.
 MIỄN: mã OP (định mức tháng) · KHO / không mã (mua dự trữ) · mặt hàng đã khai định mức tiêu hao tháng (cho thuê)
-· LŨY KẾ mua dưới mã (đã cam kết + lần này) < NGUONG_MIEN.
+· LŨY KẾ mua dưới mã (đã cam kết + lần này) < NGUONG_MIEN
+· MÃ ĐẶT RA TỪ NGAY_AP_DUNG TRỞ VỀ TRƯỚC (CEO 18/09/2026: trước mắt chỉ áp dụng cho mã hàng bán đặt ra SAU hôm nay —
+  mã cũ đang chạy không phải lập dự toán bù).
 """
+from datetime import date, timedelta, timezone
 from decimal import Decimal
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
@@ -20,6 +23,7 @@ from .models import (HangHoa, DonHang, DonMua, DonMuaCt, YeuCauMua, YeuCauMuaCt,
 DUNG_SAI = 0.10          # 10% — cùng mức với định mức tiêu hao tháng (CEO chốt)
 NGUONG_MIEN = 5_000_000  # lũy kế mua dưới mã < 5 triệu (chưa VAT) → chưa cần dự toán (CEO chốt 18/09/2026)
 LOAI_BAT_BUOC = ("TM", "DA", "DV")
+NGAY_AP_DUNG = date(2026, 9, 18)   # chỉ mã ĐẶT RA SAU ngày này mới bắt buộc dự toán (CEO chốt 18/09/2026)
 
 
 def _f(v) -> float:
@@ -84,6 +88,73 @@ def co_du_toan(db: Session, ma: str) -> bool:
     return False
 
 
+def ma_dat_truoc(db: Session, ma: str) -> bool:
+    """Mã (hoặc NHÓM gốc + tháng của nó) đã được đặt ra từ NGAY_AP_DUNG trở về trước? → miễn bắt buộc dự toán.
+    Dấu vết: tháng trong mã < tháng áp dụng · đơn bán · PO / đề xuất / công nợ ngoài mang mã · dự án · tài sản cho thuê."""
+    from .ma_code import phan_tich, nhom
+    from .models import AuditLog, CongNo, TaiSanChoThue
+    ma = str(ma or "").strip()
+    if not ma:
+        return True
+    p = phan_tich(ma)
+    th, nam = p.get("thang"), p.get("nam")
+    try:
+        if th and (2000 + int(th[2:]), int(th[:2])) < (NGAY_AP_DUNG.year, NGAY_AP_DUNG.month):
+            return True                                   # TM-X-0826…: mã của tháng trước
+        if nam and int(nam) < NGAY_AP_DUNG.year:
+            return True                                   # mã mẹ cho thuê DV-X-2024
+    except (TypeError, ValueError):
+        pass
+    ml, g = ma.lower(), nhom(ma)
+
+    def trung(m):
+        m = str(m or "").strip()
+        return bool(m) and (m.lower() == ml or (g is not None and nhom(m) == g))
+
+    nguon = (
+        db.query(DonHang.so).filter(DonHang.so.isnot(None), DonHang.ngay <= NGAY_AP_DUNG),
+        db.query(DonMua.ma_ban).filter(DonMua.ma_ban.isnot(None), DonMua.ngay <= NGAY_AP_DUNG),
+        db.query(YeuCauMua.ma_ban).filter(YeuCauMua.ma_ban.isnot(None), YeuCauMua.ngay <= NGAY_AP_DUNG),
+        db.query(YeuCauMua.cho_thue_ma).filter(YeuCauMua.cho_thue_ma.isnot(None), YeuCauMua.ngay <= NGAY_AP_DUNG),
+        db.query(CongNo.ma_ban_ngoai).filter(CongNo.ma_ban_ngoai.isnot(None), CongNo.ngay_ct <= NGAY_AP_DUNG),
+    )
+    for q in nguon:
+        for (m,) in q.distinct().all():
+            if trung(m):
+                return True
+    gio_vn = timezone(timedelta(hours=7))
+    for (m, c) in db.query(TaiSanChoThue.ma, TaiSanChoThue.created_at).all():
+        if trung(m) and (c is None or c.astimezone(gio_vn).date() <= NGAY_AP_DUNG):
+            return True
+    for (i, m) in db.query(DuAn.id, DuAn.ma).filter(DuAn.ma.isnot(None)).all():
+        if not trung(m):
+            continue
+        t = (db.query(func.min(AuditLog.thoi_gian))
+             .filter(AuditLog.bang == "du_an", AuditLog.hanh_dong == "TAO", AuditLog.ban_ghi_id == i).scalar())
+        if t is None or t.astimezone(gio_vn).date() <= NGAY_AP_DUNG:   # không có vết tạo = dữ liệu nạp từ trước
+            return True
+    return False
+
+
+def trang_thai_ma(db: Session, ma: str) -> dict:
+    """Tra cứu (chỉ đọc): mã này có BẮT BUỘC dự toán không, vì sao miễn, đã mua lũy kế bao nhiêu."""
+    from .ma_code import phan_tich
+    ma = str(ma or "").strip()
+    loai = (phan_tich(ma).get("loai") or "").upper() if ma else ""
+    mien = None
+    if not ma:
+        mien = "không mã — mua dự trữ KHO"
+    elif loai not in LOAI_BAT_BUOC:
+        mien = f"mã loại {loai or 'khác'} — không thuộc TM · DA · DV"
+    elif co_du_toan(db, ma):
+        mien = "mã đã có dự toán — kiểm soát theo dự toán (vượt / ngoài dự toán)"
+    elif ma_dat_truoc(db, ma):
+        mien = f"mã đặt ra từ {NGAY_AP_DUNG:%d/%m/%Y} trở về trước — chưa áp dụng"
+    da = sum(v["tien"] for v in da_dung_theo_ma(db, ma).values()) if ma else 0.0
+    return {"ma": ma, "loai": loai or None, "bat_buoc": mien is None, "ly_do_mien": mien,
+            "da_mua_luy_ke": da, "nguong_mien": NGUONG_MIEN, "ngay_ap_dung": str(NGAY_AP_DUNG)}
+
+
 def thieu_du_toan(db: Session, ma: str, lines, mien_hh=None, bo_qua_ycm=None, bo_qua_dm=None):
     """Mã TM · DA · DV CHƯA có dự toán → mô tả vi phạm (str); được miễn → None.
     lines = [(hang_hoa_id, so_luong, don_gia)]; mien_hh = các mặt hàng đã khai định mức tháng (miễn)."""
@@ -96,6 +167,8 @@ def thieu_du_toan(db: Session, ma: str, lines, mien_hh=None, bo_qua_ycm=None, bo
         return None
     if co_du_toan(db, ma):
         return None
+    if ma_dat_truoc(db, ma):
+        return None                                   # mã cũ (đặt ra ≤ NGAY_AP_DUNG) — chưa áp dụng
     mien = set(mien_hh or [])
     them = sum(_f(sl) * _f(dg) for (hid, sl, dg) in lines if hid and hid not in mien)
     if not any(hid and hid not in mien for (hid, _sl, _dg) in lines):
