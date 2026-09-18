@@ -276,6 +276,59 @@ def tim_theo_ten(db: Session, q: str, gioi_han: int = 40) -> list:
     return out
 
 
+def goi_y_mua_cu(db: Session, dong, n: int = 3) -> dict:
+    """💡 GIÁ TỪ MUA HÀNG CŨ cho dòng dự toán gõ TÊN CHUNG ("Bơm EDI", "Tủ điều khiển"…) — tên không
+    trùng mặt hàng nào nên không tự nhận giá. Dò các mặt hàng kho CÓ GIÁ có tên gần giống (trùng từ khóa,
+    không dấu) → ưu tiên hàng ĐÃ MUA THẬT, mới mua lên trước.
+    dong = [(khoa, ten, hang_hoa_id_dang_lien_ket|None)] → {khoa: {"tong": số ứng viên, "rows": [≤ n]}}."""
+    dong = [(k, t, h) for (k, t, h) in dong if str(t or "").strip()]
+    if not dong:
+        return {}
+    kho = [(hid, ten, dv, _tokens(ten)) for (hid, ten, dv)
+           in db.query(HangHoa.id, HangHoa.ten, HangHoa.don_vi).all() if ten and ten.strip()]
+
+    def _khop(a: str, tb: set) -> bool:        # từ khóa a của dòng dự toán có trong tên mặt hàng?
+        if a in tb:
+            return True
+        return len(a) >= 3 and any((b.startswith(a) or a.startswith(b)) for b in tb if len(b) >= 3)
+
+    so_bo = {}
+    for khoa, ten, hid in dong:
+        ta = _tokens(ten)
+        if not ta:
+            continue
+        cs = []
+        for kid, kten, kdv, tb in kho:
+            if kid == hid or not tb:
+                continue
+            trung = sum(1 for a in ta if _khop(a, tb))
+            if not trung:
+                continue
+            diem = max(diem_giong(ten, kten), 0.9 * trung / len(ta))
+            if diem >= 0.4:
+                cs.append((diem, kid, kten, kdv))
+        so_bo[khoa] = cs
+    ids = {c[1] for cs in so_bo.values() for c in cs}
+    bg = bang_gia(db, ids) if ids else {}
+    out = {}
+    for khoa, cs in so_bo.items():
+        rows = []
+        for diem, kid, kten, kdv in cs:
+            g = bg.get(kid) or {}
+            if g.get("gia_de_xuat") is None:
+                continue
+            rows.append({"hang_hoa_id": kid, "ten": kten, "don_vi": kdv, "diem": round(diem, 2),
+                         "gia": g["gia_de_xuat"], "nguon": g.get("nguon"),
+                         "da_mua": (g.get("so_lan_mua") or 0) > 0, "so_lan_mua": g.get("so_lan_mua") or 0,
+                         "ngay": g.get("ngay_gan_nhat"), "so_po": g.get("so_po_gan_nhat"),
+                         "ncc": g.get("ncc_gan_nhat")})
+        # hàng ĐÃ MUA THẬT trước, rồi độ giống tên, rồi lần mua mới nhất
+        rows.sort(key=lambda r: str(r["ngay"] or ""), reverse=True)          # sắp ổn định 2 bước
+        rows.sort(key=lambda r: (0 if r["da_mua"] else 1, -r["diem"]))
+        out[khoa] = {"tong": len(rows), "rows": rows[:n]}
+    return out
+
+
 def _tron_tu_bat_ky(tks, c):
     words = set(c.replace("/", " ").replace("-", " ").split(" "))
     return any(t in words for t in tks)

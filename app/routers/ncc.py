@@ -4160,13 +4160,20 @@ def dtb_chi_tiet(dt_id: int, db: Session = Depends(get_db), _=Depends(yeu_cau_ba
     d = db.get(DuToanBan, dt_id)
     if d is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy dự toán")
-    from ..gia_dau_vao import bang_gia, gia_thuc_theo_ma, hang_hoa_theo_ten
+    from ..gia_dau_vao import bang_gia, gia_thuc_theo_ma, hang_hoa_theo_ten, goi_y_mua_cu
     mucs = db.query(DuToanBanMuc).filter_by(du_toan_id=dt_id).order_by(DuToanBanMuc.id).all()
     ten_map = hang_hoa_theo_ten(db, [m.ten for m in mucs if not m.hang_hoa_id])
     hh_cua = {m.id: (m.hang_hoa_id or ten_map.get(str(m.ten or "").strip().lower())) for m in mucs}
     ids = {h for h in hh_cua.values() if h}
     gia = bang_gia(db, ids) if ids else {}
     thuc = gia_thuc_theo_ma(db, d.ma, ids) if ids else {}
+    # 💡 dòng CHƯA có giá gợi ý (tên chung / mặt hàng liên kết chưa có giá) → dò giá từ MUA HÀNG CŨ theo tên gần giống
+    thieu = [(m.id, m.ten, hh_cua.get(m.id)) for m in mucs
+             if not (gia.get(hh_cua.get(m.id)) or {}).get("gia_de_xuat")]
+    try:
+        mua_cu = goi_y_mua_cu(db, thieu) if thieu else {}
+    except Exception:
+        mua_cu = {}
     items = []
     for r in mucs:
         y = _dtb_dx_hieu_luc(db, r)
@@ -4186,7 +4193,9 @@ def dtb_chi_tiet(dt_id: int, db: Session = Depends(get_db), _=Depends(yeu_cau_ba
                       "po_thuc": t["so_po"] if t else None,
                       "po_thuc_tt": t["trang_thai"] if t else None,
                       "sl_thuc": t["so_luong"] if t else None,
-                      "chenh_thuc": (t["don_gia"] - dg) if t else None})
+                      "chenh_thuc": (t["don_gia"] - dg) if t else None,
+                      "ung_vien_gia": (mua_cu.get(r.id) or {}).get("rows") or [],
+                      "ung_vien_tong": (mua_cu.get(r.id) or {}).get("tong") or 0})
     return {"id": d.id, "ma": d.ma, "khach_hang": d.khach_hang, "mo_ta": d.mo_ta,
             "ngay": str(d.ngay) if d.ngay else None, "nguoi_tao": d.nguoi_tao,
             "items": items, "tong": sum(x["thanh_tien"] for x in items),

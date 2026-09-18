@@ -39,6 +39,17 @@ def tim_gia_theo_ten(q: str = "", db: Session = Depends(get_db),
     return {"q": q, "rows": tim_theo_ten(db, q)}
 
 
+@router.get("/goi-y-gia")
+def goi_y_gia_mua_cu(ten: str = "", db: Session = Depends(get_db),
+                     _=Depends(yeu_cau_bat_ky(("kho", "XEM"), ("ncc", "XEM"), ("ban_hang", "XEM"), ("du_an", "XEM")))):
+    """💡 Giá từ MUA HÀNG CŨ theo tên GẦN GIỐNG (không cần trùng tên): ưu tiên hàng đã mua thật."""
+    from ..gia_dau_vao import goi_y_mua_cu
+    if len((ten or "").strip()) < 2:
+        return {"ten": ten, "tong": 0, "rows": []}
+    r = goi_y_mua_cu(db, [(0, ten, None)], n=6).get(0) or {"tong": 0, "rows": []}
+    return {"ten": ten, "tong": r["tong"], "rows": r["rows"]}
+
+
 @router.get("/gia-dau-vao")
 def ds_gia_dau_vao(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
     """💲 BẢNG GIÁ ĐẦU VÀO tự học từ mua thật (PO đã duyệt) + báo giá còn hiệu lực + giá vốn.
