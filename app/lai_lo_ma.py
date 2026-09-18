@@ -191,3 +191,64 @@ def gom_theo_nhom(rows):
                     "ma": [x.get("ma_ban") for x in rs]})
     out.sort(key=lambda o: -o["doanh_thu"])
     return out
+
+
+# ================= DÒNG TIỀN THỰC TẾ THEO MÃ (Kế toán → Thu–chi theo mã hàng bán) =================
+def dong_tien_theo_ma(db: Session) -> dict:
+    """{mã (chữ thường): {"ma", "thu", "chi"}} — TIỀN THỰC đã thu của khách / đã trả NCC theo từng mã,
+    lấy từ SỔ CÔNG NỢ (nơi ✔ Đã chi · 💳 · ghi thu đều trừ vào) — cùng nguyên tắc với chi_phi_ma:
+      chi = Σ «đã thanh toán» của công nợ PHẢI TRẢ (theo PO của mã · nhập ngoài khớp mã · hóa đơn mua gắn mã)
+            + PO cũ chưa có dòng công nợ: lũy kế đã duyệt chi (da_duyet_tt), không có thì de_nghi_tt
+      thu = Σ «đã thanh toán» của công nợ PHẢI THU của đơn + trả trước chưa cấn
+            (đơn chưa có công nợ: max(cọc, tạm ứng); đã có công nợ: chỉ cộng tạm ứng còn dư)."""
+    so_dh = {i: (s or "").strip() for (i, s) in db.query(DonHang.id, DonHang.so).all()}
+    out = {}
+
+    def cong(ma, thu=0.0, chi=0.0):
+        ma = str(ma or "").strip()
+        k = ma.lower() or "(không gắn)"
+        o = out.setdefault(k, {"ma": ma or "(không gắn)", "thu": 0.0, "chi": 0.0})
+        o["thu"] += thu
+        o["chi"] += chi
+
+    po = {i: (dh, mb, dd, dn) for (i, dh, mb, dd, dn) in
+          db.query(DonMua.id, DonMua.don_hang_id, DonMua.ma_ban, DonMua.da_duyet_tt, DonMua.de_nghi_tt)
+          .filter(DonMua.trang_thai != "TU_CHOI").all()}
+
+    def ma_po(pid):
+        p = po.get(pid)
+        if not p:
+            return None
+        return so_dh.get(p[0]) or (p[1] or "").strip() or None
+
+    hd_dh = {i: d for (i, d) in db.query(HoaDon.id, HoaDon.don_hang_id).filter(HoaDon.don_hang_id.isnot(None)).all()}
+    po_co_cn, dh_co_cn_thu = set(), set()
+    for c in db.query(CongNo).all():
+        da = _f(c.da_thanh_toan)
+        if c.loai == "PHAI_TRA":
+            if c.don_mua_id:
+                po_co_cn.add(c.don_mua_id)
+                ma = ma_po(c.don_mua_id)
+            elif c.hoa_don_id and hd_dh.get(c.hoa_don_id):
+                ma = so_dh.get(hd_dh[c.hoa_don_id])
+            else:
+                ma = (c.ma_ban_ngoai or "").strip() or None
+            if da:
+                cong(ma, chi=da)
+        elif c.loai == "PHAI_THU":
+            dh_id = c.don_hang_id or (hd_dh.get(c.hoa_don_id) if c.hoa_don_id else None)
+            if dh_id:
+                dh_co_cn_thu.add(dh_id)
+            if da:
+                cong(so_dh.get(dh_id) if dh_id else None, thu=da)
+    for pid, (dh, mb, dd, dn) in po.items():          # PO cũ: đã ghi trả nhưng chưa có dòng công nợ
+        if pid in po_co_cn:
+            continue
+        da = _f(dd if dd is not None else dn)
+        if da > 0:
+            cong(ma_po(pid), chi=da)
+    for i, o in tra_truoc_theo_don(db).items():       # trả trước của khách chưa cấn vào công nợ
+        v = o["tam_ung"] if i in dh_co_cn_thu else o["tra_truoc"]
+        if v:
+            cong(so_dh.get(i), thu=v)
+    return out

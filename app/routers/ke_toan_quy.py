@@ -60,6 +60,42 @@ def _ma_ban(db, don_hang_id):
     return (dh.so or f"DH-{dh.id}") if dh else None
 
 
+def _ma_cua_phieu(db, p: PhieuThuChi):
+    """Mã hàng bán của phiếu: đơn bán gắn trên phiếu → công nợ (PO / hóa đơn / nhập ngoài) → lệnh chi ngân hàng."""
+    m = _ma_ban(db, p.don_hang_id)
+    if m:
+        return m
+    from ..models import CongNo as _CNm, DonMua as _DMm, HoaDon as _HDm, LenhChiBank as _LCm
+
+    def _ma_po(dm_id):
+        dm = db.get(_DMm, dm_id) if dm_id else None
+        if dm is None:
+            return None
+        return _ma_ban(db, dm.don_hang_id) or ((dm.ma_ban or "").strip() or None)
+
+    def _ma_cn(cn_id):
+        cn = db.get(_CNm, cn_id) if cn_id else None
+        if cn is None:
+            return None
+        if cn.don_hang_id:
+            return _ma_ban(db, cn.don_hang_id)
+        if cn.don_mua_id:
+            return _ma_po(cn.don_mua_id)
+        if cn.hoa_don_id:
+            hd = db.get(_HDm, cn.hoa_don_id)
+            if hd is not None and hd.don_hang_id:
+                return _ma_ban(db, hd.don_hang_id)
+        return (cn.ma_ban_ngoai or "").strip() or None
+
+    m = _ma_cn(p.cong_no_id)
+    if m:
+        return m
+    lcb = db.get(_LCm, p.lenh_chi_id) if getattr(p, "lenh_chi_id", None) else None
+    if lcb is not None:
+        return _ma_po(lcb.don_mua_id) or _ma_cn(getattr(lcb, "cong_no_id", None))
+    return None
+
+
 def _phieu_dict(db, p: PhieuThuChi):
     q = db.get(TaiKhoanQuy, p.quy_id)
     return {"id": p.id, "so": p.so, "loai": p.loai, "ngay": str(p.ngay) if p.ngay else None,
@@ -642,7 +678,7 @@ def thong_ke_thu_chi(tu_ngay: str | None = None, den_ngay: str | None = None,
                      db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
     """Thống kê dòng tiền thu/chi (phiếu ĐÃ DUYỆT): theo kỳ (tháng), theo loại tài khoản
     đối ứng, theo quỹ, và theo mã hàng bán (kiểm soát tiền dự án)."""
-    q = db.query(PhieuThuChi).filter(PhieuThuChi.trang_thai == "DA_DUYET")
+    q = db.query(PhieuThuChi).filter(PhieuThuChi.trang_thai.in_(["DA_DUYET", "CHO_DUYET"]))
     if tu_ngay:
         q = q.filter(PhieuThuChi.ngay >= tu_ngay)
     if den_ngay:
@@ -651,25 +687,35 @@ def thong_ke_thu_chi(tu_ngay: str | None = None, den_ngay: str | None = None,
         q = q.filter(PhieuThuChi.quy_id == quy_id)
     if don_hang_id:
         q = q.filter(PhieuThuChi.don_hang_id == don_hang_id)
-    rows = q.all()
+    tat_ca = q.order_by(PhieuThuChi.ngay, PhieuThuChi.id).all()
+    rows = [p for p in tat_ca if p.trang_thai == "DA_DUYET"]      # số phiếu / tổng / tháng / TK / quỹ: chỉ ĐÃ GHI SỔ
 
     tong_thu = tong_chi = 0.0
+    cho = {"so_phieu": 0, "thu": 0.0, "chi": 0.0}
     thang, loai, quy, maban = {}, {}, {}, {}
     quy_ten = {x.id: x.ten for x in db.query(TaiKhoanQuy).all()}
-    for p in rows:
+    for p in tat_ca:
         amt = _f(p.so_tien)
+        da_duyet = p.trang_thai == "DA_DUYET"
         bt = db.get(ButToan, p.but_toan_id) if p.but_toan_id else None
         off = (bt.tk_co if p.loai == "THU" else bt.tk_no) if bt else \
             (p.tk_doi_ung or ("131" if p.loai == "THU" else "642"))
         ky = p.ngay.strftime("%Y-%m") if p.ngay else "—"
-        mb = _ma_ban(db, p.don_hang_id) or "(không gắn)"
-        for d, k in ((thang, ky), (loai, off), (quy, p.quy_id), (maban, mb)):
-            g = d.setdefault(k, {"thu": 0.0, "chi": 0.0})
-            g["thu" if p.loai == "THU" else "chi"] += amt
-        if p.loai == "THU":
-            tong_thu += amt
-        else:
-            tong_chi += amt
+        mb = _ma_cua_phieu(db, p) or "(không gắn)"
+        gm = maban.setdefault(mb, {"thu": 0.0, "chi": 0.0, "cho_thu": 0.0, "cho_chi": 0.0})
+        if da_duyet:
+            for d, k in ((thang, ky), (loai, off), (quy, p.quy_id)):
+                g = d.setdefault(k, {"thu": 0.0, "chi": 0.0})
+                g["thu" if p.loai == "THU" else "chi"] += amt
+            gm["thu" if p.loai == "THU" else "chi"] += amt
+            if p.loai == "THU":
+                tong_thu += amt
+            else:
+                tong_chi += amt
+        else:                                # phiếu CHỜ DUYỆT: tiền có thể đã ra/vào thật nhưng CHƯA ghi sổ quỹ
+            gm["cho_thu" if p.loai == "THU" else "cho_chi"] += amt
+            cho["so_phieu"] += 1
+            cho["thu" if p.loai == "THU" else "chi"] += amt
         # 🔗 TỰ LIÊN KẾT chi tiết từng khoản: Đối tác (NCC/Khách) + Số hóa đơn
         import re as _re
         from ..models import CongNo as _CN, NhaCungCap as _NCC, KhachHang as _KH, DonHang as _DH
@@ -713,6 +759,7 @@ def thong_ke_thu_chi(tu_ngay: str | None = None, den_ngay: str | None = None,
             "pid": p.id,
             "ngay": str(p.ngay) if p.ngay else None, "so": p.so, "loai": p.loai,
             "so_tien": amt, "doi_tac": doi_tac, "so_hd": so_hd, "tk": off,
+            "cho_duyet": not da_duyet,
             "canh_bao": canh_bao, "dien_giai": (p.dien_giai or "")[:90]})
 
     def _net(d):
@@ -723,9 +770,34 @@ def thong_ke_thu_chi(tu_ngay: str | None = None, den_ngay: str | None = None,
     theo_loai = sorted([{"tk": k, "ten_tk": TEN_TK.get(k, ""), **v} for k, v in loai.items()],
                        key=lambda x: -(x["thu"] + x["chi"]))
     theo_quy = [{"quy": quy_ten.get(k, f"Quỹ {k}"), **v} for k, v in quy.items()]
-    theo_ma_ban = sorted([{"ma_ban": k, **v, "rong": v["thu"] - v["chi"]}
-                          for k, v in maban.items()], key=lambda x: -(x["thu"] + x["chi"]))
+    # 💵 TIỀN THỰC TẾ theo SỔ CÔNG NỢ (lũy kế — không theo bộ lọc ngày/quỹ): mọi mã có tiền ra/vào đều lên bảng
+    from ..lai_lo_ma import dong_tien_theo_ma
+    try:
+        thuc = dong_tien_theo_ma(db)
+    except Exception:
+        thuc = {}
+    theo_khoa = {str(k).strip().lower(): k for k in maban}
+    for k, t in thuc.items():
+        if not (t["thu"] or t["chi"]):
+            continue
+        ten = theo_khoa.get(k)
+        if ten is None:
+            ten = t["ma"]
+            maban[ten] = {"thu": 0.0, "chi": 0.0, "cho_thu": 0.0, "cho_chi": 0.0}
+            theo_khoa[k] = ten
+        maban[ten]["thuc_thu"] = t["thu"]
+        maban[ten]["thuc_chi"] = t["chi"]
+    for v in maban.values():
+        v.setdefault("thuc_thu", 0.0)
+        v.setdefault("thuc_chi", 0.0)
+        v["thuc_rong"] = v["thuc_thu"] - v["thuc_chi"]
+    theo_ma_ban = sorted([{"ma_ban": k, **v, "rong": v["thu"] - v["chi"]} for k, v in maban.items()],
+                         key=lambda x: -max(x["thuc_thu"] + x["thuc_chi"],
+                                            x["thu"] + x["chi"] + x["cho_thu"] + x["cho_chi"]))
     return {"tu_ngay": tu_ngay, "den_ngay": den_ngay, "so_phieu": len(rows),
+            "cho_duyet": cho,
+            "tong_thuc_thu": sum(v["thuc_thu"] for v in maban.values()),
+            "tong_thuc_chi": sum(v["thuc_chi"] for v in maban.values()),
             "tong_thu": tong_thu, "tong_chi": tong_chi, "rong": tong_thu - tong_chi,
             "theo_thang": theo_thang, "theo_loai": theo_loai,
             "theo_quy": theo_quy, "theo_ma_ban": theo_ma_ban}
