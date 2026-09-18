@@ -106,10 +106,15 @@ def _chan_vuot_du_toan(db, ma, lines, xac_nhan=False, bo_qua_ycm=None, bo_qua_dm
     xác nhận; đã xác nhận → trả lý do để gắn cờ vuot_du_toan (chỉ CEO/ADMIN duyệt)."""
     if not ma:
         return None
-    from ..du_toan_ks import kiem_tra as _kt_dt
+    from ..du_toan_ks import kiem_tra as _kt_dt, thieu_du_toan as _thieu_dt
     vp, mo_ta = _kt_dt(db, ma, lines, bo_qua_ycm=bo_qua_ycm, bo_qua_dm=bo_qua_dm)
     if not vp:
-        return None
+        # 📋 MỨC 2: mã TM · DA · DV CHƯA có dự toán nào → cũng chặn & chờ CEO duyệt (miễn < 5 triệu lũy kế,
+        # mặt hàng đã khai định mức tháng, mã OP / KHO / không mã)
+        mo_ta = _thieu_dt(db, ma, lines, mien_hh=_hh_co_dinh_muc(db, ma),
+                          bo_qua_ycm=bo_qua_ycm, bo_qua_dm=bo_qua_dm)
+        if not mo_ta:
+            return None
     if not xac_nhan:
         raise HTTPException(status.HTTP_409_CONFLICT,
                             mo_ta + " — Xác nhận có chủ đích thì đề xuất/PO vào HÀNG CHỜ DUYỆT, "
@@ -117,10 +122,34 @@ def _chan_vuot_du_toan(db, ma, lines, xac_nhan=False, bo_qua_ycm=None, bo_qua_dm
     return mo_ta[:300]
 
 
+def _hh_co_dinh_muc(db, ma_eff) -> set:
+    """Các mặt hàng ĐÃ KHAI định mức tiêu hao tháng dưới mã cho thuê này — miễn yêu cầu dự toán
+    (đã có trần mua theo tháng). Cùng cách tìm tài sản với _dinh_muc_thang."""
+    from ..models import TaiSanChoThue, DinhMucTieuHao
+    if not ma_eff or not str(ma_eff).strip():
+        return set()
+    m = str(ma_eff).strip()
+    goc, _mmyy = _tach_ma_thang(m)
+    ts = None
+    if goc:
+        for t in db.query(TaiSanChoThue).filter(func.lower(TaiSanChoThue.ma).like(goc.lower() + "%")).all():
+            con = (t.ma or "").strip()[len(goc):]
+            if con == "" or _re_ma.fullmatch(r"-\d{4}", con):
+                ts = t
+                break
+    else:
+        ts = db.query(TaiSanChoThue).filter(func.lower(TaiSanChoThue.ma) == m.lower()).first()
+    if ts is None:
+        return set()
+    return {h for (h, dmuc) in db.query(DinhMucTieuHao.hang_hoa_id, DinhMucTieuHao.dinh_muc_thang)
+            .filter(DinhMucTieuHao.tai_san_id == ts.id).all() if dmuc and Decimal(str(dmuc)) > 0}
+
+
 def _chi_ceo_duyet_vuot(nd, ly_do, nhan):
     if ly_do and not getattr(getattr(nd, "vai_tro", None), "ma", None) in ("CEO", "ADMIN"):
+        loai = "thuộc MÃ CHƯA CÓ DỰ TOÁN" if str(ly_do).startswith("⛔ MÃ CHƯA") else "VƯỢT/NGOÀI DỰ TOÁN"
         raise HTTPException(status.HTTP_403_FORBIDDEN,
-                            f"⛔ {nhan} này VƯỢT/NGOÀI DỰ TOÁN — chỉ CEO/ADMIN duyệt được. Lý do: {ly_do}")
+                            f"⛔ {nhan} này {loai} — chỉ CEO/ADMIN duyệt được. Lý do: {ly_do}")
 
 
 def _po_nghi_trung(db, ncc_id, so_tien, ngay, pos=None):
@@ -871,6 +900,7 @@ def tao_po_tu_bao_gia_file(tep_id: int, data: TuBgFileVao | None = None, ep_ma: 
     dm.so = f"PO-{date.today():%Y%m%d}-{dm.id}"
     tien_hang, tien_thue = Decimal(0), Decimal(0)
     hh_moi = []
+    _dong_dt = []
     for it in items:
         hh = None
         if it["ma_sp"]:
@@ -893,10 +923,19 @@ def tao_po_tu_bao_gia_file(tep_id: int, data: TuBgFileVao | None = None, ep_ma: 
         gia = Decimal(it["don_gia"] or 0)
         ts = Decimal(str(it.get("thue_suat") or 0))
         db.add(DonMuaCt(don_mua_id=dm.id, hang_hoa_id=hh.id, so_luong=sl, don_gia=gia, thue_suat=ts))
+        _dong_dt.append((hh.id, sl, gia))
         line = (sl * gia).quantize(Decimal(1))
         tien_hang += line
         tien_thue += (line * ts / Decimal(100)).quantize(Decimal(1))
     dm.tien_hang, dm.tien_thue, dm.tong_tien = tien_hang, tien_thue, tien_hang + tien_thue
+    # 📋 cổng DỰ TOÁN: AI đã đọc file xong nên KHÔNG chặn (tránh tốn lượt AI lần 2) — PO tự mang cờ, chỉ CEO/ADMIN duyệt
+    try:
+        dm.vuot_du_toan = _chan_vuot_du_toan(db, _ma_hieu_luc(db, don_hang_id=don_hang_id, ma_ban=dm.ma_ban),
+                                             _dong_dt, xac_nhan=True, bo_qua_dm=dm.id)
+    except HTTPException:
+        raise
+    except Exception:
+        dm.vuot_du_toan = None
     ghi_audit(db, nd.id, "AI_TAO_PO", "don_mua", dm.id,
               moi={"tu_file": t.ten_file, "ncc": ncc.ten, "so_dong": len(items),
                    "tong_tien": float(dm.tong_tien), "tien_thue": float(tien_thue),
@@ -904,7 +943,8 @@ def tao_po_tu_bao_gia_file(tep_id: int, data: TuBgFileVao | None = None, ep_ma: 
     db.commit()
     return {"ok": True, "don_mua_id": dm.id, "so": dm.so, "ncc": ncc.ten,
             "so_dong": len(items), "tien_hang": float(tien_hang), "tien_thue": float(tien_thue),
-            "tong_tien": float(dm.tong_tien), "hang_hoa_moi": hh_moi[:10], "so_hang_moi": len(hh_moi)}
+            "tong_tien": float(dm.tong_tien), "hang_hoa_moi": hh_moi[:10], "so_hang_moi": len(hh_moi),
+            "canh_bao_du_toan": dm.vuot_du_toan}
 
 
 @router.delete("/bao-gia-file/{tep_id}")
@@ -2251,6 +2291,12 @@ def sua_don_mua(dm_id: int, data: DonMuaVao, ep_ma: bool = False, db: Session = 
                                           so_luong_moi=_sl_theo_hh([c for c in data.chi_tiet if c.hang_hoa_id in set(kiem_tra)]))
             if data.xac_nhan_lap:
                 dm.dinh_ky = True
+    # 📋 sửa PO cũng qua cổng DỰ TOÁN (vượt / ngoài / mã chưa có dự toán) — PO đã mang cờ thì coi như đã xác nhận
+    _vuot_sua = _chan_vuot_du_toan(db, _ma_hieu_luc(db, don_hang_id=data.don_hang_id, ma_ban=_ma_moi),
+                                   [(ct.hang_hoa_id, ct.so_luong, ct.don_gia) for ct in data.chi_tiet],
+                                   xac_nhan=bool(getattr(data, "xac_nhan_du_toan", False) or dm.vuot_du_toan),
+                                   bo_qua_dm=dm.id)
+    dm.vuot_du_toan = _vuot_sua
     cu = {"nha_cung_cap_id": dm.nha_cung_cap_id, "don_hang_id": dm.don_hang_id,
           "tong_tien": float(dm.tong_tien or 0), "trang_thai": dm.trang_thai,
           "so_dong": len(dm.chi_tiet)}

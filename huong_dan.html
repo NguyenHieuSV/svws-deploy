@@ -399,6 +399,17 @@
     <li><b>PO mua dự trữ</b> dùng từ khóa <code>KHO</code> thay cho mã; khi xuất dùng cho mã nào thì gán lại mã đó.</li>
     <li>Mã cũ sai quy luật: xem <b>Nhà cung cấp → Kiểm soát → 🧩 Chi phí chưa vào mã → ⑧ Mã sai quy luật</b>, sửa một lần là đổi ở mọi bảng.</li>
   </ul>
+  <h3 id="bat-buoc-du-toan">Mua hàng phải xuất phát từ dự toán (áp dụng 18/09/2026)</h3>
+  <p>Đề xuất / PO mang mã loại <b>TM · DA · DV</b> mà mã đó <b>chưa có dự toán</b> (Dự toán hàng bán hoặc BOQ dự án — trùng mã,
+  hoặc cùng nhóm <i>gốc + tháng</i>) sẽ bị <b>chặn ngay lúc lập</b>. Cách đúng: lập dự toán ở <b>Bán hàng → Báo giá → 🧾 Dự toán</b>
+  (hoặc BOQ của dự án) rồi tick dòng → <b>🛒 Tạo đề xuất</b>. Nếu vẫn cần mua khi chưa có dự toán, người lập xác nhận “mua có chủ đích”
+  → đề xuất/PO mang nhãn <b>⛔ Chưa có dự toán</b> và <b>chỉ CEO/ADMIN duyệt được</b>.</p>
+  <ul>
+    <li><b>Được miễn:</b> mã <b>OP</b> (đã kiểm theo định mức tháng) · mã <b>KHO</b> / đề xuất không mã (mua dự trữ, kho tự sinh khi tồn thấp) ·
+      mặt hàng đã khai <b>định mức tiêu hao tháng</b> của tài sản cho thuê · <b>lũy kế mua dưới mã &lt; 5.000.000 đ</b> (chưa VAT; tính cả PO và đề xuất còn hiệu lực
+      của mã — chia nhỏ nhiều lần vẫn bị cộng dồn).</li>
+    <li>Áp dụng ở mọi đường lập: đề xuất tay · PO từ đề xuất · PO lập tay · <b>sửa PO</b> · PO do AI đọc file báo giá (đường này không chặn để khỏi tốn lượt AI — PO tự mang nhãn ⛔ chờ CEO duyệt).</li>
+  </ul>
   <h3 id="kiem-soat-du-toan">Kiểm soát mua hàng theo dự toán — “chặn và chờ duyệt”</h3>
   <p>Mã đã có <b>Dự toán hàng bán</b> hoặc <b>BOQ dự án</b> thì mỗi mặt hàng chỉ được đề xuất / lập PO tối đa bằng
   <b>dự toán dòng + 10%</b> (tính lũy kế cả PO và đề xuất còn hiệu lực của mã đó). Vượt mức, hoặc mặt hàng

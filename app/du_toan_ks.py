@@ -5,7 +5,10 @@ Mã có dự toán (Dự toán hàng bán và/hoặc BOQ dự án cùng mã) th�
 = dự toán dòng × (1 + DUNG_SAI). Vượt mức, hoặc mặt hàng KHÔNG có trong dự toán:
   • lúc lập đề xuất / PO: chặn (409) — người lập phải xác nhận có chủ đích (xac_nhan_du_toan)
   • sau xác nhận: bản ghi mang cờ vuot_du_toan (lý do) và CHỈ CEO/ADMIN mới duyệt được.
-Mã chưa có dự toán nào → không kiểm soát (không có gì để so).
+Mã CHƯA có dự toán nào (CEO chốt 18/09/2026 — "mức 2"): mã loại TM · DA · DV bắt buộc có dự toán.
+Chưa có → chặn lúc lập, xác nhận có chủ đích → cờ vuot_du_toan ("⛔ MÃ CHƯA CÓ DỰ TOÁN…") → chỉ CEO/ADMIN duyệt.
+MIỄN: mã OP (định mức tháng) · KHO / không mã (mua dự trữ) · mặt hàng đã khai định mức tiêu hao tháng (cho thuê)
+· LŨY KẾ mua dưới mã (đã cam kết + lần này) < NGUONG_MIEN.
 """
 from decimal import Decimal
 from sqlalchemy import func, or_
@@ -15,6 +18,8 @@ from .models import (HangHoa, DonHang, DonMua, DonMuaCt, YeuCauMua, YeuCauMuaCt,
                      DuToanBan, DuToanBanMuc, DuAn, DuAnDuToan)
 
 DUNG_SAI = 0.10          # 10% — cùng mức với định mức tiêu hao tháng (CEO chốt)
+NGUONG_MIEN = 5_000_000  # lũy kế mua dưới mã < 5 triệu (chưa VAT) → chưa cần dự toán (CEO chốt 18/09/2026)
+LOAI_BAT_BUOC = ("TM", "DA", "DV")
 
 
 def _f(v) -> float:
@@ -59,6 +64,48 @@ def du_toan_cua_ma(db: Session, ma: str):
             o["sl"] += _f(x.so_luong)
             o["tien"] += _f(x.so_luong) * _f(x.don_gia)
     return out if co else None
+
+
+def co_du_toan(db: Session, ma: str) -> bool:
+    """Mã đã có dự toán chưa: trùng mã, hoặc CÙNG NHÓM gốc + tháng (dự toán lập ở mã gốc TM-X-0926,
+    PO tách -01/-02 vẫn tính là có dự toán)."""
+    if du_toan_cua_ma(db, ma) is not None:
+        return True
+    from .ma_code import nhom
+    g = nhom(ma)
+    if not g:
+        return False
+    for (m,) in db.query(DuToanBan.ma).all():
+        if m and nhom(m) == g:
+            return True
+    for (m,) in db.query(DuAn.ma).all():
+        if m and nhom(m) == g:
+            return True
+    return False
+
+
+def thieu_du_toan(db: Session, ma: str, lines, mien_hh=None, bo_qua_ycm=None, bo_qua_dm=None):
+    """Mã TM · DA · DV CHƯA có dự toán → mô tả vi phạm (str); được miễn → None.
+    lines = [(hang_hoa_id, so_luong, don_gia)]; mien_hh = các mặt hàng đã khai định mức tháng (miễn)."""
+    ma = str(ma or "").strip()
+    if not ma:
+        return None
+    from .ma_code import phan_tich
+    loai = (phan_tich(ma).get("loai") or "").upper()
+    if loai not in LOAI_BAT_BUOC:
+        return None
+    if co_du_toan(db, ma):
+        return None
+    mien = set(mien_hh or [])
+    them = sum(_f(sl) * _f(dg) for (hid, sl, dg) in lines if hid and hid not in mien)
+    if not any(hid and hid not in mien for (hid, _sl, _dg) in lines):
+        return None                                   # mọi dòng đều đã có định mức tháng
+    da = sum(v["tien"] for hid, v in da_dung_theo_ma(db, ma, bo_qua_ycm, bo_qua_dm).items() if hid not in mien)
+    if da + them < NGUONG_MIEN:
+        return None
+    return (f"⛔ MÃ CHƯA CÓ DỰ TOÁN: {ma.upper()} (loại {loai}) chưa có Dự toán hàng bán / BOQ dự án — "
+            f"lần này {them:,.0f}đ + đã mua dưới mã {da:,.0f}đ = {da + them:,.0f}đ ≥ ngưỡng miễn "
+            f"{NGUONG_MIEN:,.0f}đ. Lập dự toán trước (Bán hàng → Báo giá → 🧾 Dự toán, hoặc BOQ dự án) rồi đề xuất từ đó")
 
 
 def da_dung_theo_ma(db: Session, ma: str, bo_qua_ycm=None, bo_qua_dm=None):
