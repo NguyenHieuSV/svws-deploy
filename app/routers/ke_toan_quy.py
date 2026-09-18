@@ -362,7 +362,7 @@ def tao_phieu(data: PhieuVao, db: Session = Depends(get_db),
 
 
 def _tt_lenh_tam_ung(db, p):
-    if not (p.loai == "CHI" and p.la_tam_ung):
+    if not (p.loai == "CHI" and (p.la_tam_ung or p.cong_no_id) and p.trang_thai in ("CHO_DUYET", "NHAP")):
         return None
     l = _lenh_tam_ung_cua_phieu(db, p)
     return {"id": l.id, "trang_thai": l.trang_thai} if l is not None else None
@@ -379,13 +379,22 @@ def _day_tam_ung_sang_duyet_chi(db, p: PhieuThuChi, nd_id) -> None:
     mọi khoản tiền ra cho NCC duyệt cùng MỘT CỬA; ✔ Đã chi ở đó thì phiếu tự ghi sổ."""
     from ..models import LenhChiBank
     from ..nhac_viec_service import gio_hien_tai
-    if not (p.loai == "CHI" and p.la_tam_ung and p.nha_cung_cap_id and p.trang_thai == "CHO_DUYET"):
+    if p.loai != "CHI" or p.trang_thai != "CHO_DUYET" or getattr(p, "lenh_chi_id", None):
+        return
+    la_tam_ung = bool(p.la_tam_ung and p.nha_cung_cap_id)
+    cn_tra = None
+    if p.cong_no_id and not la_tam_ung:            # phiếu chi CẤN CÔNG NỢ NCC (lập tay / đối chiếu sao kê)
+        _c = db.get(CongNo, p.cong_no_id)
+        cn_tra = _c if (_c is not None and _c.loai == "PHAI_TRA") else None
+    if not la_tam_ung and cn_tra is None:
         return
     lcb = _lenh_tam_ung_cua_phieu(db, p)
     if lcb is not None and lcb.trang_thai in ("CHO_DUYET", "DA_DUYET", "DA_CHI"):
         return
-    lcb = LenhChiBank(phieu_id=p.id, so_tien=p.so_tien, de_nghi_luc=gio_hien_tai(), nguoi_tao=nd_id,
-                      ghi_chu=("Tạm ứng / cọc NCC — " + (p.dien_giai or p.so or ""))[:200])
+    lcb = LenhChiBank(phieu_id=p.id, cong_no_id=(cn_tra.id if cn_tra is not None else None),
+                      so_tien=p.so_tien, de_nghi_luc=gio_hien_tai(), nguoi_tao=nd_id,
+                      ghi_chu=(("Tạm ứng / cọc NCC — " if la_tam_ung else "Trả công nợ (phiếu chi kế toán) — ")
+                               + (p.dien_giai or p.so or ""))[:200])
     db.add(lcb); db.flush()
     p.lenh_chi_id = lcb.id
 
@@ -504,7 +513,7 @@ def duyet_phieu(pid: int, data: DuyetPhieuVao = DuyetPhieuVao(),
     _ltu = _lenh_tam_ung_cua_phieu(db, p)
     if _ltu is not None and _ltu.trang_thai in ("CHO_DUYET", "DA_DUYET"):
         raise HTTPException(status.HTTP_400_BAD_REQUEST,
-                            "Phiếu chi TẠM ỨNG / CỌC NCC duyệt ở «Nhà cung cấp → Duyệt chi Ngân Hàng» (một cửa duyệt chi): "
+                            "Phiếu chi cho NCC (tạm ứng / cọc / trả công nợ) duyệt ở «Nhà cung cấp → Duyệt chi Ngân Hàng» (một cửa duyệt chi): "
                             "duyệt lệnh ở đó, ngân hàng chi xong bấm ✔ Đã chi thì phiếu tự ghi sổ.")
     # DUYỆT THEO HẠN MỨC NHIỀU CẤP (bảng han_muc_duyet, loại 'thu_chi')
     kiem_han_muc(db, nd, LOAI_DUYET, Decimal(p.so_tien))
@@ -1728,6 +1737,10 @@ def tao_hoa_don(data: HoaDonVao, db: Session = Depends(get_db),
             adv.da_can_tru = Decimal(adv.da_can_tru) + ap
             cn.da_thanh_toan = Decimal(cn.da_thanh_toan) + ap
             da_cap_tru_tu_ung += ap
+        if da_cap_tru_tu_ung > 0 and cn.loai == "PHAI_TRA":
+            from ..models import ChiNgoaiLenh as _CNLk
+            db.add(_CNLk(don_mua_id=getattr(cn, "don_mua_id", None), cong_no_id=cn.id, so_tien=da_cap_tru_tu_ung,
+                         nguon="CAN_TRU", ly_do="Cấn trừ tạm ứng NCC vào công nợ", nguoi_dung_id=nd.id))
         if da_cap_tru_tu_ung > 0:
             du = Decimal(cn.da_thanh_toan) >= Decimal(cn.so_tien)
             if cn.loai == "PHAI_THU":
@@ -2404,6 +2417,11 @@ def _sao_ke_ghi_chi_lo(data: SkGhiVao, db: Session, nd: NguoiDung):
                 "tong_cong_no": float(dm.tong_tien or 0)}
     if not data.quy_id:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Chọn sổ quỹ ngân hàng phát sinh giao dịch")
+    # 🔒 BẮT BUỘC QUA DUYỆT CHI: PO phải có lệnh chi ĐÃ DUYỆT đang chờ thực chi — không có thì không ghi «đã chi»
+    if (db.query(LenhChiBank.id).filter_by(don_mua_id=dm.id, trang_thai="DA_DUYET").first()) is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            f"PO {dm.so or dm.id} chưa có LỆNH CHI ĐÃ DUYỆT ở «Nhà cung cấp → Duyệt chi Ngân Hàng» — "
+                            "đề nghị thanh toán ở Thanh toán mua hàng và chờ CEO/KTT duyệt chi trước, rồi mới ✔ Đã chi.")
     d0 = db.get(SaoKeDong, data.sao_ke_dong_id) if data.sao_ke_dong_id else None
     cn = db.query(CongNo).filter_by(don_mua_id=dm.id).with_for_update().first()
     p = PhieuThuChi(loai="CHI", quy_id=data.quy_id, so_tien=so_tien,
@@ -2584,6 +2602,7 @@ def sao_ke_ghi_chi_gop(d_id: int, data: SkGhiGopVao, db: Session = Depends(get_d
         db.add(p)
         db.flush()
         p.so = f"PC-{date.today():%Y%m%d}-{p.id}"
+        _day_tam_ung_sang_duyet_chi(db, p, nd.id)   # 🔒 trả công nợ NCC phải qua Duyệt chi Ngân Hàng
         so_phieu.append(p.so)
     d.khop_loai = "PHIEU_SK"
     d.khop_mo_ta = (f"{len(so_phieu)} phiếu chi gộp: " + ", ".join(so_phieu) + " (chờ duyệt)")[:300]
@@ -2625,6 +2644,7 @@ def sao_ke_ghi_chi_phan(d_id: int, data: SkGhiVao, db: Session = Depends(get_db)
     db.add(p)
     db.flush()
     p.so = f"PC-{date.today():%Y%m%d}-{p.id}"
+    _day_tam_ung_sang_duyet_chi(db, p, nd.id)       # 🔒 trả công nợ NCC phải qua Duyệt chi Ngân Hàng
     d.khop_loai = "PHIEU_SK"
     d.khop_id = p.id
     d.khop_mo_ta = (f"Phiếu {p.so} — trả một phần CN{cn.id} (chờ duyệt)")[:300]

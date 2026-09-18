@@ -1210,6 +1210,23 @@ class SuaDotTtVao(_SPBase):
     ngay: date | None = None
     so_tien: Decimal | None = None
     ghi_chu: str | None = None
+    ly_do: str | None = None          # BẮT BUỘC: sửa đợt = ghi thẳng «đã trả» không qua Duyệt chi Ngân Hàng
+
+
+def _ghi_vet_ngoai_lenh(db, nd_id, nguon, so_tien, ly_do=None, don_mua_id=None, cong_no_id=None, ngay=None):
+    """Vết khoản ghi «đã trả NCC» KHÔNG qua lệnh chi (mig 121) — để bảng Thực chi theo mã tách được
+    «lịch sử» với «ghi trực tiếp SAU ngày áp dụng» và biết ai · khi nào · vì sao."""
+    from ..models import ChiNgoaiLenh
+    if not so_tien or float(so_tien) == 0:
+        return
+    db.add(ChiNgoaiLenh(don_mua_id=don_mua_id, cong_no_id=cong_no_id, so_tien=Decimal(str(so_tien)),
+                        ngay=ngay or date.today(), nguon=nguon[:20], ly_do=(ly_do or "")[:300] or None,
+                        nguoi_dung_id=nd_id))
+
+
+def _da_tra_po(db, dm):
+    cn = db.query(CongNo).filter_by(don_mua_id=dm.id).first()
+    return Decimal(cn.da_thanh_toan or 0) if cn is not None else Decimal(dm.de_nghi_tt or 0)
 
 
 @router.put("/dot-thanh-toan/{dot_id}")
@@ -1224,6 +1241,11 @@ def sua_dot_thanh_toan(dot_id: int, data: SuaDotTtVao, db: Session = Depends(get
     dm = db.get(DonMua, d.don_mua_id)
     if dm is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đơn mua")
+    if not (data.ly_do or "").strip():
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Sửa đợt thanh toán = ghi thẳng «đã trả» KHÔNG qua Duyệt chi Ngân Hàng — bắt buộc nhập LÝ DO "
+                            "(khoản này sẽ hiện nhãn đỏ ở bảng Thực chi theo mã).")
+    _truoc = _da_tra_po(db, dm)
     cu = {"ngay": str(d.ngay) if d.ngay else None, "so_tien": float(d.so_tien or 0)}
     moi_tien = Decimal(data.so_tien) if data.so_tien is not None else Decimal(d.so_tien or 0)
     if moi_tien < 0:
@@ -1240,6 +1262,9 @@ def sua_dot_thanh_toan(dot_id: int, data: SuaDotTtVao, db: Session = Depends(get
     if data.ghi_chu is not None:
         d.ghi_chu = (data.ghi_chu or "").strip() or None
     _ap_dung_tt_mua(db, dm, dn)
+    db.flush()
+    _ghi_vet_ngoai_lenh(db, nd.id, "SUA_DOT_TT", _da_tra_po(db, dm) - _truoc, data.ly_do, don_mua_id=dm.id,
+                        ngay=d.ngay)
     ghi_audit(db, nd.id, "SUA_DOT_TT", "don_mua", dm.id, cu=cu,
               moi={"dot_id": d.id, "ngay": str(d.ngay), "so_tien": float(moi_tien),
                    "de_nghi_tt": float(dn)})
@@ -1248,9 +1273,9 @@ def sua_dot_thanh_toan(dot_id: int, data: SuaDotTtVao, db: Session = Depends(get
 
 
 @router.delete("/dot-thanh-toan/{dot_id}")
-def xoa_dot_thanh_toan(dot_id: int, db: Session = Depends(get_db),
+def xoa_dot_thanh_toan(dot_id: int, ly_do: str = "", db: Session = Depends(get_db),
                        nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
-    """Xóa một đợt thanh toán ghi nhầm — chỉ CEO/ADMIN. Tổng đã thanh toán trừ lại."""
+    """Xóa một đợt thanh toán ghi nhầm — chỉ CEO/ADMIN. Tổng đã thanh toán trừ lại. Bắt buộc LÝ DO."""
     from ..models import DonMuaDotTt
     d = db.get(DonMuaDotTt, dot_id)
     if d is None:
@@ -1258,6 +1283,10 @@ def xoa_dot_thanh_toan(dot_id: int, db: Session = Depends(get_db),
     dm = db.get(DonMua, d.don_mua_id)
     if dm is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đơn mua")
+    if not (ly_do or "").strip():
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Xóa đợt thanh toán làm đổi số «đã trả» không qua Duyệt chi Ngân Hàng — bắt buộc nhập LÝ DO.")
+    _truoc_x = _da_tra_po(db, dm)
     dn = Decimal(dm.de_nghi_tt or 0) - Decimal(d.so_tien or 0)
     if dn < 0:
         dn = Decimal(0)
@@ -1265,6 +1294,8 @@ def xoa_dot_thanh_toan(dot_id: int, db: Session = Depends(get_db),
     db.delete(d)
     db.flush()
     _ap_dung_tt_mua(db, dm, dn)
+    db.flush()
+    _ghi_vet_ngoai_lenh(db, nd.id, "XOA_DOT_TT", _da_tra_po(db, dm) - _truoc_x, ly_do, don_mua_id=dm.id)
     ghi_audit(db, nd.id, "XOA_DOT_TT", "don_mua", dm.id, cu=cu,
               moi={"de_nghi_tt": float(dn)})
     db.commit()
@@ -1391,7 +1422,9 @@ def chot_thanh_toan_mua(dm_id: int, db: Session = Depends(get_db),
 def _loai_lenh(db, r, dm, cn, ph, dot_chi):
     """Nhãn loại lệnh chi để người duyệt biết đang duyệt gì: cọc / trả đợt / tất toán / công nợ / tạm ứng."""
     if ph is not None:
-        return {"ma": "TAM_UNG", "nhan": "💵 Tạm ứng / cọc NCC (chưa có PO)"}
+        if ph.la_tam_ung:
+            return {"ma": "TAM_UNG", "nhan": "💵 Tạm ứng / cọc NCC (chưa có PO)"}
+        return {"ma": "CONG_NO_PHIEU", "nhan": "Trả công nợ — phiếu chi lập ở Kế toán"}
     if dm is None:
         return {"ma": "CONG_NO", "nhan": "Trả công nợ"} if cn is not None else {"ma": "KHAC", "nhan": "—"}
     _L = type(r)
@@ -1503,6 +1536,35 @@ def _thuc_chi_ngoai_lenh(db, lich_su):
     for (cid, ng) in db.query(_TTn.cong_no_id, func.max(_TTn.ngay)).group_by(_TTn.cong_no_id).all():
         ngay_tt[cid] = ng
     ncc_ten = {i: t for (i, t) in db.query(NhaCungCap.id, NhaCungCap.ten).all()}
+    # 🧾 VẾT ghi trực tiếp TỪ NGÀY ÁP DỤNG (mig 121): tách «lịch sử» với «ghi trực tiếp sau khi đã bắt buộc duyệt chi»
+    from ..models import ChiNgoaiLenh as _CNL, NguoiDung as _NDn
+    vet_po, vet_cn, can_tru_po, can_tru_cn = {}, {}, {}, {}
+    ten_nd = {}
+    for v in db.query(_CNL).order_by(_CNL.id).all():
+        if v.nguon == "CAN_TRU":                  # cấn trừ tạm ứng: tiền đã tính ở lệnh tạm ứng → không tính lần 2
+            if v.don_mua_id:
+                can_tru_po[v.don_mua_id] = can_tru_po.get(v.don_mua_id, 0.0) + float(v.so_tien or 0)
+            elif v.cong_no_id:
+                can_tru_cn[v.cong_no_id] = can_tru_cn.get(v.cong_no_id, 0.0) + float(v.so_tien or 0)
+            continue
+        if v.nguoi_dung_id and v.nguoi_dung_id not in ten_nd:
+            u = db.get(_NDn, v.nguoi_dung_id)
+            ten_nd[v.nguoi_dung_id] = (getattr(u, "ho_ten", None) or getattr(u, "email", None)) if u else None
+        o = {"so_tien": float(v.so_tien or 0), "ngay": str(v.ngay) if v.ngay else None, "nguon": v.nguon,
+             "ly_do": v.ly_do, "nguoi": ten_nd.get(v.nguoi_dung_id)}
+        (vet_po.setdefault(v.don_mua_id, []) if v.don_mua_id else vet_cn.setdefault(v.cong_no_id, [])).append(o)
+
+    def _nhan_vet(ds, mac_dinh):
+        """(nhãn, số tiền ghi trực tiếp SAU ngày áp dụng)"""
+        moi = [x for x in ds if x["nguon"] in ("SUA_DOT_TT", "XOA_DOT_TT") and x["so_tien"] > 0]
+        if moi:
+            return ("⚠ GHI TRỰC TIẾP SAU KHI BẮT BUỘC DUYỆT CHI — " + " · ".join(
+                f"{x['ngay']}: {x['so_tien']:,.0f}đ" + (f" ({x['nguoi']})" if x["nguoi"] else "")
+                + (f" — {x['ly_do']}" if x["ly_do"] else "") for x in moi[:3]), sum(x["so_tien"] for x in moi))
+        if any(x["nguon"] == "AI_NHAP" for x in ds):
+            return ("📂 Số dư lịch sử — «đã trả» nhập theo file công nợ", 0.0)
+        return (mac_dinh, 0.0)
+
     out = []
     for dm in db.query(DonMua).filter(DonMua.trang_thai != "TU_CHOI").all():
         cl = cn_po.get(dm.id) or []
@@ -1510,10 +1572,11 @@ def _thuc_chi_ngoai_lenh(db, lich_su):
             da = sum(float(c.da_thanh_toan or 0) for c in cl)
         else:       # PO cũ chưa có công nợ: lũy kế đã duyệt chi, không có thì số đã ghi trả
             da = float((dm.da_duyet_tt if dm.da_duyet_tt is not None else dm.de_nghi_tt) or 0)
-        ngoai = da - lenh_po.get(dm.id, 0.0)
+        ngoai = da - lenh_po.get(dm.id, 0.0) - can_tru_po.get(dm.id, 0.0)
         if ngoai <= 1:
             continue
         tong = float(dm.tong_tien or 0)
+        _nhan, _sau = _nhan_vet(vet_po.get(dm.id) or [], "✍ Ghi trực tiếp — trước khi có luồng Duyệt chi")
         ds_ngay = [ngay_tt[c.id] for c in cl if ngay_tt.get(c.id)] + [d for d in (dm.ngay_tt_du, dm.ngay_tt) if d]
         ngay = max(ds_ngay) if ds_ngay else dm.ngay
         pct = round(da / tong * 100) if tong > 0 else None
@@ -1521,16 +1584,17 @@ def _thuc_chi_ngoai_lenh(db, lich_su):
                     "so": dm.so or f"PO-{dm.id}", "so_hoa_don": dm.so_hoa_don, "ma_don_ban": _ma_ban_hang_po(db, dm),
                     "ncc_ten": ncc_ten.get(dm.nha_cung_cap_id), "tong_tien": tong, "so_tien": ngoai, "thuc_chi": ngoai,
                     "chi_luc": str(ngay) if ngay else None, "nguoi_duyet": None, "trang_thai": "NGOAI_LENH",
-                    "loai_lenh": "NGOAI_LENH",
-                    "loai_nhan": "✍ Ghi trực tiếp — không qua lệnh chi"
-                                 + (f" · PO đã trả {pct}%" if (pct is not None and pct < 100) else "")})
+                    "loai_lenh": "NGOAI_LENH", "sau_ap_dung": min(_sau, ngoai),
+                    "loai_nhan": _nhan + (f" · PO đã trả {pct}%" if (pct is not None and pct < 100) else "")})
     hd_dh = {}
     for c in cns:
         if c.don_mua_id:
             continue
-        ngoai = float(c.da_thanh_toan or 0) - lenh_cn.get(c.id, 0.0)
+        ngoai = float(c.da_thanh_toan or 0) - lenh_cn.get(c.id, 0.0) - can_tru_cn.get(c.id, 0.0)
         if ngoai <= 1:
             continue
+        _nhan_c, _sau_c = _nhan_vet(vet_cn.get(c.id) or [],
+                                    "📂 Số dư lịch sử — công nợ nhập ngoài đã trả trước khi có luồng Duyệt chi")
         ma = (c.ma_ban_ngoai or "").strip() or None
         if not ma and c.hoa_don_id:
             if c.hoa_don_id not in hd_dh:
@@ -1544,7 +1608,7 @@ def _thuc_chi_ngoai_lenh(db, lich_su):
                     "ncc_ten": ncc_ten.get(c.nha_cung_cap_id), "tong_tien": float(c.so_tien or 0),
                     "so_tien": ngoai, "thuc_chi": ngoai, "chi_luc": str(ngay) if ngay else None,
                     "nguoi_duyet": None, "trang_thai": "NGOAI_LENH", "loai_lenh": "NGOAI_LENH",
-                    "loai_nhan": "✍ Ghi trực tiếp — không qua lệnh chi"})
+                    "sau_ap_dung": min(_sau_c, ngoai), "loai_nhan": _nhan_c})
     return out
 
 
@@ -3077,9 +3141,14 @@ def ai_nhap_cong_no_ncc(data: AiNhapNccVao, db: Session = Depends(get_db),
         if vat > st:
             vat = Decimal(0)
         tt = "DA_TRA" if dtt >= st else ("TRA_MOT_PHAN" if dtt > 0 else "CHUA_TRA")
-        db.add(CongNo(loai="PHAI_TRA", nha_cung_cap_id=ncc_id, so_tien=st, tien_thue=vat,
-                      da_thanh_toan=dtt, han=han, ngay_ct=ngay_ct, ngay_tt_tiep=ngay_tt,
-                      ma_ban_ngoai=ma, so_ct=so_ct, trang_thai=tt, ghi_chu=ghi_chu))
+        _cn_moi = CongNo(loai="PHAI_TRA", nha_cung_cap_id=ncc_id, so_tien=st, tien_thue=vat,
+                         da_thanh_toan=dtt, han=han, ngay_ct=ngay_ct, ngay_tt_tiep=ngay_tt,
+                         ma_ban_ngoai=ma, so_ct=so_ct, trang_thai=tt, ghi_chu=ghi_chu)
+        db.add(_cn_moi)
+        if dtt and dtt > 0:                       # «đã trả» nhập theo file = SỐ DƯ LỊCH SỬ, không phải chi mới
+            db.flush()
+            _ghi_vet_ngoai_lenh(db, nd.id, "AI_NHAP", dtt, "Số dư đã trả nhập theo file công nợ (lịch sử)",
+                                cong_no_id=_cn_moi.id, ngay=ngay_ct)
         tao += 1
     ghi_audit(db, nd.id, "TAO", "cong_no", 0,
               moi={"ai_upload_ncc_so_dong": tao, "noi_po": da_noi_po,

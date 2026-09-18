@@ -940,6 +940,19 @@ class VonMuc(Base):
     ghi_chu: Mapped[str | None] = mapped_column(String(200), nullable=True)
 
 
+class ChiNgoaiLenh(Base):
+    """mig 121: vết mọi khoản ghi «đã trả NCC» KHÔNG qua lệnh chi ngân hàng (từ 18/09/2026)."""
+    __tablename__ = "chi_ngoai_lenh"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    don_mua_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    cong_no_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    so_tien: Mapped[Decimal] = mapped_column(Numeric(18, 0), default=0)
+    ngay: Mapped[date] = mapped_column(Date, server_default=func.current_date())
+    nguon: Mapped[str] = mapped_column(String(20))
+    ly_do: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    nguoi_dung_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+
+
 class LenhChiBank(Base):
     __tablename__ = "lenh_chi_bank"
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
