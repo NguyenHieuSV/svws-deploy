@@ -202,6 +202,7 @@ def dong_tien_theo_ma(db: Session) -> dict:
       thu = Σ «đã thanh toán» của công nợ PHẢI THU của đơn + trả trước chưa cấn
             (đơn chưa có công nợ: max(cọc, tạm ứng); đã có công nợ: chỉ cộng tạm ứng còn dư)."""
     so_dh = {i: (s or "").strip() for (i, s) in db.query(DonHang.id, DonHang.so).all()}
+    so_key = {s.lower(): i for i, s in so_dh.items() if s}
     out = {}
 
     def cong(ma, thu=0.0, chi=0.0):
@@ -237,10 +238,13 @@ def dong_tien_theo_ma(db: Session) -> dict:
                 cong(ma, chi=da)
         elif c.loai == "PHAI_THU":
             dh_id = c.don_hang_id or (hd_dh.get(c.hoa_don_id) if c.hoa_don_id else None)
+            ma = so_dh.get(dh_id) if dh_id else ((c.ma_ban_ngoai or "").strip() or None)
+            if not dh_id and ma:                       # công nợ thu NHẬP NGOÀI mang mã trùng số đơn bán
+                dh_id = so_key.get(ma.lower())
             if dh_id:
-                dh_co_cn_thu.add(dh_id)
+                dh_co_cn_thu.add(dh_id)                # đơn đã có công nợ thu → cọc coi như đã cấn, không cộng lần 2
             if da:
-                cong(so_dh.get(dh_id) if dh_id else None, thu=da)
+                cong(ma, thu=da)
     for pid, (dh, mb, dd, dn) in po.items():          # PO cũ: đã ghi trả nhưng chưa có dòng công nợ
         if pid in po_co_cn:
             continue
