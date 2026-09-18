@@ -358,6 +358,33 @@ def tao_phieu(data: PhieuVao, db: Session = Depends(get_db),
     return _phieu_dict(db, p)
 
 
+def _canh_bao_quy_am(db, quy_id):
+    q = db.get(TaiKhoanQuy, quy_id) if quy_id else None
+    if q is not None and Decimal(q.so_du or 0) < 0:
+        return (f"⚠ QUỸ ÂM: '{q.ten}' còn {float(q.so_du):,.0f}đ trên sổ — tiền đã chi thật nên vẫn ghi; "
+                "quỹ âm nghĩa là THIẾU GHI THU hoặc số dư đầu kỳ chưa đúng, cần bổ sung.")
+    return None
+
+
+def _tu_ghi_so_theo_lenh(db, p: PhieuThuChi, lcb, nd_id=None) -> None:
+    """Phiếu chi của LỆNH CHI ĐÃ DUYỆT: thẩm quyền đã có ở bước Duyệt chi Ngân Hàng, tiền đã ra thật,
+    công nợ đã trừ lúc ✔ Đã chi → ghi sổ quỹ + bút toán NGAY, không chờ duyệt lần hai."""
+    bt = _hach_toan_phieu(db, p, cho_am_quy=True)
+    p.trang_thai = "DA_DUYET"
+    p.ngay_duyet = date.today()
+    nguoi = getattr(lcb, "nguoi_duyet", None)
+    p.nguoi_duyet = nhan_vien_id_cua(db, nguoi) if nguoi else None
+    ten = None
+    if nguoi:
+        u = db.get(NguoiDung, nguoi)
+        ten = (getattr(u, "ho_ten", None) or getattr(u, "email", None)) if u else None
+    p.ghi_chu = ((p.ghi_chu + " | ") if p.ghi_chu else "") + (
+        f"Tự ghi sổ theo lệnh chi #{lcb.id} đã duyệt" + (f" bởi {ten}" if ten else "")
+        + (f" lúc {lcb.duyet_luc:%d/%m/%Y %H:%M}" if getattr(lcb, "duyet_luc", None) else ""))
+    ghi_audit(db, nd_id, "TU_GHI_SO", "phieu_thu_chi", p.id,
+              moi={"lenh_chi_id": lcb.id, "but_toan": bt.id, "so_tien": _f(p.so_tien)})
+
+
 @router.post("/phieu/{pid}/trinh")
 def trinh_phieu(pid: int, db: Session = Depends(get_db),
                 nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
@@ -372,7 +399,9 @@ def trinh_phieu(pid: int, db: Session = Depends(get_db),
     return _phieu_dict(db, p)
 
 
-def _hach_toan_phieu(db, p: PhieuThuChi):
+def _hach_toan_phieu(db, p: PhieuThuChi, cho_am_quy: bool = False):
+    """cho_am_quy=True: phiếu sinh từ LỆNH CHI ĐÃ DUYỆT (ngân hàng đã chi thật) — vẫn ghi sổ khi số dư quỹ
+    trên sổ không đủ; quỹ âm = thiếu ghi thu / số dư đầu kỳ, được CẢNH BÁO chứ không che đi bằng cách chặn."""
     quy = db.query(TaiKhoanQuy).filter_by(id=p.quy_id).with_for_update().first()
     # ✅ KIỂM LẠI TẠI THỜI ĐIỂM DUYỆT (khóa hàng chống race / chống cấn vượt):
     if p.cong_no_id:
@@ -383,7 +412,7 @@ def _hach_toan_phieu(db, p: PhieuThuChi):
                 raise HTTPException(status.HTTP_400_BAD_REQUEST,
                                     f"Phiếu {p.so or p.id}: số tiền vượt phần còn lại hiện tại của công nợ "
                                     f"({float(con_lai0):,.0f}đ) — khoản này có thể đã được thu/chi ở phiếu/lệnh khác")
-    if p.loai == "CHI" and Decimal(quy.so_du or 0) < Decimal(p.so_tien):
+    if p.loai == "CHI" and Decimal(quy.so_du or 0) < Decimal(p.so_tien) and not cho_am_quy:
         raise HTTPException(status.HTTP_400_BAD_REQUEST,
                             f"Số dư quỹ '{quy.ten}' ({float(quy.so_du or 0):,.0f}đ) không đủ chi "
                             f"{float(p.so_tien):,.0f}đ — nạp/điều chuyển quỹ trước khi duyệt")
@@ -441,7 +470,7 @@ def duyet_phieu(pid: int, data: DuyetPhieuVao = DuyetPhieuVao(),
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Phiếu không ở trạng thái chờ duyệt")
     # DUYỆT THEO HẠN MỨC NHIỀU CẤP (bảng han_muc_duyet, loại 'thu_chi')
     kiem_han_muc(db, nd, LOAI_DUYET, Decimal(p.so_tien))
-    bt = _hach_toan_phieu(db, p)
+    bt = _hach_toan_phieu(db, p, cho_am_quy=bool(getattr(p, "lenh_chi_id", None)))
     p.trang_thai = "DA_DUYET"
     p.nguoi_duyet = nhan_vien_id_cua(db, nd.id)
     p.ngay_duyet = date.today()
@@ -529,6 +558,113 @@ def _mo_lai_lenh_cua_phieu(db, p) -> None:
         d0.khop_loai = None
         d0.khop_id = None
         d0.khop_mo_ta = None
+
+
+def _lenh_da_chi_cua_phieu(db, p: PhieuThuChi):
+    """Lệnh chi ngân hàng ĐÃ CHI ứng với phiếu: theo lenh_chi_id; phiếu cũ chưa lưu lệnh → dò số PO trong diễn giải."""
+    import re as _re_l
+    from ..models import LenhChiBank, DonMua
+    if getattr(p, "lenh_chi_id", None):
+        lcb = db.get(LenhChiBank, p.lenh_chi_id)
+        return lcb if (lcb is not None and lcb.trang_thai == "DA_CHI") else None
+    m = _re_l.search(r"PO-\d{8}-\d+", p.dien_giai or "")
+    if not m:
+        return None
+    dm = db.query(DonMua).filter(DonMua.so == m.group(0)).first()
+    if dm is None:
+        return None
+    return (db.query(LenhChiBank).filter_by(don_mua_id=dm.id, trang_thai="DA_CHI")
+            .order_by(LenhChiBank.id.desc()).first())
+
+
+@router.post("/phieu/ghi-so-theo-lenh")
+def ghi_so_theo_lenh(thuc_hien: bool = False, db: Session = Depends(get_db),
+                     nd: NguoiDung = Depends(yeu_cau(MODULE, "DUYET"))):
+    """📒 Đối chiếu phiếu CHI đang CHỜ DUYỆT với Duyệt chi Ngân Hàng: lệnh ĐÃ CHI → ghi sổ (quỹ + bút toán).
+    thuc_hien=False chỉ trả bảng xem trước. Phiếu không khớp lệnh đã chi giữ nguyên chờ duyệt tay."""
+    ds = (db.query(PhieuThuChi).filter(PhieuThuChi.trang_thai == "CHO_DUYET", PhieuThuChi.loai == "CHI")
+          .order_by(PhieuThuChi.ngay, PhieuThuChi.id).all())
+    khop, khong, loi = [], [], []
+    for p in ds:
+        lcb = _lenh_da_chi_cua_phieu(db, p)
+        dong = {"id": p.id, "so": p.so, "ngay": str(p.ngay) if p.ngay else None, "so_tien": _f(p.so_tien),
+                "dien_giai": (p.dien_giai or "")[:90], "ma_ban": _ma_cua_phieu(db, p),
+                "lenh_id": lcb.id if lcb is not None else None}
+        if lcb is None:
+            khong.append(dong)
+            continue
+        if thuc_hien:
+            try:
+                with db.begin_nested():
+                    if not getattr(p, "lenh_chi_id", None):
+                        p.lenh_chi_id = lcb.id
+                    _tu_ghi_so_theo_lenh(db, p, lcb, nd.id)
+            except HTTPException as e:
+                loi.append({**dong, "loi": str(e.detail)})
+                continue
+            except Exception as e:                    # noqa: BLE001 — một phiếu hỏng không chặn cả lô
+                loi.append({**dong, "loi": str(e)[:200]})
+                continue
+        khop.append(dong)
+    canh_bao = []
+    if thuc_hien and khop:
+        _snapshot_so_quy(db, f"TU GHI SO {len(khop)} phieu theo lenh")
+        from ..fin_snapshot import snapshot_financial
+        snapshot_financial(db, f"TU GHI SO {len(khop)} phieu theo lenh")
+        db.commit()
+        for q in db.query(TaiKhoanQuy).all():
+            cb = _canh_bao_quy_am(db, q.id)
+            if cb:
+                canh_bao.append(cb)
+    return {"thuc_hien": thuc_hien, "so_khop": len(khop), "tien_khop": sum(x["so_tien"] for x in khop),
+            "so_khong_khop": len(khong), "tien_khong_khop": sum(x["so_tien"] for x in khong),
+            "khop": khop, "khong_khop": khong, "loi": loi, "canh_bao_quy": canh_bao}
+
+
+@router.post("/phieu/{pid}/dao")
+def dao_phieu(pid: int, data: DuyetPhieuVao = DuyetPhieuVao(), db: Session = Depends(get_db),
+              nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
+    """↩ ĐẢO phiếu ĐÃ DUYỆT (ghi nhầm / ✔ Đã chi nhầm): sinh BÚT TOÁN ĐẢO, hoàn số dư quỹ, hoàn cấn trừ công nợ;
+    phiếu theo lệnh chi → lệnh mở lại 'Đã duyệt — chờ ngân hàng thực chi'. Giữ nguyên vết, không xóa gì."""
+    p = db.query(PhieuThuChi).filter_by(id=pid).with_for_update().first()
+    if p is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy phiếu")
+    if p.trang_thai != "DA_DUYET":
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Chỉ đảo được phiếu ĐÃ DUYỆT")
+    if p.la_tam_ung and Decimal(p.da_can_tru or 0) > 0:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Phiếu tạm ứng đã được cấn trừ một phần — gỡ cấn trừ trước khi đảo")
+    quy = db.query(TaiKhoanQuy).filter_by(id=p.quy_id).with_for_update().first()
+    bt0 = db.get(ButToan, p.but_toan_id) if p.but_toan_id else None
+    if quy is not None:
+        quy.so_du = Decimal(quy.so_du or 0) + (Decimal(p.so_tien) if p.loai == "CHI" else -Decimal(p.so_tien))
+    if bt0 is not None:
+        db.add(ButToan(ngay=date.today(), tk_no=bt0.tk_co, tk_co=bt0.tk_no, so_tien=bt0.so_tien,
+                       dien_giai=("ĐẢO " + (bt0.dien_giai or p.so or ""))[:200],
+                       don_hang_id=bt0.don_hang_id, quy_id=bt0.quy_id, nguon="PHIEU_DAO", nguon_id=p.id))
+    if p.cong_no_id:                                  # phiếu kiểu cũ: công nợ cấn LÚC DUYỆT → hoàn lại
+        cn = db.query(CongNo).filter_by(id=p.cong_no_id).with_for_update().first()
+        if cn is not None:
+            cn.da_thanh_toan = max(Decimal(cn.da_thanh_toan or 0) - Decimal(p.so_tien), Decimal(0))
+            da, tong = Decimal(cn.da_thanh_toan), Decimal(cn.so_tien or 0)
+            if cn.loai == "PHAI_THU":
+                cn.trang_thai = "THU_DU" if (tong > 0 and da >= tong) else ("THU_MOT_PHAN" if da > 0 else "CHUA_THU")
+            else:
+                cn.trang_thai = "DA_TRA" if (tong > 0 and da >= tong) else ("TRA_MOT_PHAN" if da > 0 else "CHUA_TRA")
+                if da < tong and getattr(cn, "don_mua_id", None):
+                    from ..models import DonMua as _DMd
+                    dmx = db.get(_DMd, cn.don_mua_id)
+                    if dmx is not None:
+                        dmx.tt_du = False
+                        dmx.ngay_tt_du = None
+    p.trang_thai = "DA_DAO"
+    _mo_lai_lenh_cua_phieu(db, p)                     # phiếu theo lệnh: mở lại lệnh + hoàn công nợ đã cấn lúc ✔ Đã chi
+    p.ghi_chu = ((p.ghi_chu + " | ") if p.ghi_chu else "") + "ĐẢO" + (f": {data.ghi_chu}" if data.ghi_chu else "")
+    ghi_audit(db, nd.id, "DAO_PHIEU", "phieu_thu_chi", p.id,
+              cu={"trang_thai": "DA_DUYET", "so_tien": _f(p.so_tien)}, moi={"trang_thai": "DA_DAO"})
+    _snapshot_so_quy(db, "DAO " + (p.so or f"PC-{p.id}"))
+    db.commit(); db.refresh(p)
+    return _phieu_dict(db, p)
 
 
 @router.post("/phieu/{pid}/tu-choi")
@@ -2260,14 +2396,25 @@ def _sao_ke_ghi_chi_lo(data: SkGhiVao, db: Session, nd: NguoiDung):
                 dm.tt_du = True
                 if not dm.ngay_tt_du:
                     dm.ngay_tt_du = date.today()
+    # 📒 TỰ GHI SỔ: lệnh đã được CEO/KTT duyệt + ngân hàng đã chi thật → phiếu vào sổ quỹ + bút toán NGAY
+    da_ghi_so = False
+    if lcb is not None:
+        _tu_ghi_so_theo_lenh(db, p, lcb, nd.id)
+        da_ghi_so = True
     if d0 is not None:
         d0.khop_loai = "DA_CHI_SK"
         d0.khop_id = p.id
-        d0.khop_mo_ta = (f"Phiếu {p.so} — PO {dm.so or dm.id} (chờ duyệt phiếu)")[:300]
+        d0.khop_mo_ta = (f"Phiếu {p.so} — PO {dm.so or dm.id} "
+                         + ("(đã ghi sổ)" if da_ghi_so else "(chờ duyệt phiếu)"))[:300]
     ghi_audit(db, nd.id, "SAO_KE_GHI_CHI", "phieu_thu_chi", p.id,
-              moi={"po": dm.so, "so_tien": float(so_tien), "quy_id": data.quy_id})
+              moi={"po": dm.so, "so_tien": float(so_tien), "quy_id": data.quy_id, "da_ghi_so": da_ghi_so})
+    if da_ghi_so:
+        _snapshot_so_quy(db, "TU GHI SO " + (p.so or f"PC-{p.id}"))
+        from ..fin_snapshot import snapshot_financial
+        snapshot_financial(db, "TU GHI SO " + (p.so or f"PC-{p.id}"))
     db.commit()
-    return {"ok": True, "phieu_so": p.so}
+    return {"ok": True, "phieu_so": p.so, "da_ghi_so": da_ghi_so,
+            "canh_bao_quy": _canh_bao_quy_am(db, data.quy_id) if da_ghi_so else None}
 
 
 @router.post("/sao-ke/ghi-thu")
