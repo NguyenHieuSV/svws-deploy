@@ -1481,14 +1481,20 @@ def _thuc_chi_ngoai_lenh(db, lich_su):
     trước khi có luồng Duyệt chi · PO cũ chưa có dòng công nợ). Mỗi PO / khoản công nợ một dòng:
     phần ngoài lệnh = «đã thanh toán» trên sổ công nợ − tổng thực chi của các lệnh ĐÃ CHI."""
     from ..models import ThanhToan as _TTn, HoaDon as _HDn, DonHang as _DHn
+    cns = db.query(CongNo).filter(CongNo.loai == "PHAI_TRA").all()
+    po_cua_cn = {c.id: c.don_mua_id for c in cns if c.don_mua_id}
     lenh_po, lenh_cn = {}, {}
     for x in lich_su:
         v = float(x.get("thuc_chi", x.get("so_tien") or 0) or 0)
         if x.get("don_mua_id"):
             lenh_po[x["don_mua_id"]] = lenh_po.get(x["don_mua_id"], 0.0) + v
         elif x.get("cong_no_id"):
-            lenh_cn[x["cong_no_id"]] = lenh_cn.get(x["cong_no_id"], 0.0) + v
-    cns = db.query(CongNo).filter(CongNo.loai == "PHAI_TRA").all()
+            # lệnh «Trả công nợ» của CHÍNH công nợ PO → tính vào phần đã qua lệnh của PO đó (không đếm 2 lần)
+            pid = po_cua_cn.get(x["cong_no_id"])
+            if pid:
+                lenh_po[pid] = lenh_po.get(pid, 0.0) + v
+            else:
+                lenh_cn[x["cong_no_id"]] = lenh_cn.get(x["cong_no_id"], 0.0) + v
     cn_po = {}
     for c in cns:
         if c.don_mua_id:
