@@ -945,6 +945,7 @@ class LenhChiBank(Base):
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     don_mua_id: Mapped[int | None] = mapped_column(ForeignKey("don_mua.id"), nullable=True)
     cong_no_id: Mapped[int | None] = mapped_column(ForeignKey("cong_no.id"), nullable=True)
+    phieu_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)   # mig 120: lệnh của phiếu chi TẠM ỨNG / CỌC NCC lập tay
     hinh_thuc: Mapped[str | None] = mapped_column(String(30), nullable=True)
     ngay_tt: Mapped[date | None] = mapped_column(Date, nullable=True)
     so_tien: Mapped[Decimal] = mapped_column(Numeric(18, 0), default=0)

@@ -107,7 +107,9 @@ def _phieu_dict(db, p: PhieuThuChi):
             "cong_no_id": p.cong_no_id, "tk_doi_ung": p.tk_doi_ung,
             "trang_thai": p.trang_thai, "but_toan_id": p.but_toan_id, "ghi_chu": p.ghi_chu,
             "la_tam_ung": bool(p.la_tam_ung), "da_can_tru": _f(p.da_can_tru),
-            "con_lai_tam_ung": _f(p.so_tien) - _f(p.da_can_tru) if p.la_tam_ung else 0}
+            "con_lai_tam_ung": _f(p.so_tien) - _f(p.da_can_tru) if p.la_tam_ung else 0,
+            # 💵 phiếu chi tạm ứng / cọc NCC đang đi cửa Duyệt chi Ngân Hàng → giao diện ẩn nút Duyệt tay
+            "lenh_tam_ung": _tt_lenh_tam_ung(db, p)}
 
 
 def _snapshot_so_quy(db, su_kien: str):
@@ -353,9 +355,39 @@ def tao_phieu(data: PhieuVao, db: Session = Depends(get_db),
                     la_tam_ung=bool(data.la_tam_ung))
     db.add(p); db.flush()
     p.so = f"{'PT' if p.loai == 'THU' else 'PC'}-{date.today():%Y%m%d}-{p.id}"
+    _day_tam_ung_sang_duyet_chi(db, p, nd.id)
     ghi_audit(db, nd.id, "TAO", "phieu_thu_chi", p.id, moi={"so": p.so, "so_tien": _f(p.so_tien)})
     db.commit(); db.refresh(p)
     return _phieu_dict(db, p)
+
+
+def _tt_lenh_tam_ung(db, p):
+    if not (p.loai == "CHI" and p.la_tam_ung):
+        return None
+    l = _lenh_tam_ung_cua_phieu(db, p)
+    return {"id": l.id, "trang_thai": l.trang_thai} if l is not None else None
+
+
+def _lenh_tam_ung_cua_phieu(db, p):
+    from ..models import LenhChiBank
+    return (db.query(LenhChiBank).filter(LenhChiBank.phieu_id == p.id)
+            .order_by(LenhChiBank.id.desc()).first())
+
+
+def _day_tam_ung_sang_duyet_chi(db, p: PhieuThuChi, nd_id) -> None:
+    """💵 Phiếu CHI TẠM ỨNG / CỌC cho NCC (không gắn PO) đang CHỜ DUYỆT → sinh LỆNH CHI ở Duyệt chi Ngân Hàng:
+    mọi khoản tiền ra cho NCC duyệt cùng MỘT CỬA; ✔ Đã chi ở đó thì phiếu tự ghi sổ."""
+    from ..models import LenhChiBank
+    from ..nhac_viec_service import gio_hien_tai
+    if not (p.loai == "CHI" and p.la_tam_ung and p.nha_cung_cap_id and p.trang_thai == "CHO_DUYET"):
+        return
+    lcb = _lenh_tam_ung_cua_phieu(db, p)
+    if lcb is not None and lcb.trang_thai in ("CHO_DUYET", "DA_DUYET", "DA_CHI"):
+        return
+    lcb = LenhChiBank(phieu_id=p.id, so_tien=p.so_tien, de_nghi_luc=gio_hien_tai(), nguoi_tao=nd_id,
+                      ghi_chu=("Tạm ứng / cọc NCC — " + (p.dien_giai or p.so or ""))[:200])
+    db.add(lcb); db.flush()
+    p.lenh_chi_id = lcb.id
 
 
 def _canh_bao_quy_am(db, quy_id):
@@ -394,6 +426,7 @@ def trinh_phieu(pid: int, db: Session = Depends(get_db),
     if p.trang_thai != "NHAP":
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Chỉ trình được phiếu ở trạng thái NHÁP")
     p.trang_thai = "CHO_DUYET"
+    _day_tam_ung_sang_duyet_chi(db, p, nd.id)
     ghi_audit(db, nd.id, "TRINH", "phieu_thu_chi", p.id)
     db.commit(); db.refresh(p)
     return _phieu_dict(db, p)
@@ -468,6 +501,11 @@ def duyet_phieu(pid: int, data: DuyetPhieuVao = DuyetPhieuVao(),
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy phiếu")
     if p.trang_thai not in ("CHO_DUYET", "NHAP"):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Phiếu không ở trạng thái chờ duyệt")
+    _ltu = _lenh_tam_ung_cua_phieu(db, p)
+    if _ltu is not None and _ltu.trang_thai in ("CHO_DUYET", "DA_DUYET"):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Phiếu chi TẠM ỨNG / CỌC NCC duyệt ở «Nhà cung cấp → Duyệt chi Ngân Hàng» (một cửa duyệt chi): "
+                            "duyệt lệnh ở đó, ngân hàng chi xong bấm ✔ Đã chi thì phiếu tự ghi sổ.")
     # DUYỆT THEO HẠN MỨC NHIỀU CẤP (bảng han_muc_duyet, loại 'thu_chi')
     kiem_han_muc(db, nd, LOAI_DUYET, Decimal(p.so_tien))
     bt = _hach_toan_phieu(db, p, cho_am_quy=bool(getattr(p, "lenh_chi_id", None)))
@@ -529,6 +567,12 @@ def _mo_lai_lenh_cua_phieu(db, p) -> None:
         return
     from ..models import LenhChiBank, DonMua, SaoKeDong
     lcb = db.get(LenhChiBank, p.lenh_chi_id)
+    if lcb is not None and getattr(lcb, "phieu_id", None) == p.id:
+        # lệnh TẠM ỨNG / CỌC của chính phiếu này: phiếu bị từ chối / hủy / xóa / đảo → lệnh đóng theo
+        if lcb.trang_thai in ("CHO_DUYET", "DA_DUYET", "DA_CHI"):
+            lcb.trang_thai = "TU_CHOI"
+            lcb.ghi_chu = ((lcb.ghi_chu or "") + " | phiếu " + str(p.trang_thai))[:200]
+        return
     if lcb is not None and lcb.trang_thai == "DA_CHI":
         lcb.trang_thai = "DA_DUYET"
         lcb.chi_luc = None

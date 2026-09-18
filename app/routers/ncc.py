@@ -1388,14 +1388,49 @@ def chot_thanh_toan_mua(dm_id: int, db: Session = Depends(get_db),
     return {"ok": True, "da_tt_100": da_tt_100, "con_lai": float(tong - dn)}
 
 
+def _loai_lenh(db, r, dm, cn, ph, dot_chi):
+    """Nhãn loại lệnh chi để người duyệt biết đang duyệt gì: cọc / trả đợt / tất toán / công nợ / tạm ứng."""
+    if ph is not None:
+        return {"ma": "TAM_UNG", "nhan": "💵 Tạm ứng / cọc NCC (chưa có PO)"}
+    if dm is None:
+        return {"ma": "CONG_NO", "nhan": "Trả công nợ"} if cn is not None else {"ma": "KHAC", "nhan": "—"}
+    _L = type(r)
+    truoc = float(db.query(func.coalesce(func.sum(_L.so_tien), 0))
+                  .filter(_L.don_mua_id == dm.id, _L.trang_thai == "DA_CHI", _L.id < r.id).scalar() or 0)
+    tong = float(dm.tong_tien or 0)
+    st = float(r.so_tien or 0)
+    if r.trang_thai == "DA_DUYET" and dot_chi is not None:
+        dot = float(dot_chi)
+    elif r.trang_thai == "CHO_DUYET":
+        dot = max(st - truoc, 0.0) if st > truoc else st
+    else:
+        dot = st
+    if dot <= 0:
+        return {"ma": "CONG_NO_100", "nhan": "Công nợ 100% (0 ₫)"}
+    luy_ke = truoc + dot
+    pct = round(luy_ke / tong * 100) if tong > 0 else None
+    du = tong > 0 and luy_ke >= tong * 0.999
+    if truoc <= 0:
+        return ({"ma": "TRA_DU", "nhan": "Thanh toán 100% một lần"} if du
+                else {"ma": "COC", "nhan": f"💵 Cọc / đợt 1 — {pct}% PO" if pct is not None else "💵 Cọc / đợt 1"})
+    return ({"ma": "TAT_TOAN", "nhan": "Tất toán — đợt cuối"} if du
+            else {"ma": "DOT_TIEP", "nhan": f"Trả đợt tiếp — lũy kế {pct}% PO" if pct is not None else "Trả đợt tiếp"})
+
+
 def _lcb_dict(db, r):
     dm = db.get(DonMua, r.don_mua_id) if r.don_mua_id else None
     cn = db.get(CongNo, r.cong_no_id) if getattr(r, "cong_no_id", None) else None
+    ph = None
+    if getattr(r, "phieu_id", None):
+        from ..models import PhieuThuChi as _PtcL
+        ph = db.get(_PtcL, r.phieu_id)
     ncc = None
     if dm is not None:
         ncc = db.get(NhaCungCap, dm.nha_cung_cap_id)
     elif cn is not None and cn.nha_cung_cap_id:
         ncc = db.get(NhaCungCap, cn.nha_cung_cap_id)
+    elif ph is not None and ph.nha_cung_cap_id:
+        ncc = db.get(NhaCungCap, ph.nha_cung_cap_id)
     ma_cn = None
     if cn is not None:
         if cn.don_mua_id:
@@ -1414,14 +1449,24 @@ def _lcb_dict(db, r):
         dot_chi = max(float(dm.lenh_bank_tien or 0) - float(da_chi), 0.0)
     elif cn is not None and r.trang_thai == "DA_DUYET":
         dot_chi = float(r.so_tien or 0)      # lệnh công nợ: mỗi lệnh là một đợt
+    elif ph is not None and r.trang_thai == "DA_DUYET":
+        dot_chi = float(r.so_tien or 0)      # lệnh tạm ứng / cọc: một đợt
+    ma_ph = None
+    if ph is not None and ph.don_hang_id:
+        from ..models import DonHang as _DhL
+        _d = db.get(_DhL, ph.don_hang_id)
+        ma_ph = (_d.so if _d else None)
+    loai = _loai_lenh(db, r, dm, cn, ph, dot_chi)
     return {"id": r.id, "don_mua_id": r.don_mua_id, "cong_no_id": getattr(r, "cong_no_id", None),
-            "nguon": "PO" if dm is not None else ("CONG_NO" if cn is not None else "—"),
-            "so": (dm.so if dm else None) or (f"CN-{cn.id}" if cn else None)
+            "phieu_id": getattr(r, "phieu_id", None), "loai_lenh": loai["ma"], "loai_nhan": loai["nhan"],
+            "dien_giai": (ph.dien_giai if ph is not None else None),
+            "nguon": "PO" if dm is not None else ("CONG_NO" if cn is not None else ("TAM_UNG" if ph is not None else "—")),
+            "so": (dm.so if dm else None) or (f"CN-{cn.id}" if cn else None) or (ph.so if ph is not None else None)
                   or (f"PO-{r.don_mua_id}" if r.don_mua_id else "—"),
             "so_hoa_don": (dm.so_hoa_don if dm else None) or (cn.so_ct if cn else None),
-            "ma_don_ban": (_ma_ban_hang_po(db, dm) if dm else None) or ma_cn,
+            "ma_don_ban": (_ma_ban_hang_po(db, dm) if dm else None) or ma_cn or ma_ph,
             "ncc_ten": ncc.ten if ncc else None,
-            "tong_tien": float(dm.tong_tien or 0) if dm else (float(cn.so_tien or 0) if cn else 0),
+            "tong_tien": float(dm.tong_tien or 0) if dm else (float(cn.so_tien or 0) if cn else float(r.so_tien or 0)),
             "so_tien": float(r.so_tien or 0),
             "de_nghi_luc": str(r.de_nghi_luc)[:16] if r.de_nghi_luc else None,
             "trang_thai": r.trang_thai,
@@ -1547,6 +1592,27 @@ def da_chi_lenh_cong_no(lcb_id: int, sao_ke_dong_id: int | None = None,
     if r.trang_thai != "DA_DUYET":
         raise HTTPException(status.HTTP_400_BAD_REQUEST,
                             f"Lệnh đang ở trạng thái {r.trang_thai} — chỉ ✔ Đã chi được lệnh ĐÃ DUYỆT.")
+    if getattr(r, "phieu_id", None) and not r.don_mua_id:
+        # 💵 LỆNH TẠM ỨNG / CỌC NCC: ngân hàng đã chi → phiếu chi TỰ GHI SỔ (quỹ + bút toán), lệnh xuống Lịch sử
+        from ..models import PhieuThuChi as _PtcD
+        from .ke_toan_quy import _tu_ghi_so_theo_lenh, _canh_bao_quy_am, _snapshot_so_quy
+        p = db.query(_PtcD).filter_by(id=r.phieu_id).with_for_update().first()
+        if p is None or p.trang_thai not in ("CHO_DUYET", "NHAP"):
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                "Phiếu tạm ứng của lệnh này không còn ở trạng thái chờ — kiểm tra ở Kế toán → Phiếu thu–chi.")
+        if not p.lenh_chi_id:
+            p.lenh_chi_id = r.id
+        _tu_ghi_so_theo_lenh(db, p, r, nd.id)
+        r.trang_thai = "DA_CHI"
+        r.chi_luc = gio_hien_tai()
+        ghi_audit(db, nd.id, "DA_CHI_TAM_UNG", "lenh_chi_bank", r.id,
+                  moi={"phieu": p.so, "so_tien": float(r.so_tien or 0)})
+        _snapshot_so_quy(db, "DA CHI TAM UNG " + (p.so or ""))
+        db.commit()
+        kq = _lcb_dict(db, r)
+        kq["canh_bao_quy"] = _canh_bao_quy_am(db, p.quy_id)
+        kq["phieu_so"] = p.so
+        return kq
     if r.don_mua_id or not getattr(r, "cong_no_id", None):
         raise HTTPException(status.HTTP_400_BAD_REQUEST,
                             "Đây là lệnh PO — bấm ✔ Đã chi theo đường tạo phiếu chi, không dùng nút này.")
@@ -1583,8 +1649,8 @@ def tu_choi_lenh_chi_bank(lcb_id: int, db: Session = Depends(get_db),
     r = db.get(LenhChiBank, lcb_id)
     if r is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy lệnh chi")
-    la_cn_cho_chi = (r.trang_thai == "DA_DUYET" and getattr(r, "cong_no_id", None)
-                     and not r.don_mua_id)   # lệnh công nợ chờ thực chi — chưa trừ gì, gỡ an toàn
+    la_cn_cho_chi = (r.trang_thai == "DA_DUYET" and (getattr(r, "cong_no_id", None) or getattr(r, "phieu_id", None))
+                     and not r.don_mua_id)   # lệnh công nợ / tạm ứng chờ thực chi — chưa trừ gì, gỡ an toàn
     if r.trang_thai != "CHO_DUYET" and not la_cn_cho_chi:
         raise HTTPException(status.HTTP_400_BAD_REQUEST,
                             f"Lệnh chi đang ở trạng thái {r.trang_thai} — chỉ gỡ được lệnh CHỜ DUYỆT "
@@ -1597,6 +1663,12 @@ def tu_choi_lenh_chi_bank(lcb_id: int, db: Session = Depends(get_db),
     dm = db.get(DonMua, r.don_mua_id) if r.don_mua_id else None
     if dm is not None:
         dm.cho_lenh_bank = False
+    if getattr(r, "phieu_id", None):           # lệnh tạm ứng bị từ chối → phiếu chi cũng TỪ CHỐI (chưa ghi sổ gì)
+        from ..models import PhieuThuChi as _PtcT
+        _p = db.get(_PtcT, r.phieu_id)
+        if _p is not None and _p.trang_thai in ("CHO_DUYET", "NHAP"):
+            _p.trang_thai = "TU_CHOI"
+            _p.ghi_chu = ((_p.ghi_chu + " | ") if _p.ghi_chu else "") + "Lệnh chi tạm ứng bị từ chối ở Duyệt chi Ngân Hàng"
     ghi_audit(db, nd.id, "TU_CHOI_CHI_BANK", "lenh_chi_bank", r.id,
               moi={"don_mua_id": r.don_mua_id, "so_tien": float(r.so_tien or 0)})
     db.commit()
