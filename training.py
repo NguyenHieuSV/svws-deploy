@@ -391,8 +391,31 @@ button.go{width:100%;border:0;border-radius:9px;padding:12px;font-size:15px;font
 .hp{position:absolute;left:-5000px;top:-5000px}
 a{color:#0582ca;font-size:13.5px}.foot{margin-top:12px;text-align:center}
 .note{background:#eef7ff;border:1px solid #cfe6fa;border-radius:9px;padding:9px 11px;font-size:12.5px;color:#13315c;margin-bottom:12px}
+.card{max-width:500px}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:12px 0}
+.stats div{background:#f2f7fd;border:1px solid #dce9f8;border-radius:10px;padding:8px 4px;text-align:center}
+.stats b{display:block;font-size:18px;color:#0582ca}
+.stats span{font-size:10.5px;color:#5a6b85;line-height:1.3;display:block}
+.feat{margin:0 0 12px;padding-left:18px;color:#33445e;font-size:13px;line-height:1.65}
+.feat li{margin-bottom:3px}.feat b{color:#13315c}
+.how{background:#f7faf3;border:1px solid #e0eccd;border-radius:9px;padding:9px 11px;font-size:12.5px;color:#3a5320;margin-bottom:14px}
 </style><div class=card>
-<h1>💧 SVWS Training — Đăng ký</h1>
+<h1>💧 SVWS Training</h1>
+<p class=sub>Chương trình huấn luyện <b>công nghệ xử lý nước cấp – nước thải – khí thải</b> của Công ty TNHH GPKT Sóng Việt (SVWS), biên soạn theo chuẩn đào tạo kỹ sư nội bộ — mở miễn phí cho sinh viên ngành Môi trường, Cấp thoát nước, Hóa – Kỹ thuật.</p>
+<div class=stats>
+<div><b>31</b><span>công nghệ<br>3 lĩnh vực</span></div>
+<div><b>31</b><span>mô phỏng<br>động</span></div>
+<div><b>313</b><span>câu hỏi<br>trắc nghiệm</span></div>
+<div><b>100%</b><span>miễn phí<br>học mọi lúc</span></div>
+</div>
+<ul class=feat>
+<li><b>Học theo slide</b> từ nguyên lý → tính toán thiết kế → vận hành & chẩn "bệnh" hệ thống → kinh nghiệm thi công thực tế và an toàn.</li>
+<li><b>Bám quy chuẩn mới nhất</b>: QCVN 40:2025 (nước thải), QCVN 19:2024 (khí thải) kèm bảng tra ngưỡng xả, đối chiếu tài liệu kỹ thuật US EPA.</li>
+<li><b>Mỗi bài kết thúc bằng bài test 10 câu</b> (đạt khi ≥ 80%) — điểm được ghi nhận vào hồ sơ học tập của bạn trên hệ thống SVWS.</li>
+<li><b>Dùng ngay trên điện thoại</b> — mở bằng trình duyệt, có thể cài ra màn hình chính như một app.</li>
+</ul>
+<div class=how>📌 <b>Sau khi đăng ký:</b> xác minh qua email (hoặc chờ SVWS duyệt) → quay lại trang đăng nhập → bắt đầu học. Hoàn thành tốt là một điểm cộng khi ứng tuyển thực tập/việc làm tại SVWS.</div>
+<h2 style="font-size:16px;color:#13315c;margin:0 0 8px">Đăng ký tài khoản</h2>
 <div class=tabs><div class="tab" id=tS>🎓 Sinh viên</div><div class="tab" id=tE>👷 Nhân viên SVWS</div></div>
 <div id=fS>
 <div class=note>Dùng thông tin thật (ưu tiên <b>email trường .edu.vn</b>) — tài khoản ảo sẽ không được kích hoạt.</div>
