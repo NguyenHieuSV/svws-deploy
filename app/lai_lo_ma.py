@@ -81,7 +81,8 @@ def po_trung_khoan(pos, so_ct, ncc_id, tong, truoc_thue=None, da_dung=None):
     return None
 
 
-def chi_phi_ma(db: Session, dh: DonHang) -> dict:
+def chi_phi_ma(db: Session, dh: DonHang, tho: bool = False) -> dict:
+    """tho=True → số THÔ (không áp quy tắc đơn ĐẦU TƯ) — dùng để tính vốn đầu tư của dự án cho thuê."""
     doanh_thu = _f(dh.tong_tien) + _f(dh.tien_thue)
     # PO gắn đơn + PO chỉ mang MÃ CHUỖI trùng số đơn (sinh từ Dự toán / Dự án trước khi có
     # đơn bán) — đơn bán cùng số tạo sau vẫn gom đủ giá vốn.
@@ -172,7 +173,17 @@ def chi_phi_ma(db: Session, dh: DonHang) -> dict:
     coc_don = _f(dh.thanh_toan_coc) if not cn_thu else 0.0
     da_thu = da_thu_cn + (max(tu_thu_clt, coc_don) if not cn_thu else max(tu_thu_clt, 0.0))
 
+    # 🏗 ĐƠN ĐẦU TƯ – CHO THUÊ: PO / chi phí của đơn là VỐN ĐẦU TƯ (tài sản, khấu hao dần) — KHÔNG phải giá vốn;
+    #    giá trị đơn là giá trị hợp đồng ước tính — KHÔNG phải doanh thu. Xem app/dau_tu_cho_thue.py
+    dau_tu = {}
+    if not tho and (getattr(dh, "loai_don", None) or "").upper() == "DAU_TU":
+        dau_tu = {"la_dau_tu": True, "von_dau_tu": tong_chi_phi, "von_po": gia_von_po, "von_khac": chi_phi_khac,
+                  "gia_tri_hd": doanh_thu, "tai_san_cho_thue_id": getattr(dh, "tai_san_cho_thue_id", None)}
+        doanh_thu = gia_von_po = chi_phi_khac = chi_ngoai_cn = chi_hd_ngoai_po = tong_chi_phi = loi_nhuan = 0.0
+        da_thu = 0.0
+
     return {
+        **dau_tu,
         "doanh_thu": doanh_thu,
         "gia_von_po": gia_von_po, "po_cho_duyet": po_cho_duyet, "gia_von_thuc": gia_von_thuc,
         "chi_ngoai_cn": chi_ngoai_cn, "chi_hd_ngoai_po": chi_hd_ngoai_po,

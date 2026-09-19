@@ -442,6 +442,8 @@ class DonHang(Base):
     ty_le_dat_coc: Mapped[Decimal] = mapped_column(Numeric(5, 2), default=0)
     thanh_toan_coc: Mapped[Decimal] = mapped_column(Numeric(18, 0), default=0)   # tiền cọc khách đã trả
     so_hoa_don: Mapped[str | None] = mapped_column(String(60), nullable=True)     # mig 108: số HĐ xuất cho khách
+    loai_don: Mapped[str | None] = mapped_column(String(20), default="THUONG")    # mig 125: THUONG | DAU_TU (đầu tư – cho thuê)
+    tai_san_cho_thue_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)   # mig 125: mã mẹ dự án cho thuê
     chi_tiet: Mapped[list["DonHangCt"]] = relationship(cascade="all, delete-orphan", lazy="selectin")
 
 
@@ -1268,6 +1270,10 @@ class TaiSanChoThue(Base):
     gia_thue_thang: Mapped[Decimal] = mapped_column(Numeric(18, 0), default=0)
     don_vi_gia: Mapped[str | None] = mapped_column(String(20), default="VND/THANG")   # VND/THANG | VND/M3 (mig 66)
     khau_hao_thang: Mapped[Decimal] = mapped_column(Numeric(18, 0), default=0)
+    so_thang_hd: Mapped[int | None] = mapped_column(Integer, nullable=True)               # mig 125: thời hạn HĐ = thời gian khấu hao
+    ngay_bat_dau_hd: Mapped[date | None] = mapped_column(Date, nullable=True)            # mig 125
+    san_luong_toi_thieu: Mapped[Decimal | None] = mapped_column(Numeric(15, 1), default=0)   # mig 125: m³/tháng cam kết tối thiểu
+    san_luong_du_kien: Mapped[Decimal | None] = mapped_column(Numeric(15, 1), default=0)     # mig 125: m³/tháng dự kiến
     ngay_mua: Mapped[date | None] = mapped_column(Date, nullable=True)
     tinh_trang: Mapped[str] = mapped_column(String(16), default="SAN_SANG")
     khach_hang_id: Mapped[int | None] = mapped_column(ForeignKey("khach_hang.id"), nullable=True)

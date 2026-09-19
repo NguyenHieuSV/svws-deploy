@@ -3018,9 +3018,10 @@ def chi_phi_theo_don(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "X
     out = []
     for dh in db.query(DonHang).order_by(DonHang.id.desc()).all():
         cp = chi_phi_ma(db, dh)
-        if cp["doanh_thu"] == 0 and cp["tong_chi_phi"] == 0:
+        if cp["doanh_thu"] == 0 and cp["tong_chi_phi"] == 0 and not cp.get("la_dau_tu"):
             continue                      # bỏ đơn rỗng (chưa có doanh thu lẫn chi phí)
         out.append({"don_hang_id": dh.id, "ma_ban": dh.so or f"DH-{dh.id}", "nhom": nhom_ma(dh.so),
+                    "la_dau_tu": bool(cp.get("la_dau_tu")), "von_dau_tu": cp.get("von_dau_tu") or 0,
                     "doanh_thu": cp["doanh_thu"],
                     "gia_von_po": cp["gia_von_po"], "chi_phi_khac": cp["chi_phi_khac"],
                     "thanh_toan_mua": cp["da_tra_ncc"], "cong_no_phai_tra": cp["con_phai_tra"],

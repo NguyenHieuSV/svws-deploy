@@ -303,6 +303,15 @@
     <p>Quản lý thiết bị / hệ thống cho thuê. Chọn <b>Dự án</b> ở bộ lọc đầu trang để xem riêng từng dự án. Các tab:
     <b>Báo cáo vận hành · Tài sản · Hợp đồng · Chi phí vận hành · Vật tư &amp; thiết bị · Định mức tiêu hao · Bảo trì · Document</b>.</p>
     <ul>
+      <li><b>🏗 Đầu tư – cho thuê (từ 19/09/2026)</b> — cho các hợp đồng <b>bán nước theo m³ / cho thuê hệ thống theo tháng</b> mà thiết bị do Sóng Việt bỏ vốn và <b>vẫn là tài sản của Sóng Việt</b>:
+        <ul>
+          <li><b>Dự án cho thuê = mã mẹ</b>, giữ thông số hợp đồng (nút <b>⚙ Thông số</b>): số tháng hợp đồng, ngày bắt đầu tính tiền, sản lượng <b>tối thiểu</b> và <b>dự kiến</b> (m³/tháng), vốn đầu tư đầu kỳ.</li>
+          <li><b>Đơn ĐẦU TƯ</b>: mã DV dùng để mua / lắp thiết bị cho hợp đồng. CEO / ADMIN / KTT bấm <b>🏗 Là đơn ĐẦU TƯ</b> (ở danh sách «mã DV nghi là đơn đầu tư») → mọi PO / chi phí của mã đó thành <b>vốn đầu tư</b> của dự án: <b>không vào giá vốn, không tính doanh thu, không bị gắn cờ bất thường</b>. Bỏ đánh dấu được bất cứ lúc nào.</li>
+          <li><b>Khấu hao theo thời gian</b>: khấu hao tháng = vốn đầu tư ÷ số tháng hợp đồng (hoặc số nhập tay). Chỉ phần <b>khấu hao lũy kế</b> mới trừ vào LÃI/LỖ tổng ở Overall Financial (dòng «🏗 Khấu hao đầu tư cho thuê»); vốn chưa thu hồi là <b>tài sản</b>, hiện ở ghi chú tím dưới bảng Lãi/Lỗ.</li>
+          <li><b>Sản lượng tối thiểu</b>: tháng nào m³ thực tế thấp hơn mức cam kết thì doanh thu tính theo mức tối thiểu (bảng «Mã bán hàng theo tháng» ghi rõ «tính … m³ (tối thiểu)»).</li>
+          <li><b>Hai góc nhìn lãi/lỗ</b>: theo <b>tháng</b> = doanh thu − chi phí vận hành − khấu hao (cột «LN sau khấu hao»); <b>lũy kế</b> = bảng «Đầu tư – cho thuê» ở trang danh mục dự án: vốn · đã khấu hao · giá trị còn lại · doanh thu / chi phí lũy kế · <b>% hoàn vốn</b> · số tháng còn lại để hoàn vốn.</li>
+          <li>Mã tháng được nối vào dự án theo <b>gốc mã</b> (DV-COA-NT-0926-01 → dự án DV-COA-NT-2024); mã tháng viết tắt bỏ tên khách (DV-D10-0926) được nối khi cùng khách và cùng đuôi gốc.</li>
+        </ul></li>
       <li><b>Báo cáo vận hành</b>: tỷ lệ thiết bị đang cho thuê, doanh thu thuê/tháng, chi phí lũy kế và <b>lãi/lỗ theo tháng</b> của từng dự án.</li>
       <li><b>Tài sản</b>: tình trạng từng tài sản — Sẵn sàng / Đang thuê / Bảo trì / Hỏng / Thanh lý.</li>
       <li><b>Hợp đồng</b>: hợp đồng thuê, ngày hết hạn (nhắc trước 30 ngày), công nợ tiền thuê.</li>

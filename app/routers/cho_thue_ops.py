@@ -41,6 +41,8 @@ def _ts_ra(db, t: TaiSanChoThue) -> dict:
             "nguyen_gia": float(t.nguyen_gia or 0), "gia_thue_thang": float(t.gia_thue_thang or 0),
             "don_vi_gia": t.don_vi_gia or "VND/THANG",
             "khau_hao_thang": float(t.khau_hao_thang or 0),
+            "so_thang_hd": t.so_thang_hd, "ngay_bat_dau_hd": str(t.ngay_bat_dau_hd) if t.ngay_bat_dau_hd else None,
+            "san_luong_toi_thieu": float(t.san_luong_toi_thieu or 0), "san_luong_du_kien": float(t.san_luong_du_kien or 0),
             "ngay_mua": str(t.ngay_mua) if t.ngay_mua else None,
             "tinh_trang": t.tinh_trang, "khach_hang_id": t.khach_hang_id,
             "khach_hang": _ten_kh(db, t.khach_hang_id), "vi_tri": t.vi_tri, "ghi_chu": t.ghi_chu}
@@ -72,6 +74,10 @@ class TaiSanSuaCT(BaseModel):
     gia_thue_thang: Decimal | None = None
     don_vi_gia: str | None = Field(default=None, pattern="^(VND/THANG|VND/M3)$")
     khau_hao_thang: Decimal | None = None
+    so_thang_hd: int | None = Field(default=None, ge=0, le=600)
+    ngay_bat_dau_hd: date | None = None
+    san_luong_toi_thieu: Decimal | None = Field(default=None, ge=0)
+    san_luong_du_kien: Decimal | None = Field(default=None, ge=0)
     tinh_trang: str | None = None
     khach_hang_id: int | None = None
     vi_tri: str | None = None
@@ -110,7 +116,8 @@ def sua_tai_san(ts_id: int, data: TaiSanSuaCT, db: Session = Depends(get_db),
     if data.tinh_trang is not None and data.tinh_trang not in TINH_TRANG:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Tình trạng không hợp lệ")
     for f in ("ten_du_an", "ten", "loai", "loai_he_thong", "nguyen_gia", "gia_thue_thang",
-              "don_vi_gia", "khau_hao_thang", "tinh_trang", "vi_tri", "ghi_chu"):
+              "don_vi_gia", "khau_hao_thang", "so_thang_hd", "ngay_bat_dau_hd", "san_luong_toi_thieu",
+              "san_luong_du_kien", "tinh_trang", "vi_tri", "ghi_chu"):
         v = getattr(data, f)
         if v is not None:
             setattr(t, f, v)
@@ -1730,13 +1737,22 @@ def du_an_cac_thang(ts_id: int, so_thang: int = 12, db: Session = Depends(get_db
             if mk:
                 kl_thang[mk] = kl_thang.get(mk, 0.0) + (float(arr[i].luong_ton) - float(arr[i - 1].luong_ton))
     theo_m3 = (ts.don_vi_gia or "").upper() == "VND/M3"
+    # 🏗 khấu hao tháng (vốn đầu tư / số tháng hợp đồng) + sản lượng TỐI THIỂU cam kết — app/dau_tu_cho_thue.py
+    from ..dau_tu_cho_thue import tong_hop as _dt_th, m3_tinh_tien as _m3_tt
+    _da = next((x for x in _dt_th(db)["du_an"] if x["tai_san_id"] == ts_id), None)
+    kh_thang = float(_da["khau_hao_thang"]) if _da else 0.0
+    _bd = (_da or {}).get("ngay_bat_dau_hd")
     rows = []
     for m in months:
         cp = round(cp_thang.get(m, 0.0))
         kl = round(kl_thang.get(m, 0.0), 1)
-        # Dự án tính VND/m³: DOANH THU = KHỐI LƯỢNG × ĐƠN GIÁ; dự án VND/tháng: giá thuê tháng
-        doanh_thu = round(kl * dt) if theo_m3 else dt
+        kl_tt = _m3_tt(ts, kl) if theo_m3 else kl
+        # Dự án tính VND/m³: DOANH THU = KHỐI LƯỢNG TÍNH TIỀN (≥ tối thiểu) × ĐƠN GIÁ; dự án VND/tháng: giá thuê tháng
+        doanh_thu = round(kl_tt * dt) if theo_m3 else dt
+        kh_m = kh_thang if (kh_thang and _bd and m >= _bd[:7]) else 0.0
         rows.append({"thang": m, "ma_ban_hang": _ma_thang(prefix, m),
+                     "khoi_luong_tinh_tien": kl_tt, "ap_toi_thieu": bool(theo_m3 and kl_tt > kl),
+                     "khau_hao": kh_m, "loi_nhuan_sau_kh": doanh_thu - cp - kh_m,
                      "khoi_luong": kl,
                      "don_vi_kl": don_vi_kl or "m³",
                      "don_gia": dt, "don_vi_gia": ts.don_vi_gia or "VND/THANG",
@@ -1746,6 +1762,50 @@ def du_an_cac_thang(ts_id: int, so_thang: int = 12, db: Session = Depends(get_db
                      "doanh_thu": doanh_thu, "chi_phi": cp, "loi_nhuan": doanh_thu - cp})
     return {"tai_san_id": ts_id, "ten_du_an": prefix, "gia_thue_thang": dt,
             "dang_thue": dang_thue, "cac_thang": rows}
+
+
+# ===================== 🏗 ĐẦU TƯ – CHO THUÊ: vốn đầu tư · khấu hao · hoàn vốn =====================
+@router.get("/dau-tu")
+def dau_tu_tong_hop(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
+    """Bảng vốn đầu tư – khấu hao – hoàn vốn của mọi dự án cho thuê + đơn đầu tư / đơn NGHI là đầu tư. CHỈ ĐỌC."""
+    from ..dau_tu_cho_thue import tong_hop
+    r = tong_hop(db)
+    for x in r["du_an"]:
+        x["khach_hang"] = _ten_kh(db, x.get("khach_hang_id"))
+    return r
+
+
+class LoaiDonVao(BaseModel):
+    loai_don: str = Field(pattern="^(THUONG|DAU_TU)$")
+    tai_san_cho_thue_id: int | None = None
+
+
+@router.put("/dau-tu/don/{dh_id}")
+def dat_loai_don(dh_id: int, data: LoaiDonVao, db: Session = Depends(get_db),
+                 nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN", "KTT"))):
+    """Đánh dấu / bỏ đánh dấu một đơn bán là đơn ĐẦU TƯ – cho thuê, nối với dự án cho thuê (mã mẹ). Đổi cách tính lãi/lỗ
+    của mã (PO thành vốn đầu tư thay vì giá vốn) nên chỉ CEO / ADMIN / KTT."""
+    from ..models import DonHang
+    from ..dau_tu_cho_thue import du_an_cua_ma
+    dh = db.get(DonHang, dh_id)
+    if dh is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đơn hàng")
+    cu = {"loai_don": dh.loai_don, "tai_san_cho_thue_id": dh.tai_san_cho_thue_id}
+    if data.loai_don == "DAU_TU":
+        ts = db.get(TaiSanChoThue, data.tai_san_cho_thue_id) if data.tai_san_cho_thue_id else du_an_cua_ma(db, dh.so)
+        if ts is None:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                f"Chọn DỰ ÁN CHO THUÊ (mã mẹ) cho đơn {dh.so or dh.id} — chưa có dự án nào cùng gốc mã. "
+                                f"Tạo dự án ở Cho thuê → + Dự án cho thuê trước.")
+        dh.loai_don, dh.tai_san_cho_thue_id = "DAU_TU", ts.id
+    else:                                  # đơn thường: vẫn cho NỐI TAY vào dự án (mã tháng viết khác gốc mã mẹ)
+        if data.tai_san_cho_thue_id and db.get(TaiSanChoThue, data.tai_san_cho_thue_id) is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy dự án cho thuê")
+        dh.loai_don, dh.tai_san_cho_thue_id = "THUONG", (data.tai_san_cho_thue_id or None)
+    ghi_audit(db, nd.id, "LOAI_DON_DAU_TU", "don_hang", dh.id, cu=cu,
+              moi={"loai_don": dh.loai_don, "tai_san_cho_thue_id": dh.tai_san_cho_thue_id})
+    db.commit()
+    return {"id": dh.id, "so": dh.so, "loai_don": dh.loai_don, "tai_san_cho_thue_id": dh.tai_san_cho_thue_id}
 
 
 # ===================== BÁO CÁO THEO DỰ ÁN (pivot) =====================

@@ -656,6 +656,12 @@ def _tinh_lai_lo_tong(db: Session) -> dict:
         cp = chi_phi_ma(db, dh)
         doanh_thu = cp["doanh_thu"]          # GỒM VAT — cùng cơ sở với chi phí
         chi_phi = cp["tong_chi_phi"]         # PO đã duyệt + nhập ngoài + hóa đơn mua ngoài PO gắn mã
+        if cp.get("la_dau_tu"):              # 🏗 đơn ĐẦU TƯ – cho thuê: vốn đầu tư, không vào doanh thu / chi phí theo mã
+            theo_ma.append({"don_hang_id": dh.id, "ma_ban": dh.so or f"DH-{dh.id}", "nhom": nhom_ma(dh.so),
+                            "doanh_thu": 0.0, "tong_chi_phi": 0.0, "loi_nhuan": 0.0, "ty_suat": None,
+                            "la_dau_tu": True, "von_dau_tu": cp["von_dau_tu"], "gia_tri_hd": cp["gia_tri_hd"],
+                            "tai_san_cho_thue_id": cp.get("tai_san_cho_thue_id")})
+            continue
         if doanh_thu == 0 and chi_phi == 0:
             continue
         tong_dt += doanh_thu
@@ -704,12 +710,19 @@ def _tinh_lai_lo_tong(db: Session) -> dict:
                         "tong_chi_phi": g["chi"], "loi_nhuan": -g["chi"], "ty_suat": None,
                         "chua_co_don_ban": True})
     lai_gop = tong_dt - tong_cp
-    return {"doanh_thu": tong_dt, "chi_phi_don": tong_cp, "lai_gop": lai_gop,
+    # 🏗 ĐẦU TƯ – CHO THUÊ: vốn đầu tư là TÀI SẢN; chỉ KHẤU HAO lũy kế (theo thời gian hợp đồng) mới là chi phí
+    from ..dau_tu_cho_thue import tong_hop as _dt_tong_hop
+    _dtct = _dt_tong_hop(db, hom_nay)
+    khau_hao_ct = _dtct["tong"]["kh_luy_ke"]
+    return {"dau_tu_cho_thue": {"tong": _dtct["tong"], "so_du_an": len([x for x in _dtct["du_an"] if x["von_dau_tu"] > 0]),
+                                "so_nghi": len(_dtct["nghi_dau_tu"]), "so_chua_noi": len(_dtct["don_dau_tu_chua_noi"])},
+            "khau_hao_cho_thue": khau_hao_ct,
+            "doanh_thu": tong_dt, "chi_phi_don": tong_cp, "lai_gop": lai_gop,
             "chi_thang": chi_thang, "chi_phi_khac": chi_khac,
             "chi_phi_hd_mua": chi_hd_mua,
             "chi_phi_op": chi_op, "chi_chua_ma": chi_chua_ma, "chi_kho": chi_kho,
             "so_ma_le": len(ma_le),
-            "lai_lo": lai_gop - chi_khac - chi_hd_mua - chi_op - chi_chua_ma,
+            "lai_lo": lai_gop - chi_khac - chi_hd_mua - chi_op - chi_chua_ma - khau_hao_ct,
             "theo_ma": theo_ma, "theo_nhom": gom_theo_nhom(theo_ma), "ngay": str(hom_nay)}
 
 

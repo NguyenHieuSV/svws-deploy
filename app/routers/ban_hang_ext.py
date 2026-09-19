@@ -699,6 +699,7 @@ def _pnl_don(db: Session, dh: DonHang) -> dict:
     gia_von_cam_ket = cp["tong_chi_phi"]
     rate = lambda v: round((doanh_thu - v) / doanh_thu * 100, 1) if doanh_thu else 0.0
     return {"don_hang_id": dh.id, "so": dh.so, "doanh_thu": doanh_thu,
+            "la_dau_tu": bool(cp.get("la_dau_tu")), "von_dau_tu": cp.get("von_dau_tu") or 0,
             "gia_von_thuc": gia_von_thuc, "gia_von_cam_ket": gia_von_cam_ket,
             "gia_von_po": cp["gia_von_po"], "chi_phi_khac": cp["chi_phi_khac"],
             "da_tra_ncc": cp["da_tra_ncc"], "con_phai_tra": cp["con_phai_tra"],

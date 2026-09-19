@@ -568,6 +568,8 @@ def _don_chua_hoa_don(db, chi_bo_qua: bool = False) -> list[dict]:
             continue                                   # công nợ của đơn đã gắn một hóa đơn (hóa đơn gắn mã khác)
         if (dh.id in bo_qua) != chi_bo_qua:
             continue
+        if (getattr(dh, "loai_don", None) or "").upper() == "DAU_TU":
+            continue                                   # 🏗 đơn đầu tư – cho thuê: hóa đơn nằm ở các mã THÁNG
         tong = _f(dh.tong_tien) + _f(dh.tien_thue)
         kh = db.get(KhachHang, dh.khach_hang_id) if dh.khach_hang_id else None
         so_don = (dh.so_hoa_don or "").strip()
@@ -2185,6 +2187,8 @@ def _lai_lo_1(db, dh: DonHang):
     else:
         coc_tt = "DU"
     return {"don_hang_id": dh.id, "ma_ban": dh.so or f"DH-{dh.id}",
+            "la_dau_tu": bool(cp.get("la_dau_tu")), "von_dau_tu": cp.get("von_dau_tu") or 0,
+            "gia_tri_hd": cp.get("gia_tri_hd") or 0, "tai_san_cho_thue_id": cp.get("tai_san_cho_thue_id"),
             "doanh_thu": doanh_thu, "gia_von": gia_von, "chi_phi_khac": chi_phi,
             "thanh_toan_mua": gia_von, "cong_no_phai_tra": chi_phi,
             "gia_von_thuc": cp["gia_von_thuc"], "po_cho_duyet": cp["po_cho_duyet"],
