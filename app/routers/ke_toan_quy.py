@@ -532,6 +532,112 @@ def duyet_phieu(pid: int, data: DuyetPhieuVao = DuyetPhieuVao(),
     return _phieu_dict(db, p)
 
 
+def _la_so_tam(so, ma_don, hd_id=None) -> bool:
+    """Số hóa đơn bán đang là SỐ TẠM: trống · = mã đơn · dạng HD-<id> / DH-<id>."""
+    import re as _re_st
+    s = (so or "").strip().lower()
+    return (not s) or s == (ma_don or "").strip().lower() or bool(_re_st.fullmatch(r"(hd|dh)-\d+", s))
+
+
+def _don_chua_hoa_don(db) -> list[dict]:
+    """Đơn bán đã ở trạng thái ĐÃ XUẤT HÓA ĐƠN / HOÀN THÀNH mà CHƯA có hóa đơn bán nào bên Kế toán → doanh thu chưa được
+    ghi nhận. Kèm lý do: đơn chưa có giá trị · đã có công nợ nhưng chưa có hóa đơn · chưa sinh gì."""
+    co_hd = {i for (i,) in db.query(HoaDon.don_hang_id).filter(HoaDon.loai == "BAN",
+                                                               HoaDon.don_hang_id.isnot(None)).all()}
+    out = []
+    for dh in (db.query(DonHang).filter(DonHang.trang_thai.in_(("DA_XUAT_HD", "HOAN_THANH")))
+               .order_by(DonHang.ngay.desc(), DonHang.id.desc()).all()):
+        if dh.id in co_hd:
+            continue
+        cn = (db.query(CongNo).filter(CongNo.loai == "PHAI_THU", CongNo.don_hang_id == dh.id)
+              .order_by(CongNo.id.desc()).first())
+        if cn is not None and cn.hoa_don_id:
+            continue                                   # công nợ của đơn đã gắn một hóa đơn (hóa đơn gắn mã khác)
+        tong = _f(dh.tong_tien) + _f(dh.tien_thue)
+        kh = db.get(KhachHang, dh.khach_hang_id) if dh.khach_hang_id else None
+        so_don = (dh.so_hoa_don or "").strip()
+        out.append({"id": dh.id, "so": dh.so or f"DH-{dh.id}", "ngay": str(dh.ngay) if dh.ngay else None,
+                    "trang_thai": dh.trang_thai, "khach": kh.ten if kh else None,
+                    "truoc": _f(dh.tong_tien), "thue": _f(dh.tien_thue), "tong": tong,
+                    "so_hoa_don": so_don if (so_don and not _la_so_tam(so_don, dh.so)) else None,
+                    "cong_no_id": cn.id if cn else None, "cong_no_tien": _f(cn.so_tien) if cn else None,
+                    "ly_do": ("Đơn chưa có giá trị (0 đ) — nhập giá trị đơn ở Bán hàng trước" if tong <= 0 and cn is None
+                              else ("Đã có công nợ nhưng chưa có hóa đơn" if cn is not None
+                                    else "Chưa sinh hóa đơn + công nợ"))})
+    return out
+
+
+@router.get("/don-chua-hoa-don")
+def ds_don_chua_hoa_don(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
+    ds = _don_chua_hoa_don(db)
+    return {"so_don": len(ds), "tong": sum(x["tong"] for x in ds), "ds": ds}
+
+
+from pydantic import BaseModel as _BM_lap
+
+
+class LapHdDonVao(_BM_lap):
+    so: str | None = None
+    ngay: date | None = None
+
+
+@router.post("/don-chua-hoa-don/{dh_id}/lap")
+def lap_hoa_don_cho_don(dh_id: int, data: LapHdDonVao, db: Session = Depends(get_db),
+                        nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    """➕ Lập hóa đơn bán (GHI NHẬN, chưa hạch toán) cho đơn đã xuất HĐ / hoàn thành mà chưa có hóa đơn. Chưa có công nợ →
+    mở luôn công nợ (tự nối công nợ nhập ngoài cùng mã nếu có — không sinh trùng); đã có công nợ → hóa đơn theo công nợ."""
+    from ..lai_lo_ma import so_hd_chuan
+    from .ban_hang import _dam_bao_cong_no_don
+    dh = db.get(DonHang, dh_id)
+    if dh is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đơn hàng")
+    if dh_id not in {x["id"] for x in _don_chua_hoa_don(db)}:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Đơn này không (còn) thiếu hóa đơn — tải lại bảng")
+    so = (data.so or "").strip()
+    if so:
+        khoa = so_hd_chuan(so)
+        for (oso,) in db.query(HoaDon.so).filter(HoaDon.loai == "BAN").all():
+            if khoa and so_hd_chuan(oso) == khoa:
+                raise HTTPException(status.HTTP_409_CONFLICT, f"Số hóa đơn '{so}' đã dùng cho hóa đơn bán khác")
+    cn = (db.query(CongNo).filter(CongNo.loai == "PHAI_THU", CongNo.don_hang_id == dh.id)
+          .order_by(CongNo.id.desc()).first())
+    if cn is None:
+        if _f(dh.tong_tien) + _f(dh.tien_thue) <= 0:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                "Đơn chưa có giá trị — nhập giá trị đơn ở Bán hàng → Đơn hàng trước khi lập hóa đơn")
+        cn = _dam_bao_cong_no_don(db, dh, so or None, nd, xong=(dh.trang_thai == "HOAN_THANH"))
+        hd = db.get(HoaDon, cn.hoa_don_id) if (cn is not None and cn.hoa_don_id) else None
+        if hd is None:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Không lập được hóa đơn cho đơn này — kiểm tra giá trị đơn")
+    else:                                              # đã có công nợ → hóa đơn đi theo công nợ (số phải thu thật)
+        truoc, tong = Decimal(dh.tong_tien or 0), Decimal(cn.so_tien or 0)
+        kq = None
+        if truoc > 0:
+            from types import SimpleNamespace as _NS
+            kq = _khop_theo_cong_no(_NS(tien_truoc_thue=truoc), tong)
+        if kq is None:                                 # không suy được VAT → lấy thuế trên công nợ (nếu có)
+            thue = Decimal(getattr(cn, "tien_thue", 0) or 0)
+            kq = (tong - thue, thue, tong)
+        so_hd = so or (cn.so_ct or "").strip() or (dh.so_hoa_don or "").strip() or dh.so or f"DH-{dh.id}"
+        hd = HoaDon(loai="BAN", don_hang_id=dh.id, khach_hang_id=dh.khach_hang_id or cn.khach_hang_id, so=so_hd[:40],
+                    ngay=data.ngay or cn.ngay_ct or date.today(), tien_truoc_thue=kq[0], tien_thue=kq[1],
+                    tong_tien=kq[2], hddt_trang_thai="CHUA_PHAT_HANH", da_hach_toan=False, trang_thai="GHI_NHAN",
+                    dien_giai=f"Công nợ đơn {dh.so or dh.id} (lập bù hóa đơn)")
+        db.add(hd); db.flush()
+        cn.hoa_don_id = hd.id
+        if so and (not (cn.so_ct or "").strip() or _la_so_tam(cn.so_ct, dh.so)):
+            cn.so_ct = so[:60]
+    if data.ngay:
+        hd.ngay = data.ngay
+    if so and (not (dh.so_hoa_don or "").strip() or _la_so_tam(dh.so_hoa_don, dh.so)):
+        dh.so_hoa_don = so[:60]
+    ghi_audit(db, nd.id, "LAP_HD_BU", "hoa_don", hd.id,
+              moi={"don_hang": dh.so, "so": hd.so, "ngay": str(hd.ngay), "tong_tien": _f(hd.tong_tien),
+                   "cong_no": cn.id if cn else None})
+    db.commit()
+    return _hd_dict(db, hd)
+
+
 @router.get("/viec-treo")
 def viec_ke_toan_treo(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
     """🔔 Việc kế toán còn treo — các con số dễ bị bỏ quên; giao diện hiện thành dãy chip
@@ -554,7 +660,13 @@ def viec_ke_toan_treo(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "
                           DonMua.trang_thai_nhan != "DU",
                           DonMua.ngay_hen_giao.isnot(None),
                           DonMua.ngay_hen_giao < date.today()).count())
+    don_thieu = _don_chua_hoa_don(db)
     return {
+        "don_chua_hd": len(don_thieu),
+        "don_chua_hd_tong": sum(x["tong"] for x in don_thieu),
+        "hd_ban_so_tam": len([1 for (hid, so, dso) in
+                              db.query(HoaDon.id, HoaDon.so, DonHang.so).outerjoin(DonHang, DonHang.id == HoaDon.don_hang_id)
+                              .filter(HoaDon.loai == "BAN").all() if _la_so_tam(so, dso, hid)]),
         "hdc_cho": db.query(KtHoaDonCho).filter(KtHoaDonCho.trang_thai == "CHO_XAC_NHAN").count(),
         "hd_chua_ht": len(hd_rows),
         "hd_chua_ht_tong": sum(float(h.tong_tien or 0) for h in hd_rows),
@@ -1611,6 +1723,10 @@ def ds_hoa_don(loai: str | None = None, db: Session = Depends(get_db),
 class HdSoNgayVao(_BM_hdc):
     so: str | None = None
     ngay: date | None = None
+    # theo FILE hóa đơn (XML / PDF): tiền trước thuế · thuế · tổng — chỉ áp khi hóa đơn CHƯA hạch toán
+    tien_truoc_thue: Decimal | None = None
+    tien_thue: Decimal | None = None
+    tong_tien: Decimal | None = None
 
 
 @router.put("/hoa-don/{hd_id}/so-ngay")
@@ -1652,10 +1768,86 @@ def sua_so_ngay_hoa_don(hd_id: int, data: HdSoNgayVao, db: Session = Depends(get
         for cn in db.query(CongNo).filter_by(hoa_don_id=hd.id).all():
             if not cn.ngay_ct:
                 cn.ngay_ct = data.ngay
+    tien = None
+    if data.tong_tien is not None or data.tien_truoc_thue is not None:
+        t_thue = Decimal(data.tien_thue or 0)
+        t_truoc = Decimal(data.tien_truoc_thue) if data.tien_truoc_thue is not None else Decimal(data.tong_tien) - t_thue
+        t_tong = Decimal(data.tong_tien) if data.tong_tien is not None else t_truoc + t_thue
+        cn0 = db.query(CongNo).filter_by(hoa_don_id=hd.id).first()
+        if (abs(t_truoc - Decimal(hd.tien_truoc_thue or 0)) <= 1000 and abs(t_thue - Decimal(hd.tien_thue or 0)) <= 1000
+                and abs(t_tong - Decimal(hd.tong_tien or 0)) <= 1000):
+            tien = "GIU_NGUYEN"
+        elif hd.da_hach_toan:
+            tien = "BO_QUA: hóa đơn đã hạch toán — tiền không đổi theo file"
+        elif not (abs(t_truoc - Decimal(hd.tien_truoc_thue or 0)) <= 1000 or abs(t_tong - Decimal(hd.tong_tien or 0)) <= 1000
+                  or (cn0 is not None and abs(t_tong - Decimal(cn0.so_tien or 0)) <= 1000)):
+            tien = "BO_QUA: tiền trên file khác hẳn hóa đơn / công nợ — kiểm tra tay"
+        else:
+            cu["tien"] = [_f(hd.tien_truoc_thue), _f(hd.tien_thue), _f(hd.tong_tien)]
+            hd.tien_truoc_thue, hd.tien_thue, hd.tong_tien = t_truoc, t_thue, t_tong
+            if cn0 is not None and abs(t_tong - Decimal(cn0.so_tien or 0)) <= 1000 and hasattr(cn0, "tien_thue"):
+                cn0.tien_thue = t_thue
+            tien = "DA_AP"
     ghi_audit(db, nd.id, "SUA_SO_NGAY_HD", "hoa_don", hd.id, cu=cu,
-              moi={"so": hd.so, "ngay": str(hd.ngay) if hd.ngay else None})
+              moi={"so": hd.so, "ngay": str(hd.ngay) if hd.ngay else None, "tien": tien,
+                   "tong_tien": _f(hd.tong_tien)})
     db.commit()
-    return _hd_dict(db, hd)
+    return {**_hd_dict(db, hd), "tien": tien}
+
+
+@router.post("/hoa-don-ban/doc-tep")
+def doc_tep_hoa_don_ban(file: UploadFile = File(...), db: Session = Depends(get_db),
+                        _=Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    """🤖 Đọc 1 FILE hóa đơn bán đã xuất (XML hóa đơn điện tử: đọc thẳng · PDF / ảnh: AI) → số, ngày, tiền; khớp với hóa đơn
+    bán đang có. CHỈ XEM TRƯỚC — chưa lưu gì; áp dụng qua PUT /hoa-don/{id}/so-ngay. (def thường → chạy threadpool.)"""
+    from .. import hoa_don_ban_doc as _hdb
+    from ..lai_lo_ma import so_hd_chuan
+    data = file.file.read()
+    if not data:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "File trống")
+    if len(data) > _hdb.GIOI_HAN:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "File quá lớn (> 8 MB)")
+    tt, nguon = None, None
+    if _hdb.la_xml(data, file.content_type, file.filename):
+        try:
+            tt = _hdb.doc_xml(data)
+        except ValueError as e:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e))
+        nguon = "XML" if tt else None
+    if tt is None:
+        from ..ai_gateway import doc_hoa_don_ban_tep
+        tt = doc_hoa_don_ban_tep(data, file.content_type, file.filename)
+        nguon = "AI" if tt else None
+    if not tt or not str(tt.get("so_hoa_don") or "").strip():
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Không đọc được số hóa đơn từ file này. File XML hóa đơn điện tử đọc chắc chắn nhất; "
+                            "PDF / ảnh cần AI đang bật trên máy chủ.")
+    tt["so_hoa_don"] = str(tt["so_hoa_don"]).strip().lstrip("0") or str(tt["so_hoa_don"]).strip()
+    hds = []
+    for hd in db.query(HoaDon).filter(HoaDon.loai == "BAN").all():
+        dh = db.get(DonHang, hd.don_hang_id) if hd.don_hang_id else None
+        kh_id = hd.khach_hang_id or (dh.khach_hang_id if dh else None)
+        kh = db.get(KhachHang, kh_id) if kh_id else None
+        cn = db.query(CongNo).filter_by(hoa_don_id=hd.id).first()
+        hds.append({"id": hd.id, "so": hd.so, "ma_ban": dh.so if dh else None, "kh_ten": kh.ten if kh else None,
+                    "kh_mst": getattr(kh, "ma_so_thue", None) if kh else None, "truoc": _f(hd.tien_truoc_thue),
+                    "thue": _f(hd.tien_thue), "tong": _f(hd.tong_tien), "cn_so_tien": _f(cn.so_tien) if cn else None,
+                    "da_hach_toan": bool(hd.da_hach_toan), "khoa": hd.hddt_trang_thai == "DA_PHAT_HANH",
+                    "so_tam": _la_so_tam(hd.so, dh.so if dh else None, hd.id)})
+    uv, chon = _hdb.khop(tt, [h for h in hds if not h["khoa"]], so_hd_chuan)
+    canh_bao = []
+    if "song viet" in _hdb.ten_chuan(tt.get("ten_nguoi_mua")) or "song viet" in _hdb._khong_dau(tt.get("ten_nguoi_mua")):
+        canh_bao.append("Người MUA trên file là Sóng Việt — đây có vẻ là hóa đơn MUA VÀO, không phải hóa đơn bán")
+    khoa = so_hd_chuan(tt["so_hoa_don"])
+    trung = [h for h in hds if khoa and not h["so_tam"] and so_hd_chuan(h["so"]) == khoa]
+    if trung and (chon is None or all(h["id"] != chon for h in trung)):
+        canh_bao.append(f"Số {tt['so_hoa_don']} đã gắn cho hóa đơn {trung[0]['ma_ban'] or trung[0]['so']} — chọn đúng dòng đó nếu "
+                        f"chỉ muốn cập nhật ngày / tiền")
+    if not uv:
+        canh_bao.append("Không tìm thấy hóa đơn bán nào cùng tiền / cùng mã — đơn này có thể chưa sinh hóa đơn "
+                        "(xem ô «Đơn chưa có hóa đơn» ở Việc còn treo)")
+    tt.pop("_toan_van", None)
+    return {"ten_file": file.filename, "nguon": nguon, "tt": tt, "ung_vien": uv, "chon": chon, "canh_bao": canh_bao}
 
 
 @router.put("/hoa-don/{hd_id}/sua-ban")

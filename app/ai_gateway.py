@@ -1233,6 +1233,39 @@ def doc_hoa_don_tep(data: bytes, content_type: str, filename: str,
         return None
 
 
+def doc_hoa_don_ban_tep(data: bytes, content_type: str, filename: str) -> dict | None:
+    """AI đọc FILE hóa đơn BÁN (PDF / ảnh / XML lạ) do công ty xuất cho khách → {so_hoa_don, ky_hieu, ngay,
+    ten_nguoi_mua, mst_nguoi_mua, tien_truoc_thue, tien_thue, so_tien, thue_suat, mo_ta}. None khi AI tắt / không đọc được."""
+    if (settings.ai_provider or "").upper() != "ANTHROPIC" or not settings.anthropic_api_key:
+        return None
+    fn, ct = (filename or "").lower(), (content_type or "").lower()
+    try:
+        if fn.endswith(".xml") or ct in ("application/xml", "text/xml"):
+            khoi = {"type": "text", "text": data.decode("utf-8", errors="replace")[:60000]}
+        else:
+            khoi = _khoi_noi_dung_file(data, content_type, filename)
+    except Exception:
+        return None
+    sys_p = ("Bạn là kế toán Việt Nam. Đọc file HÓA ĐƠN GIÁ TRỊ GIA TĂNG do công ty XUẤT CHO KHÁCH HÀNG (hóa đơn bán ra) "
+             "và trả về DUY NHẤT một JSON object: "
+             '{"so_hoa_don": string|null (SỐ hóa đơn, bỏ các số 0 ở đầu, VD "191"), '
+             '"ky_hieu": string|null (ký hiệu hóa đơn, VD "1C26TSV"), '
+             '"ngay": "YYYY-MM-DD"|null (ngày lập hóa đơn), '
+             '"ten_nguoi_mua": string|null (TÊN ĐƠN VỊ MUA HÀNG), "mst_nguoi_mua": string|null (mã số thuế người mua), '
+             '"ten_nguoi_ban": string|null, "mst_nguoi_ban": string|null, '
+             '"tien_truoc_thue": number|null (cộng tiền hàng CHƯA VAT, VNĐ, chỉ chữ số), '
+             '"tien_thue": number|null (tiền thuế GTGT; hóa đơn 0% / không chịu thuế → 0), '
+             '"so_tien": number|null (TỔNG TIỀN THANH TOÁN gồm VAT), '
+             '"thue_suat": string|null (VD "8%", "10%", "0%", "KCT"), '
+             '"mo_ta": string|null (tên hàng hóa / dịch vụ + mọi MÃ ĐƠN HÀNG / số PO / số hợp đồng ghi trên hóa đơn, ngắn gọn)}')
+    try:
+        txt = _goi_claude_json(khoi, sys_p, "Trích thông tin hóa đơn bán ra từ file trên.", max_tokens=600, timeout=90)
+        ds = _vot_json_mang(txt)
+        return ds[0] if ds else None
+    except Exception:
+        return None
+
+
 def doc_sao_ke_tep(data: bytes, content_type: str, filename: str) -> list | None:
     """AI đọc FILE SAO KÊ ngân hàng (PDF / ảnh / Excel / CSV) → list dòng giao dịch
     [{ngay, dien_giai, tien_vao, tien_ra, so_du}]. None khi AI tắt / không đọc được."""
