@@ -2181,6 +2181,27 @@ def _dam_bao_cong_no_don(db: Session, dh: DonHang, so_hoa_don, nd: NguoiDung, xo
     return cn
 
 
+def _so_hd_that(so, dh: DonHang) -> bool:
+    """Số hóa đơn THẬT: có giá trị và không phải số tạm (= mã đơn · DH-<id> · HD-<id>)."""
+    s = (so or "").strip().lower()
+    return bool(s) and s != (dh.so or "").strip().lower() and not _re_mod.fullmatch(r"(hd|dh)-\d+", s)
+
+
+def _don_da_xuat_hoa_don(db: Session, dh: DonHang, so_moi=None) -> bool:
+    """Đơn ĐÃ XUẤT HÓA ĐƠN = có số hóa đơn thật ở một trong các nơi: số vừa nhập · số trên đơn · hóa đơn bán của đơn
+    (hoặc đã phát hành HĐĐT) · công nợ của đơn · công nợ nhập ngoài cùng mã (sẽ được nối vào đơn)."""
+    if _so_hd_that(so_moi, dh) or _so_hd_that(dh.so_hoa_don, dh):
+        return True
+    for hd in db.query(HoaDon).filter_by(loai="BAN", don_hang_id=dh.id).all():
+        if _so_hd_that(hd.so, dh) or hd.hddt_trang_thai == "DA_PHAT_HANH":
+            return True
+    cn = _cong_no_cua_don(db, dh.id)
+    if cn is not None and _so_hd_that(cn.so_ct, dh):
+        return True
+    ngoai = _cn_thu_ngoai_cung_ma(db, dh, Decimal(dh.tong_tien or 0) + Decimal(dh.tien_thue or 0))
+    return ngoai is not None and _so_hd_that(ngoai.so_ct, dh)
+
+
 @router.put("/don-hang/{dh_id}/trang-thai")
 def doi_trang_thai_don_hang(dh_id: int, data: TrangThaiDonVao, db: Session = Depends(get_db),
                             nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
@@ -2196,6 +2217,12 @@ def doi_trang_thai_don_hang(dh_id: int, data: TrangThaiDonVao, db: Session = Dep
                             "Trạng thái phải là Mới / Đang thực hiện / Đã xuất hóa đơn / Hoàn thành. "
                             "Trạng thái 'Đã xuất kho' do luồng xuất kho tự đặt.")
     cu = dh.trang_thai
+    # ⛔ chưa xuất hóa đơn thì KHÔNG được Hoàn thành (đơn đang Hoàn thành từ trước lưu lại thì không chặn)
+    if tt == "HOAN_THANH" and cu != "HOAN_THANH" and not _don_da_xuat_hoa_don(db, dh, data.so_hoa_don):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            f"CHUA_XUAT_HD: Đơn {dh.so or dh.id} CHƯA XUẤT HÓA ĐƠN (chưa có số hóa đơn thật) — không đặt "
+                            f"được Hoàn thành. Nhập số hóa đơn đã xuất cho khách trước (ô «Số hóa đơn» của đơn, hoặc chuyển "
+                            f"«Đã xuất hóa đơn» kèm số).")
     dh.trang_thai = tt
     cn = None
     if tt == "DA_XUAT_HD":                       # Đã xuất hóa đơn → mở công nợ (Chờ thanh toán)
