@@ -4535,11 +4535,11 @@ if(typeof LOCKED!=='undefined'&&LOCKED){
 goHome();
 
 
-/* ===== LỚP APP: đăng nhập + đồng bộ điểm về backend /training (same-origin) ===== */
+/* ===== LỚP APP v3: đăng nhập email+mật khẩu cho Nhân viên & Sinh viên + đồng bộ điểm ===== */
 (function(){
  const API='/training/api';
  const css=document.createElement('style');
- css.textContent='.trnOv{position:fixed;inset:0;background:rgba(10,25,47,.92);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px}.trnBox{background:#fff;border-radius:14px;max-width:400px;width:100%;padding:26px 24px;box-shadow:0 20px 60px rgba(0,0,0,.4)}.trnBox h2{margin:0 0 4px;color:#13315c;font-size:19px}.trnBox p{color:#5a6b85;font-size:12.5px;margin:0 0 16px}.trnBox input{width:100%;box-sizing:border-box;border:1.5px solid #d7e3f4;border-radius:9px;padding:11px 12px;font-size:15px;margin-bottom:10px}.trnBox button{width:100%;border:0;border-radius:9px;padding:12px;font-size:15px;font-weight:700;cursor:pointer}.trnGo{background:#0582ca;color:#fff}.trnOff{background:#eef3fa;color:#13315c;margin-top:8px;font-weight:600;font-size:13px}.trnErr{color:#b02020;font-size:12.5px;min-height:16px;margin:4px 0}.trnChip{position:fixed;right:10px;bottom:10px;z-index:999;background:#13315c;color:#fff;border-radius:999px;padding:7px 14px;font-size:12px;box-shadow:0 4px 14px rgba(0,0,0,.25);display:flex;gap:10px;align-items:center}.trnChip b{font-weight:700}.trnChip span{opacity:.75;cursor:pointer}.trnChip .q{background:#0582ca;border-radius:999px;padding:1px 8px;font-size:11px}';
+ css.textContent='.trnOv{position:fixed;inset:0;background:rgba(10,25,47,.92);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px}.trnBox{background:#fff;border-radius:14px;max-width:410px;width:100%;padding:24px;box-shadow:0 20px 60px rgba(0,0,0,.4)}.trnBox h2{margin:0 0 4px;color:#13315c;font-size:19px}.trnBox p{color:#5a6b85;font-size:12.5px;margin:0 0 12px}.trnTabs{display:flex;gap:6px;margin-bottom:14px}.trnTab{flex:1;text-align:center;padding:9px 6px;border-radius:9px;border:1.5px solid #d7e3f4;font-size:13.5px;font-weight:700;color:#5a6b85;cursor:pointer}.trnTab.on{background:#13315c;color:#fff;border-color:#13315c}.trnBox input{width:100%;box-sizing:border-box;border:1.5px solid #d7e3f4;border-radius:9px;padding:11px 12px;font-size:15px;margin-bottom:10px}.trnBox button{width:100%;border:0;border-radius:9px;padding:12px;font-size:15px;font-weight:700;cursor:pointer}.trnGo{background:#0582ca;color:#fff}.trnOff{background:#eef3fa;color:#13315c;margin-top:8px;font-weight:600;font-size:13px}.trnReg{background:none;color:#0582ca;margin-top:10px;font-size:13.5px;text-decoration:underline;font-weight:600}.trnErr{color:#b02020;font-size:12.5px;min-height:16px;margin:2px 0 6px}.trnChip{position:fixed;right:10px;bottom:10px;z-index:999;background:#13315c;color:#fff;border-radius:999px;padding:7px 14px;font-size:12px;box-shadow:0 4px 14px rgba(0,0,0,.25);display:flex;gap:10px;align-items:center}.trnChip b{font-weight:700}.trnChip span{opacity:.85;cursor:pointer}.trnChip .q{background:#0582ca;border-radius:999px;padding:1px 8px;font-size:11px}';
  document.head.appendChild(css);
  function auth(){try{return JSON.parse(localStorage.getItem('svws_trn_auth')||'null');}catch(e){return null;}}
  function setAuth(a){localStorage.setItem('svws_trn_auth',JSON.stringify(a));}
@@ -4557,7 +4557,7 @@ goHome();
        if(!r.ok){if(r.status===401){setAuth(null);showLogin();}break;}
        q.shift();setQueue(q);
      }
-   }catch(e){/* offline — giữ hàng đợi */}
+   }catch(e){}
    flushing=false;updateChip();
  }
  function updateChip(){
@@ -4565,28 +4565,39 @@ goHome();
    if(!a){if(c)c.remove();return;}
    if(!c){c=document.createElement('div');c.id='trnChip';c.className='trnChip';document.body.appendChild(c);}
    const n=queue().length;
-   c.innerHTML='👤 <b>'+(a.name||'Học viên')+'</b>'+(a.token?(n?' <span class="q">chờ gửi: '+n+'</span>':''):' <span class="q">offline</span>')+' <span id="trnOut" title="Đăng xuất">✕</span>';
+   c.innerHTML='👤 <b>'+(a.name||'Học viên')+'</b>'+(a.code?' · '+a.code:'')+(a.token?(n?' <span class="q">chờ gửi: '+n+'</span>':''):' <span class="q">offline</span>')+' <span id="trnOut" title="Đăng xuất">✕</span>';
    c.querySelector('#trnOut').onclick=function(){if(confirm('Đăng xuất khỏi app?')){setAuth(null);location.reload();}};
  }
  function showLogin(){
    if(document.querySelector('.trnOv'))return;
    const ov=document.createElement('div');ov.className='trnOv';
-   ov.innerHTML='<div class="trnBox"><h2>💧 SVWS Training</h2><p>Đăng nhập để điểm bài test được ghi nhận về công ty.</p><input id="trnCode" placeholder="Mã nhân viên (VD: SV025)" maxlength="20"><input id="trnName" placeholder="Họ và tên" maxlength="60"><div class="trnErr" id="trnErr"></div><button class="trnGo" id="trnGo">Đăng nhập</button><button class="trnOff" id="trnOffB">Học offline — điểm chỉ lưu trên máy này</button></div>';
+   ov.innerHTML='<div class="trnBox"><h2>💧 SVWS Training</h2><p>Đăng nhập để điểm bài test được ghi nhận.</p>'
+   +'<div class="trnTabs"><div class="trnTab on" id="tabE">👷 Nhân viên SVWS</div><div class="trnTab" id="tabS">🎓 Sinh viên</div></div>'
+   +'<input id="lgId" placeholder="Email công ty" maxlength="120">'
+   +'<input id="lgPw" type="password" placeholder="Mật khẩu" maxlength="60">'
+   +'<div class="trnErr" id="trnErr"></div><button class="trnGo" id="trnGo">Đăng nhập</button>'
+   +'<button class="trnReg" id="trnRegB">Chưa có tài khoản? Đăng ký tại đây →</button>'
+   +'<button class="trnOff" id="trnOffB">Học offline — điểm chỉ lưu trên máy này</button></div>';
    document.body.appendChild(ov);
+   let mode='emp';
+   const tE=ov.querySelector('#tabE'),tS=ov.querySelector('#tabS'),idI=ov.querySelector('#lgId'),err=ov.querySelector('#trnErr');
+   function sw(m){mode=m;tE.classList.toggle('on',m==='emp');tS.classList.toggle('on',m==='stu');idI.placeholder=m==='emp'?'Email công ty':'Email hoặc số điện thoại';err.textContent='';}
+   tE.onclick=function(){sw('emp')}; tS.onclick=function(){sw('stu')};
+   ov.querySelector('#trnRegB').onclick=function(){location.href='/training/register'+(mode==='emp'?'?nv=1':'');};
    ov.querySelector('#trnGo').onclick=async function(){
-     const code=ov.querySelector('#trnCode').value.trim(),name=ov.querySelector('#trnName').value.trim();
-     const err=ov.querySelector('#trnErr');
-     if(!code||!name){err.textContent='Nhập đủ mã nhân viên và họ tên.';return;}
+     const id=idI.value.trim(),pw=ov.querySelector('#lgPw').value;
+     if(!id||!pw){err.textContent='Nhập email và mật khẩu.';return;}
      err.textContent='Đang đăng nhập…';
      try{
-       const r=await fetch(API+'/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({emp_code:code,name:name})});
-       if(!r.ok)throw 0;
-       const d=await r.json();setAuth({code:code,name:d.name||name,token:d.token});ov.remove();updateChip();flush();
+       const url=API+(mode==='emp'?'/staff/login':'/student/login');
+       const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:id,password:pw})});
+       const d=await r.json().catch(function(){return{}});
+       if(!r.ok){err.textContent=d.detail||'Đăng nhập không thành công.';return;}
+       setAuth({code:d.emp_code||d.student_code,name:d.name,token:d.token});ov.remove();updateChip();flush();
      }catch(e){err.textContent='Không kết nối được máy chủ — kiểm tra mạng, hoặc chọn Học offline.';}
    };
    ov.querySelector('#trnOffB').onclick=function(){setAuth({code:'',name:'Khách (offline)',token:null});ov.remove();updateChip();};
  }
- /* PWA: manifest + service worker (chỉ khi chạy từ /training) */
  try{
    if(location.pathname.indexOf('/training')===0){
      const l=document.createElement('link');l.rel='manifest';l.href='/training/manifest.json';document.head.appendChild(l);
@@ -4594,8 +4605,9 @@ goHome();
    }
  }catch(e){}
  window.addEventListener('online',flush);
- document.addEventListener('DOMContentLoaded',function(){ if(!auth())showLogin(); updateChip(); flush(); });
- if(document.readyState!=='loading'){ if(!auth())showLogin(); updateChip(); flush(); }
+ function boot(){ if(!auth())showLogin(); updateChip(); flush(); }
+ document.addEventListener('DOMContentLoaded',boot);
+ if(document.readyState!=='loading')boot();
 })();
 
 </script>
