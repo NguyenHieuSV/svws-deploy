@@ -511,11 +511,14 @@ def cn_thu_nghi_trung_don(db: Session = Depends(get_db), _=Depends(yeu_cau(MODUL
         did = _cn_thu_don_id(db, g)
         dh = db.get(DonHang, did) if did else None
         so_tien_moi = max(float(g.so_tien or 0), float(n.so_tien or 0)) if kieu == "VAT" else float(g.so_tien or 0)
+        da_moi = max(float(g.da_thanh_toan or 0), float(n.da_thanh_toan or 0))
+        # «còn phải thu» đang bị ĐỘI = (còn thu của 2 bản hiện tại) − (còn thu đúng sau khi gộp)
+        doi = ((float(g.so_tien or 0) - float(g.da_thanh_toan or 0)) + (float(n.so_tien or 0) - float(n.da_thanh_toan or 0))
+               - max(so_tien_moi - da_moi, 0.0))
         out.append({"ma": dh.so if dh else n.ma_ban_ngoai, "ly_do": ld, "kieu": kieu,
                     "giu": _cn_thu_ra(db, g), "bo": _cn_thu_ra(db, n),
-                    "sau_gop": {"so_tien": so_tien_moi,
-                                "da_thanh_toan": max(float(g.da_thanh_toan or 0), float(n.da_thanh_toan or 0))},
-                    "doi_phai_thu": float(n.so_tien or 0) - float(n.da_thanh_toan or 0)})
+                    "sau_gop": {"so_tien": so_tien_moi, "da_thanh_toan": da_moi},
+                    "doi_phai_thu": doi})
     return {"so_cap": len(out), "tong_doi": sum(max(x["doi_phai_thu"], 0) for x in out), "cap": out}
 
 
