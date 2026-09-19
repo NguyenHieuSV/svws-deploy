@@ -675,13 +675,20 @@ def _tinh_lai_lo_tong(db: Session) -> dict:
     po_cn_hd = {h for (h,) in db.query(CongNo.hoa_don_id)
                 .filter(CongNo.don_mua_id.isnot(None), CongNo.hoa_don_id.isnot(None)).all()}
     chi_hd_mua = 0.0
-    for (hid, htong, hdg) in db.query(HoaDon.id, HoaDon.tong_tien, HoaDon.dien_giai) \
-                               .filter(HoaDon.loai == "MUA", HoaDon.don_hang_id.is_(None)).all():
+    from ..lai_lo_ma import po_trung_khoan as _po_trung
+    _pos_all = db.query(DonMua).filter(DonMua.trang_thai != "TU_CHOI").all()
+    _po_khop = set()
+    for hd0 in db.query(HoaDon).filter(HoaDon.loai == "MUA", HoaDon.don_hang_id.is_(None)).all():
         # chỉ hóa đơn KHÔNG gắn mã (hóa đơn gắn mã đã nằm trong chi phí theo mã ở trên)
         # bỏ hóa đơn tự sinh khi nhận hàng PO — chi phí PO đã tính ở trên
-        if hid in po_cn_hd or str(hdg or "").startswith("Nhận hàng PO"):
+        if hd0.id in po_cn_hd or str(hd0.dien_giai or "").startswith("Nhận hàng PO"):
             continue
-        chi_hd_mua += float(htong or 0)
+        # 🔁 hóa đơn nhập trực tiếp ở Kế toán mà chính là một PO (cùng số HĐ / NCC / số tiền) → không cộng lần 2
+        _p = _po_trung(_pos_all, hd0.so, hd0.nha_cung_cap_id, hd0.tong_tien, hd0.tien_truoc_thue, _po_khop)
+        if _p is not None:
+            chi_hd_mua += max(float(hd0.tong_tien or 0) - float(_p.tong_tien or 0), 0.0)
+            continue
+        chi_hd_mua += float(hd0.tong_tien or 0)
     # ⚙️ CHI PHÍ VẬN HÀNH (mã OP-…): PO đã duyệt mang mã OP nhưng KHÔNG có đơn hàng bán cùng số —
     # chi phí doanh nghiệp, tách dòng riêng (không nằm trong lãi/lỗ theo mã bán hàng).
     # 🧩 và CHƯA PHÂN MÃ: khoản chi không mang mã (không vào được Lãi/Lỗ của mã nào)

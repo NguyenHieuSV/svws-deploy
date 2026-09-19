@@ -1818,6 +1818,8 @@ def _lai_lo_1(db, dh: DonHang):
             "thanh_toan_mua": gia_von, "cong_no_phai_tra": chi_phi,
             "gia_von_thuc": cp["gia_von_thuc"], "po_cho_duyet": cp["po_cho_duyet"],
             "chi_ngoai_cn": cp["chi_ngoai_cn"], "chi_hd_ngoai_po": cp["chi_hd_ngoai_po"],
+            "trung_po": cp.get("trung_po") or [], "tien_trung_po": cp.get("tien_trung_po") or 0,
+            "chenh_trung_po": cp.get("chenh_trung_po") or 0,
             "da_tra_ncc": cp["da_tra_ncc"], "con_phai_tra": cp["con_phai_tra"],
             "tong_chi_phi": cp["tong_chi_phi"], "loi_nhuan": loi_nhuan,
             "ty_suat": cp["ty_suat"],

@@ -47,6 +47,40 @@ def tra_truoc_theo_don(db: Session, dh_ids=None) -> dict:
     return out
 
 
+# ================= NHẬN DIỆN KHOẢN NHẬP TRỰC TIẾP TRÙNG VỚI PO (một khoản mua đi 2 cửa) =================
+import re as _re_tr
+
+LECH_TRUNG = 1000.0          # đ — lệch làm tròn cho phép
+
+
+def so_hd_chuan(s) -> str:
+    """'00004731' = '4731' = ' 4731 ' ; 'C26TAP-00004260' = 'c26tap4260'."""
+    t = _re_tr.sub(r"[^0-9a-z]", "", str(s or "").lower())
+    return _re_tr.sub(r"^0+", "", t)
+
+
+def po_trung_khoan(pos, so_ct, ncc_id, tong, truoc_thue=None, da_dung=None):
+    """PO (cùng mã) chính là khoản mua của hóa đơn / công nợ nhập trực tiếp này?
+    Trùng khi: (cùng SỐ HÓA ĐƠN và [cùng tiền hoặc cùng NCC]) hoặc (cùng NCC và cùng tiền).
+    «Cùng tiền» = bằng tổng PO, hoặc PO ghi THIẾU VAT nên bằng tiền trước thuế của hóa đơn."""
+    so = so_hd_chuan(so_ct)
+    tong, truoc = _f(tong), _f(truoc_thue)
+    for p in pos:
+        if p.trang_thai == "TU_CHOI" or (da_dung is not None and p.id in da_dung):
+            continue
+        pt = _f(p.tong_tien)
+        if pt <= 0:
+            continue
+        cung_so = bool(so) and so_hd_chuan(p.so_hoa_don) == so
+        cung_ncc = bool(ncc_id) and p.nha_cung_cap_id == ncc_id
+        cung_tien = abs(pt - tong) <= LECH_TRUNG or (truoc > 0 and abs(pt - truoc) <= LECH_TRUNG)
+        if (cung_so and (cung_tien or cung_ncc)) or (cung_ncc and cung_tien):
+            if da_dung is not None:
+                da_dung.add(p.id)
+            return p
+    return None
+
+
 def chi_phi_ma(db: Session, dh: DonHang) -> dict:
     doanh_thu = _f(dh.tong_tien) + _f(dh.tien_thue)
     # PO gắn đơn + PO chỉ mang MÃ CHUỖI trùng số đơn (sinh từ Dự toán / Dự án trước khi có
@@ -77,6 +111,29 @@ def chi_phi_ma(db: Session, dh: DonHang) -> dict:
                             CongNo.hoa_don_id.is_(None),
                             func.lower(CongNo.ma_ban_ngoai) == dh.so.lower()).all())
                     if not str(c.so_ct or "").upper().startswith("HDM-")]
+    # 🔁 LOẠI NHÂN ĐÔI: khoản nhập TRỰC TIẾP (hóa đơn Kế toán / công nợ nhập ngoài) mà CHÍNH LÀ một PO của mã này
+    # → không cộng lần 2; PO ghi thiếu VAT so với hóa đơn → chỉ cộng phần CHÊNH (chi phí thật = hóa đơn).
+    _po_da_khop = set()
+    trung_po, chi_chenh_trung = [], 0.0
+
+    def _ghi_trung(loai, so_ct, tien, p):
+        nonlocal chi_chenh_trung
+        chenh = max(_f(tien) - _f(p.tong_tien), 0.0)
+        if chenh <= LECH_TRUNG:
+            chenh = 0.0
+        chi_chenh_trung += chenh
+        trung_po.append({"loai": loai, "so_ct": so_ct, "so_tien": _f(tien), "po": p.so, "don_mua_id": p.id,
+                         "tien_po": _f(p.tong_tien), "chenh_cong_them": chenh})
+
+    _cn_giu = []
+    for c in cn_ngoai:
+        p = po_trung_khoan(pos, c.so_ct, c.nha_cung_cap_id, c.so_tien,
+                           _f(c.so_tien) - _f(getattr(c, "tien_thue", 0)), _po_da_khop)
+        if p is not None:
+            _ghi_trung("CONG_NO", c.so_ct or f"CN-{c.id}", c.so_tien, p)
+        else:
+            _cn_giu.append(c)
+    cn_ngoai = _cn_giu
     chi_ngoai_cn = sum(_f(c.so_tien) for c in cn_ngoai)
     # hóa đơn MUA gắn mã KHÔNG qua PO (email / nhập tay) — bỏ hóa đơn tự sinh khi nhận hàng PO
     hd_po = {c.hoa_don_id for c in cn_po if c.hoa_don_id}
@@ -84,8 +141,12 @@ def chi_phi_ma(db: Session, dh: DonHang) -> dict:
     for hd in db.query(HoaDon).filter(HoaDon.loai == "MUA", HoaDon.don_hang_id == dh.id).all():
         if hd.id in hd_po or str(hd.dien_giai or "").startswith("Nhận hàng PO"):
             continue
+        p = po_trung_khoan(pos, hd.so, hd.nha_cung_cap_id, hd.tong_tien, hd.tien_truoc_thue, _po_da_khop)
+        if p is not None:
+            _ghi_trung("HOA_DON", hd.so or f"HD-{hd.id}", hd.tong_tien, p)
+            continue
         hd_ngoai_po.append(hd)
-    chi_hd_ngoai_po = sum(_f(h.tong_tien) for h in hd_ngoai_po)
+    chi_hd_ngoai_po = sum(_f(h.tong_tien) for h in hd_ngoai_po) + chi_chenh_trung
     # công nợ sinh từ các hóa đơn ngoài PO (luồng cũ) — chỉ dùng cho DÒNG TIỀN, không cộng chi phí
     cn_hd = []
     if hd_ngoai_po:
@@ -115,6 +176,8 @@ def chi_phi_ma(db: Session, dh: DonHang) -> dict:
         "doanh_thu": doanh_thu,
         "gia_von_po": gia_von_po, "po_cho_duyet": po_cho_duyet, "gia_von_thuc": gia_von_thuc,
         "chi_ngoai_cn": chi_ngoai_cn, "chi_hd_ngoai_po": chi_hd_ngoai_po,
+        "trung_po": trung_po, "tien_trung_po": sum(t["so_tien"] for t in trung_po),
+        "chenh_trung_po": chi_chenh_trung,
         "chi_phi_khac": chi_phi_khac, "tong_chi_phi": tong_chi_phi,
         "loi_nhuan": loi_nhuan,
         "ty_suat": round(loi_nhuan / doanh_thu * 100, 1) if doanh_thu else None,
