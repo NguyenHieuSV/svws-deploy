@@ -2003,10 +2003,30 @@ def dat_so_hoa_don(dh_id: int, data: SoHdDonVao, db: Session = Depends(get_db),
     cn = _cong_no_cua_don(db, dh_id)
     if cn is not None and so_hd:
         cn.so_ct = so_hd
+    # hóa đơn bán bên KẾ TOÁN của đơn đang mang SỐ TẠM (= mã đơn / số cũ của đơn) → nhận luôn số thật này
+    hd_doi = None
+    if so_hd:
+        from ..lai_lo_ma import so_hd_chuan
+        if cn is not None and cn.hoa_don_id:
+            hds = [db.get(HoaDon, cn.hoa_don_id)]
+        else:
+            hds = db.query(HoaDon).filter_by(loai="BAN", don_hang_id=dh.id).order_by(HoaDon.id).all()
+        tam = {"", (dh.so or "").strip().lower(), f"dh-{dh.id}", (cu or "").strip().lower()}
+        hds = [x for x in hds if x is not None and x.hddt_trang_thai != "DA_PHAT_HANH"
+               and ((x.so or "").strip().lower() in tam or (x.so or "").strip().lower() == f"hd-{x.id}")]
+        if len(hds) == 1 and (hds[0].so or "").strip().lower() != so_hd.lower():
+            hd, khoa = hds[0], so_hd_chuan(so_hd)
+            trung = any(khoa and so_hd_chuan(o) == khoa for (o,) in
+                        db.query(HoaDon.so).filter(HoaDon.loai == "BAN", HoaDon.id != hd.id).all())
+            if not trung:
+                hd.so = so_hd[:40]
+                hd_doi = hd.id
     ghi_audit(db, nd.id, "CAP_NHAT", "don_hang", dh.id,
-              cu={"so_hoa_don": cu}, moi={"so_hoa_don": so_hd, "cong_no_id": cn.id if cn else None})
+              cu={"so_hoa_don": cu}, moi={"so_hoa_don": so_hd, "cong_no_id": cn.id if cn else None,
+                                          "hoa_don_id": hd_doi})
     db.commit()
-    return {"id": dh.id, "so_hoa_don": dh.so_hoa_don, "doi": True, "cong_no_id": cn.id if cn else None}
+    return {"id": dh.id, "so_hoa_don": dh.so_hoa_don, "doi": True, "cong_no_id": cn.id if cn else None,
+            "hoa_don_id": hd_doi}
 
 
 class TtCocVao(_CNBase):
