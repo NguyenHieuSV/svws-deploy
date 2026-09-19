@@ -448,6 +448,147 @@ def dep_trung_cong_no(data: DepTrungVao, db: Session = Depends(get_db),
     return {"da_xoa": len(du)}
 
 
+# ----- 🔗 CÔNG NỢ PHẢI THU đi 2 cửa: bản NHẬP NGOÀI (theo hóa đơn / file) ↔ bản TỰ SINH TỪ ĐƠN HÀNG cùng mã -----
+def _cn_thu_don_id(db, cn):
+    if cn.don_hang_id:
+        return cn.don_hang_id
+    if cn.hoa_don_id:
+        hd = db.get(HoaDon, cn.hoa_don_id)
+        return hd.don_hang_id if hd is not None else None
+    return None
+
+
+def _cn_thu_cap_trung(db):
+    """[(bản gắn đơn, bản nhập ngoài, lý do, kiểu)] — kiểu: BANG (cùng tiền) · VAT (nhập ngoài = đơn + VAT) · SO_HD."""
+    from ..lai_lo_ma import so_hd_chuan
+    rows = db.query(CongNo).filter(CongNo.loai == "PHAI_THU").order_by(CongNo.id).all()
+    so_don = {d.id: (d.so or "").strip() for d in db.query(DonHang).all()}
+    theo_ma, ngoai = {}, []
+    for c in rows:
+        did = _cn_thu_don_id(db, c)
+        if did:
+            theo_ma.setdefault(so_don.get(did, "").lower(), []).append(c)
+        elif (c.ma_ban_ngoai or "").strip():
+            ngoai.append(c)
+    cap, da_dung = [], set()
+    for n in ngoai:
+        for g in theo_ma.get(n.ma_ban_ngoai.strip().lower(), []):
+            if g.id in da_dung:
+                continue
+            a, b = float(g.so_tien or 0), float(n.so_tien or 0)
+            if a <= 0 or b <= 0:
+                continue
+            ty = b / a
+            cung_so = bool(so_hd_chuan(n.so_ct)) and so_hd_chuan(n.so_ct) == so_hd_chuan(g.so_ct)
+            if abs(a - b) <= 1000:
+                kieu, ld = "BANG", "cùng mã · cùng số tiền"
+            elif any(abs(ty - (1 + v)) <= 0.002 for v in (0.05, 0.08, 0.10)):
+                kieu, ld = "VAT", f"cùng mã · bản nhập ngoài = bản đơn hàng + VAT {round((ty - 1) * 100)}%"
+            elif cung_so:
+                kieu, ld = "SO_HD", "cùng mã · cùng số hóa đơn"
+            else:
+                continue
+            if cung_so and kieu != "SO_HD":
+                ld += " · cùng số hóa đơn"
+            da_dung.add(g.id)
+            cap.append((g, n, ld, kieu))
+            break
+    return cap
+
+
+def _cn_thu_ra(db, c):
+    kh = db.get(KhachHang, c.khach_hang_id) if c.khach_hang_id else None
+    return {"id": c.id, "so_tien": float(c.so_tien or 0), "da_thanh_toan": float(c.da_thanh_toan or 0),
+            "so_ct": c.so_ct, "ngay_ct": str(c.ngay_ct) if c.ngay_ct else None, "han": str(c.han) if c.han else None,
+            "khach_ten": kh.ten if kh else None, "ghi_chu": c.ghi_chu}
+
+
+@router.get("/cong-no/nghi-trung-don")
+def cn_thu_nghi_trung_don(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
+    """🔗 Các cặp công nợ PHẢI THU nghi là MỘT khoản đi 2 cửa: nhập ngoài (hóa đơn / file) ↔ tự sinh từ đơn hàng."""
+    out = []
+    for (g, n, ld, kieu) in _cn_thu_cap_trung(db):
+        did = _cn_thu_don_id(db, g)
+        dh = db.get(DonHang, did) if did else None
+        so_tien_moi = max(float(g.so_tien or 0), float(n.so_tien or 0)) if kieu == "VAT" else float(g.so_tien or 0)
+        out.append({"ma": dh.so if dh else n.ma_ban_ngoai, "ly_do": ld, "kieu": kieu,
+                    "giu": _cn_thu_ra(db, g), "bo": _cn_thu_ra(db, n),
+                    "sau_gop": {"so_tien": so_tien_moi,
+                                "da_thanh_toan": max(float(g.da_thanh_toan or 0), float(n.da_thanh_toan or 0))},
+                    "doi_phai_thu": float(n.so_tien or 0) - float(n.da_thanh_toan or 0)})
+    return {"so_cap": len(out), "tong_doi": sum(max(x["doi_phai_thu"], 0) for x in out), "cap": out}
+
+
+class GopCnThuVao(_CNBase):
+    giu_id: int
+    bo_id: int
+
+
+@router.post("/cong-no/gop-don")
+def cn_thu_gop_don(data: GopCnThuVao, db: Session = Depends(get_db),
+                   nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
+    """GỘP bản công nợ NHẬP NGOÀI vào bản GẮN ĐƠN HÀNG: giữ bản gắn đơn; nhận số hóa đơn thật, ngày CT, hạn, phần ĐÃ THU
+    lớn hơn, lịch sử thu / phiếu thu; bản nhập ngoài gồm VAT còn bản đơn chưa VAT → số tiền lấy bản gồm VAT. Audit lưu bản cũ."""
+    from sqlalchemy import text as _sqlt
+    from ..models import ThanhToan
+    hop_le = {(g.id, n.id): kieu for (g, n, _ld, kieu) in _cn_thu_cap_trung(db)}
+    kieu = hop_le.get((data.giu_id, data.bo_id))
+    if kieu is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Cặp này không (còn) nằm trong danh sách nghi trùng — tải lại bảng rà trùng.")
+    giu = db.query(CongNo).filter_by(id=data.giu_id).with_for_update().first()
+    bo = db.query(CongNo).filter_by(id=data.bo_id).with_for_update().first()
+    cu = {"id": bo.id, "so_tien": float(bo.so_tien or 0), "da_thanh_toan": float(bo.da_thanh_toan or 0),
+          "so_ct": bo.so_ct, "ma_ban_ngoai": bo.ma_ban_ngoai, "ngay_ct": str(bo.ngay_ct) if bo.ngay_ct else None,
+          "han": str(bo.han) if bo.han else None, "ghi_chu": bo.ghi_chu,
+          "giu_truoc": {"so_tien": float(giu.so_tien or 0), "da_thanh_toan": float(giu.da_thanh_toan or 0),
+                        "so_ct": giu.so_ct}}
+    if kieu == "VAT" and Decimal(bo.so_tien or 0) > Decimal(giu.so_tien or 0):
+        if not Decimal(giu.tien_thue or 0):
+            giu.tien_thue = Decimal(bo.so_tien or 0) - Decimal(giu.so_tien or 0)
+        giu.so_tien = bo.so_tien                       # khoản phải thu thật = hóa đơn GỒM VAT
+    giu.da_thanh_toan = max(Decimal(giu.da_thanh_toan or 0), Decimal(bo.da_thanh_toan or 0))
+    ma = (bo.ma_ban_ngoai or "").strip().lower()
+    if bo.so_ct and (not (giu.so_ct or "").strip() or (giu.so_ct or "").strip().lower() == ma):
+        giu.so_ct = bo.so_ct                           # số hóa đơn THẬT thay cho số tạm (= mã đơn)
+    for k in ("ngay_ct", "han", "ngay_tt_tiep", "khach_hang_id"):
+        if not getattr(giu, k) and getattr(bo, k):
+            setattr(giu, k, getattr(bo, k))
+    if bo.ghi_chu and bo.ghi_chu not in (giu.ghi_chu or ""):
+        giu.ghi_chu = (((giu.ghi_chu + " · ") if giu.ghi_chu else "") + bo.ghi_chu)[:300]
+    if (bo.nhac_trang_thai or "") == "XONG":
+        giu.nhac_trang_thai = "XONG"
+    da, tong = Decimal(giu.da_thanh_toan or 0), Decimal(giu.so_tien or 0)
+    giu.trang_thai = "THU_DU" if (tong > 0 and da >= tong) else ("THU_MOT_PHAN" if da > 0 else "CHUA_THU")
+    # lịch sử thu: bản giữ chưa có lần thu nào → chuyển sang; đã có → các lần thu của bản trùng là ghi lặp, gỡ đi
+    tt_bo = [{"ngay": str(t.ngay), "so_tien": float(t.so_tien or 0)}
+             for t in db.query(ThanhToan).filter_by(cong_no_id=bo.id).all()]
+    cu["lan_thu_ban_trung"] = tt_bo
+    if db.query(ThanhToan).filter_by(cong_no_id=giu.id).first() is None:
+        db.query(ThanhToan).filter_by(cong_no_id=bo.id).update({"cong_no_id": giu.id}, synchronize_session=False)
+    else:
+        db.query(ThanhToan).filter_by(cong_no_id=bo.id).delete(synchronize_session=False)
+    chuyen = {}
+    for (t, c) in db.execute(_sqlt(
+            "SELECT cl.relname, att.attname FROM pg_constraint con "
+            "JOIN pg_class cl ON cl.oid = con.conrelid "
+            "JOIN pg_attribute att ON att.attrelid = con.conrelid AND att.attnum = ANY(con.conkey) "
+            "WHERE con.contype = 'f' AND con.confrelid = 'cong_no'::regclass")).all():
+        if t == "thanh_toan":
+            continue
+        r = db.execute(_sqlt(f'UPDATE "{t}" SET "{c}" = :g WHERE "{c}" = :b'), {"g": giu.id, "b": bo.id})
+        if r.rowcount:
+            chuyen[f"{t}.{c}"] = r.rowcount
+    db.flush()
+    db.delete(bo)
+    ghi_audit(db, nd.id, "GOP_CN_THU", "cong_no", giu.id, cu=cu,
+              moi={"so_tien": float(giu.so_tien or 0), "da_thanh_toan": float(giu.da_thanh_toan or 0),
+                   "so_ct": giu.so_ct, "chuyen": chuyen})
+    db.commit()
+    return {"ok": True, "giu_id": giu.id, "so_tien": float(giu.so_tien or 0),
+            "da_thanh_toan": float(giu.da_thanh_toan or 0), "so_ct": giu.so_ct, "trang_thai": giu.trang_thai}
+
+
 @router.post("/cong-no/xoa-nhap")
 def xoa_cong_no_nhap(data: DepTrungVao, db: Session = Depends(get_db),
                      nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
