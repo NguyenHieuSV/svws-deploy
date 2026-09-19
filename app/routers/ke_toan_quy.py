@@ -539,9 +539,22 @@ def _la_so_tam(so, ma_don, hd_id=None) -> bool:
     return (not s) or s == (ma_don or "").strip().lower() or bool(_re_st.fullmatch(r"(hd|dh)-\d+", s))
 
 
-def _don_chua_hoa_don(db) -> list[dict]:
+def _don_bo_qua(db) -> dict:
+    """Đơn được CEO / ADMIN / KTT cho BỎ QUA cảnh báo thiếu hóa đơn (mig 124): {don_hang_id: (lý do, lúc)}."""
+    from sqlalchemy import text as _sqlb
+    try:
+        return {i: (ld, str(luc)[:10] if luc else None) for (i, ld, luc) in
+                db.execute(_sqlb("SELECT don_hang_id, ly_do, tao_luc FROM don_bo_qua_hoa_don")).all()}
+    except Exception:
+        db.rollback()
+        return {}
+
+
+def _don_chua_hoa_don(db, chi_bo_qua: bool = False) -> list[dict]:
     """Đơn bán đã ở trạng thái ĐÃ XUẤT HÓA ĐƠN / HOÀN THÀNH mà CHƯA có hóa đơn bán nào bên Kế toán → doanh thu chưa được
-    ghi nhận. Kèm lý do: đơn chưa có giá trị · đã có công nợ nhưng chưa có hóa đơn · chưa sinh gì."""
+    ghi nhận. Kèm lý do: đơn chưa có giá trị · đã có công nợ nhưng chưa có hóa đơn · chưa sinh gì.
+    Mặc định LOẠI các đơn đã được cho bỏ qua; chi_bo_qua=True → chỉ trả các đơn đang bỏ qua (để xem / khôi phục)."""
+    bo_qua = _don_bo_qua(db)
     co_hd = {i for (i,) in db.query(HoaDon.don_hang_id).filter(HoaDon.loai == "BAN",
                                                                HoaDon.don_hang_id.isnot(None)).all()}
     out = []
@@ -553,6 +566,8 @@ def _don_chua_hoa_don(db) -> list[dict]:
               .order_by(CongNo.id.desc()).first())
         if cn is not None and cn.hoa_don_id:
             continue                                   # công nợ của đơn đã gắn một hóa đơn (hóa đơn gắn mã khác)
+        if (dh.id in bo_qua) != chi_bo_qua:
+            continue
         tong = _f(dh.tong_tien) + _f(dh.tien_thue)
         kh = db.get(KhachHang, dh.khach_hang_id) if dh.khach_hang_id else None
         so_don = (dh.so_hoa_don or "").strip()
@@ -561,16 +576,54 @@ def _don_chua_hoa_don(db) -> list[dict]:
                     "truoc": _f(dh.tong_tien), "thue": _f(dh.tien_thue), "tong": tong,
                     "so_hoa_don": so_don if (so_don and not _la_so_tam(so_don, dh.so)) else None,
                     "cong_no_id": cn.id if cn else None, "cong_no_tien": _f(cn.so_tien) if cn else None,
+                    "bo_qua_ly_do": bo_qua.get(dh.id, (None, None))[0], "bo_qua_luc": bo_qua.get(dh.id, (None, None))[1],
                     "ly_do": ("Đơn chưa có giá trị (0 đ) — nhập giá trị đơn ở Bán hàng trước" if tong <= 0 and cn is None
                               else ("Đã có công nợ nhưng chưa có hóa đơn" if cn is not None
                                     else "Chưa sinh hóa đơn + công nợ"))})
     return out
 
 
+from pydantic import BaseModel as _BM_bq
+
+
 @router.get("/don-chua-hoa-don")
 def ds_don_chua_hoa_don(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
     ds = _don_chua_hoa_don(db)
-    return {"so_don": len(ds), "tong": sum(x["tong"] for x in ds), "ds": ds}
+    return {"so_don": len(ds), "tong": sum(x["tong"] for x in ds), "ds": ds,
+            "bo_qua": _don_chua_hoa_don(db, chi_bo_qua=True)}
+
+
+class BoQuaDonVao(_BM_bq):
+    ly_do: str | None = None
+
+
+@router.post("/don-chua-hoa-don/{dh_id}/bo-qua")
+def bo_qua_don_chua_hd(dh_id: int, data: BoQuaDonVao, db: Session = Depends(get_db),
+                       nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN", "KTT"))):
+    """🚫 CEO / ADMIN / KTT cho BỎ QUA cảnh báo thiếu hóa đơn của một đơn (VD đã hoàn tất, hóa đơn theo dõi ngoài hệ thống).
+    Bắt buộc lý do. Đơn giữ nguyên trạng thái; chỉ thôi báo ở «Việc còn treo». Khôi phục bằng DELETE."""
+    from sqlalchemy import text as _sqlb
+    ly_do = (data.ly_do or "").strip()
+    if len(ly_do) < 5:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Nhập lý do bỏ qua (tối thiểu 5 ký tự)")
+    if dh_id not in {x["id"] for x in _don_chua_hoa_don(db)}:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Đơn này không (còn) nằm trong bảng thiếu hóa đơn — tải lại bảng")
+    db.execute(_sqlb("INSERT INTO don_bo_qua_hoa_don (don_hang_id, ly_do, nguoi_dung_id) VALUES (:i, :l, :n) "
+                     "ON CONFLICT (don_hang_id) DO UPDATE SET ly_do = :l, nguoi_dung_id = :n, tao_luc = now()"),
+               {"i": dh_id, "l": ly_do[:300], "n": nd.id})
+    ghi_audit(db, nd.id, "BO_QUA_THIEU_HD", "don_hang", dh_id, moi={"ly_do": ly_do[:300]})
+    db.commit()
+    return {"ok": True}
+
+
+@router.delete("/don-chua-hoa-don/{dh_id}/bo-qua")
+def khoi_phuc_don_bo_qua(dh_id: int, db: Session = Depends(get_db),
+                         nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN", "KTT"))):
+    from sqlalchemy import text as _sqlb
+    r = db.execute(_sqlb("DELETE FROM don_bo_qua_hoa_don WHERE don_hang_id = :i"), {"i": dh_id})
+    ghi_audit(db, nd.id, "HUY_BO_QUA_THIEU_HD", "don_hang", dh_id, moi={"xoa": r.rowcount})
+    db.commit()
+    return {"ok": True, "xoa": r.rowcount}
 
 
 from pydantic import BaseModel as _BM_lap
