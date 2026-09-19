@@ -644,6 +644,19 @@ def cn_thu_gop_don(data: GopCnThuVao, db: Session = Depends(get_db),
         if r.rowcount:
             chuyen[f"{t}.{c}"] = r.rowcount
     db.flush()
+    # hóa đơn bán của bản giữ đi theo công nợ sau gộp: số tạm (= mã đơn) → số THẬT; chưa hạch toán thì khớp ngày + VAT
+    hd = db.get(HoaDon, giu.hoa_don_id) if giu.hoa_don_id else None
+    if hd is not None and hd.hddt_trang_thai != "DA_PHAT_HANH":
+        so_hd_cu = (hd.so or "").strip().lower()
+        if (giu.so_ct or "").strip() and (not so_hd_cu or so_hd_cu == ma or so_hd_cu == f"dh-{giu.don_hang_id}"):
+            hd.so = giu.so_ct.strip()[:40]
+            if bo.ngay_ct and not hd.da_hach_toan:
+                hd.ngay = bo.ngay_ct                   # ngày hóa đơn THẬT theo bản nhập ngoài
+        if not hd.da_hach_toan and abs(Decimal(giu.so_tien or 0) - Decimal(hd.tong_tien or 0)) > 1000:
+            truoc_hd = Decimal(hd.tien_truoc_thue or 0)
+            if truoc_hd > 0 and Decimal(giu.so_tien or 0) > truoc_hd:
+                hd.tien_thue = Decimal(giu.so_tien or 0) - truoc_hd
+                hd.tong_tien = giu.so_tien
     db.delete(bo)
     ghi_audit(db, nd.id, "GOP_CN_THU", "cong_no", giu.id, cu=cu,
               moi={"so_tien": float(giu.so_tien or 0), "da_thanh_toan": float(giu.da_thanh_toan or 0),

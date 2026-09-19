@@ -1513,7 +1513,21 @@ def _cong_no_cua_hd(db, hd_id):
         return None
     return {"id": cn.id, "loai": cn.loai, "so_tien": _f(cn.so_tien),
             "da_thanh_toan": _f(cn.da_thanh_toan),
-            "con_lai": _f(cn.so_tien) - _f(cn.da_thanh_toan), "trang_thai": cn.trang_thai}
+            "con_lai": _f(cn.so_tien) - _f(cn.da_thanh_toan), "trang_thai": cn.trang_thai,
+            "so_ct": cn.so_ct, "ngay_ct": str(cn.ngay_ct) if cn.ngay_ct else None}
+
+
+def _khop_theo_cong_no(hd: HoaDon, so_tien_cn):
+    """Tiền hóa đơn BÁN khớp theo công nợ (số phải thu thật): công nợ = trước thuế → VAT 0 (khách chế xuất / không VAT);
+    công nợ = trước thuế + VAT 5/8/10% → thuế = phần chênh. Không suy được → None (kiểm tra tay)."""
+    truoc, cn = Decimal(hd.tien_truoc_thue or 0), Decimal(so_tien_cn or 0)
+    if truoc <= 0 or cn <= 0:
+        return None
+    if abs(cn - truoc) <= 1000:
+        return truoc, Decimal(0), truoc
+    if any(abs(float(cn / truoc) - (1 + v)) <= 0.002 for v in (0.05, 0.08, 0.10)):
+        return truoc, cn - truoc, cn
+    return None
 
 
 def _hd_dict(db, hd: HoaDon):
@@ -1537,6 +1551,37 @@ def _hd_dict(db, hd: HoaDon):
             "dien_giai": hd.dien_giai, "da_hach_toan": bool(hd.da_hach_toan),
             "trang_thai": hd.trang_thai, "hddt_trang_thai": hd.hddt_trang_thai,
             "hddt_ma_tra_cuu": hd.hddt_ma_tra_cuu, "cong_no": _cong_no_cua_hd(db, hd.id)}
+
+
+@router.post("/hoa-don/{hd_id}/khop-cong-no")
+def khop_hoa_don_theo_cong_no(hd_id: int, db: Session = Depends(get_db),
+                              nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    """↔ Hóa đơn BÁN lệch tiền so với công nợ (công nợ đã sửa tổng / gộp bản gồm VAT mà hóa đơn không đổi theo) →
+    khớp THUẾ + TỔNG của hóa đơn theo công nợ. Chỉ khi CHƯA hạch toán và chưa phát hành HĐĐT."""
+    hd = db.get(HoaDon, hd_id)
+    if hd is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy hóa đơn")
+    if hd.loai != "BAN":
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Chỉ áp dụng hóa đơn BÁN")
+    if hd.da_hach_toan or hd.hddt_trang_thai == "DA_PHAT_HANH":
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            f"'{hd.so}' đã hạch toán / đã phát hành HĐĐT — không tự khớp được, cần lập hóa đơn điều chỉnh")
+    cn = db.query(CongNo).filter(CongNo.hoa_don_id == hd.id).first()
+    if cn is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Hóa đơn này chưa gắn công nợ")
+    kq = _khop_theo_cong_no(hd, cn.so_tien)
+    if kq is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            f"Công nợ {_f(cn.so_tien):,.0f} đ không khớp trước thuế {_f(hd.tien_truoc_thue):,.0f} đ theo mức VAT "
+                            f"0/5/8/10% — kiểm tra lại giá trị đơn / công nợ rồi sửa tay")
+    cu = {"tien_thue": _f(hd.tien_thue), "tong_tien": _f(hd.tong_tien)}
+    _, hd.tien_thue, hd.tong_tien = kq
+    if hasattr(cn, "tien_thue"):
+        cn.tien_thue = hd.tien_thue
+    ghi_audit(db, nd.id, "KHOP_HD_CONG_NO", "hoa_don", hd.id, cu=cu,
+              moi={"tien_thue": _f(hd.tien_thue), "tong_tien": _f(hd.tong_tien), "cong_no": cn.id})
+    db.commit()
+    return _hd_dict(db, hd)
 
 
 @router.post("/chi-phi/doan-nhom")
