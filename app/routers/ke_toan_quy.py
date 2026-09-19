@@ -643,6 +643,31 @@ def lap_hoa_don_cho_don(dh_id: int, data: LapHdDonVao, db: Session = Depends(get
     return _hd_dict(db, hd)
 
 
+@router.post("/don-chua-hoa-don/{dh_id}/tra-ve")
+def tra_don_chua_xuat_hd(dh_id: int, db: Session = Depends(get_db),
+                         nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    """↩ Đơn bị đánh dấu «Đã xuất hóa đơn / Hoàn thành» nhưng THỰC TẾ CHƯA XUẤT HÓA ĐƠN → trả về trạng thái trước
+    (Đã xuất kho nếu đơn có phiếu xuất kho, còn lại Đang thực hiện). Chỉ khi đơn chưa có công nợ / hóa đơn nào."""
+    from ..models import PhieuKho
+    dh = db.get(DonHang, dh_id)
+    if dh is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đơn hàng")
+    x = next((d for d in _don_chua_hoa_don(db) if d["id"] == dh_id), None)
+    if x is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Đơn này không (còn) nằm trong bảng thiếu hóa đơn — tải lại bảng")
+    if x["cong_no_id"]:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            f"Đơn {dh.so or dh.id} đã có công nợ phải thu (CN-{x['cong_no_id']}) — không trả về được; "
+                            f"nếu công nợ ghi nhầm thì xử lý công nợ trước.")
+    cu = dh.trang_thai
+    da_xuat_kho = db.query(PhieuKho).filter(PhieuKho.don_hang_id == dh.id).first() is not None
+    dh.trang_thai = "DA_XUAT" if da_xuat_kho else "DANG_THUC_HIEN"
+    ghi_audit(db, nd.id, "TRA_VE_CHUA_XUAT_HD", "don_hang", dh.id, cu={"trang_thai": cu},
+              moi={"trang_thai": dh.trang_thai, "ly_do": "chưa xuất hóa đơn"})
+    db.commit()
+    return {"id": dh.id, "so": dh.so, "trang_thai": dh.trang_thai, "truoc": cu}
+
+
 @router.get("/viec-treo")
 def viec_ke_toan_treo(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
     """🔔 Việc kế toán còn treo — các con số dễ bị bỏ quên; giao diện hiện thành dãy chip
