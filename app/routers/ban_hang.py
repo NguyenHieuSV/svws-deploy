@@ -93,7 +93,7 @@ def sua_kh(kh_id: int, data: KhachHangSua, db: Session = Depends(get_db),
 from pydantic import BaseModel as _KhBase
 
 _KH_TU_BO_THEM = ("llc", "inc", "corp", "corporation", "pte", "gmbh")
-_KH_BANG_DEM = (("bao_gia", "bao_gia"), ("don_hang", "don_hang"), ("cong_no", "cong_no"), ("hoa_don", "hoa_don"),
+_KH_BANG_DEM = (("bao_gia", "bao_gia"), ("bao_gia", "bao_gia_form"), ("don_hang", "don_hang"), ("cong_no", "cong_no"), ("hoa_don", "hoa_don"),
                 ("du_an", "du_an"), ("hop_dong_thue", "hop_dong_thue"), ("phieu", "phieu_thu_chi"),
                 ("lien_lac", "lien_lac"))
 
@@ -173,7 +173,7 @@ def kh_nghi_trung(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"
             for (kid, n) in db.execute(_sqlk(f"SELECT khach_hang_id, COUNT(*) FROM {bang} "
                                              f"WHERE khach_hang_id IS NOT NULL GROUP BY khach_hang_id")).all():
                 if kid in dem:
-                    dem[kid][khoa] = int(n)
+                    dem[kid][khoa] += int(n)
         except Exception:
             db.rollback()
     out = []
