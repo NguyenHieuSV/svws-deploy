@@ -1023,6 +1023,13 @@ def ncc_nghi_trung(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM
             cha[max(ra, rb)] = min(ra, rb)
 
     ly_do = {}
+    # cặp đã được kết luận KHÔNG PHẢI cùng công ty (mig 122) → không báo lại
+    from sqlalchemy import text as _sqlk
+    try:
+        khac = {(a, b) for (a, b) in db.execute(_sqlk("SELECT a_id, b_id FROM ncc_khong_trung")).all()}
+    except Exception:
+        db.rollback()
+        khac = set()
     loi = {n.id: _ncc_loi_ten(n.ten) for n in nccs}
     mst = {n.id: _re_ma.sub(r"[^0-9]", "", n.ma_so_thue or "") for n in nccs}
     for i, a in enumerate(nccs):
@@ -1036,7 +1043,7 @@ def ncc_nghi_trung(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM
                   and _SMn(None, loi[a.id], loi[b.id]).ratio() >= 0.9
                   and not (mst[a.id] and mst[b.id] and mst[a.id] != mst[b.id])):
                 ld = "tên gần giống"
-            if ld:
+            if ld and (min(a.id, b.id), max(a.id, b.id)) not in khac:
                 noi(a.id, b.id)
                 ly_do[(a.id, b.id)] = ld
     nhom = {}
@@ -1056,6 +1063,31 @@ def ncc_nghi_trung(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM
         out.append({"ly_do": " · ".join(lds), "goi_y_giu": ds[0]["id"], "ncc": ds})
     out.sort(key=lambda g: -sum(x["tong_chung_tu"] for x in g["ncc"]))
     return {"so_nhom": len(out), "nhom": out}
+
+
+class NccKhongTrungVao(_NccCnBase):
+    ids: list[int]                   # toàn bộ hồ sơ của nhóm
+    khac_ids: list[int] | None = None   # hồ sơ KHÁC công ty (bỏ tick); trống = cả nhóm đều khác nhau
+
+
+@router.post("/nha-cung-cap/khong-trung")
+def ncc_danh_dau_khong_trung(data: NccKhongTrungVao, db: Session = Depends(get_db),
+                             nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
+    """Ghi nhớ: các hồ sơ này KHÔNG PHẢI cùng một công ty — công cụ Rà NCC trùng không báo lại cặp đó."""
+    from sqlalchemy import text as _sqlk2
+    ids = list(dict.fromkeys(data.ids or []))
+    khac = [i for i in (data.khac_ids or []) if i in ids] or ids
+    cap = set()
+    for k in khac:
+        for i in ids:
+            if i != k:
+                cap.add((min(i, k), max(i, k)))
+    for (a, b) in sorted(cap):
+        db.execute(_sqlk2("INSERT INTO ncc_khong_trung (a_id, b_id, nguoi_dung_id) VALUES (:a, :b, :n) "
+                          "ON CONFLICT DO NOTHING"), {"a": a, "b": b, "n": nd.id})
+    ghi_audit(db, nd.id, "NCC_KHONG_TRUNG", "nha_cung_cap", (khac[0] if khac else 0), moi={"cap": [list(c) for c in sorted(cap)]})
+    db.commit()
+    return {"ok": True, "so_cap": len(cap)}
 
 
 class GopNccVao(_NccCnBase):
