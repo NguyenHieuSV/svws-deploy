@@ -51,8 +51,16 @@ def ds_kh(q: str | None = None, db: Session = Depends(get_db),
 
 
 @router.post("/khach-hang", response_model=KhachHangRa, status_code=201)
-def tao_kh(data: KhachHangVao, db: Session = Depends(get_db),
+def tao_kh(data: KhachHangVao, cho_trung: bool = False, db: Session = Depends(get_db),
            nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    if not cho_trung:                            # 🧹 chặn sinh hồ sơ trùng: đã có khách cùng MST / cùng tên lõi
+        da_co = _match_khach(db, data.ten, data.ma_so_thue)
+        if da_co is not None:
+            raise HTTPException(status.HTTP_409_CONFLICT,
+                                f"TRUNG_KHACH: Đã có khách «{da_co.ten}»" + (f" (mã {da_co.ma})" if da_co.ma else "")
+                                + (f", MST {da_co.ma_so_thue}" if da_co.ma_so_thue else "")
+                                + " — có vẻ là cùng một công ty. Nếu đúng là khách KHÁC (chi nhánh / nhà máy xuất "
+                                  "hóa đơn riêng) thì xác nhận để vẫn tạo.")
     phu = _lien_he_phu_sach(data.lien_he_phu)
     kh = KhachHang(ma=data.ma, ten=data.ten, ma_so_thue=data.ma_so_thue,
                    dien_thoai=data.dien_thoai, nguoi_lien_he=data.nguoi_lien_he,
@@ -564,13 +572,36 @@ def tao_cong_no_khach(data: TaoCongNoVao, db: Session = Depends(get_db),
 
 
 # ===================== AI UPLOAD CÔNG NỢ (chỉ CEO/ADMIN) =====================
-def _match_khach(db: Session, ten: str):
-    """Khớp khách hàng theo tên (không phân biệt hoa thường, đã trim)."""
-    t = (ten or "").strip()
-    if not t:
-        return None
+def _match_khach(db: Session, ten: str, mst: str | None = None):
+    """Khớp khách hàng ĐÃ CÓ trước khi tạo mới — cùng cách so tên với công cụ Rà khách hàng trùng, để file / PO viết tên
+    khác danh bạ («Silicon Carbide Vietnam LLC» ↔ «Công ty TNHH Silicon Carbide Việt Nam») không sinh hồ sơ thứ hai.
+    Thứ tự: đúng tên → trùng MST → trùng TÊN LÕI (bỏ loại hình DN, dấu, Vietnam / LLC…) → tên lõi gần giống ≥ 92% và
+    DUY NHẤT. Nhiều hồ sơ cùng tên lõi (VD các nhà máy để riêng) → ưu tiên hồ sơ có MST / mã khách, rồi id nhỏ nhất."""
+    from difflib import SequenceMatcher as _SMm
     from sqlalchemy import func as _f
-    return db.query(KhachHang).filter(_f.lower(KhachHang.ten) == t.lower()).first()
+    t = (ten or "").strip()
+    so_mst = _re_mod.sub(r"[^0-9]", "", mst or "")
+    if t:
+        kh = db.query(KhachHang).filter(_f.lower(KhachHang.ten) == t.lower()).order_by(KhachHang.id).first()
+        if kh is not None:
+            return kh
+    khs = db.query(KhachHang).order_by(KhachHang.id).all()
+    if len(so_mst) >= 9:
+        for k in khs:
+            if _re_mod.sub(r"[^0-9]", "", k.ma_so_thue or "") == so_mst:
+                return k
+    loi = _kh_loi_ten(t) if t else ""
+    if not loi:
+        return None
+    uu_tien = lambda k: (0 if (k.ma_so_thue or "").strip() else 1, 0 if (k.ma or "").strip() else 1, k.id)
+    cung = [k for k in khs if _kh_loi_ten(k.ten) == loi]
+    if cung:
+        return sorted(cung, key=uu_tien)[0]
+    if len(loi) >= 6:
+        gan = [k for k in khs if len(_kh_loi_ten(k.ten)) >= 6 and _SMm(None, loi, _kh_loi_ten(k.ten)).ratio() >= 0.92]
+        if len(gan) == 1:
+            return gan[0]
+    return None
 
 
 @router.post("/cong-no/ai-doc")
@@ -598,6 +629,9 @@ def ai_doc_cong_no(file: UploadFile = File(...), db: Session = Depends(get_db),
         kh = _match_khach(db, r.get("khach_hang"))
         r["khach_hang_id"] = kh.id if kh else None
         r["khop_kh"] = bool(kh)
+        # tên trong file khác tên danh bạ → cho người nhập thấy dòng này sẽ vào hồ sơ nào
+        r["khop_kh_ten"] = (kh.ten if (kh is not None and (kh.ten or "").strip().lower()
+                                       != str(r.get("khach_hang") or "").strip().lower()) else None)
         sh = str(r.get("so_hoa_don") or "").strip()
         r["trung"] = False
         r["trung_ly_do"] = ""
@@ -1960,7 +1994,7 @@ async def tao_don_hang_tu_po_ai(file: UploadFile = File(...), db: Session = Depe
     if mst:
         kh = db.query(KhachHang).filter(KhachHang.ma_so_thue == mst).first()
     if kh is None and ten_kh:
-        kh = db.query(KhachHang).filter(KhachHang.ten.ilike(ten_kh)).first()
+        kh = _match_khach(db, ten_kh, mst)       # đúng tên → MST → tên lõi (không sinh hồ sơ khách thứ hai)
     kh_moi = False
     if kh is None:
         if not ten_kh:
