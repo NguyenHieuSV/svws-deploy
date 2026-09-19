@@ -103,7 +103,7 @@ def tong_hop(db: Session, hom_nay: date | None = None) -> dict:
     hom_nay = hom_nay or date.today()
     ds_ts = db.query(TaiSanChoThue).order_by(TaiSanChoThue.id).all()
     theo_ts = {t.id: {"don_dau_tu": [], "don_thang": [], "von_po": 0.0, "dt": 0.0, "cp": 0.0} for t in ds_ts}
-    chua_noi, nghi_dau_tu = [], []
+    chua_noi, nghi_dau_tu, dt_nhom = [], [], {}
     for dh in db.query(DonHang).order_by(DonHang.id).all():
         dau_tu = la_don_dau_tu(dh)
         ts = db.get(TaiSanChoThue, dh.tai_san_cho_thue_id) if getattr(dh, "tai_san_cho_thue_id", None) else None
@@ -123,8 +123,10 @@ def tong_hop(db: Session, hom_nay: date | None = None) -> dict:
         dong = {"don_hang_id": dh.id, "ma": dh.so or f"DH-{dh.id}", "ngay": str(dh.ngay) if dh.ngay else None,
                 "doanh_thu": cp["doanh_thu"], "chi_phi": cp["tong_chi_phi"], "so_po": cp["so_po"]}
         # NGHI LÀ ĐẦU TƯ (để CEO / KTT xem và quyết): mã DV có chi phí lớn mà doanh thu = 0 hoặc < 5% chi phí
+        nh = phan_tich(dh.so)["goc"] or (dh.so or "")
+        dt_nhom[nh] = dt_nhom.get(nh, 0.0) + cp["doanh_thu"]
         if not dau_tu and cp["tong_chi_phi"] >= NGUONG_NGHI and cp["doanh_thu"] < cp["tong_chi_phi"] * 0.05:
-            nghi_dau_tu.append({**dong, "tai_san_id": ts.id if ts else None, "du_an": ts.ma if ts else None})
+            nghi_dau_tu.append({**dong, "tai_san_id": ts.id if ts else None, "du_an": ts.ma if ts else None, "_nhom": nh})
         if ts is None and not dau_tu:
             continue
         if dau_tu:
@@ -137,6 +139,10 @@ def tong_hop(db: Session, hom_nay: date | None = None) -> dict:
         theo_ts[ts.id]["don_thang"].append(dong)
         theo_ts[ts.id]["dt"] += cp["doanh_thu"]
         theo_ts[ts.id]["cp"] += cp["tong_chi_phi"]
+    # mã con CHỈ MANG CHI PHÍ của một tháng đã có doanh thu ở mã anh em (DV-COA-NT-0926-02 bên cạnh -01) = chi phí vận hành
+    # tháng, KHÔNG phải đầu tư → bỏ khỏi danh sách nghi
+    nghi_dau_tu = [{k: v for k, v in x.items() if k != "_nhom"} for x in nghi_dau_tu
+                   if dt_nhom.get(x["_nhom"], 0.0) - x["doanh_thu"] < NGUONG_NGHI]
     out, tong = [], {"von": 0.0, "kh_luy_ke": 0.0, "con_lai": 0.0, "dt": 0.0, "cp": 0.0}
     for t in ds_ts:
         g = theo_ts[t.id]
