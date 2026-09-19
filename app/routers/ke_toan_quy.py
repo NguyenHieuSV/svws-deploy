@@ -1845,11 +1845,12 @@ def sua_so_ngay_hoa_don(hd_id: int, data: HdSoNgayVao, db: Session = Depends(get
                                    or (dh.so_hoa_don or "").strip().lower() in (so_cu.lower(), (dh.so or "").strip().lower())):
                 dh.so_hoa_don = so_moi[:60]
     if data.ngay is not None and data.ngay != hd.ngay:
+        ngay_cu = hd.ngay
         hd.ngay = data.ngay
         for bt in db.query(ButToan).filter_by(hoa_don_id=hd.id).all():
             bt.ngay = data.ngay                     # bút toán doanh thu theo đúng NGÀY HÓA ĐƠN
         for cn in db.query(CongNo).filter_by(hoa_don_id=hd.id).all():
-            if not cn.ngay_ct:
+            if not cn.ngay_ct or cn.ngay_ct == ngay_cu:   # ngày CT công nợ đang đi theo ngày hóa đơn → đổi theo
                 cn.ngay_ct = data.ngay
     tien = None
     if data.tong_tien is not None or data.tien_truoc_thue is not None:

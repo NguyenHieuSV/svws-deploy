@@ -3682,6 +3682,17 @@ def doi_ma(data: DoiMaVao, db: Session = Depends(get_db),
                       synchronize_session=False))
         if so:
             ket_qua[nhan] = int(so)
+    # SỐ TẠM đang mang mã cũ (hóa đơn bán tự sinh · số CT công nợ · số HĐ trên đơn) → theo mã mới, để vẫn được nhận
+    # là số tạm (= mã đơn) chứ không bị hiểu nhầm thành số hóa đơn thật
+    from ..models import HoaDon as _HDm, DonHang as _DHm
+    for nhan, model, cot, dk in (("Hóa đơn bán (số tạm)", _HDm, _HDm.so, [_HDm.loai == "BAN"]),
+                                 ("Công nợ (số CT tạm)", CongNo, CongNo.so_ct, []),
+                                 ("Đơn bán (số HĐ tạm)", _DHm, _DHm.so_hoa_don, [])):
+        so = (db.query(model).filter(func.lower(func.trim(cot)) == cu.lower(), *dk)
+              .update({cot.key: moi[:cot.type.length] if getattr(cot.type, "length", None) else moi},
+                      synchronize_session=False))
+        if so:
+            ket_qua[nhan] = int(so)
     ghi_audit(db, nd.id, "DOI_MA", "don_hang", 0, cu={"ma": cu}, moi={"ma": moi, "so_dong": ket_qua})
     db.commit()
     return {"ma_cu": cu, "ma_moi": moi, "da_doi": ket_qua, "tong": sum(ket_qua.values())}
