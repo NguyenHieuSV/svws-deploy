@@ -89,6 +89,199 @@ def sua_kh(kh_id: int, data: KhachHangSua, db: Session = Depends(get_db),
     return kh
 
 
+# ----- 🧹 RÀ KHÁCH HÀNG TRÙNG + GỘP HỒ SƠ (cùng cách làm với Rà NCC trùng) -----
+from pydantic import BaseModel as _KhBase
+
+_KH_TU_BO_THEM = ("llc", "inc", "corp", "corporation", "pte", "gmbh")
+_KH_BANG_DEM = (("bao_gia", "bao_gia"), ("don_hang", "don_hang"), ("cong_no", "cong_no"), ("hoa_don", "hoa_don"),
+                ("du_an", "du_an"), ("hop_dong_thue", "hop_dong_thue"), ("phieu", "phieu_thu_chi"),
+                ("lien_lac", "lien_lac"))
+
+
+def _kh_loi_ten(ten: str) -> str:
+    """Tên lõi của khách để so trùng: như NCC (bỏ dấu, loại hình DN, từ chung) + bỏ LLC / Inc / Corp…"""
+    from .ncc import _ncc_loi_ten
+    s = " " + _ncc_loi_ten(ten) + " "
+    for tu in _KH_TU_BO_THEM:
+        s = s.replace(" " + tu + " ", " ")
+    return _re_mod.sub(r"\s+", " ", s).strip()
+
+
+def _kh_cot_tham_chieu(db):
+    """Mọi cột trỏ tới khach_hang(id): khóa ngoại thật + cột tên khach_hang_id chưa khai khóa ngoại."""
+    from sqlalchemy import text as _sqlk
+    cot = {(t, c) for (t, c) in db.execute(_sqlk(
+        "SELECT cl.relname, att.attname FROM pg_constraint con "
+        "JOIN pg_class cl ON cl.oid = con.conrelid "
+        "JOIN pg_attribute att ON att.attrelid = con.conrelid AND att.attnum = ANY(con.conkey) "
+        "WHERE con.contype = 'f' AND con.confrelid = 'khach_hang'::regclass")).all()}
+    cot |= {(t, c) for (t, c) in db.execute(_sqlk(
+        "SELECT c.table_name, c.column_name FROM information_schema.columns c "
+        "JOIN information_schema.tables t ON t.table_schema = c.table_schema AND t.table_name = c.table_name "
+        "WHERE c.table_schema = current_schema() AND t.table_type = 'BASE TABLE' "
+        "AND c.column_name = 'khach_hang_id' AND c.table_name <> 'khach_hang'")).all()}
+    return cot
+
+
+@router.get("/khach-hang/nghi-trung")
+def kh_nghi_trung(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
+    """🧹 Các nhóm KHÁCH HÀNG nghi là CÙNG MỘT công ty: trùng MST · trùng tên lõi (bỏ loại hình DN, dấu, Vietnam / LLC…) ·
+    tên lõi gần giống ≥ 90%. Kèm số chứng từ từng hồ sơ + gợi ý hồ sơ nên GIỮ. CHỈ ĐỌC."""
+    from difflib import SequenceMatcher as _SMk
+    from sqlalchemy import text as _sqlk
+    khs = db.query(KhachHang).order_by(KhachHang.id).all()
+    cha = {k.id: k.id for k in khs}
+
+    def tim(x):
+        while cha[x] != x:
+            cha[x] = cha[cha[x]]
+            x = cha[x]
+        return x
+
+    try:
+        khac = {(a, b) for (a, b) in db.execute(_sqlk("SELECT a_id, b_id FROM kh_khong_trung")).all()}
+    except Exception:
+        db.rollback()
+        khac = set()
+    loi = {k.id: _kh_loi_ten(k.ten) for k in khs}
+    mst = {k.id: _re_mod.sub(r"[^0-9]", "", k.ma_so_thue or "") for k in khs}
+    ly_do = {}
+    for i, a in enumerate(khs):
+        for b in khs[i + 1:]:
+            ld = None
+            if mst[a.id] and len(mst[a.id]) >= 9 and mst[a.id] == mst[b.id]:
+                ld = "trùng MST"
+            elif loi[a.id] and loi[a.id] == loi[b.id]:
+                ld = "trùng tên (sau khi bỏ loại hình DN)"
+            elif (len(loi[a.id]) >= 6 and len(loi[b.id]) >= 6
+                  and _SMk(None, loi[a.id], loi[b.id]).ratio() >= 0.9
+                  and not (mst[a.id] and mst[b.id] and mst[a.id] != mst[b.id])):
+                ld = "tên gần giống"
+            if ld and (min(a.id, b.id), max(a.id, b.id)) not in khac:
+                ra, rb = tim(a.id), tim(b.id)
+                if ra != rb:
+                    cha[max(ra, rb)] = min(ra, rb)
+                ly_do[(a.id, b.id)] = ld
+    nhom = {}
+    for k in khs:
+        nhom.setdefault(tim(k.id), []).append(k)
+    nhom = {g: v for g, v in nhom.items() if len(v) > 1}
+    ids = [k.id for v in nhom.values() for k in v]
+    dem = {i: {khoa: 0 for khoa, _b in _KH_BANG_DEM} for i in ids}
+    for khoa, bang in _KH_BANG_DEM:
+        try:
+            for (kid, n) in db.execute(_sqlk(f"SELECT khach_hang_id, COUNT(*) FROM {bang} "
+                                             f"WHERE khach_hang_id IS NOT NULL GROUP BY khach_hang_id")).all():
+                if kid in dem:
+                    dem[kid][khoa] = int(n)
+        except Exception:
+            db.rollback()
+    out = []
+    for g, v in nhom.items():
+        ds = []
+        for k in v:
+            d = dem.get(k.id, {})
+            ds.append({"id": k.id, "ma": k.ma, "ten": k.ten, "ma_so_thue": k.ma_so_thue, "dien_thoai": k.dien_thoai,
+                       "email": k.email, "nguoi_lien_he": k.nguoi_lien_he, **d, "tong_chung_tu": sum(d.values())})
+        ds.sort(key=lambda x: (-x["tong_chung_tu"], 0 if x["ma_so_thue"] else 1, x["id"]))
+        out.append({"ly_do": " · ".join(sorted({l for (a, b), l in ly_do.items() if tim(a) == g})),
+                    "goi_y_giu": ds[0]["id"], "kh": ds})
+    out.sort(key=lambda x: -sum(k["tong_chung_tu"] for k in x["kh"]))
+    return {"so_nhom": len(out), "so_khach": len(khs), "nhom": out}
+
+
+class KhKhongTrungVao(_KhBase):
+    ids: list[int]                       # toàn bộ hồ sơ của nhóm
+    khac_ids: list[int] | None = None    # hồ sơ KHÁC công ty (bỏ tick); trống = cả nhóm đều khác nhau
+
+
+@router.post("/khach-hang/khong-trung")
+def kh_danh_dau_khong_trung(data: KhKhongTrungVao, db: Session = Depends(get_db),
+                            nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
+    """Ghi nhớ: các hồ sơ này KHÔNG PHẢI cùng một khách — công cụ Rà khách hàng trùng không báo lại cặp đó."""
+    from sqlalchemy import text as _sqlk
+    ids = list(dict.fromkeys(data.ids or []))
+    khac = [i for i in (data.khac_ids or []) if i in ids] or ids
+    cap = {(min(i, k), max(i, k)) for k in khac for i in ids if i != k}
+    for (a, b) in sorted(cap):
+        db.execute(_sqlk("INSERT INTO kh_khong_trung (a_id, b_id, nguoi_dung_id) VALUES (:a, :b, :n) "
+                         "ON CONFLICT DO NOTHING"), {"a": a, "b": b, "n": nd.id})
+    ghi_audit(db, nd.id, "KH_KHONG_TRUNG", "khach_hang", (khac[0] if khac else 0),
+              moi={"cap": [list(c) for c in sorted(cap)]})
+    db.commit()
+    return {"ok": True, "so_cap": len(cap)}
+
+
+class GopKhVao(_KhBase):
+    giu_id: int
+    bo_ids: list[int]
+
+
+@router.post("/khach-hang/gop")
+def gop_khach_hang(data: GopKhVao, db: Session = Depends(get_db),
+                   nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
+    """GỘP hồ sơ khách trùng: mọi báo giá · đơn hàng · công nợ · hóa đơn · dự án · hợp đồng thuê · phiếu · liên lạc CRM…
+    của hồ sơ BỎ chuyển sang hồ sơ GIỮ (dò mọi cột trỏ tới khach_hang), ô trống của hồ sơ giữ được điền bù, người liên hệ
+    của hồ sơ bỏ thành liên hệ phụ, rồi xóa hồ sơ bỏ. KIỂM TRA không còn dòng nào trỏ về hồ sơ bỏ trước khi xóa (nhiều
+    bảng ON DELETE CASCADE — không để mất dữ liệu). Audit lưu nguyên hồ sơ cũ."""
+    from sqlalchemy import text as _sqlk
+    giu = db.get(KhachHang, data.giu_id)
+    if giu is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy khách hàng giữ lại")
+    bo_ids = [i for i in dict.fromkeys(data.bo_ids or []) if i != giu.id]
+    if not bo_ids:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Chọn ít nhất một hồ sơ để gộp vào")
+    cot = sorted(_kh_cot_tham_chieu(db))
+    ket_qua = []
+    for bid in bo_ids:
+        bo = db.get(KhachHang, bid)
+        if bo is None:
+            continue
+        cu = {"id": bo.id, "ma": bo.ma, "ten": bo.ten, "ma_so_thue": bo.ma_so_thue, "dien_thoai": bo.dien_thoai,
+              "nguoi_lien_he": bo.nguoi_lien_he, "email": bo.email, "phan_loai_abc": bo.phan_loai_abc,
+              "lien_he_phu": bo.lien_he_phu, "nguoi_phu_trach": bo.nguoi_phu_trach}
+        chuyen = {}
+        try:
+            for (t, c) in cot:
+                r = db.execute(_sqlk(f'UPDATE "{t}" SET "{c}" = :g WHERE "{c}" = :b'), {"g": giu.id, "b": bo.id})
+                if r.rowcount:
+                    chuyen[f"{t}.{c}"] = r.rowcount
+        except IntegrityError as e:
+            db.rollback()
+            raise HTTPException(status.HTTP_409_CONFLICT,
+                                f"Không gộp được «{cu['ten']}»: dữ liệu liên kết bị trùng khóa ({str(e.orig)[:160]}). "
+                                f"Chưa có gì thay đổi.")
+        for (t, c) in cot:                             # lưới an toàn trước khi xóa (CASCADE)
+            con = db.execute(_sqlk(f'SELECT COUNT(*) FROM "{t}" WHERE "{c}" = :b'), {"b": bo.id}).scalar() or 0
+            if con:
+                db.rollback()
+                raise HTTPException(status.HTTP_409_CONFLICT,
+                                    f"Còn {con} dòng ở {t}.{c} trỏ về «{cu['ten']}» — dừng gộp, chưa có gì thay đổi.")
+        for k in ("ma_so_thue", "dien_thoai", "nguoi_lien_he", "email", "phan_loai_abc", "nguoi_phu_trach"):
+            if not getattr(giu, k) and getattr(bo, k):
+                setattr(giu, k, getattr(bo, k))
+        phu = list(giu.lien_he_phu or [])
+        da_co = {str((x or {}).get("email") or "").strip().lower() for x in phu if isinstance(x, dict)} | \
+                {(giu.email or "").strip().lower()}
+        for x in list(bo.lien_he_phu or []) + [{"ten": bo.nguoi_lien_he, "email": bo.email, "dien_thoai": bo.dien_thoai}]:
+            if not isinstance(x, dict):
+                continue
+            em = str(x.get("email") or "").strip().lower()
+            if (em and em not in da_co) or (not em and x.get("ten") and x.get("ten") != giu.nguoi_lien_he
+                                           and all((p or {}).get("ten") != x.get("ten") for p in phu if isinstance(p, dict))):
+                phu.append({k2: v2 for k2, v2 in x.items() if v2})
+                da_co.add(em)
+        giu.lien_he_phu = phu
+        giu.khong_nhan_email = bool(giu.khong_nhan_email or bo.khong_nhan_email)
+        db.flush()
+        db.delete(bo)
+        db.flush()
+        ghi_audit(db, nd.id, "GOP_KH", "khach_hang", giu.id, cu=cu, moi={"giu": giu.id, "chuyen": chuyen})
+        ket_qua.append({"bo_id": cu["id"], "ten": cu["ten"], "chuyen": chuyen})
+    db.commit()
+    return {"ok": True, "giu": {"id": giu.id, "ten": giu.ten}, "da_gop": ket_qua}
+
+
 @router.delete("/khach-hang/{kh_id}")
 def xoa_kh(kh_id: int, db: Session = Depends(get_db),
            nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
