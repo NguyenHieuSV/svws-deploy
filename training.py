@@ -403,9 +403,9 @@ a{color:#0582ca;font-size:13.5px}.foot{margin-top:12px;text-align:center}
 <h1>💧 SVWS Training</h1>
 <p class=sub>Chương trình huấn luyện <b>công nghệ xử lý nước cấp – nước thải – khí thải</b> của Công ty TNHH GPKT Sóng Việt (SVWS), biên soạn theo chuẩn đào tạo kỹ sư nội bộ — mở miễn phí cho sinh viên ngành Môi trường, Cấp thoát nước, Hóa – Kỹ thuật.</p>
 <div class=stats>
-<div><b>31</b><span>công nghệ<br>3 lĩnh vực</span></div>
+<div><b>53</b><span>chuyên đề<br>3 lĩnh vực</span></div>
 <div><b>31</b><span>mô phỏng<br>động</span></div>
-<div><b>313</b><span>câu hỏi<br>trắc nghiệm</span></div>
+<div><b>356</b><span>câu hỏi<br>trắc nghiệm</span></div>
 <div><b>100%</b><span>miễn phí<br>học mọi lúc</span></div>
 </div>
 <ul class=feat>
