@@ -70,6 +70,26 @@ def so_thang_giua(a: date, b: date) -> int:
     return (b.year - a.year) * 12 + (b.month - a.month) + 1
 
 
+def _cong_thang(bat_dau, n):
+    """Ngày kết thúc hợp đồng = ngày bắt đầu + n tháng − 1 ngày (chuỗi ISO); thiếu dữ liệu → None."""
+    from datetime import timedelta
+    if not bat_dau or not n:
+        return None
+    y, m = bat_dau.year + (bat_dau.month - 1 + int(n)) // 12, (bat_dau.month - 1 + int(n)) % 12 + 1
+    d, cat = bat_dau.day, False
+    while d > 28:
+        try:
+            date(y, m, d)
+            break
+        except ValueError:
+            d, cat = d - 1, True
+    return str(date(y, m, d) - timedelta(days=0 if cat else 1))   # bắt đầu 31/01 + 1 tháng → hết 28/02
+
+
+def _con_ngay(ket_thuc_iso, hom_nay):
+    return (date.fromisoformat(ket_thuc_iso) - hom_nay).days if ket_thuc_iso else None
+
+
 def khau_hao_thang(ts, von: float) -> float:
     """Khấu hao THEO THỜI GIAN: vốn / số tháng hợp đồng. Ô «khấu hao tháng» nhập tay (> 0) thì ưu tiên số nhập tay."""
     tay = _f(getattr(ts, "khau_hao_thang", 0))
@@ -159,6 +179,9 @@ def tong_hop(db: Session, hom_nay: date | None = None) -> dict:
         lai_vh = g["dt"] - g["cp"]                      # lãi vận hành lũy kế (chưa trừ vốn)
         out.append({"tai_san_id": t.id, "ma": t.ma, "ten": t.ten, "khach_hang_id": t.khach_hang_id,
                     "don_gia": _f(t.gia_thue_thang), "don_vi_gia": t.don_vi_gia or "VND/THANG",
+                    "so_hop_dong": getattr(t, "so_hop_dong", None),
+                    "ngay_ky_hd": str(t.ngay_ky_hd) if getattr(t, "ngay_ky_hd", None) else None,
+                    "ngay_ket_thuc_hd": _cong_thang(bat_dau, n_hd), "con_ngay_hd": _con_ngay(_cong_thang(bat_dau, n_hd), hom_nay),
                     "so_thang_hd": n_hd, "ngay_bat_dau_hd": str(bat_dau) if bat_dau else None,
                     "san_luong_toi_thieu": _f(getattr(t, "san_luong_toi_thieu", 0)),
                     "san_luong_du_kien": _f(getattr(t, "san_luong_du_kien", 0)),

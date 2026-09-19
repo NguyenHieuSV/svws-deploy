@@ -1270,6 +1270,8 @@ class TaiSanChoThue(Base):
     gia_thue_thang: Mapped[Decimal] = mapped_column(Numeric(18, 0), default=0)
     don_vi_gia: Mapped[str | None] = mapped_column(String(20), default="VND/THANG")   # VND/THANG | VND/M3 (mig 66)
     khau_hao_thang: Mapped[Decimal] = mapped_column(Numeric(18, 0), default=0)
+    so_hop_dong: Mapped[str | None] = mapped_column(String(60), nullable=True)             # mig 126
+    ngay_ky_hd: Mapped[date | None] = mapped_column(Date, nullable=True)                  # mig 126
     so_thang_hd: Mapped[int | None] = mapped_column(Integer, nullable=True)               # mig 125: thời hạn HĐ = thời gian khấu hao
     ngay_bat_dau_hd: Mapped[date | None] = mapped_column(Date, nullable=True)            # mig 125
     san_luong_toi_thieu: Mapped[Decimal | None] = mapped_column(Numeric(15, 1), default=0)   # mig 125: m³/tháng cam kết tối thiểu

@@ -41,6 +41,7 @@ def _ts_ra(db, t: TaiSanChoThue) -> dict:
             "nguyen_gia": float(t.nguyen_gia or 0), "gia_thue_thang": float(t.gia_thue_thang or 0),
             "don_vi_gia": t.don_vi_gia or "VND/THANG",
             "khau_hao_thang": float(t.khau_hao_thang or 0),
+            "so_hop_dong": t.so_hop_dong, "ngay_ky_hd": str(t.ngay_ky_hd) if t.ngay_ky_hd else None,
             "so_thang_hd": t.so_thang_hd, "ngay_bat_dau_hd": str(t.ngay_bat_dau_hd) if t.ngay_bat_dau_hd else None,
             "san_luong_toi_thieu": float(t.san_luong_toi_thieu or 0), "san_luong_du_kien": float(t.san_luong_du_kien or 0),
             "ngay_mua": str(t.ngay_mua) if t.ngay_mua else None,
@@ -59,6 +60,13 @@ class TaiSanVaoCT(BaseModel):
     gia_thue_thang: Decimal = 0
     don_vi_gia: str = Field(default="VND/THANG", pattern="^(VND/THANG|VND/M3)$")
     khau_hao_thang: Decimal = 0
+    # 📄 thông số HỢP ĐỒNG (mig 125–126) — điền ngay khi có hợp đồng mới
+    so_hop_dong: str | None = Field(default=None, max_length=60)
+    ngay_ky_hd: date | None = None
+    so_thang_hd: int | None = Field(default=None, ge=0, le=600)
+    ngay_bat_dau_hd: date | None = None
+    san_luong_toi_thieu: Decimal | None = Field(default=None, ge=0)
+    san_luong_du_kien: Decimal | None = Field(default=None, ge=0)
     ngay_mua: date | None = None
     vi_tri: str | None = None
     ghi_chu: str | None = None
@@ -74,6 +82,8 @@ class TaiSanSuaCT(BaseModel):
     gia_thue_thang: Decimal | None = None
     don_vi_gia: str | None = Field(default=None, pattern="^(VND/THANG|VND/M3)$")
     khau_hao_thang: Decimal | None = None
+    so_hop_dong: str | None = Field(default=None, max_length=60)
+    ngay_ky_hd: date | None = None
     so_thang_hd: int | None = Field(default=None, ge=0, le=600)
     ngay_bat_dau_hd: date | None = None
     san_luong_toi_thieu: Decimal | None = Field(default=None, ge=0)
@@ -116,7 +126,7 @@ def sua_tai_san(ts_id: int, data: TaiSanSuaCT, db: Session = Depends(get_db),
     if data.tinh_trang is not None and data.tinh_trang not in TINH_TRANG:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Tình trạng không hợp lệ")
     for f in ("ten_du_an", "ten", "loai", "loai_he_thong", "nguyen_gia", "gia_thue_thang",
-              "don_vi_gia", "khau_hao_thang", "so_thang_hd", "ngay_bat_dau_hd", "san_luong_toi_thieu",
+              "don_vi_gia", "khau_hao_thang", "so_hop_dong", "ngay_ky_hd", "so_thang_hd", "ngay_bat_dau_hd", "san_luong_toi_thieu",
               "san_luong_du_kien", "tinh_trang", "vi_tri", "ghi_chu"):
         v = getattr(data, f)
         if v is not None:
