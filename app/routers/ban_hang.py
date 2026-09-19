@@ -2181,6 +2181,34 @@ def _dam_bao_cong_no_don(db: Session, dh: DonHang, so_hoa_don, nd: NguoiDung, xo
     return cn
 
 
+def _ghi_so_hoa_don_don(db: Session, dh: DonHang, so_hd):
+    """Ghi SỐ HÓA ĐƠN lên đơn + công nợ của đơn + hóa đơn bán bên Kế toán đang mang SỐ TẠM (= mã đơn / số cũ của đơn;
+    chưa phát hành HĐĐT; không trùng số hóa đơn bán khác). Trả (công nợ, id hóa đơn vừa đổi số | None)."""
+    cu = dh.so_hoa_don
+    dh.so_hoa_don = so_hd
+    cn = _cong_no_cua_don(db, dh.id)
+    if cn is not None and so_hd:
+        cn.so_ct = so_hd
+    hd_doi = None
+    if so_hd:
+        from ..lai_lo_ma import so_hd_chuan
+        if cn is not None and cn.hoa_don_id:
+            hds = [db.get(HoaDon, cn.hoa_don_id)]
+        else:
+            hds = db.query(HoaDon).filter_by(loai="BAN", don_hang_id=dh.id).order_by(HoaDon.id).all()
+        tam = {"", (dh.so or "").strip().lower(), f"dh-{dh.id}", (cu or "").strip().lower()}
+        hds = [x for x in hds if x is not None and x.hddt_trang_thai != "DA_PHAT_HANH"
+               and ((x.so or "").strip().lower() in tam or (x.so or "").strip().lower() == f"hd-{x.id}")]
+        if len(hds) == 1 and (hds[0].so or "").strip().lower() != so_hd.lower():
+            hd, khoa = hds[0], so_hd_chuan(so_hd)
+            trung = any(khoa and so_hd_chuan(o) == khoa for (o,) in
+                        db.query(HoaDon.so).filter(HoaDon.loai == "BAN", HoaDon.id != hd.id).all())
+            if not trung:
+                hd.so = so_hd[:40]
+                hd_doi = hd.id
+    return cn, hd_doi
+
+
 def _so_hd_that(so, dh: DonHang) -> bool:
     """Số hóa đơn THẬT: có giá trị và không phải số tạm (= mã đơn · DH-<id> · HD-<id>)."""
     s = (so or "").strip().lower()
@@ -2223,12 +2251,21 @@ def doi_trang_thai_don_hang(dh_id: int, data: TrangThaiDonVao, db: Session = Dep
                             f"CHUA_XUAT_HD: Đơn {dh.so or dh.id} CHƯA XUẤT HÓA ĐƠN (chưa có số hóa đơn thật) — không đặt "
                             f"được Hoàn thành. Nhập số hóa đơn đã xuất cho khách trước (ô «Số hóa đơn» của đơn, hoặc chuyển "
                             f"«Đã xuất hóa đơn» kèm số).")
+    # ⛔ «Đã xuất hóa đơn» = phải có SỐ HÓA ĐƠN THẬT — không còn lấy mã đơn làm số tạm
+    if tt == "DA_XUAT_HD" and cu != "DA_XUAT_HD" and not _don_da_xuat_hoa_don(db, dh, data.so_hoa_don):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            f"CHUA_CO_SO_HD: Chuyển «Đã xuất hóa đơn» cần SỐ HÓA ĐƠN THẬT đã xuất cho khách (đơn "
+                            f"{dh.so or dh.id}). Mã đơn / số tạm không được chấp nhận.")
     dh.trang_thai = tt
     cn = None
+    so_kem = (data.so_hoa_don or "").strip()[:60]
     if tt == "DA_XUAT_HD":                       # Đã xuất hóa đơn → mở công nợ (Chờ thanh toán)
         cn = _dam_bao_cong_no_don(db, dh, data.so_hoa_don, nd, xong=False)
     elif tt == "HOAN_THANH":                     # Hoàn thành → công nợ chuyển sang Đã hoàn thành
         cn = _dam_bao_cong_no_don(db, dh, data.so_hoa_don, nd, xong=True)
+    # số hóa đơn thật gõ kèm: đơn đã có công nợ / hóa đơn số tạm từ trước (VD sinh lúc xuất kho) → ghi đủ 3 nơi
+    if tt in ("DA_XUAT_HD", "HOAN_THANH") and _so_hd_that(so_kem, dh) and (dh.so_hoa_don or "").strip() != so_kem:
+        _ghi_so_hoa_don_don(db, dh, so_kem)
     ghi_audit(db, nd.id, "CAP_NHAT", "don_hang", dh.id,
               cu={"trang_thai": cu}, moi={"trang_thai": tt})
     db.commit()
@@ -2253,28 +2290,7 @@ def dat_so_hoa_don(dh_id: int, data: SoHdDonVao, db: Session = Depends(get_db),
     cu = dh.so_hoa_don
     if cu == so_hd:
         return {"id": dh.id, "so_hoa_don": dh.so_hoa_don, "doi": False}
-    dh.so_hoa_don = so_hd
-    cn = _cong_no_cua_don(db, dh_id)
-    if cn is not None and so_hd:
-        cn.so_ct = so_hd
-    # hóa đơn bán bên KẾ TOÁN của đơn đang mang SỐ TẠM (= mã đơn / số cũ của đơn) → nhận luôn số thật này
-    hd_doi = None
-    if so_hd:
-        from ..lai_lo_ma import so_hd_chuan
-        if cn is not None and cn.hoa_don_id:
-            hds = [db.get(HoaDon, cn.hoa_don_id)]
-        else:
-            hds = db.query(HoaDon).filter_by(loai="BAN", don_hang_id=dh.id).order_by(HoaDon.id).all()
-        tam = {"", (dh.so or "").strip().lower(), f"dh-{dh.id}", (cu or "").strip().lower()}
-        hds = [x for x in hds if x is not None and x.hddt_trang_thai != "DA_PHAT_HANH"
-               and ((x.so or "").strip().lower() in tam or (x.so or "").strip().lower() == f"hd-{x.id}")]
-        if len(hds) == 1 and (hds[0].so or "").strip().lower() != so_hd.lower():
-            hd, khoa = hds[0], so_hd_chuan(so_hd)
-            trung = any(khoa and so_hd_chuan(o) == khoa for (o,) in
-                        db.query(HoaDon.so).filter(HoaDon.loai == "BAN", HoaDon.id != hd.id).all())
-            if not trung:
-                hd.so = so_hd[:40]
-                hd_doi = hd.id
+    cn, hd_doi = _ghi_so_hoa_don_don(db, dh, so_hd)
     ghi_audit(db, nd.id, "CAP_NHAT", "don_hang", dh.id,
               cu={"so_hoa_don": cu}, moi={"so_hoa_don": so_hd, "cong_no_id": cn.id if cn else None,
                                           "hoa_don_id": hd_doi})

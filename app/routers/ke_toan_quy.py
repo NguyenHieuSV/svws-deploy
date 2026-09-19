@@ -627,6 +627,11 @@ def lap_hoa_don_cho_don(dh_id: int, data: LapHdDonVao, db: Session = Depends(get
         cn.hoa_don_id = hd.id
         if so and (not (cn.so_ct or "").strip() or _la_so_tam(cn.so_ct, dh.so)):
             cn.so_ct = so[:60]
+    if _la_so_tam(hd.so, dh.so, hd.id):              # ⛔ không lập hóa đơn mang số tạm nữa
+        db.rollback()
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            f"Nhập SỐ HÓA ĐƠN THẬT đã xuất cho đơn {dh.so or dh.id} — hệ thống không tìm thấy số thật "
+                            f"nào (trên đơn / công nợ) để lấy thay.")
     if data.ngay:
         hd.ngay = data.ngay
     if so and (not (dh.so_hoa_don or "").strip() or _la_so_tam(dh.so_hoa_don, dh.so)):
