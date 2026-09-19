@@ -1563,6 +1563,56 @@ def ds_hoa_don(loai: str | None = None, db: Session = Depends(get_db),
     return out
 
 
+class HdSoNgayVao(_BM_hdc):
+    so: str | None = None
+    ngay: date | None = None
+
+
+@router.put("/hoa-don/{hd_id}/so-ngay")
+def sua_so_ngay_hoa_don(hd_id: int, data: HdSoNgayVao, db: Session = Depends(get_db),
+                        nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    """🔢 Nhập SỐ + NGÀY hóa đơn THẬT cho hóa đơn bán đang mang số tạm (= mã đơn). Đồng bộ: công nợ (số CT, ngày CT),
+    đơn hàng (số hóa đơn), bút toán đã sinh (ngày). Khóa khi đã phát hành HĐĐT; chặn trùng số với hóa đơn bán khác."""
+    from ..lai_lo_ma import so_hd_chuan
+    hd = db.get(HoaDon, hd_id)
+    if hd is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy hóa đơn")
+    if hd.hddt_trang_thai == "DA_PHAT_HANH":
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            f"'{hd.so}' đã phát hành HĐĐT — không sửa được số / ngày")
+    so_moi = (data.so or "").strip()
+    if not so_moi and data.ngay is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Nhập số hóa đơn hoặc ngày hóa đơn")
+    cu = {"so": hd.so, "ngay": str(hd.ngay) if hd.ngay else None}
+    so_cu = (hd.so or "").strip()
+    if so_moi and so_moi != so_cu:
+        khoa = so_hd_chuan(so_moi)
+        for (oid, oso) in db.query(HoaDon.id, HoaDon.so).filter(HoaDon.loai == hd.loai, HoaDon.id != hd.id).all():
+            if khoa and so_hd_chuan(oso) == khoa:
+                raise HTTPException(status.HTTP_409_CONFLICT,
+                                    f"Số hóa đơn '{so_moi}' đã dùng cho hóa đơn khác ('{oso}') — kiểm tra lại")
+        hd.so = so_moi[:40]
+        for cn in db.query(CongNo).filter_by(hoa_don_id=hd.id).all():
+            if not (cn.so_ct or "").strip() or (cn.so_ct or "").strip().lower() == so_cu.lower():
+                cn.so_ct = so_moi[:60]
+        if hd.don_hang_id:
+            dh = db.get(DonHang, hd.don_hang_id)
+            if dh is not None and (not (dh.so_hoa_don or "").strip()
+                                   or (dh.so_hoa_don or "").strip().lower() in (so_cu.lower(), (dh.so or "").strip().lower())):
+                dh.so_hoa_don = so_moi[:60]
+    if data.ngay is not None and data.ngay != hd.ngay:
+        hd.ngay = data.ngay
+        for bt in db.query(ButToan).filter_by(hoa_don_id=hd.id).all():
+            bt.ngay = data.ngay                     # bút toán doanh thu theo đúng NGÀY HÓA ĐƠN
+        for cn in db.query(CongNo).filter_by(hoa_don_id=hd.id).all():
+            if not cn.ngay_ct:
+                cn.ngay_ct = data.ngay
+    ghi_audit(db, nd.id, "SUA_SO_NGAY_HD", "hoa_don", hd.id, cu=cu,
+              moi={"so": hd.so, "ngay": str(hd.ngay) if hd.ngay else None})
+    db.commit()
+    return _hd_dict(db, hd)
+
+
 @router.put("/hoa-don/{hd_id}/sua-ban")
 def sua_hoa_don_ban(hd_id: int, data: HdBanSua, db: Session = Depends(get_db),
                     nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):

@@ -237,6 +237,62 @@ def _cong_no_cua_don(db: Session, dh_id: int):
               .order_by(CongNo.id.desc()).first())
 
 
+def _cn_thu_ngoai_cung_ma(db: Session, dh: DonHang, tong, so_hoa_don=None):
+    """🔁 CHẶN SINH TRÙNG: công nợ phải thu NHẬP NGOÀI (theo hóa đơn / file — chưa gắn đơn, chưa gắn hóa đơn) mang ĐÚNG
+    mã đơn này và là CÙNG khoản: cùng tiền (±1.000đ) · bản nhập ngoài = giá trị đơn + VAT 5/8/10% · hoặc cùng số hóa đơn."""
+    from sqlalchemy import func
+    from ..lai_lo_ma import so_hd_chuan
+    ma = (dh.so or "").strip().lower()
+    if not ma:
+        return None
+    tong = float(tong or 0)
+    truoc = float(dh.tong_tien or 0)
+    so = so_hd_chuan(so_hoa_don)
+    for c in (db.query(CongNo).filter(CongNo.loai == "PHAI_THU", CongNo.don_hang_id.is_(None),
+                                      CongNo.hoa_don_id.is_(None),
+                                      func.lower(func.trim(CongNo.ma_ban_ngoai)) == ma)
+              .order_by(CongNo.id).all()):
+        st = float(c.so_tien or 0)
+        if st <= 0:
+            continue
+        cung_tien = any(b > 0 and (abs(st - b) <= 1000
+                                   or any(abs(st / b - (1 + v)) <= 0.002 for v in (0.05, 0.08, 0.10)))
+                        for b in (tong, truoc))
+        cung_so = bool(so) and so_hd_chuan(c.so_ct) == so
+        if cung_tien or cung_so:
+            return c
+    return None
+
+
+def _noi_cn_ngoai_vao_don(db: Session, dh: DonHang, cn, truoc, thue, tong, nd, so_hoa_don=None):
+    """Nối công nợ nhập ngoài vào đơn: lập hóa đơn bán (số + ngày THẬT lấy từ công nợ) và gắn công nợ sẵn có — KHÔNG tạo
+    công nợ thứ hai. Bản nhập ngoài gồm VAT còn đơn chưa có VAT → hóa đơn lấy theo số gồm VAT."""
+    truoc, thue, tong = Decimal(truoc or 0), Decimal(thue or 0), Decimal(tong or 0)
+    st = Decimal(cn.so_tien or 0)
+    if st > tong and truoc > 0:                    # bản nhập ngoài GỒM VAT, đơn chưa tính VAT
+        thue, tong = st - truoc, st
+    so_hd = (str(so_hoa_don or "").strip() or (cn.so_ct or "").strip() or dh.so_hoa_don or dh.so or f"DH-{dh.id}")
+    hd = HoaDon(loai="BAN", don_hang_id=dh.id, khach_hang_id=dh.khach_hang_id or cn.khach_hang_id, so=so_hd[:40],
+                ngay=cn.ngay_ct or date.today(), tien_truoc_thue=truoc, tien_thue=thue, tong_tien=tong,
+                hddt_trang_thai="CHUA_PHAT_HANH", da_hach_toan=False, trang_thai="GHI_NHAN",
+                dien_giai=f"Công nợ đơn {dh.so or dh.id} (nối công nợ nhập ngoài CN-{cn.id})")
+    db.add(hd); db.flush()
+    cn.don_hang_id = dh.id
+    cn.hoa_don_id = hd.id
+    if not cn.khach_hang_id:
+        cn.khach_hang_id = dh.khach_hang_id
+    if not (cn.so_ct or "").strip():
+        cn.so_ct = so_hd[:60]
+    if not Decimal(cn.tien_thue or 0) and thue:
+        cn.tien_thue = thue
+    if not str(dh.so_hoa_don or "").strip() and (hd.so or "").strip() and hd.so.strip().lower() != (dh.so or "").strip().lower():
+        dh.so_hoa_don = hd.so
+    ghi_audit(db, nd.id, "NOI_CN_THU", "cong_no", cn.id,
+              moi={"don_hang": dh.so, "hoa_don": hd.id, "so_tien": float(cn.so_tien or 0),
+                   "da_thanh_toan": float(cn.da_thanh_toan or 0)})
+    return hd
+
+
 @router.post("/cong-no", status_code=201)
 def tao_cong_no_khach(data: TaoCongNoVao, db: Session = Depends(get_db),
                       nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
@@ -267,20 +323,25 @@ def tao_cong_no_khach(data: TaoCongNoVao, db: Session = Depends(get_db),
             truoc = Decimal(data.tien_truoc_thue)
             thue = (truoc * Decimal(data.thue_suat or 0) / 100).quantize(Decimal("1"))
             tong = truoc + thue
-        hd = HoaDon(loai="BAN", don_hang_id=dh.id, khach_hang_id=dh.khach_hang_id, so=so_hd[:40],
-                    ngay=date.today(), tien_truoc_thue=truoc, tien_thue=thue, tong_tien=tong,
-                    hddt_trang_thai="CHUA_PHAT_HANH", da_hach_toan=False, trang_thai="GHI_NHAN",
-                    dien_giai=f"Công nợ đơn {dh.so or dh.id}")
-        db.add(hd); db.flush()
-        # 🔗 Đồng bộ số HĐ về đơn — đơn tự rời bảng "chưa có PO/HĐ" ở tab Đơn hàng
-        if not str(dh.so_hoa_don or "").strip() and str(hd.so or "").strip():
-            dh.so_hoa_don = hd.so
-        hd_id = hd.id
-        cn = CongNo(loai="PHAI_THU", hoa_don_id=hd.id, khach_hang_id=dh.khach_hang_id,
-                    don_hang_id=dh.id, so_tien=tong, da_thanh_toan=0, so_ct=so_hd[:60],
-                    han=data.ngay_tt_tiep or (date.today() + timedelta(days=30)),
-                    trang_thai="CHUA_THU")
-        db.add(cn); db.flush()
+        _cn_ng = _cn_thu_ngoai_cung_ma(db, dh, tong, so_hd)
+        if _cn_ng is not None:                # 🔁 đã có công nợ nhập ngoài cùng mã → NỐI, không tạo bản thứ hai
+            hd = _noi_cn_ngoai_vao_don(db, dh, _cn_ng, truoc, thue, tong, nd, so_hd)
+            hd_id, cn = hd.id, _cn_ng
+        else:
+            hd = HoaDon(loai="BAN", don_hang_id=dh.id, khach_hang_id=dh.khach_hang_id, so=so_hd[:40],
+                        ngay=date.today(), tien_truoc_thue=truoc, tien_thue=thue, tong_tien=tong,
+                        hddt_trang_thai="CHUA_PHAT_HANH", da_hach_toan=False, trang_thai="GHI_NHAN",
+                        dien_giai=f"Công nợ đơn {dh.so or dh.id}")
+            db.add(hd); db.flush()
+            # 🔗 Đồng bộ số HĐ về đơn — đơn tự rời bảng "chưa có PO/HĐ" ở tab Đơn hàng
+            if not str(dh.so_hoa_don or "").strip() and str(hd.so or "").strip():
+                dh.so_hoa_don = hd.so
+            hd_id = hd.id
+            cn = CongNo(loai="PHAI_THU", hoa_don_id=hd.id, khach_hang_id=dh.khach_hang_id,
+                        don_hang_id=dh.id, so_tien=tong, da_thanh_toan=0, so_ct=so_hd[:60],
+                        han=data.ngay_tt_tiep or (date.today() + timedelta(days=30)),
+                        trang_thai="CHUA_THU")
+            db.add(cn); db.flush()
     # ghi nhận đợt thanh toán (nếu có)
     tt = Decimal(data.so_tien or 0)
     if tt > 0:
@@ -1851,6 +1912,11 @@ def _dam_bao_cong_no_don(db: Session, dh: DonHang, so_hoa_don, nd: NguoiDung, xo
         tong = truoc + thue
         if tong <= 0:
             return None                          # đơn chưa có giá trị → không tạo công nợ rỗng
+        _cn_ng = _cn_thu_ngoai_cung_ma(db, dh, tong, so_hoa_don)
+        if _cn_ng is not None:                   # 🔁 đã có công nợ nhập ngoài cùng mã → NỐI, không tạo bản thứ hai
+            _noi_cn_ngoai_vao_don(db, dh, _cn_ng, truoc, thue, tong, nd, so_hoa_don)
+            _cn_ng.nhac_trang_thai = "XONG" if xong else (_cn_ng.nhac_trang_thai or "CHO")
+            return _cn_ng
         so_hd = (str(so_hoa_don or "").strip() or dh.so_hoa_don or dh.so or f"DH-{dh.id}")[:60]
         coc = Decimal(dh.thanh_toan_coc or 0)
         if coc > tong:
@@ -2050,10 +2116,19 @@ def xuat_kho_don_hang(dh_id: int, db: Session = Depends(get_db),
                 tien_truoc_thue=truoc_thue, tien_thue=thue, tong_tien=truoc_thue + thue,
                 hddt_provider=None, hddt_trang_thai="CHUA_PHAT_HANH")
     db.add(hd); db.flush()
-    cn = CongNo(loai="PHAI_THU", hoa_don_id=hd.id, khach_hang_id=dh.khach_hang_id,
-                so_tien=hd.tong_tien, da_thanh_toan=0,
-                han=date.today() + timedelta(days=30), trang_thai="CHUA_THU")
-    db.add(cn)
+    cn = _cong_no_cua_don(db, dh.id) or _cn_thu_ngoai_cung_ma(db, dh, hd.tong_tien)
+    if cn is not None:                           # 🔁 đơn đã có công nợ (gắn đơn / nhập ngoài cùng mã) → nối hóa đơn vào, không tạo bản thứ hai
+        if not cn.hoa_don_id:
+            cn.hoa_don_id = hd.id
+        if not cn.don_hang_id:
+            cn.don_hang_id = dh.id
+        if (cn.so_ct or "").strip() and not (hd.so or "").strip():
+            hd.so = cn.so_ct[:40]
+    else:
+        cn = CongNo(loai="PHAI_THU", hoa_don_id=hd.id, khach_hang_id=dh.khach_hang_id, don_hang_id=dh.id,
+                    so_tien=hd.tong_tien, da_thanh_toan=0,
+                    han=date.today() + timedelta(days=30), trang_thai="CHUA_THU")
+        db.add(cn)
     dh.trang_thai = "DA_XUAT"
     ghi_audit(db, nd.id, "XUAT", "don_hang", dh.id,
               moi={"phieu_xuat": phieu.id, "hoa_don": hd.id, "cong_no": float(hd.tong_tien)})
