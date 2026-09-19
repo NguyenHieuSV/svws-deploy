@@ -1,5 +1,6 @@
 import os
 from fastapi import FastAPI, Request
+from training import router as training_router
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from .routers import (auth, kho, ncc, du_an, ban_hang, ke_toan, tai_chinh,
@@ -8,6 +9,7 @@ from .routers import (auth, kho, ncc, du_an, ban_hang, ke_toan, tai_chinh,
 from svws_registry import registry
 
 app = FastAPI(title="SVWS — Backend hợp nhất (9 module nghiệp vụ)")
+app.include_router(training_router)
 app.add_middleware(
     CORSMiddleware, allow_origins=["*"], allow_credentials=False,
     allow_methods=["*"], allow_headers=["*"],
