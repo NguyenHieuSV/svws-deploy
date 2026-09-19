@@ -969,6 +969,159 @@ def xoa_bao_gia_file(tep_id: int, db: Session = Depends(get_db),
     return {"ok": True}
 
 
+# ----- 🧹 RÀ NCC TRÙNG + GỘP NCC: một công ty — một hồ sơ (PO / công nợ / hóa đơn không bị tách đôi) -----
+_NCC_TU_BO = ("cong ty", "cty", "c ty", "tnhh", "trach nhiem huu han", "co phan", "cp", "mtv", "mot thanh vien",
+              "thuong mai", "dich vu", "san xuat", "xuat nhap khau", "xnk", "tm", "dv", "sx", "ky thuat", "kt",
+              "viet nam", "vietnam", "vn", "co ltd", "co., ltd", "ltd", "jsc", "company", "limited", "the",
+              "dau tu", "phat trien", "giai phap", "cong nghe", "va", "and")
+
+
+def _ncc_loi_ten(ten: str) -> str:
+    """Tên lõi để so trùng: bỏ dấu, bỏ loại hình doanh nghiệp / từ chung, bỏ ký tự đặc biệt."""
+    from ..gia_dau_vao import _khong_dau
+    s = _khong_dau(ten or "").lower()
+    s = _re_ma.sub(r"[^a-z0-9 ]+", " ", s)
+    s = " " + _re_ma.sub(r"\s+", " ", s).strip() + " "
+    for tu in sorted(_NCC_TU_BO, key=len, reverse=True):
+        s = s.replace(" " + tu + " ", " ")
+    return _re_ma.sub(r"\s+", " ", s).strip()
+
+
+def _ncc_dem_chung_tu(db, ids):
+    from sqlalchemy import text as _sqlc
+    out = {i: {"po": 0, "cong_no": 0, "hoa_don": 0, "phieu": 0, "bao_gia": 0, "san_pham": 0} for i in ids}
+    for khoa, bang in (("po", "don_mua"), ("cong_no", "cong_no"), ("hoa_don", "hoa_don"),
+                       ("phieu", "phieu_thu_chi"), ("bao_gia", "bao_gia_ncc"), ("san_pham", "san_pham_ncc")):
+        try:
+            for (nid, n) in db.execute(_sqlc(
+                    f"SELECT nha_cung_cap_id, COUNT(*) FROM {bang} WHERE nha_cung_cap_id IS NOT NULL "
+                    f"GROUP BY nha_cung_cap_id")).all():
+                if nid in out:
+                    out[nid][khoa] = int(n)
+        except Exception:
+            db.rollback()
+    return out
+
+
+@router.get("/nha-cung-cap/nghi-trung")
+def ncc_nghi_trung(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
+    """🧹 Các nhóm NCC nghi là CÙNG MỘT công ty: trùng MST, trùng tên lõi (bỏ loại hình DN, dấu, ký tự),
+    hoặc tên lõi gần giống ≥ 90%. Kèm số chứng từ của từng hồ sơ + gợi ý hồ sơ nên GIỮ."""
+    from difflib import SequenceMatcher as _SMn
+    nccs = db.query(NhaCungCap).order_by(NhaCungCap.id).all()
+    cha = {n.id: n.id for n in nccs}
+
+    def tim(x):
+        while cha[x] != x:
+            cha[x] = cha[cha[x]]
+            x = cha[x]
+        return x
+
+    def noi(a, b):
+        ra, rb = tim(a), tim(b)
+        if ra != rb:
+            cha[max(ra, rb)] = min(ra, rb)
+
+    ly_do = {}
+    loi = {n.id: _ncc_loi_ten(n.ten) for n in nccs}
+    mst = {n.id: _re_ma.sub(r"[^0-9]", "", n.ma_so_thue or "") for n in nccs}
+    for i, a in enumerate(nccs):
+        for b in nccs[i + 1:]:
+            ld = None
+            if mst[a.id] and len(mst[a.id]) >= 9 and mst[a.id] == mst[b.id]:
+                ld = "trùng MST"
+            elif loi[a.id] and loi[a.id] == loi[b.id]:
+                ld = "trùng tên (sau khi bỏ loại hình DN)"
+            elif (len(loi[a.id]) >= 6 and len(loi[b.id]) >= 6
+                  and _SMn(None, loi[a.id], loi[b.id]).ratio() >= 0.9
+                  and not (mst[a.id] and mst[b.id] and mst[a.id] != mst[b.id])):
+                ld = "tên gần giống"
+            if ld:
+                noi(a.id, b.id)
+                ly_do[(a.id, b.id)] = ld
+    nhom = {}
+    for n in nccs:
+        nhom.setdefault(tim(n.id), []).append(n)
+    nhom = {k: v for k, v in nhom.items() if len(v) > 1}
+    dem = _ncc_dem_chung_tu(db, [n.id for v in nhom.values() for n in v])
+    out = []
+    for k, v in nhom.items():
+        ds = []
+        for n in v:
+            d = dem.get(n.id, {})
+            ds.append({"id": n.id, "ma": n.ma, "ten": n.ten, "ma_so_thue": n.ma_so_thue, "dien_thoai": n.dien_thoai,
+                       "email": n.email, "dia_chi": n.dia_chi, **d, "tong_chung_tu": sum(d.values()) if d else 0})
+        ds.sort(key=lambda x: (-x["tong_chung_tu"], 0 if x["ma_so_thue"] else 1, x["id"]))
+        lds = sorted({l for (a, b), l in ly_do.items() if tim(a) == k})
+        out.append({"ly_do": " · ".join(lds), "goi_y_giu": ds[0]["id"], "ncc": ds})
+    out.sort(key=lambda g: -sum(x["tong_chung_tu"] for x in g["ncc"]))
+    return {"so_nhom": len(out), "nhom": out}
+
+
+class GopNccVao(_NccCnBase):
+    giu_id: int
+    bo_ids: list[int]
+
+
+@router.post("/nha-cung-cap/gop")
+def gop_ncc(data: GopNccVao, db: Session = Depends(get_db),
+            nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
+    """GỘP hồ sơ NCC trùng: mọi PO · công nợ · hóa đơn · phiếu · báo giá · sản phẩm · đề xuất · tệp… của hồ sơ BỎ
+    chuyển sang hồ sơ GIỮ (dò mọi khóa ngoại trỏ tới nha_cung_cap), ô trống của hồ sơ giữ được điền từ hồ sơ bỏ,
+    rồi xóa hồ sơ bỏ. Audit lưu nguyên hồ sơ cũ."""
+    from sqlalchemy import text as _sqlg
+    giu = db.get(NhaCungCap, data.giu_id)
+    if giu is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy NCC giữ lại")
+    bo_ids = [i for i in dict.fromkeys(data.bo_ids or []) if i != giu.id]
+    if not bo_ids:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Chọn ít nhất một NCC để gộp vào")
+    # mọi cột khóa ngoại trỏ tới nha_cung_cap(id) + cột cùng tên chưa khai khóa ngoại
+    cot = {(t, c) for (t, c) in db.execute(_sqlg(
+        "SELECT cl.relname, att.attname FROM pg_constraint con "
+        "JOIN pg_class cl ON cl.oid = con.conrelid "
+        "JOIN pg_attribute att ON att.attrelid = con.conrelid AND att.attnum = ANY(con.conkey) "
+        "WHERE con.contype = 'f' AND con.confrelid = 'nha_cung_cap'::regclass")).all()}
+    cot |= {(t, c) for (t, c) in db.execute(_sqlg(
+        "SELECT table_name, column_name FROM information_schema.columns "
+        "WHERE table_schema = current_schema() AND column_name IN ('nha_cung_cap_id', 'ai_ncc_id', 'ncc_id') "
+        "AND table_name <> 'nha_cung_cap'")).all()}
+    ket_qua = []
+    for bid in bo_ids:
+        bo = db.get(NhaCungCap, bid)
+        if bo is None:
+            continue
+        cu = {"id": bo.id, "ma": bo.ma, "ten": bo.ten, "ma_so_thue": bo.ma_so_thue, "dien_thoai": bo.dien_thoai,
+              "email": bo.email, "dia_chi": bo.dia_chi, "han_muc_cong_no": float(bo.han_muc_cong_no or 0),
+              "blacklist": bool(bo.blacklist), "ghi_chu": bo.ghi_chu}
+        chuyen = {}
+        for (t, c) in sorted(cot):
+            r = db.execute(_sqlg(f'UPDATE "{t}" SET "{c}" = :g WHERE "{c}" = :b'), {"g": giu.id, "b": bo.id})
+            if r.rowcount:
+                chuyen[f"{t}.{c}"] = r.rowcount
+        r = db.execute(_sqlg("UPDATE tep_dinh_kem SET doi_tuong_id = :g WHERE doi_tuong_id = :b "
+                             "AND doi_tuong IN ('BAO_GIA_NCC_FILE', 'NCC_HO_SO')"), {"g": giu.id, "b": bo.id})
+        if r.rowcount:
+            chuyen["tep_dinh_kem"] = r.rowcount
+        for k in ("ma_so_thue", "dien_thoai", "email", "dia_chi", "nguoi_phu_trach"):
+            if not getattr(giu, k) and getattr(bo, k):
+                setattr(giu, k, getattr(bo, k))
+        giu.han_muc_cong_no = max(Decimal(giu.han_muc_cong_no or 0), Decimal(bo.han_muc_cong_no or 0))
+        giu.blacklist = bool(giu.blacklist or bo.blacklist)
+        giu.ghi_chu = ((giu.ghi_chu + "\n") if giu.ghi_chu else "") + \
+            f"[{date.today():%d/%m/%Y}] Gộp hồ sơ trùng #{bo.id} «{bo.ten}»" + (f" (MST {bo.ma_so_thue})" if bo.ma_so_thue else "")
+        db.flush()
+        db.delete(bo)
+        db.flush()
+        ghi_audit(db, nd.id, "GOP_NCC", "nha_cung_cap", giu.id, cu=cu, moi={"giu": giu.id, "chuyen": chuyen})
+        ket_qua.append({"bo_id": cu["id"], "ten": cu["ten"], "chuyen": chuyen})
+    diems = [d.diem for d in db.query(DanhGiaNcc).filter_by(nha_cung_cap_id=giu.id).all()]
+    if diems:
+        giu.diem_danh_gia = round(sum(diems) / len(diems), 1)
+    db.commit()
+    return {"ok": True, "giu": {"id": giu.id, "ten": giu.ten}, "da_gop": ket_qua}
+
+
 # ----- DUYET: xóa nhà cung cấp (chặn khi có chứng từ mua hàng/kế toán) -----
 @router.delete("/nha-cung-cap/{ncc_id}")
 def xoa_ncc(ncc_id: int, db: Session = Depends(get_db),
