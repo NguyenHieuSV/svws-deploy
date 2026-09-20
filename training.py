@@ -124,6 +124,32 @@ def check_bot(website: str, ts: float, request: Request):
 def hash_pw(pw: str, salt: str) -> str:
     return hashlib.pbkdf2_hmac("sha256", pw.encode(), salt.encode(), 100000).hex()
 
+
+# ---- Tài khoản quản trị gieo sẵn từ biến môi trường (Render) ----
+def _seed_admin():
+    email = os.environ.get("TRN_ADMIN_EMAIL", "").strip().lower()
+    pw = os.environ.get("TRN_ADMIN_PW", "")
+    if not email or not pw:
+        return
+    try:
+        with Session(_engine) as s:
+            st = s.exec(select(TrnStaff).where(TrnStaff.email == email)).first()
+            salt = secrets.token_hex(8)
+            if st is None:
+                st = TrnStaff(emp_code="ADMIN", full_name="Quản trị SVWS", email=email,
+                              salt=salt, pw_hash=hash_pw(pw, salt), status="active")
+            else:
+                st.salt = salt
+                st.pw_hash = hash_pw(pw, salt)
+                st.status = "active"
+                st.otp_code = ""
+            s.add(st)
+            s.commit()
+    except Exception:
+        pass
+
+_seed_admin()
+
 def send_otp(email: str, code: str) -> bool:
     try:
         msg = MIMEText("Ma xac minh SVWS Training cua ban: %s (hieu luc 15 phut)." % code, "plain", "utf-8")
