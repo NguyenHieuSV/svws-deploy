@@ -579,7 +579,7 @@ def manifest():
         "icons": [{"src": "/training/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable"},
                   {"src": "/training/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable"}]})
 
-_SW = """const C='svws-trn-v3';
+_SW = """const C='svws-trn-v4';
 self.addEventListener('install',e=>{e.waitUntil(caches.open(C).then(c=>c.addAll(['/training','/training/icon-192.png'])));self.skipWaiting();});
 self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==C).map(k=>caches.delete(k)))));self.clients.claim();});
 self.addEventListener('fetch',e=>{
