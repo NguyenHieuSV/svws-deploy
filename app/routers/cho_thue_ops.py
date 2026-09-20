@@ -1749,7 +1749,7 @@ def du_an_cac_thang(ts_id: int, so_thang: int = 12, db: Session = Depends(get_db
     theo_m3 = (ts.don_vi_gia or "").upper() == "VND/M3"
     # 🏗 khấu hao tháng (vốn đầu tư / số tháng hợp đồng) + sản lượng TỐI THIỂU cam kết — app/dau_tu_cho_thue.py
     from ..dau_tu_cho_thue import tong_hop as _dt_th, m3_tinh_tien as _m3_tt
-    _da = next((x for x in _dt_th(db)["du_an"] if x["tai_san_id"] == ts_id), None)
+    _da = next((x for x in _dt_th(db, tat_ca=True)["du_an"] if x["tai_san_id"] == ts_id), None)
     kh_thang = float(_da["khau_hao_thang"]) if _da else 0.0
     _bd = (_da or {}).get("ngay_bat_dau_hd")
     rows = []
@@ -1771,15 +1771,15 @@ def du_an_cac_thang(ts_id: int, so_thang: int = 12, db: Session = Depends(get_db
                      "cp_khac": round(cp_khac.get(m, 0.0)),
                      "doanh_thu": doanh_thu, "chi_phi": cp, "loi_nhuan": doanh_thu - cp})
     return {"tai_san_id": ts_id, "ten_du_an": prefix, "gia_thue_thang": dt,
-            "dang_thue": dang_thue, "cac_thang": rows}
+            "dang_thue": dang_thue, "cac_thang": rows, "dau_tu": _da}
 
 
 # ===================== 🏗 ĐẦU TƯ – CHO THUÊ: vốn đầu tư · khấu hao · hoàn vốn =====================
 @router.get("/dau-tu")
-def dau_tu_tong_hop(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
+def dau_tu_tong_hop(tat_ca: bool = False, db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
     """Bảng vốn đầu tư – khấu hao – hoàn vốn của mọi dự án cho thuê + đơn đầu tư / đơn NGHI là đầu tư. CHỈ ĐỌC."""
     from ..dau_tu_cho_thue import tong_hop
-    r = tong_hop(db)
+    r = tong_hop(db, tat_ca=tat_ca)
     for x in r["du_an"]:
         x["khach_hang"] = _ten_kh(db, x.get("khach_hang_id"))
     return r

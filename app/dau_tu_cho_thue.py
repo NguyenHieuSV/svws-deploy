@@ -117,8 +117,9 @@ def gia_tri_hd_uoc_tinh(ts) -> float:
     return round(gia * n)
 
 
-def tong_hop(db: Session, hom_nay: date | None = None) -> dict:
-    """Bảng vốn đầu tư – khấu hao – hoàn vốn của MỌI dự án cho thuê + danh sách đơn đầu tư / đơn nghi là đầu tư."""
+def tong_hop(db: Session, hom_nay: date | None = None, tat_ca: bool = False) -> dict:
+    """Bảng vốn đầu tư – khấu hao – hoàn vốn của MỌI dự án cho thuê + danh sách đơn đầu tư / đơn nghi là đầu tư.
+    tat_ca=True → kể cả dự án chưa có vốn / chưa có mã tháng (để mở form thông số hợp đồng của dự án mới)."""
     from .lai_lo_ma import chi_phi_ma
     hom_nay = hom_nay or date.today()
     ds_ts = db.query(TaiSanChoThue).order_by(TaiSanChoThue.id).all()
@@ -167,7 +168,7 @@ def tong_hop(db: Session, hom_nay: date | None = None) -> dict:
     for t in ds_ts:
         g = theo_ts[t.id]
         von = _f(t.nguyen_gia) + g["von_po"]
-        if von <= 0 and not g["don_thang"] and not g["don_dau_tu"]:
+        if von <= 0 and not g["don_thang"] and not g["don_dau_tu"] and not tat_ca:
             continue
         kh = khau_hao_thang(t, von)
         bat_dau = getattr(t, "ngay_bat_dau_hd", None) or t.ngay_mua
