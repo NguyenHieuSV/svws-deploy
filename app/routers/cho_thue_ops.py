@@ -95,9 +95,22 @@ class TaiSanSuaCT(BaseModel):
     bo_khach: bool = False
 
 
+_VAI_TRO_XEM_GIA = ("CEO", "ADMIN", "TP_QLNB")   # 🔒 giá thuê / đơn giá hợp đồng: người vận hành KHÔNG nhận qua API
+
+
+def _an_gia(nd, d: dict) -> dict:
+    """Vai trò vận hành: bỏ giá thuê + các số suy ra được giá khỏi dữ liệu trả về."""
+    if nd.vai_tro.ma not in _VAI_TRO_XEM_GIA:
+        for k in ("gia_thue_thang", "nguyen_gia", "khau_hao_thang"):
+            if k in d:
+                d[k] = None
+        d["an_gia"] = True
+    return d
+
+
 @router.get("/tai-san")
-def ds_tai_san(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
-    return [_ts_ra(db, t) for t in db.query(TaiSanChoThue).order_by(TaiSanChoThue.id).all()]
+def ds_tai_san(db: Session = Depends(get_db), nd: NguoiDung = Depends(yeu_cau(MODULE, "XEM"))):
+    return [_an_gia(nd, _ts_ra(db, t)) for t in db.query(TaiSanChoThue).order_by(TaiSanChoThue.id).all()]
 
 
 @router.post("/tai-san", status_code=201)
@@ -114,7 +127,7 @@ def them_tai_san(data: TaiSanVaoCT, db: Session = Depends(get_db),
     db.add(t); db.flush()
     ghi_audit(db, nd.id, "TAO", "tai_san_cho_thue", t.id, moi={"ma": data.ma})
     db.commit()
-    return _ts_ra(db, t)
+    return _an_gia(nd, _ts_ra(db, t))
 
 
 @router.put("/tai-san/{ts_id}")
@@ -125,6 +138,8 @@ def sua_tai_san(ts_id: int, data: TaiSanSuaCT, db: Session = Depends(get_db),
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy tài sản")
     if data.tinh_trang is not None and data.tinh_trang not in TINH_TRANG:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Tình trạng không hợp lệ")
+    if nd.vai_tro.ma not in _VAI_TRO_XEM_GIA:
+        data.gia_thue_thang = data.don_vi_gia = data.nguyen_gia = data.khau_hao_thang = None
     for f in ("ten_du_an", "ten", "loai", "loai_he_thong", "nguyen_gia", "gia_thue_thang",
               "don_vi_gia", "khau_hao_thang", "so_hop_dong", "ngay_ky_hd", "so_thang_hd", "ngay_bat_dau_hd", "san_luong_toi_thieu",
               "san_luong_du_kien", "tinh_trang", "vi_tri", "ghi_chu"):
@@ -137,7 +152,7 @@ def sua_tai_san(ts_id: int, data: TaiSanSuaCT, db: Session = Depends(get_db),
         t.khach_hang_id = data.khach_hang_id
     ghi_audit(db, nd.id, "SUA", "tai_san_cho_thue", t.id)
     db.commit()
-    return _ts_ra(db, t)
+    return _an_gia(nd, _ts_ra(db, t))
 
 
 # ===================== THIẾT BỊ / VẬT TƯ CỦA DỰ ÁN CHO THUÊ =====================
@@ -772,14 +787,14 @@ def xoa_tai_san(ts_id: int, db: Session = Depends(get_db),
 
 
 @router.get("/tai-san/{ts_id}")
-def chi_tiet_tai_san(ts_id: int, db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
+def chi_tiet_tai_san(ts_id: int, db: Session = Depends(get_db), nd_xem: NguoiDung = Depends(yeu_cau(MODULE, "XEM"))):
     t = db.get(TaiSanChoThue, ts_id)
     if t is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy tài sản")
     cps = db.query(ChiPhiVanHanh).filter_by(tai_san_id=ts_id).order_by(ChiPhiVanHanh.ngay.desc()).all()
     bts = db.query(KeHoachBaoTri).filter_by(tai_san_id=ts_id).order_by(KeHoachBaoTri.ngay_ke_tiep).all()
     tong_cp = sum(float(c.so_tien or 0) for c in cps)
-    return {"tai_san": _ts_ra(db, t), "tong_chi_phi": tong_cp,
+    return {"tai_san": _an_gia(nd_xem, _ts_ra(db, t)), "tong_chi_phi": tong_cp,
             "chi_phi": [{"id": c.id, "ngay": str(c.ngay), "loai_chi_phi": c.loai_chi_phi,
                          "so_tien": float(c.so_tien or 0), "mo_ta": c.mo_ta, "nguon": c.nguon}
                         for c in cps],
