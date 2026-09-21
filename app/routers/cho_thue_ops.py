@@ -95,7 +95,11 @@ class TaiSanSuaCT(BaseModel):
     bo_khach: bool = False
 
 
-_VAI_TRO_XEM_GIA = ("CEO", "ADMIN", "TP_QLNB")   # 🔒 giá thuê / đơn giá hợp đồng: người vận hành KHÔNG nhận qua API
+_VAI_TRO_XEM_GIA = ("CEO", "TP_QLNB")   # 🔒 giá thuê / đơn giá cho thuê: CHỈ CEO + Trưởng phòng Quản lý nội bộ (chốt 21/09/2026)
+
+
+def _duoc_xem_gia(nd) -> bool:
+    return nd.vai_tro.ma in _VAI_TRO_XEM_GIA
 
 
 def _an_gia(nd, d: dict) -> dict:
@@ -1088,7 +1092,7 @@ def hoan_thanh_bao_tri(bt_id: int, db: Session = Depends(get_db),
 
 # ===================== BÁO CÁO VẬN HÀNH =====================
 @router.get("/bao-cao-van-hanh")
-def bao_cao_van_hanh(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
+def bao_cao_van_hanh(db: Session = Depends(get_db), nd_xem: NguoiDung = Depends(yeu_cau(MODULE, "XEM"))):
     ts = db.query(TaiSanChoThue).all()
     theo_tt: dict[str, int] = {}
     nguyen_gia = Decimal(0)
@@ -1108,15 +1112,16 @@ def bao_cao_van_hanh(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "X
                    .filter(HoaDon.loai == "THUE").scalar() or Decimal(0)
     bt_den_han = db.query(func.count(KeHoachBaoTri.id)) \
                    .filter(KeHoachBaoTri.ngay_ke_tiep <= date.today() + timedelta(days=7)).scalar() or 0
+    xem = _duoc_xem_gia(nd_xem)                  # 🔒 doanh thu / nguyên giá: chỉ CEO + TP_QLNB
     return {
         "so_tai_san": so, "theo_tinh_trang": theo_tt,
         "ty_le_su_dung": round(dang_thue / so * 100, 1) if so else 0,
-        "nguyen_gia_tong": float(nguyen_gia),
-        "doanh_thu_thang_dk": float(dt_thang),
-        "doanh_thu_hd_thue": float(dt_hoa_don),
+        "nguyen_gia_tong": float(nguyen_gia) if xem else None,
+        "doanh_thu_thang_dk": float(dt_thang) if xem else None,
+        "doanh_thu_hd_thue": float(dt_hoa_don) if xem else None,
         "chi_phi_van_hanh": float(chi_phi),
         "chi_phi_thang_nay": float(chi_phi_thang),
-        "loi_nhuan_uoc": float(dt_thang - chi_phi_thang),
+        "loi_nhuan_uoc": float(dt_thang - chi_phi_thang) if xem else None,
         "bao_tri_den_han": int(bt_den_han),
     }
 
@@ -1785,6 +1790,10 @@ def du_an_cac_thang(ts_id: int, so_thang: int = 12, db: Session = Depends(get_db
                      "cp_bao_tri": round(cp_bt.get(m, 0.0)),
                      "cp_khac": round(cp_khac.get(m, 0.0)),
                      "doanh_thu": doanh_thu, "chi_phi": cp, "loi_nhuan": doanh_thu - cp})
+    if not _duoc_xem_gia(nd_xem):                # 🔒 giá thuê · doanh thu · lợi nhuận: chỉ CEO + TP_QLNB
+        for x in rows:
+            x["don_gia"] = x["doanh_thu"] = x["loi_nhuan"] = None
+        dt = None
     if nd_xem.vai_tro.ma != "CEO":               # 🔒 vốn đầu tư · khấu hao · hoàn vốn: CHỈ CEO
         for x in rows:
             x["khau_hao"] = None
@@ -1842,7 +1851,8 @@ def dat_loai_don(dh_id: int, data: LoaiDonVao, db: Session = Depends(get_db),
 
 # ===================== BÁO CÁO THEO DỰ ÁN (pivot) =====================
 @router.get("/bao-cao-theo-du-an")
-def bao_cao_theo_du_an(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM")), _ql: NguoiDung = Depends(quan_ly_ct)):
+def bao_cao_theo_du_an(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM")),
+                       _ql: NguoiDung = Depends(chi_vai_tro(*_VAI_TRO_XEM_GIA))):   # 🔒 có giá thuê + doanh thu
     moc = date.today() + timedelta(days=7)
     out = []
     for t in db.query(TaiSanChoThue).order_by(TaiSanChoThue.id).all():

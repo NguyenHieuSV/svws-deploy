@@ -19,7 +19,7 @@ router = APIRouter(prefix="/cho-thue", tags=["cho_thue"])
 MODULE = "cho_thue"
 # Các tab từ Tài sản trở đi (hợp đồng, chi phí, vật tư, định mức, tổng hợp):
 # chỉ CEO / ADMIN / Trưởng P. Quản lý nội bộ được xem & thao tác.
-quan_ly_ct = chi_vai_tro("CEO", "ADMIN", "TP_QLNB")
+quan_ly_ct = chi_vai_tro("CEO", "TP_QLNB")      # 🔒 hợp đồng thuê mang GIÁ THUÊ → chỉ CEO + Trưởng phòng Quản lý nội bộ
 THUE_SUAT = Decimal("0.10")  # cho thuê thiết bị thường 10% — nên cấu hình theo đối tượng
 TU_KHO = {"HOA_CHAT", "VAT_TU", "THIET_BI"}
 
