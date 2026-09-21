@@ -747,7 +747,7 @@ def luu_lai_lo_hom_nay(db: Session) -> dict:
 
 
 @router.get("/lai-lo-record")
-def lai_lo_record(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
+def lai_lo_record(db: Session = Depends(get_db), nd_xem=Depends(yeu_cau(MODULE, "XEM"))):
     """Lãi/Lỗ Record 3 phần: ① theo ngày · ② theo mã đơn hàng · ③ chốt cuối tháng."""
     from ..models import LaiLoRecord
     from ..nhac_viec_service import gio_hien_tai
@@ -765,6 +765,12 @@ def lai_lo_record(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"
                   for k, v in sorted(thang.items(), reverse=True)]
     theo_ma = t.pop("theo_ma")
     theo_nhom = t.pop("theo_nhom", [])
+    if nd_xem.vai_tro.ma != "CEO":               # 🔒 số vốn đầu tư cho thuê: CHỈ CEO (khấu hao vẫn nằm trong LÃI/LỖ)
+        t.pop("dau_tu_cho_thue", None)
+        for x in theo_ma:
+            if x.get("la_dau_tu"):
+                x["von_dau_tu"] = None
+                x["gia_tri_hd"] = None
     return {"tong": t, "theo_ngay": theo_ngay, "theo_ma": theo_ma, "theo_nhom": theo_nhom,
             "theo_thang": theo_thang}
 

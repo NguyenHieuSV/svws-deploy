@@ -1702,7 +1702,7 @@ def chi_phi_vh_tong_hop(ts_id: int, db: Session = Depends(get_db), _=Depends(yeu
 
 @router.get("/du-an/{ts_id}/cac-thang")
 def du_an_cac_thang(ts_id: int, so_thang: int = 12, db: Session = Depends(get_db),
-                    _=Depends(yeu_cau(MODULE, "XEM"))):
+                    nd_xem: NguoiDung = Depends(yeu_cau(MODULE, "XEM"))):
     ts = db.get(TaiSanChoThue, ts_id)
     if ts is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy dự án")
@@ -1770,14 +1770,21 @@ def du_an_cac_thang(ts_id: int, so_thang: int = 12, db: Session = Depends(get_db
                      "cp_bao_tri": round(cp_bt.get(m, 0.0)),
                      "cp_khac": round(cp_khac.get(m, 0.0)),
                      "doanh_thu": doanh_thu, "chi_phi": cp, "loi_nhuan": doanh_thu - cp})
+    if nd_xem.vai_tro.ma != "CEO":               # 🔒 vốn đầu tư · khấu hao · hoàn vốn: CHỈ CEO
+        for x in rows:
+            x["khau_hao"] = None
+            x["loi_nhuan_sau_kh"] = None
+        _da = ({k: _da.get(k) for k in ("tai_san_id", "ma", "so_hop_dong", "ngay_ky_hd", "so_thang_hd", "ngay_bat_dau_hd",
+                                         "ngay_ket_thuc_hd", "con_ngay_hd", "san_luong_toi_thieu", "san_luong_du_kien")}
+               if _da else None)
     return {"tai_san_id": ts_id, "ten_du_an": prefix, "gia_thue_thang": dt,
             "dang_thue": dang_thue, "cac_thang": rows, "dau_tu": _da}
 
 
 # ===================== 🏗 ĐẦU TƯ – CHO THUÊ: vốn đầu tư · khấu hao · hoàn vốn =====================
 @router.get("/dau-tu")
-def dau_tu_tong_hop(tat_ca: bool = False, db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
-    """Bảng vốn đầu tư – khấu hao – hoàn vốn của mọi dự án cho thuê + đơn đầu tư / đơn NGHI là đầu tư. CHỈ ĐỌC."""
+def dau_tu_tong_hop(tat_ca: bool = False, db: Session = Depends(get_db), _=Depends(chi_vai_tro("CEO"))):
+    """Bảng vốn đầu tư – khấu hao – hoàn vốn của mọi dự án cho thuê + đơn đầu tư / đơn NGHI là đầu tư. CHỈ ĐỌC · CHỈ CEO."""
     from ..dau_tu_cho_thue import tong_hop
     r = tong_hop(db, tat_ca=tat_ca)
     for x in r["du_an"]:
@@ -1792,7 +1799,7 @@ class LoaiDonVao(BaseModel):
 
 @router.put("/dau-tu/don/{dh_id}")
 def dat_loai_don(dh_id: int, data: LoaiDonVao, db: Session = Depends(get_db),
-                 nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN", "KTT"))):
+                 nd: NguoiDung = Depends(chi_vai_tro("CEO"))):
     """Đánh dấu / bỏ đánh dấu một đơn bán là đơn ĐẦU TƯ – cho thuê, nối với dự án cho thuê (mã mẹ). Đổi cách tính lãi/lỗ
     của mã (PO thành vốn đầu tư thay vì giá vốn) nên chỉ CEO / ADMIN / KTT."""
     from ..models import DonHang
