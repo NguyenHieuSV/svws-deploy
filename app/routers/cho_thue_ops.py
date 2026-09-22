@@ -1174,10 +1174,11 @@ def bao_cao_van_hanh(db: Session = Depends(get_db), nd_xem: NguoiDung = Depends(
             dt_thang += t.gia_thue_thang or 0
     so = len(ts)
     dang_thue = theo_tt.get("DANG_THUE", 0)
-    chi_phi = db.query(func.coalesce(func.sum(ChiPhiVanHanh.so_tien), 0)).scalar() or Decimal(0)
-    dau_thang = date.today().replace(day=1)
-    chi_phi_thang = db.query(func.coalesce(func.sum(ChiPhiVanHanh.so_tien), 0)) \
-        .filter(ChiPhiVanHanh.ngay >= dau_thang).scalar() or Decimal(0)
+    # chi phí lũy kế / tháng này — CÙNG CÔNG THỨC Kế toán (PO + chứng từ mua của đơn tháng + chi phí vận hành được tính)
+    from ..dau_tu_cho_thue import tong_hop as _dt_th3, chi_phi_du_an_theo_thang as _cpdt3
+    chi_phi = Decimal(round(sum(x["cp_van_hanh_luy_ke"] for x in _dt_th3(db, tat_ca=True)["du_an"])))
+    _thang_nay = date.today().strftime("%Y-%m")
+    chi_phi_thang = Decimal(round(sum(_cpdt3(db, t, [_thang_nay])[_thang_nay]["tong"] for t in ts)))
     dt_hoa_don = db.query(func.coalesce(func.sum(HoaDon.tong_tien), 0)) \
                    .filter(HoaDon.loai == "THUE").scalar() or Decimal(0)
     bt_den_han = db.query(func.count(KeHoachBaoTri.id)) \
@@ -1906,23 +1907,10 @@ def du_an_cac_thang(ts_id: int, so_thang: int = 12, db: Session = Depends(get_db
     prefix = ts.ten_du_an or ts.ma
     so_thang = max(1, min(int(so_thang), 24))
     months = _month_list(date.today().strftime("%Y-%m"), so_thang)
-    # chi phí theo tháng (theo ngày phát sinh) cho dự án này
-    cps = db.query(ChiPhiVanHanh).filter_by(tai_san_id=ts_id).all()
-    cp_thang: dict[str, float] = {}
-    cp_hc: dict[str, float] = {}     # 1. Hóa chất - Vật tư (loại VAT_TU)
-    cp_bt: dict[str, float] = {}     # 2. Bảo trì (nguồn BAO_TRI hoặc loại SUA_CHUA)
-    cp_khac: dict[str, float] = {}   # còn lại (nhân công, khác)
-    for c in cps:
-        mk = c.ngay.strftime("%Y-%m") if c.ngay else None
-        if mk:
-            v = float(c.so_tien or 0)
-            cp_thang[mk] = cp_thang.get(mk, 0.0) + v
-            if (c.nguon or "") == "BAO_TRI" or (c.loai_chi_phi or "") == "SUA_CHUA":
-                cp_bt[mk] = cp_bt.get(mk, 0.0) + v
-            elif (c.loai_chi_phi or "") == "VAT_TU":
-                cp_hc[mk] = cp_hc.get(mk, 0.0) + v
-            else:
-                cp_khac[mk] = cp_khac.get(mk, 0.0) + v
+    # 💰 chi phí THẬT theo tháng — CÙNG CÔNG THỨC với Kế toán / Overall Financial (PO + chứng từ mua của đơn tháng +
+    #    chi phí vận hành được tính) — app/dau_tu_cho_thue.chi_phi_du_an_theo_thang
+    from ..dau_tu_cho_thue import chi_phi_du_an_theo_thang as _cpdt
+    cpm = _cpdt(db, ts, months)
     dt = float(ts.gia_thue_thang or 0)
     dang_thue = ts.tinh_trang == "DANG_THUE"
     # KHỐI LƯỢNG nước xử lý theo tháng = tổng chênh lệch chỉ số giữa các lần ghi
@@ -1951,21 +1939,24 @@ def du_an_cac_thang(ts_id: int, so_thang: int = 12, db: Session = Depends(get_db
     _bd = (_da or {}).get("ngay_bat_dau_hd")
     rows = []
     for m in months:
-        cp = round(cp_thang.get(m, 0.0))
+        o = cpm[m]
+        cp = round(o["tong"])
         kl = round(kl_thang.get(m, 0.0), 1)
         kl_tt = _m3_tt(ts, kl) if theo_m3 else kl
         # Dự án tính VND/m³: DOANH THU = KHỐI LƯỢNG TÍNH TIỀN (≥ tối thiểu) × ĐƠN GIÁ; dự án VND/tháng: giá thuê tháng
         doanh_thu = round(kl_tt * dt) if theo_m3 else dt
         kh_m = kh_thang if (kh_thang and _bd and m >= _bd[:7]) else 0.0
-        rows.append({"thang": m, "ma_ban_hang": _ma_thang(prefix, m),
+        rows.append({"thang": m, "ma_ban_hang": (", ".join(o["don"]) if o["don"] else _ma_thang(prefix, m)),
+                     "chua_co_don": not o["don"], "don": o["don"],
                      "khoi_luong_tinh_tien": kl_tt, "ap_toi_thieu": bool(theo_m3 and kl_tt > kl),
                      "khau_hao": kh_m, "loi_nhuan_sau_kh": doanh_thu - cp - kh_m,
                      "khoi_luong": kl,
                      "don_vi_kl": don_vi_kl or "m³",
                      "don_gia": dt, "don_vi_gia": ts.don_vi_gia or "VND/THANG",
-                     "cp_hoa_chat": round(cp_hc.get(m, 0.0)),
-                     "cp_bao_tri": round(cp_bt.get(m, 0.0)),
-                     "cp_khac": round(cp_khac.get(m, 0.0)),
+                     "cp_po_ct": round(o["po_ct"]), "cp_tham_khao": round(o["tham_khao"]),
+                     "cp_hoa_chat": round(o["hoa_chat"]),
+                     "cp_bao_tri": round(o["bao_tri"]),
+                     "cp_khac": round(o["khac"]),
                      "doanh_thu": doanh_thu, "chi_phi": cp, "loi_nhuan": doanh_thu - cp})
     if not _duoc_xem_gia(nd_xem):                # 🔒 giá thuê · doanh thu · lợi nhuận: chỉ CEO + TP_QLNB
         for x in rows:
@@ -2031,9 +2022,11 @@ def dat_loai_don(dh_id: int, data: LoaiDonVao, db: Session = Depends(get_db),
 def bao_cao_theo_du_an(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM")),
                        _ql: NguoiDung = Depends(chi_vai_tro(*_VAI_TRO_XEM_GIA))):   # 🔒 có giá thuê + doanh thu
     moc = date.today() + timedelta(days=7)
+    from ..dau_tu_cho_thue import tong_hop as _dt_th2
+    _cp_lk = {x["tai_san_id"]: x["cp_van_hanh_luy_ke"] for x in _dt_th2(db, tat_ca=True)["du_an"]}   # cùng công thức Kế toán
     out = []
     for t in db.query(TaiSanChoThue).order_by(TaiSanChoThue.id).all():
-        cp = db.query(func.coalesce(func.sum(ChiPhiVanHanh.so_tien), 0)).filter_by(tai_san_id=t.id).scalar() or 0
+        cp = _cp_lk.get(t.id, 0.0)
         bt = db.query(func.count(KeHoachBaoTri.id)).filter(
             KeHoachBaoTri.tai_san_id == t.id, KeHoachBaoTri.ngay_ke_tiep <= moc).scalar() or 0
         dt = float(t.gia_thue_thang or 0) if t.tinh_trang == "DANG_THUE" else 0.0

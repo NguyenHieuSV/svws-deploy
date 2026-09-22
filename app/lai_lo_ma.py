@@ -249,7 +249,9 @@ def chi_phi_ngoai_ma(db: Session) -> dict:
       chi_chua_ma không có mã
       chi_kho    mã KHO (mua dự trữ — tồn kho)"""
     so_dh = {str(x).strip().lower() for (x,) in db.query(DonHang.so).filter(DonHang.so.isnot(None)).all()}
-    r = {"ma_le": {}, "chi_op": 0.0, "chi_chua_ma": 0.0, "chi_kho": 0.0}
+    from .dau_tu_cho_thue import ma_me_dang_dau_tu
+    ma_me = ma_me_dang_dau_tu(db)      # 🏗 PO / công nợ mang MÃ MẸ dự án cho thuê = VỐN ĐẦU TƯ (khấu hao), không phải mã lẻ
+    r = {"ma_le": {}, "chi_op": 0.0, "chi_chua_ma": 0.0, "chi_kho": 0.0, "chi_dau_tu": 0.0}
 
     def cong(mb, v):
         k = str(mb or "").strip().lower()
@@ -257,6 +259,8 @@ def chi_phi_ngoai_ma(db: Session) -> dict:
             r["chi_chua_ma"] += v
         elif k == "kho":
             r["chi_kho"] += v
+        elif k in ma_me:
+            r["chi_dau_tu"] += v
         elif k.startswith("op"):
             if k not in so_dh:
                 r["chi_op"] += v

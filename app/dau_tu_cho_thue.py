@@ -99,6 +99,94 @@ def don_thang_cua_du_an(db: Session, ts, ngay: date) -> list:
     return out
 
 
+def la_ma_me(ma) -> bool:
+    """Mã MẸ dự án (không có tháng MMYY): DV-IIVI-D26 · DV-COA-NT-2024 · DV-COH-NT-EDI."""
+    p = phan_tich(ma)
+    return bool(p["loai"]) and p["thang"] is None
+
+
+def po_ma_me_cua_du_an(db: Session, ds_ts=None) -> dict:
+    """PO ĐÃ DUYỆT không gắn đơn bán, mang MÃ MẸ của một dự án cho thuê (+ công nợ nhập ngoài cùng kiểu) → là VỐN ĐẦU TƯ của
+    dự án đó (thiết bị, lắp đặt), không phải chi phí tháng. Trả {ts.id: [{loai, id, so, ngay, tong, so_hoa_don}]}."""
+    from .models import DonMua, CongNo
+    ds_ts = ds_ts if ds_ts is not None else db.query(TaiSanChoThue).all()
+    out = {}
+    for dm in (db.query(DonMua).filter(DonMua.trang_thai == "DA_DUYET", DonMua.don_hang_id.is_(None),
+                                       DonMua.ma_ban.isnot(None)).all()):
+        if not la_ma_me(dm.ma_ban):
+            continue
+        ts = du_an_cua_ma(db, dm.ma_ban, ds_ts)
+        if ts is not None:
+            out.setdefault(ts.id, []).append({"loai": "PO", "id": dm.id, "so": dm.so, "ngay": str(dm.ngay) if dm.ngay else None,
+                                              "ma": dm.ma_ban, "tong": _f(dm.tong_tien), "so_hoa_don": dm.so_hoa_don})
+    for cn in (db.query(CongNo).filter(CongNo.loai == "PHAI_TRA", CongNo.don_mua_id.is_(None), CongNo.hoa_don_id.is_(None),
+                                       CongNo.ma_ban_ngoai.isnot(None)).all()):
+        if not la_ma_me(cn.ma_ban_ngoai) or str(cn.so_ct or "").upper().startswith("HDM-"):
+            continue
+        ts = du_an_cua_ma(db, cn.ma_ban_ngoai, ds_ts)
+        if ts is not None:
+            out.setdefault(ts.id, []).append({"loai": "CN", "id": cn.id, "so": f"CN-{cn.id}", "ngay": str(cn.ngay_ct) if cn.ngay_ct else None,
+                                              "ma": cn.ma_ban_ngoai, "tong": _f(cn.so_tien), "so_hoa_don": cn.so_ct})
+    return out
+
+
+def ma_me_dang_dau_tu(db: Session) -> set:
+    """Các mã (chữ thường) mà PO / công nợ mang mã mẹ dự án đang được tính là VỐN ĐẦU TƯ — Lãi/Lỗ không xếp thành mã lẻ."""
+    return {str(p["ma"]).strip().lower() for ds in po_ma_me_cua_du_an(db).values() for p in ds}
+
+
+def vh_ma_le_cua_du_an(db: Session) -> dict:
+    """Chi phí vận hành ĐƯỢC TÍNH (hóa đơn email · ghi tay · bảo trì; chưa nối PO / hóa đơn) nhưng CHƯA gắn đơn bán —
+    theo dự án: {ts.id: tổng}. Khoản đã gắn đơn đã nằm trong chi_phi_ma của đơn đó."""
+    from .lai_lo_ma import VH_TINH_CHI_PHI
+    from .models import ChiPhiVanHanh
+    out = {}
+    for (tid, st) in (db.query(ChiPhiVanHanh.tai_san_id, ChiPhiVanHanh.so_tien)
+                      .filter(ChiPhiVanHanh.tai_san_id.isnot(None), ChiPhiVanHanh.nguon.in_(VH_TINH_CHI_PHI),
+                              ChiPhiVanHanh.don_hang_id.is_(None), ChiPhiVanHanh.don_mua_id.is_(None),
+                              ChiPhiVanHanh.hoa_don_id.is_(None)).all()):
+        out[tid] = out.get(tid, 0.0) + _f(st)
+    return out
+
+
+def chi_phi_du_an_theo_thang(db: Session, ts, months: list) -> dict:
+    """CHI PHÍ THẬT của dự án theo tháng — CÙNG CÔNG THỨC với Kế toán / Overall Financial:
+      po_ct    = PO đã duyệt + công nợ nhập ngoài + hóa đơn mua của các ĐƠN THÁNG (chi_phi_ma, đã loại trùng; bỏ đơn đầu tư)
+      hoa_chat / bao_tri / khac = chi phí vận hành cho thuê ĐƯỢC TÍNH (hóa đơn email · ghi tay · bảo trì; chưa nối PO / hóa đơn)
+                 của dự án theo tháng phát sinh — gồm cả khoản đã gắn đơn tháng (đã trừ khỏi po_ct để không đếm 2 lần)
+      tham_khao = khoản đồng bộ từ đề xuất mua / tiêu hao định mức / đã nối PO-hóa đơn — KHÔNG cộng (PO đã là giá vốn).
+    Trả {YYYY-MM: {po_ct, hoa_chat, bao_tri, khac, tong, tham_khao, don: [mã đơn]}}."""
+    from .lai_lo_ma import chi_phi_ma, VH_TINH_CHI_PHI
+    from .models import ChiPhiVanHanh
+    out = {m: {"po_ct": 0.0, "hoa_chat": 0.0, "bao_tri": 0.0, "khac": 0.0, "tong": 0.0, "tham_khao": 0.0, "don": []}
+           for m in months}
+    for m in months:
+        y, mm = int(m[:4]), int(m[5:7])
+        for dh in don_thang_cua_du_an(db, ts, date(y, mm, 1)):
+            if la_don_dau_tu(dh):
+                continue
+            cp = chi_phi_ma(db, dh)
+            out[m]["po_ct"] += cp["tong_chi_phi"] - _f(cp.get("chi_van_hanh"))
+            out[m]["don"].append(dh.so or f"DH-{dh.id}")
+    for c in db.query(ChiPhiVanHanh).filter(ChiPhiVanHanh.tai_san_id == ts.id).all():
+        mk = c.ngay.strftime("%Y-%m") if c.ngay else None
+        if mk not in out:
+            continue
+        v = _f(c.so_tien)
+        if (c.nguon or "") not in VH_TINH_CHI_PHI or c.don_mua_id or c.hoa_don_id:
+            out[mk]["tham_khao"] += v
+            continue
+        if (c.nguon or "") == "BAO_TRI" or (c.loai_chi_phi or "") == "SUA_CHUA":
+            out[mk]["bao_tri"] += v
+        elif (c.loai_chi_phi or "") == "VAT_TU":
+            out[mk]["hoa_chat"] += v
+        else:
+            out[mk]["khac"] += v
+    for o in out.values():
+        o["tong"] = o["po_ct"] + o["hoa_chat"] + o["bao_tri"] + o["khac"]
+    return out
+
+
 def so_thang_giua(a: date, b: date) -> int:
     """Số tháng đã chạy từ a đến b, tính TRỌN tháng bắt đầu và tháng hiện tại (a=15/07, b=19/09 → 3)."""
     if not a or not b or b < a:
@@ -200,10 +288,13 @@ def tong_hop(db: Session, hom_nay: date | None = None, tat_ca: bool = False) -> 
     # tháng, KHÔNG phải đầu tư → bỏ khỏi danh sách nghi
     nghi_dau_tu = [{k: v for k, v in x.items() if k != "_nhom"} for x in nghi_dau_tu
                    if dt_nhom.get(x["_nhom"], 0.0) - x["doanh_thu"] < NGUONG_NGHI]
+    po_mm, vh_le = po_ma_me_cua_du_an(db, ds_ts), vh_ma_le_cua_du_an(db)
     out, tong = [], {"von": 0.0, "kh_luy_ke": 0.0, "con_lai": 0.0, "dt": 0.0, "cp": 0.0}
     for t in ds_ts:
         g = theo_ts[t.id]
-        von = _f(t.nguyen_gia) + g["von_po"]
+        von_mm = sum(p["tong"] for p in po_mm.get(t.id, []))     # 🏗 PO / công nợ mang MÃ MẸ dự án = vốn đầu tư
+        von = _f(t.nguyen_gia) + g["von_po"] + von_mm
+        g["cp"] += vh_le.get(t.id, 0.0)                          # chi phí vận hành chưa gắn đơn tháng (mã lẻ) của dự án
         if von <= 0 and not g["don_thang"] and not g["don_dau_tu"] and not tat_ca:
             continue
         kh = khau_hao_thang(t, von)
@@ -224,6 +315,7 @@ def tong_hop(db: Session, hom_nay: date | None = None, tat_ca: bool = False) -> 
                     "san_luong_du_kien": _f(getattr(t, "san_luong_du_kien", 0)),
                     "gia_tri_hd_uoc_tinh": gia_tri_hd_uoc_tinh(t),
                     "nguyen_gia_dau_ky": _f(t.nguyen_gia), "von_tu_don": g["von_po"], "von_dau_tu": von,
+                    "von_ma_me": von_mm, "po_ma_me": po_mm.get(t.id, []),
                     "khau_hao_thang": kh, "khau_hao_nhap_tay": _f(t.khau_hao_thang) > 0,
                     "thang_da_chay": da_chay, "khau_hao_luy_ke": kh_luy_ke, "gia_tri_con_lai": max(von - kh_luy_ke, 0.0),
                     "dt_luy_ke": g["dt"], "cp_van_hanh_luy_ke": g["cp"], "lai_van_hanh_luy_ke": lai_vh,
