@@ -63,6 +63,42 @@ def du_an_cua_ma(db: Session, ma, ds=None):
     return None
 
 
+def goc_du_an(ts) -> str:
+    """Gốc mã của dự án: 'DV-COA-NT-2024' → 'DV-COA-NT' · 'DV-COA-REJ-0926' → 'DV-COA-REJ' · 'DV-COH-NT-EDI' → giữ nguyên."""
+    for ten in ((getattr(ts, "ten_du_an", None) or ""), (getattr(ts, "ma", None) or "")):
+        ten = ten.strip()
+        if ten:
+            return goc_cua_ma(ten) or ten.upper()
+    return ""
+
+
+def ma_thang_chuan(ts, ngay: date) -> str:
+    """Mã tháng ĐÚNG QUY TẮC của dự án: GỐC-MMYY (DV-COA-NT-0926) — dùng khi tháng đó chưa có đơn bán."""
+    return f"{goc_du_an(ts)}-{ngay:%m%y}"
+
+
+def don_thang_cua_du_an(db: Session, ts, ngay: date) -> list:
+    """Các ĐƠN BÁN của dự án trong tháng của `ngay`: mã = GỐC-MMYY hoặc GỐC-MMYY-…; thêm đơn viết tắt (cùng khách, cùng
+    đuôi gốc, cùng MMYY). Đơn GỐC-MMYY (mã gốc tháng) xếp trước, rồi theo mã."""
+    goc, mmyy = goc_du_an(ts).lower(), f"{ngay:%m%y}"
+    if not goc:
+        return []
+    out = []
+    for dh in db.query(DonHang).filter(DonHang.so.isnot(None)).all():
+        s = (dh.so or "").strip().lower()
+        p = phan_tich(dh.so)
+        if p["thang"] != mmyy or (p["loai"] or "") == "OP":
+            continue
+        if s == f"{goc}-{mmyy}" or s.startswith(f"{goc}-{mmyy}-"):
+            out.append(dh)
+        elif (getattr(ts, "khach_hang_id", None) and dh.khach_hang_id == ts.khach_hang_id
+              and (p["goc_khong_thang"] or "").split("-")[-1].lower() == goc.split("-")[-1]
+              and p["loai"] == phan_tich(goc)["loai"]):
+            out.append(dh)
+    out.sort(key=lambda d: (0 if (d.so or "").strip().lower() == f"{goc}-{mmyy}" else 1, (d.so or "")))
+    return out
+
+
 def so_thang_giua(a: date, b: date) -> int:
     """Số tháng đã chạy từ a đến b, tính TRỌN tháng bắt đầu và tháng hiện tại (a=15/07, b=19/09 → 3)."""
     if not a or not b or b < a:

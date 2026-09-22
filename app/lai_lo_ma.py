@@ -15,7 +15,11 @@ Nguyên tắc (chốt 2026-08-19 — "chi phí theo NGHĨA VỤ, không theo ti�
 from sqlalchemy import func, or_, and_
 from sqlalchemy.orm import Session
 
-from .models import DonHang, DonMua, DonMuaCt, CongNo, HoaDon, PhieuThuChi
+from .models import DonHang, DonMua, DonMuaCt, CongNo, HoaDon, PhieuThuChi, ChiPhiVanHanh
+
+# Chi phí vận hành cho thuê ĐƯỢC TÍNH vào lãi/lỗ theo mã: hóa đơn email · ghi tay · bảo trì.
+# KHÔNG tính: DE_XUAT_MUA (sinh từ đề xuất → PO đã là giá vốn) · TIEU_HAO (ước tính theo định mức, hóa chất đã mua qua PO).
+VH_TINH_CHI_PHI = ("HD_EMAIL", "THU_CONG", "BAO_TRI")
 
 
 def _f(v) -> float:
@@ -157,7 +161,32 @@ def chi_phi_ma(db: Session, dh: DonHang, tho: bool = False) -> dict:
     da_tra_ncc = sum(_f(c.da_thanh_toan) for c in tat_ca_cn)
     con_phai_tra = sum(max(_f(c.so_tien) - _f(c.da_thanh_toan), 0.0) for c in tat_ca_cn)
 
-    chi_phi_khac = chi_ngoai_cn + chi_hd_ngoai_po
+    # 🏭 CHI PHÍ VẬN HÀNH CHO THUÊ (hóa đơn đầu vào ghi ở Cho thuê / ghi tay / bảo trì) gắn mã này.
+    #    Khoản đã NỐI với PO / hóa đơn MUA, hoặc trùng số HĐ + tiền với PO / hóa đơn MUA → đã tính ở nhánh đó, bỏ qua.
+    chi_van_hanh, trung_vh = 0.0, []
+    _dk_vh = ChiPhiVanHanh.don_hang_id == dh.id
+    if (dh.so or "").strip():
+        _dk_vh = or_(_dk_vh, and_(ChiPhiVanHanh.don_hang_id.is_(None),
+                                  func.lower(func.trim(ChiPhiVanHanh.ma_ban_hang)) == dh.so.strip().lower()))
+    vh_rows = db.query(ChiPhiVanHanh).filter(_dk_vh, ChiPhiVanHanh.nguon.in_(VH_TINH_CHI_PHI)).all()
+    if vh_rows:
+        hd_mua = [(so_hd_chuan(s), _f(t)) for (s, t) in db.query(HoaDon.so, HoaDon.tong_tien)
+                  .filter(HoaDon.loai == "MUA").all()]
+        for r in vh_rows:
+            st, so = _f(r.so_tien), so_hd_chuan(r.so_hoa_don)
+            ly = None
+            if r.don_mua_id or r.hoa_don_id:
+                ly = "đã nối PO" if r.don_mua_id else "đã nối hóa đơn MUA"
+            elif po_trung_khoan(pos, r.so_hoa_don, None, st, da_dung=_po_da_khop) is not None:
+                ly = "trùng PO (số HĐ + tiền)"
+            elif so and any(k == so and abs(t - st) <= LECH_TRUNG for (k, t) in hd_mua):
+                ly = "trùng hóa đơn MUA (số HĐ + tiền)"
+            if ly:
+                trung_vh.append({"id": r.id, "so_hoa_don": r.so_hoa_don, "so_tien": st, "ly_do": ly})
+                continue
+            chi_van_hanh += st
+
+    chi_phi_khac = chi_ngoai_cn + chi_hd_ngoai_po + chi_van_hanh
     tong_chi_phi = gia_von_po + chi_phi_khac
     loi_nhuan = doanh_thu - tong_chi_phi
 
@@ -187,6 +216,7 @@ def chi_phi_ma(db: Session, dh: DonHang, tho: bool = False) -> dict:
         "doanh_thu": doanh_thu,
         "gia_von_po": gia_von_po, "po_cho_duyet": po_cho_duyet, "gia_von_thuc": gia_von_thuc,
         "chi_ngoai_cn": chi_ngoai_cn, "chi_hd_ngoai_po": chi_hd_ngoai_po,
+        "chi_van_hanh": chi_van_hanh, "trung_vh": trung_vh,
         "trung_po": trung_po, "tien_trung_po": sum(t["so_tien"] for t in trung_po),
         "chenh_trung_po": chi_chenh_trung,
         "chi_phi_khac": chi_phi_khac, "tong_chi_phi": tong_chi_phi,
@@ -244,6 +274,11 @@ def chi_phi_ngoai_ma(db: Session) -> dict:
         if dmid or hdid or str(sct or "").upper().startswith("HDM-"):
             continue
         cong(mbn, _f(st))
+    # 🏭 chi phí vận hành cho thuê mang mã CHƯA có đơn bán (chưa nối PO / hóa đơn MUA) → dòng mã lẻ
+    for (mb, st) in (db.query(ChiPhiVanHanh.ma_ban_hang, ChiPhiVanHanh.so_tien)
+                     .filter(ChiPhiVanHanh.nguon.in_(VH_TINH_CHI_PHI), ChiPhiVanHanh.don_hang_id.is_(None),
+                             ChiPhiVanHanh.don_mua_id.is_(None), ChiPhiVanHanh.hoa_don_id.is_(None)).all()):
+        cong(mb, _f(st))
     return r
 
 

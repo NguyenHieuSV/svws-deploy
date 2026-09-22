@@ -1609,6 +1609,10 @@ def ghi_hoa_don_cho(h_id: int, tao_cong_no: bool = False, hach_toan: bool = True
         if nghi is not None:
             canh.append(f"đã có hóa đơn MUA '{nghi.so}' cùng NCC cùng số tiền "
                         f"{float(nghi.tong_tien or 0):,.0f}đ (có thể là hóa đơn tự sinh khi nhận hàng PO)")
+        _cpv = _cp_vh_cung_khoan(db, r.so_hoa_don, r.tong_tien)
+        if _cpv is not None and _cpv.hoa_don_id is None:
+            canh.append(f"hóa đơn số {r.so_hoa_don} ({float(_cpv.so_tien or 0):,.0f}đ) ĐÃ GHI ở Chi phí vận hành cho thuê "
+                        f"(mã {_cpv.ma_ban_hang}) — ghi tiếp hệ thống sẽ NỐI hai bản ghi, không tính 2 lần")
         if canh:
             raise HTTPException(status.HTTP_409_CONFLICT, "⚠TRÙNG: " + "; ".join(canh))
     data = HoaDonVao(loai="MUA", nha_cung_cap_id=r.nha_cung_cap_id,
@@ -1622,6 +1626,13 @@ def ghi_hoa_don_cho(h_id: int, tao_cong_no: bool = False, hach_toan: bool = True
     r.trang_thai = "DA_GHI"          # đặt TRƯỚC khi tạo — cùng 1 commit với hóa đơn, hết khe hở ghi đúp
     kq = tao_hoa_don(data, db, nd)
     r.hoa_don_id = (kq or {}).get("id") if isinstance(kq, dict) else None
+    # 🔗 NỐI với chi phí vận hành cho thuê cùng khoản (đã ghi từ email bên Cho thuê) → không tính chi phí 2 lần
+    _cpv = _cp_vh_cung_khoan(db, r.so_hoa_don, r.tong_tien) if r.hoa_don_id else None
+    if _cpv is not None and _cpv.hoa_don_id is None:
+        _cpv.hoa_don_id = r.hoa_don_id
+        _hdm = db.get(HoaDon, r.hoa_don_id)
+        if _hdm is not None and not _hdm.don_hang_id and _cpv.don_hang_id:
+            _hdm.don_hang_id = _cpv.don_hang_id      # hóa đơn MUA chưa gắn mã → nhận mã của khoản vận hành
     ghi_audit(db, nd.id, "GHI_HD_EMAIL_MUA", "kt_hoa_don_cho", r.id,
               moi={"hoa_don_id": r.hoa_don_id, "tong": float(r.tong_tien or 0),
                    "bo_qua_canh_bao_trung": bool(bo_qua_trung)})
@@ -1779,6 +1790,19 @@ def khop_hoa_don_theo_cong_no(hd_id: int, db: Session = Depends(get_db),
               moi={"tien_thue": _f(hd.tien_thue), "tong_tien": _f(hd.tong_tien), "cong_no": cn.id})
     db.commit()
     return _hd_dict(db, hd)
+
+
+def _cp_vh_cung_khoan(db, so_hoa_don, tong_tien):
+    """Khoản chi phí vận hành cho thuê (hóa đơn email / ghi tay) cùng SỐ HĐ + cùng tiền (±1.000đ) với hóa đơn đang ghi."""
+    from ..models import ChiPhiVanHanh as _CPV
+    from ..lai_lo_ma import so_hd_chuan, LECH_TRUNG
+    so = so_hd_chuan(so_hoa_don)
+    if not so:
+        return None
+    for c in db.query(_CPV).filter(_CPV.so_hoa_don.isnot(None)).all():
+        if so_hd_chuan(c.so_hoa_don) == so and abs(float(c.so_tien or 0) - float(tong_tien or 0)) <= LECH_TRUNG:
+            return c
+    return None
 
 
 @router.post("/chi-phi/doan-nhom")

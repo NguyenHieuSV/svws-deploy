@@ -1337,6 +1337,12 @@ class ChiPhiVanHanh(Base):
     yeu_cau_mua_id: Mapped[int | None] = mapped_column(ForeignKey("yeu_cau_mua.id", ondelete="SET NULL"), nullable=True)
     mo_ta: Mapped[str | None] = mapped_column(String(300), nullable=True)
     nguon: Mapped[str] = mapped_column(String(16), default="THU_CONG")
+    # mig 127: ghi theo MÃ HÀNG BÁN THẬT + nối PO / hóa đơn MUA (khoản đã nối → tính chi phí qua PO / hóa đơn, không cộng lần 2)
+    don_hang_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    don_mua_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    hoa_don_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    so_hoa_don: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    ncc_ten: Mapped[str | None] = mapped_column(String(200), nullable=True)
 
 
 class KeHoachBaoTri(Base):
