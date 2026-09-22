@@ -1947,7 +1947,7 @@ def du_an_cac_thang(ts_id: int, so_thang: int = 12, db: Session = Depends(get_db
         doanh_thu = round(kl_tt * dt) if theo_m3 else dt
         kh_m = kh_thang if (kh_thang and _bd and m >= _bd[:7]) else 0.0
         rows.append({"thang": m, "ma_ban_hang": (", ".join(o["don"]) if o["don"] else _ma_thang(prefix, m)),
-                     "chua_co_don": not o["don"], "don": o["don"],
+                     "chua_co_don": not o["don"], "don": o["don"], "ma_le": o.get("ma_le") or [],
                      "khoi_luong_tinh_tien": kl_tt, "ap_toi_thieu": bool(theo_m3 and kl_tt > kl),
                      "khau_hao": kh_m, "loi_nhuan_sau_kh": doanh_thu - cp - kh_m,
                      "khoi_luong": kl,

@@ -149,6 +149,39 @@ def vh_ma_le_cua_du_an(db: Session) -> dict:
     return out
 
 
+def po_cn_ma_le_cua_du_an(db: Session, ts) -> dict:
+    """PO đã duyệt / công nợ nhập ngoài mang MÃ THÁNG cùng gốc dự án (GỐC-MMYY hoặc GỐC-MMYY-…) nhưng CHƯA có đơn bán →
+    vẫn là chi phí của THÁNG đó (đúng cách đọc: mọi đuôi sau MMYY thuộc cùng tháng — khớp nhóm gốc+tháng ở Kế toán).
+    Trả {YYYY-MM: {"tong": x, "ma": [mã…]}}. Công nợ của PO / sinh từ hóa đơn không tính (đã ở PO / hóa đơn)."""
+    from .models import DonMua, CongNo
+    goc = goc_du_an(ts).lower()
+    if not goc:
+        return {}
+    so_dh = {str(x).strip().lower() for (x,) in db.query(DonHang.so).filter(DonHang.so.isnot(None)).all()}
+    out = {}
+
+    def cong(ma, v):
+        s = str(ma or "").strip().lower()
+        p = phan_tich(s)
+        if not p["thang"] or s in so_dh or not (s == f"{goc}-{p['thang']}" or s.startswith(f"{goc}-{p['thang']}-")):
+            return
+        mk = f"20{p['thang'][2:4]}-{p['thang'][:2]}"
+        o = out.setdefault(mk, {"tong": 0.0, "ma": []})
+        o["tong"] += _f(v)
+        if str(ma).strip() not in o["ma"]:
+            o["ma"].append(str(ma).strip())
+
+    for (mb, tt) in (db.query(DonMua.ma_ban, DonMua.tong_tien)
+                     .filter(DonMua.trang_thai == "DA_DUYET", DonMua.don_hang_id.is_(None), DonMua.ma_ban.isnot(None)).all()):
+        cong(mb, tt)
+    for (mb, st, sct) in (db.query(CongNo.ma_ban_ngoai, CongNo.so_tien, CongNo.so_ct)
+                          .filter(CongNo.loai == "PHAI_TRA", CongNo.don_mua_id.is_(None), CongNo.hoa_don_id.is_(None),
+                                  CongNo.ma_ban_ngoai.isnot(None)).all()):
+        if not str(sct or "").upper().startswith("HDM-"):
+            cong(mb, st)
+    return out
+
+
 def chi_phi_du_an_theo_thang(db: Session, ts, months: list) -> dict:
     """CHI PHÍ THẬT của dự án theo tháng — CÙNG CÔNG THỨC với Kế toán / Overall Financial:
       po_ct    = PO đã duyệt + công nợ nhập ngoài + hóa đơn mua của các ĐƠN THÁNG (chi_phi_ma, đã loại trùng; bỏ đơn đầu tư)
@@ -158,7 +191,7 @@ def chi_phi_du_an_theo_thang(db: Session, ts, months: list) -> dict:
     Trả {YYYY-MM: {po_ct, hoa_chat, bao_tri, khac, tong, tham_khao, don: [mã đơn]}}."""
     from .lai_lo_ma import chi_phi_ma, VH_TINH_CHI_PHI
     from .models import ChiPhiVanHanh
-    out = {m: {"po_ct": 0.0, "hoa_chat": 0.0, "bao_tri": 0.0, "khac": 0.0, "tong": 0.0, "tham_khao": 0.0, "don": []}
+    out = {m: {"po_ct": 0.0, "hoa_chat": 0.0, "bao_tri": 0.0, "khac": 0.0, "tong": 0.0, "tham_khao": 0.0, "don": [], "ma_le": []}
            for m in months}
     for m in months:
         y, mm = int(m[:4]), int(m[5:7])
@@ -168,6 +201,10 @@ def chi_phi_du_an_theo_thang(db: Session, ts, months: list) -> dict:
             cp = chi_phi_ma(db, dh)
             out[m]["po_ct"] += cp["tong_chi_phi"] - _f(cp.get("chi_van_hanh"))
             out[m]["don"].append(dh.so or f"DH-{dh.id}")
+    for mk, o in po_cn_ma_le_cua_du_an(db, ts).items():        # PO / công nợ mã tháng chưa có đơn → vẫn là chi phí tháng
+        if mk in out:
+            out[mk]["po_ct"] += o["tong"]
+            out[mk]["ma_le"] = o["ma"]
     for c in db.query(ChiPhiVanHanh).filter(ChiPhiVanHanh.tai_san_id == ts.id).all():
         mk = c.ngay.strftime("%Y-%m") if c.ngay else None
         if mk not in out:
@@ -295,6 +332,7 @@ def tong_hop(db: Session, hom_nay: date | None = None, tat_ca: bool = False) -> 
         von_mm = sum(p["tong"] for p in po_mm.get(t.id, []))     # 🏗 PO / công nợ mang MÃ MẸ dự án = vốn đầu tư
         von = _f(t.nguyen_gia) + g["von_po"] + von_mm
         g["cp"] += vh_le.get(t.id, 0.0)                          # chi phí vận hành chưa gắn đơn tháng (mã lẻ) của dự án
+        g["cp"] += sum(o["tong"] for o in po_cn_ma_le_cua_du_an(db, t).values())   # PO / công nợ mã tháng chưa có đơn
         if von <= 0 and not g["don_thang"] and not g["don_dau_tu"] and not tat_ca:
             continue
         kh = khau_hao_thang(t, von)
