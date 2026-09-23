@@ -971,6 +971,7 @@ class LenhChiBank(Base):
     nguoi_tao: Mapped[int | None] = mapped_column(BigInteger, nullable=True)     # mig 107: người đề nghị
     chi_luc: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     ghi_chu: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    so_tien_dot: Mapped[Decimal | None] = mapped_column(Numeric(18, 0), nullable=True)  # mig 129: phần CHI THÊM của lệnh (= lũy kế − đã trả thật)
 
 
 class ThamSoTaiChinh(Base):

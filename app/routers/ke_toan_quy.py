@@ -2825,6 +2825,22 @@ def _sao_ke_ghi_chi_lo(data: SkGhiVao, db: Session, nd: NguoiDung):
                             "đề nghị thanh toán ở Thanh toán mua hàng và chờ CEO/KTT duyệt chi trước, rồi mới ✔ Đã chi.")
     d0 = db.get(SaoKeDong, data.sao_ke_dong_id) if data.sao_ke_dong_id else None
     cn = db.query(CongNo).filter_by(don_mua_id=dm.id).with_for_update().first()
+    # 🔒 KHÔNG BAO GIỜ chi vượt: (1) còn phải trả trên sổ công nợ; (2) phần ĐỢT còn phải chi của lệnh đã duyệt (mig 129)
+    if cn is not None:
+        _con_cn = Decimal(cn.so_tien or 0) - Decimal(cn.da_thanh_toan or 0)
+        if so_tien > _con_cn:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                f"Số chi {so_tien:,.0f} ₫ VƯỢT còn phải trả {max(_con_cn, Decimal(0)):,.0f} ₫ của PO "
+                                f"{dm.so or dm.id} trên sổ công nợ — không ghi để tránh trả trùng; kiểm tra lại số tiền / các đợt đã trả.")
+    _lcb_hl = (db.query(LenhChiBank).filter_by(don_mua_id=dm.id, trang_thai="DA_DUYET")
+               .order_by(LenhChiBank.id.desc()).first())
+    if _lcb_hl is not None:
+        from .ncc import _dot_chi_po
+        _tran = Decimal(str(int(_dot_chi_po(db, _lcb_hl, dm))))
+        if so_tien > _tran:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                f"Số chi {so_tien:,.0f} ₫ vượt phần ĐỢT còn phải chi của lệnh đã duyệt ({_tran:,.0f} ₫) — "
+                                "lệnh này chỉ còn chi được đúng số đó; sửa số tiền hoặc đề nghị lại ở Thanh toán mua hàng.")
     p = PhieuThuChi(loai="CHI", quy_id=data.quy_id, so_tien=so_tien,
                     ngay=(d0.ngay if (d0 is not None and d0.ngay) else date.today()),
                     dien_giai=(f"Chi ngân hàng theo sao kê — PO {dm.so or dm.id}")[:200],

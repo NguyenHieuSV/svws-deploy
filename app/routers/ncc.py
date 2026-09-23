@@ -1243,6 +1243,11 @@ def ds_thanh_toan_mua(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "
                         .join(HangHoa, DonMuaCt.hang_hoa_id == HangHoa.id)
                         .order_by(DonMuaCt.id).all()):
         hh_tens.setdefault(_dmid, []).append(_ten or "")
+    from ..models import LenhChiBank as _LCBl
+    lenh_hl = {}                                   # PO → lệnh đang CHỜ DUYỆT / ĐÃ DUYỆT (chờ chi) ở tab Duyệt chi
+    for _l in (db.query(_LCBl).filter(_LCBl.don_mua_id.isnot(None),
+                                      _LCBl.trang_thai.in_(["CHO_DUYET", "DA_DUYET"])).order_by(_LCBl.id).all()):
+        lenh_hl[_l.don_mua_id] = _l
     out = []
     for dm in db.query(DonMua).order_by(DonMua.id.desc()).limit(300).all():
         # LOGIC: PO chỉ chạy sang Thanh toán mua hàng khi ĐÃ DUYỆT.
@@ -1280,7 +1285,13 @@ def ds_thanh_toan_mua(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "
                     "ngay_tt_tiep": str(dm.ngay_tt_tiep) if dm.ngay_tt_tiep else None,
                     "tt_du": bool(dm.tt_du),
                     "ngay_tt_du": str(dm.ngay_tt_du) if dm.ngay_tt_du else None,
-                    "trang_thai": dm.trang_thai})
+                    "trang_thai": dm.trang_thai,
+                    "da_tra": float(_da_tra_that(db, dm)),
+                    "lenh_cho": ({"id": lenh_hl[dm.id].id, "trang_thai": lenh_hl[dm.id].trang_thai,
+                                  "so_tien": float(lenh_hl[dm.id].so_tien or 0),
+                                  "so_tien_dot": _dot_chi_po(db, lenh_hl[dm.id], dm),
+                                  "luc": str(lenh_hl[dm.id].de_nghi_luc)[:16] if lenh_hl[dm.id].de_nghi_luc else None}
+                                 if dm.id in lenh_hl else None)})
     return out
 
 
@@ -1337,9 +1348,12 @@ def _dam_bao_cong_no_po(db: Session, dm: DonMua) -> None:
     tong = Decimal(dm.tong_tien or 0)
     cn = db.query(CongNo).filter_by(don_mua_id=dm.id).first()
     if cn is None:
+        # PO cũ chưa có dòng công nợ: phần đã trả TRƯỚC luồng Duyệt chi (mốc chốt lúc đề nghị = da_duyet_tt)
+        # được ghi vào «đã trả» để lệnh sau này không chi lại — không có mốc thì 0.
+        _da0 = min(Decimal(dm.da_duyet_tt or 0), tong) if dm.da_duyet_tt is not None else Decimal(0)
         cn = CongNo(loai="PHAI_TRA", nha_cung_cap_id=dm.nha_cung_cap_id, don_mua_id=dm.id,
-                    so_tien=tong, da_thanh_toan=0, han=dm.ngay_tt_tiep,
-                    trang_thai="CHUA_TRA")
+                    so_tien=tong, da_thanh_toan=_da0, han=dm.ngay_tt_tiep,
+                    trang_thai=("DA_TRA" if (tong > 0 and _da0 >= tong) else ("TRA_MOT_PHAN" if _da0 > 0 else "CHUA_TRA")))
         db.add(cn)
     else:
         cn.so_tien = tong
@@ -1352,12 +1366,53 @@ def _dam_bao_cong_no_po(db: Session, dm: DonMua) -> None:
         cn.so_ct = dm.so_hoa_don[:60]
 
 
-def _hang_cho_duyet_chi(db: Session, dm: DonMua, dn: Decimal, nd=None):
+def _da_tra_that(db: Session, dm: DonMua) -> Decimal:
+    """Số ĐÃ TRẢ THẬT của PO = «đã thanh toán» trên sổ công nợ (nguồn sự thật — gồm cả cọc / đợt ghi trước khi có
+    luồng Duyệt chi). PO chưa có dòng công nợ: mốc đã trả cũ (da_duyet_tt); chưa có mốc → PO chưa từng có lệnh thì
+    lũy kế cũ de_nghi_tt (PO cũ = đã trả), đã có lệnh thì 0 (de_nghi_tt lúc này là số đang đề nghị)."""
+    from ..models import LenhChiBank
+    cn = db.query(CongNo).filter_by(don_mua_id=dm.id).first()
+    if cn is not None:
+        return Decimal(cn.da_thanh_toan or 0)
+    if dm.da_duyet_tt is not None:
+        return Decimal(dm.da_duyet_tt or 0)
+    if db.query(LenhChiBank.id).filter(LenhChiBank.don_mua_id == dm.id).first() is None:
+        return Decimal(dm.de_nghi_tt or 0)
+    return Decimal(0)
+
+
+def _dot_chi_po(db: Session, r, dm: DonMua) -> float:
+    """Số tiền ĐỢT NÀY thực chi của một lệnh PO (chờ duyệt / đã duyệt) — KHÔNG BAO GIỜ vượt còn phải trả của PO:
+    • lệnh mới (mig 129, so_tien_dot ghi lúc đề nghị) → min(so_tien_dot, còn lại);
+    • lệnh cũ: so_tien = lũy kế đề nghị → so_tien − đã trả thật; đúng bằng số đã trả (đề nghị lại cọc/đợt cũ) → 0;
+      nhỏ hơn số đã trả → người dùng đã nhập SỐ ĐỢT → min(so_tien, còn lại)."""
+    tong = Decimal(dm.tong_tien or 0)
+    da_tra = _da_tra_that(db, dm)
+    con_lai = max(tong - da_tra, Decimal(0))
+    sd = getattr(r, "so_tien_dot", None)
+    if sd is not None:
+        return float(max(min(Decimal(sd), con_lai), Decimal(0)))
+    st = Decimal(r.so_tien or 0)
+    if st <= 0:
+        return 0.0
+    if st > da_tra:
+        return float(min(st - da_tra, con_lai))
+    if st == da_tra:
+        return 0.0
+    return float(min(st, con_lai))
+
+
+def _hang_cho_duyet_chi(db: Session, dm: DonMua, dn: Decimal, nd=None, dot: Decimal | None = None):
     """Đưa đề nghị chi vào HÀNG CHỜ DUYỆT (tab Duyệt chi Ngân Hàng). KHÔNG phân bổ
     vào Công nợ/Kiểm soát ở bước này — phân bổ chỉ chạy khi CEO/KTT bấm Duyệt chi.
+    dn = LŨY KẾ đề nghị; dot = phần CHI THÊM của lệnh này (mig 129: = dn − đã trả thật, không âm) —
+    ✔ Đã chi chỉ chi đúng phần này, không bao giờ chi lại cọc / đợt đã trả.
     dn = 0 VẪN tạo lệnh: đơn CÔNG NỢ 100% — duyệt xong TOÀN BỘ giá trị PO vào Công nợ phải trả."""
     from ..nhac_viec_service import gio_hien_tai
     from ..models import LenhChiBank
+    if dot is None:
+        dot = Decimal(dn or 0) - _da_tra_that(db, dm)
+    dot = max(Decimal(dot), Decimal(0))
     dm.cho_lenh_bank = True
     dm.lenh_bank_tien = dn
     dm.lenh_bank_luc = gio_hien_tai()
@@ -1366,10 +1421,11 @@ def _hang_cho_duyet_chi(db: Session, dm: DonMua, dn: Decimal, nd=None):
                    LenhChiBank.trang_thai.in_(["CHO_DUYET", "DA_DUYET"]))
            .order_by(LenhChiBank.id.desc()).first())
     if lcb is None:
-        db.add(LenhChiBank(don_mua_id=dm.id, so_tien=dn, de_nghi_luc=gio_hien_tai(),
+        db.add(LenhChiBank(don_mua_id=dm.id, so_tien=dn, so_tien_dot=dot, de_nghi_luc=gio_hien_tai(),
                            nguoi_tao=(nd.id if nd is not None else None)))
     else:
         lcb.so_tien = dn
+        lcb.so_tien_dot = dot
         lcb.de_nghi_luc = gio_hien_tai()
         if nd is not None:
             lcb.nguoi_tao = nd.id            # người sửa đề nghị gần nhất là người đề nghị
@@ -1539,6 +1595,12 @@ def cap_nhat_thanh_toan_mua(dm_id: int, data: ThanhToanMuaVao, db: Session = Dep
     # KHÔNG phân bổ ngay: khoản chỉ vào Công nợ/Kiểm soát SAU KHI lệnh chi được DUYỆT
     from ..models import LenhChiBank as _LCBc
     da_co_lenh = db.query(_LCBc.id).filter(_LCBc.don_mua_id == dm.id).first() is not None
+    lenh_hl = (db.query(_LCBc.id).filter(_LCBc.don_mua_id == dm.id,
+                                          _LCBc.trang_thai.in_(["CHO_DUYET", "DA_DUYET"])).first() is not None)
+    da_tra = _da_tra_that(db, dm)          # đã trả THẬT (sổ công nợ) — tính TRƯỚC khi đổi de_nghi_tt
+    dot = Decimal(dn) - da_tra             # phần CHI THÊM nếu tạo lệnh
+    khong_chi_them = False
+    thong_bao = None
     if dn == da_cu and (da_co_lenh or dm.tt_du):
         # số tiền không đổi & PO đã có lệnh / đã tất toán → chỉ đồng bộ chứng từ / hạn
         cn = db.query(CongNo).filter_by(don_mua_id=dm.id).first()
@@ -1549,11 +1611,30 @@ def cap_nhat_thanh_toan_mua(dm_id: int, data: ThanhToanMuaVao, db: Session = Dep
                 cn.han = dm.ngay_tt_tiep
         da_tt_100 = bool(dm.tt_du)
         cho_duyet_chi = False
+    elif dn > 0 and dot <= 0 and not lenh_hl:
+        # 🔒 Đề nghị KHÔNG vượt số ĐÃ TRẢ THẬT → không còn gì phải chi: KHÔNG tạo lệnh chi
+        #    (chặn lệnh trùng cọc / đợt đã trả từ trước — nếu duyệt + ✔ Đã chi sẽ trả lần hai)
+        cn = db.query(CongNo).filter_by(don_mua_id=dm.id).first()
+        if cn is not None:
+            if dm.so_hoa_don:
+                cn.so_ct = dm.so_hoa_don[:60]
+            if dm.ngay_tt_tiep:
+                cn.han = dm.ngay_tt_tiep
+        if dm.da_duyet_tt is None:
+            dm.da_duyet_tt = da_tra
+        if dn > da_cu:
+            dm.de_nghi_tt = dn
+        da_tt_100 = bool(dm.tt_du)
+        cho_duyet_chi = False
+        khong_chi_them = True
+        thong_bao = (f"{dm.so or ('PO-' + str(dm.id))}: đề nghị {dn:,.0f} ₫ không vượt số ĐÃ TRẢ {da_tra:,.0f} ₫ "
+                     "trên sổ công nợ — không có gì phải chi thêm nên KHÔNG tạo lệnh chi (tránh trả trùng cọc / đợt cũ). "
+                     "Muốn trả tiếp hãy nhập số đề nghị LŨY KẾ cao hơn số đã trả.")
     else:
         if dm.da_duyet_tt is None:
             dm.da_duyet_tt = da_cu    # chốt phần đã áp dụng trước đó làm mốc ĐÃ DUYỆT (PO cũ)
         dm.de_nghi_tt = dn
-        _hang_cho_duyet_chi(db, dm, dn, nd)
+        _hang_cho_duyet_chi(db, dm, dn, nd, dot=max(dot, Decimal(0)))
         da_tt_100 = False
         cho_duyet_chi = True
     ghi_audit(db, nd.id, "THANH_TOAN_MUA", "don_mua", dm.id,
@@ -1564,7 +1645,9 @@ def cap_nhat_thanh_toan_mua(dm_id: int, data: ThanhToanMuaVao, db: Session = Dep
     snapshot_financial(db, "TT MUA " + (dm.so or f"PO-{dm.id}"))
     db.commit()
     return {"ok": True, "da_tt_100": da_tt_100, "da_thanh_toan": float(dn),
-            "con_lai": float(tong - dn), "cho_duyet_chi": cho_duyet_chi}
+            "con_lai": float(tong - dn), "cho_duyet_chi": cho_duyet_chi,
+            "khong_chi_them": khong_chi_them, "thong_bao": thong_bao, "da_tra": float(da_tra),
+            "so_tien_dot": float(max(dot, Decimal(0))) if cho_duyet_chi else 0.0}
 
 
 @router.post("/don-mua/{dm_id}/chot-thanh-toan")
@@ -1592,10 +1675,19 @@ def chot_thanh_toan_mua(dm_id: int, db: Session = Depends(get_db),
             raise HTTPException(status.HTTP_400_BAD_REQUEST,
                                 "Khoản còn nợ cần Ngày thanh toán tiếp theo — nhập ở bảng "
                                 "Thanh toán mua hàng rồi tick lại.")
+    # 🔒 Đề nghị không vượt số đã trả thật → không có gì để chi (chặn lệnh trùng cọc / đợt cũ)
+    da_tra = _da_tra_that(db, dm)
+    dot = dn - da_tra
+    if dot <= 0:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            f"Đề nghị {dn:,.0f} ₫ không vượt số ĐÃ TRẢ {da_tra:,.0f} ₫ của PO — không có gì phải chi thêm. "
+                            "Nhập số đề nghị (lũy kế) cao hơn số đã trả ở Thanh toán mua hàng rồi tick lại.")
+    if dm.da_duyet_tt is None:
+        dm.da_duyet_tt = da_tra
     # KHÔNG phân bổ ở bước này — chỉ đưa lệnh chi vào hàng chờ DUYỆT (tab Duyệt chi
     # Ngân Hàng); CEO/KTT duyệt xong hệ thống mới phân bổ vào Công nợ / Kiểm soát.
     da_tt_100 = dn >= tong
-    _hang_cho_duyet_chi(db, dm, dn, nd)
+    _hang_cho_duyet_chi(db, dm, dn, nd, dot=dot)
     ghi_audit(db, nd.id, "CHOT_TT_MUA", "don_mua", dm.id,
               moi={"de_nghi_tt": float(dn), "tong": float(tong), "tt_du": da_tt_100})
     from ..fin_snapshot import snapshot_financial
@@ -1613,18 +1705,22 @@ def _loai_lenh(db, r, dm, cn, ph, dot_chi):
     if dm is None:
         return {"ma": "CONG_NO", "nhan": "Trả công nợ"} if cn is not None else {"ma": "KHAC", "nhan": "—"}
     _L = type(r)
-    truoc = float(db.query(func.coalesce(func.sum(_L.so_tien), 0))
-                  .filter(_L.don_mua_id == dm.id, _L.trang_thai == "DA_CHI", _L.id < r.id).scalar() or 0)
     tong = float(dm.tong_tien or 0)
     st = float(r.so_tien or 0)
-    if r.trang_thai == "DA_DUYET" and dot_chi is not None:
+    if r.trang_thai in ("CHO_DUYET", "DA_DUYET") and dot_chi is not None:
+        # lệnh đang sống: đợt = số thực chi (đã chặn theo còn phải trả), trước = đã trả THẬT trên sổ công nợ
         dot = float(dot_chi)
-    elif r.trang_thai == "CHO_DUYET":
-        dot = max(st - truoc, 0.0) if st > truoc else st
+        truoc = float(_da_tra_that(db, dm))
+        if dot <= 0:
+            if st <= 0:
+                return {"ma": "CONG_NO_100", "nhan": "Công nợ 100% (0 ₫)"}
+            return {"ma": "KHONG_CHI_THEM", "nhan": "Đã trả đủ số đề nghị — không chi thêm (0 ₫)"}
     else:
+        truoc = float(db.query(func.coalesce(func.sum(_L.so_tien), 0))
+                      .filter(_L.don_mua_id == dm.id, _L.trang_thai == "DA_CHI", _L.id < r.id).scalar() or 0)
         dot = st
-    if dot <= 0:
-        return {"ma": "CONG_NO_100", "nhan": "Công nợ 100% (0 ₫)"}
+        if dot <= 0:
+            return {"ma": "CONG_NO_100", "nhan": "Công nợ 100% (0 ₫)"}
     luy_ke = truoc + dot
     pct = round(luy_ke / tong * 100) if tong > 0 else None
     du = tong > 0 and luy_ke >= tong * 0.999
@@ -1659,12 +1755,10 @@ def _lcb_dict(db, r):
     nguoi = db.get(NguoiDung, r.nguoi_duyet) if r.nguoi_duyet else None
     # Số tiền ĐỢT còn phải thực chi (chỉ tính cho lệnh PO ĐÃ DUYỆT — dùng cho nút ✔ Đã chi)
     dot_chi = None
-    if dm is not None and r.trang_thai == "DA_DUYET":
-        _lcb = type(r)
-        da_chi = (db.query(func.coalesce(func.sum(_lcb.so_tien), 0))
-                  .filter(_lcb.don_mua_id == dm.id, _lcb.trang_thai == "DA_CHI")
-                  .scalar() or 0)
-        dot_chi = max(float(dm.lenh_bank_tien or 0) - float(da_chi), 0.0)
+    da_tra_po = None
+    if dm is not None and r.trang_thai in ("CHO_DUYET", "DA_DUYET"):
+        dot_chi = _dot_chi_po(db, r, dm)              # đợt thực chi — không vượt còn phải trả, không chi lại cọc cũ
+        da_tra_po = float(_da_tra_that(db, dm))
     elif cn is not None and r.trang_thai == "DA_DUYET":
         dot_chi = float(r.so_tien or 0)      # lệnh công nợ: mỗi lệnh là một đợt
     elif ph is not None and r.trang_thai == "DA_DUYET":
@@ -1691,6 +1785,8 @@ def _lcb_dict(db, r):
             "duyet_luc": str(r.duyet_luc)[:16] if r.duyet_luc else None,
             "nguoi_duyet": getattr(nguoi, "ho_ten", None) or (nguoi.email if nguoi else None),
             "chi_luc": str(r.chi_luc)[:16] if r.chi_luc else None,
+            "so_tien_dot": (float(r.so_tien_dot) if getattr(r, "so_tien_dot", None) is not None else None),
+            "da_tra": da_tra_po, "ghi_chu": getattr(r, "ghi_chu", None),
             "so_tien_chi": dot_chi}
 
 
@@ -1863,9 +1959,10 @@ def duyet_lenh_chi_bank(lcb_id: int, db: Session = Depends(get_db),
     # duyệt (✔ Đã chi lúc ngân hàng chi thật): sổ không bao giờ chạy trước thực tế.
     dm = db.get(DonMua, r.don_mua_id) if r.don_mua_id else None
     if dm is not None:
-        dm.de_nghi_tt = Decimal(r.so_tien or 0)    # lũy kế đã đề nghị (số quản trị)
+        _da_tra_d = _da_tra_that(db, dm)               # tính TRƯỚC khi tạo dòng công nợ
+        dm.de_nghi_tt = max(Decimal(r.so_tien or 0), _da_tra_d)    # lũy kế đã đề nghị — không thấp hơn số đã trả
         _dam_bao_cong_no_po(db, dm)
-        dm.da_duyet_tt = Decimal(r.so_tien or 0)   # báo cáo chi phí chỉ đếm số ĐÃ DUYỆT này
+        dm.da_duyet_tt = max(Decimal(r.so_tien or 0), _da_tra_d)   # báo cáo chi phí chỉ đếm số ĐÃ DUYỆT này
         dm.cho_lenh_bank = True
         dm.lenh_bank_tien = r.so_tien
         if not dm.lenh_bank_luc:
@@ -1889,7 +1986,8 @@ def duyet_lenh_chi_bank(lcb_id: int, db: Session = Depends(get_db),
         from ..chat_gateway import gui_webhook_rieng
         if (settings.gchat_webhook_duyet_chi or "").strip():
             ten_nd = getattr(nd, "ho_ten", None) or nd.email
-            tien = f"{float(r.so_tien or 0):,.0f}".replace(",", ".")
+            _dot_wh = kq.get("so_tien_chi")
+            tien = f"{float(_dot_wh if _dot_wh is not None else (r.so_tien or 0)):,.0f}".replace(",", ".")
             phan_bo = "nghĩa vụ PO ghi ở Công nợ phải trả — trừ dần khi ✔ Đã chi (ngân hàng chi thật)"
             gui_webhook_rieng(settings.gchat_webhook_duyet_chi,
                 "🏦 *DUYỆT CHI NGÂN HÀNG*\n"
