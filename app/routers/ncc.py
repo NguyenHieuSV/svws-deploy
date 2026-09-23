@@ -283,7 +283,7 @@ def ds_san_pham(ncc_id: int | None = None, q: str | None = None,
                        | (SanPhamNcc.nha_san_xuat.ilike(like)) | (SanPhamNcc.spec.ilike(like)))
     ten_ncc = {n.id: n.ten for n in db.query(NhaCungCap).all()}
     return [_spn_ra(sp, ten_ncc.get(sp.nha_cung_cap_id))
-            for sp in qr.order_by(SanPhamNcc.nha_cung_cap_id, SanPhamNcc.ten).limit(500).all()]
+            for sp in qr.order_by(SanPhamNcc.nha_cung_cap_id, SanPhamNcc.ten).limit(5000).all()]   # không cắt 500 — danh mục đã > 500 SP
 
 
 @router.post("/san-pham", status_code=201)
