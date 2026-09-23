@@ -851,6 +851,9 @@ async def luu_bao_gia_file(nha_cung_cap_id: int = Form(...), file: UploadFile = 
 
 # ============ 📥 BÁO GIÁ NCC TỪ EMAIL — AI đọc thư + đính kèm, CHỜ XÁC NHẬN rồi mới vào Sản phẩm NCC / hồ sơ NCC ============
 _BGE_TU_KHOA = ("bao gia", "quotation", "quote", "chao gia", "bang gia", "price list", "pricelist")
+# thư KHÔNG phải báo giá dù đến từ email NCC: hóa đơn điện tử (đã có luồng Kế toán → Hóa đơn chờ), trả lời PO, thanh toán…
+_BGE_LOAI_TRU = ("hoa don", "invoice", "e-invoice", "einvoice", "don dat hang", "purchase order", "thanh toan",
+                 "payment", "bien ban", "hop dong", "contract", "nhac no", "cong no")
 
 
 def _bge_kd(s: str) -> str:
@@ -920,14 +923,20 @@ def quet_bao_gia_email(tu_ngay: date | None = None, db: Session = Depends(get_db
         tu_cty = bool(mien_cty) and nguoi.endswith("@" + mien_cty)
         if tu_cty and not any(x in td for x in ("fw:", "fwd:", "chuyen tiep")):
             continue                                # thư công ty tự gửi (RFQ đi, nội bộ) — chỉ nhận thư CHUYỂN TIẾP
-        if not (nguoi in tin_cay or nguoi in them_email or any(k in td for k in _BGE_TU_KHOA)):
+        co_tu_khoa = any(k in td for k in _BGE_TU_KHOA)
+        kems = m.get("dinh_kem") or []
+        co_xml = any(str(t.get("ten_file") or "").lower().endswith(".xml") for t in kems)   # HĐ điện tử kèm XML
+        if (any(k in td for k in _BGE_LOAI_TRU) or co_xml) and not co_tu_khoa:
+            khong_khop += 1                     # hóa đơn / trả lời PO / thanh toán — không phải báo giá
+            continue
+        # nhận: tiêu đề có chữ báo giá, HOẶC thư từ NCC đã có hồ sơ KÈM file (báo giá thường gửi PDF/Excel)
+        if not (co_tu_khoa or ((nguoi in tin_cay or nguoi in them_email) and kems)):
             khong_khop += 1
             continue
         if them >= GIOI_HAN:
             con_lai += 1
             continue
         items, nguon, ncc_ai = [], None, None
-        kems = m.get("dinh_kem") or []
         for tep in kems:
             try:
                 its = doc_bao_gia_file(tep.get("data") or b"", tep.get("content_type") or "", tep.get("ten_file") or "")
