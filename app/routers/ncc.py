@@ -849,6 +849,277 @@ async def luu_bao_gia_file(nha_cung_cap_id: int = Form(...), file: UploadFile = 
             "ds_trung": trung[:10], "ds_them": them[:10]}
 
 
+# ============ 📥 BÁO GIÁ NCC TỪ EMAIL — AI đọc thư + đính kèm, CHỜ XÁC NHẬN rồi mới vào Sản phẩm NCC / hồ sơ NCC ============
+_BGE_TU_KHOA = ("bao gia", "quotation", "quote", "chao gia", "bang gia", "price list", "pricelist")
+
+
+def _bge_kd(s: str) -> str:
+    import unicodedata
+    s = unicodedata.normalize("NFD", s or "")
+    s = "".join(c for c in s if unicodedata.category(c) != "Mn")
+    return s.replace("đ", "d").replace("Đ", "D").lower()
+
+
+def _bge_ngay(v):
+    from email.utils import parsedate_to_datetime
+    try:
+        return parsedate_to_datetime(v).date() if v else None
+    except Exception:
+        return None
+
+
+def _bge_dict(db, r):
+    ncc = db.get(NhaCungCap, r.nha_cung_cap_id) if r.nha_cung_cap_id else None
+    nd = db.get(NguoiDung, r.nguoi_xac_nhan) if r.nguoi_xac_nhan else None
+    return {"id": r.id, "message_id": r.message_id, "tu_email": r.tu_email, "tieu_de": r.tieu_de,
+            "ngay_thu": str(r.ngay_thu) if r.ngay_thu else None,
+            "nha_cung_cap_id": r.nha_cung_cap_id, "ncc_ten": ncc.ten if ncc else None,
+            "ncc_ai": r.ncc_ai, "san_pham": r.san_pham or [], "so_sp": len(r.san_pham or []),
+            "dinh_kem": [{k: v for k, v in (t or {}).items() if k != "ref"} for t in (r.dinh_kem or [])],
+            "nguon_doc": r.nguon_doc, "trang_thai": r.trang_thai, "ket_qua": r.ket_qua,
+            "tao_luc": str(r.tao_luc)[:16] if r.tao_luc else None,
+            "xac_nhan_luc": str(r.xac_nhan_luc)[:16] if r.xac_nhan_luc else None,
+            "nguoi_xac_nhan": (getattr(nd, "ho_ten", None) or nd.email) if nd else None}
+
+
+@router.post("/bao-gia-email/quet")
+def quet_bao_gia_email(tu_ngay: date | None = None, db: Session = Depends(get_db),
+                       nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    """🤖 Quét hộp thư mua hàng: thư từ email NCC đã có hồ sơ / danh bạ NCC dự án, hoặc tiêu đề có chữ
+    báo giá / quotation → AI đọc ĐÍNH KÈM (PDF · ảnh · Excel · CSV) rồi THÂN THƯ, trích sản phẩm + nhận diện NCC
+    → hàng CHỜ XÁC NHẬN. KHÔNG ghi thẳng vào Sản phẩm NCC / hồ sơ NCC — người dùng xác nhận từng thư.
+    Thư đã xử lý (mọi trạng thái) khử trùng bằng Message-ID nên không bị quét lại."""
+    from ..inbound_gateway import lay_inbound_provider
+    from ..models import BgEmailCho, CtNccEmail
+    from ..nhac_viec_service import gio_hien_tai
+    from datetime import timedelta as _td
+    prov = lay_inbound_provider()
+    moc = tu_ngay or (date.today() - _td(days=30))
+    try:
+        thu = prov.lay_thu(moc) if hasattr(prov, "lay_thu") else prov.lay_thu_moi()
+    except Exception as e:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            f"Không đọc được hộp thư ({prov.ten}): {str(e)[:150]}")
+    tin_cay = {}
+    for n in db.query(NhaCungCap).all():
+        k = (n.email or "").strip().lower()
+        if k and k not in tin_cay:
+            tin_cay[k] = n.id
+    them_email = {(e.email or "").strip().lower() for e in db.query(CtNccEmail).all()}
+    mien_cty = (settings.email_from_ncc or "").split("@")[-1].strip().lower()
+    them = trung = khong_khop = khong_doc = con_lai = 0
+    GIOI_HAN = 15                                   # trần thư gọi AI mỗi lần quét
+    for m in thu:
+        mid = (m.get("message_id") or "").strip()[:250] or None
+        if mid and db.query(BgEmailCho.id).filter_by(message_id=mid).first() is not None:
+            trung += 1
+            continue
+        nguoi = (m.get("tu_email") or "").strip().lower()
+        tieu_de = (m.get("tieu_de") or "")[:250]
+        td = _bge_kd(tieu_de)
+        tu_cty = bool(mien_cty) and nguoi.endswith("@" + mien_cty)
+        if tu_cty and not any(x in td for x in ("fw:", "fwd:", "chuyen tiep")):
+            continue                                # thư công ty tự gửi (RFQ đi, nội bộ) — chỉ nhận thư CHUYỂN TIẾP
+        if not (nguoi in tin_cay or nguoi in them_email or any(k in td for k in _BGE_TU_KHOA)):
+            khong_khop += 1
+            continue
+        if them >= GIOI_HAN:
+            con_lai += 1
+            continue
+        items, nguon, ncc_ai = [], None, None
+        kems = m.get("dinh_kem") or []
+        for tep in kems:
+            try:
+                its = doc_bao_gia_file(tep.get("data") or b"", tep.get("content_type") or "", tep.get("ten_file") or "")
+            except ValueError:
+                its = []
+            if its:
+                items, nguon = its, f"đính kèm: {tep.get('ten_file')}"
+                if nguoi not in tin_cay:
+                    try:
+                        ds = doc_thong_tin_ncc(tep.get("data") or b"", tep.get("content_type") or "",
+                                               tep.get("ten_file") or "")
+                        ncc_ai = ds[0] if ds else None
+                    except ValueError:
+                        ncc_ai = None
+                break
+        nd_thu = (m.get("noi_dung") or "").strip()
+        if not items and len(nd_thu) >= 80:
+            try:
+                items = doc_bao_gia_file(nd_thu.encode("utf-8"), "text/plain", "than_thu.txt")
+                nguon = "thân thư"
+            except ValueError:
+                items = []
+            if items and nguoi not in tin_cay:
+                try:
+                    ds = doc_thong_tin_ncc(nd_thu.encode("utf-8"), "text/plain", "than_thu.txt")
+                    ncc_ai = ds[0] if ds else None
+                except ValueError:
+                    ncc_ai = None
+        ncc_id = tin_cay.get(nguoi)
+        if ncc_id is None and ncc_ai:                # AI đọc được công ty → thử khớp hồ sơ có sẵn (MST · tên · email)
+            n0 = None
+            if ncc_ai.get("ma_so_thue"):
+                n0 = db.query(NhaCungCap).filter(NhaCungCap.ma_so_thue == ncc_ai["ma_so_thue"]).first()
+            if n0 is None and ncc_ai.get("ten"):
+                n0 = db.query(NhaCungCap).filter(NhaCungCap.ten.ilike(ncc_ai["ten"])).first()
+            if n0 is None and ncc_ai.get("email"):
+                n0 = db.query(NhaCungCap).filter(NhaCungCap.email.ilike(ncc_ai["email"])).first()
+            if n0 is not None:
+                ncc_id = n0.id
+        if ncc_ai is None and ncc_id is None and nguoi:
+            ncc_ai = {"ten": None, "email": nguoi}
+        r = BgEmailCho(message_id=mid, tu_email=(nguoi[:160] or None), tieu_de=(tieu_de or None),
+                       ngay_thu=_bge_ngay(m.get("ngay")), nha_cung_cap_id=ncc_id, ncc_ai=ncc_ai,
+                       san_pham=items, nguon_doc=(nguon[:40] if nguon else None),
+                       trang_thai="CHO_XAC_NHAN", tao_luc=gio_hien_tai())
+        db.add(r)
+        db.flush()
+        dk = []
+        for tep in kems[:3]:                        # đính kèm lưu TẠM (kho tệp nhóm bao_gia_email) — xác nhận mới gắn NCC
+            data = tep.get("data") or b""
+            if not data:
+                continue
+            try:
+                ref = luu_tep_chung(data, "bao_gia_email", r.id, tep.get("ten_file") or "dinh_kem",
+                                    tep.get("content_type"))
+            except Exception:
+                continue
+            dk.append({"ten_file": tep.get("ten_file"), "content_type": tep.get("content_type"),
+                       "kich_thuoc": len(data), "ref": ref,
+                       "doc_duoc": bool(nguon and nguon.endswith(str(tep.get("ten_file"))))})
+        r.dinh_kem = dk
+        if not items:
+            khong_doc += 1
+        them += 1
+    ghi_audit(db, nd.id, "AI_QUET_BG_EMAIL", "bg_email_cho", None,
+              moi={"provider": prov.ten, "tu_ngay": str(moc), "so_thu": len(thu), "them": them, "trung": trung,
+                   "khong_khop": khong_khop, "khong_doc": khong_doc, "con_lai": con_lai})
+    db.commit()
+    return {"ok": True, "provider": prov.ten, "tu_ngay": str(moc), "so_thu": len(thu), "them": them,
+            "trung": trung, "khong_khop": khong_khop, "khong_doc": khong_doc, "con_lai": con_lai}
+
+
+@router.get("/bao-gia-email")
+def ds_bao_gia_email(tat_ca: bool = False, db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
+    """Hàng báo giá từ email: mặc định chỉ thư CHỜ XÁC NHẬN; tat_ca=true → cả đã xác nhận / bỏ qua (200 thư gần nhất)."""
+    from ..models import BgEmailCho
+    q = db.query(BgEmailCho)
+    if not tat_ca:
+        q = q.filter(BgEmailCho.trang_thai == "CHO_XAC_NHAN")
+    return [_bge_dict(db, r) for r in q.order_by(BgEmailCho.id.desc()).limit(200).all()]
+
+
+class BgEmailXacNhanVao(_NccCnBase):
+    nha_cung_cap_id: int | None = None    # NCC nhận báo giá (chọn tay); bỏ trống = NCC hệ thống đã khớp
+    tao_ncc_moi: bool = False             # chưa khớp → tạo NCC mới theo thông tin AI trích (cần kiểm chứng)
+    chon: list[int] | None = None         # chỉ số dòng sản phẩm được tick (bỏ trống = tất cả)
+
+
+@router.post("/bao-gia-email/{bge_id}/xac-nhan")
+def xac_nhan_bao_gia_email(bge_id: int, data: BgEmailXacNhanVao | None = None, db: Session = Depends(get_db),
+                           nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    """✅ XÁC NHẬN một thư báo giá: sản phẩm đã tick → Sản phẩm NCC (bỏ qua trùng tên + mã); NCC chưa có → tạo mới
+    theo AI (hoặc chọn NCC có sẵn); email người gửi bổ sung vào hồ sơ nếu trống; đính kèm → Lưu file báo giá
+    (doi_tuong BAO_GIA_NCC_FILE — dùng được cho 🤖 AI tự tạo PO)."""
+    from ..models import BgEmailCho
+    from ..nhac_viec_service import gio_hien_tai
+    r = db.get(BgEmailCho, bge_id)
+    if r is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy thư báo giá")
+    if r.trang_thai != "CHO_XAC_NHAN":
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Thư này đã xử lý ({r.trang_thai})")
+    data = data or BgEmailXacNhanVao()
+    ncc, tao_moi, cap_nhat = None, False, []
+    if data.nha_cung_cap_id:
+        ncc = db.get(NhaCungCap, data.nha_cung_cap_id)
+        if ncc is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy nhà cung cấp đã chọn")
+    elif r.nha_cung_cap_id:
+        ncc = db.get(NhaCungCap, r.nha_cung_cap_id)
+    if ncc is None:
+        info = dict(r.ncc_ai or {})
+        if not data.tao_ncc_moi or not str(info.get("ten") or "").strip():
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                "Chưa xác định nhà cung cấp — chọn NCC trong danh sách, hoặc chọn «Tạo NCC mới theo AI» "
+                                "(cần AI đọc được tên công ty trong thư).")
+        if not info.get("email") and r.tu_email:
+            info["email"] = r.tu_email
+        ncc, tao_moi, cap_nhat, _kb = _ai_ap_mot_ncc(db, info, f"email «{(r.tieu_de or '')[:60]}»")
+    if not (ncc.email or "").strip() and r.tu_email:
+        ncc.email = r.tu_email
+        cap_nhat.append("email")
+    items = list(r.san_pham or [])
+    if data.chon is not None:
+        _c = set(int(i) for i in data.chon)
+        items = [it for i, it in enumerate(items) if i in _c]
+    hien_co = {((sp.ten or "").strip().lower(), (sp.ma_sp or "").strip().lower())
+               for sp in db.query(SanPhamNcc).filter_by(nha_cung_cap_id=ncc.id).all()}
+    them, trung = [], []
+    for it in items:
+        ten = str(it.get("ten") or "").strip()
+        if not ten:
+            continue
+        khoa = (ten.lower(), str(it.get("ma_sp") or "").strip().lower())
+        if khoa in hien_co:
+            trung.append(ten)
+            continue
+        hien_co.add(khoa)
+        db.add(SanPhamNcc(nha_cung_cap_id=ncc.id, ten=ten[:250], ma_sp=(it.get("ma_sp") or None),
+                          mo_ta=(it.get("mo_ta") or None), nha_san_xuat=(it.get("nha_san_xuat") or None),
+                          don_vi=(it.get("don_vi") or None), don_gia=(it.get("don_gia") or 0),
+                          ghi_chu=(f"AI đọc từ email {r.ngay_thu or ''} — {(r.tieu_de or '')[:80]}")[:200]))
+        them.append(ten)
+    tep_ids = []
+    for t in (r.dinh_kem or []):
+        if not t.get("ref"):
+            continue
+        tep = TepDinhKem(doi_tuong="BAO_GIA_NCC_FILE", doi_tuong_id=ncc.id, loai=("BG_TRUNG" if trung else "BG_OK"),
+                         ten_file=str(t.get("ten_file") or "bao_gia")[:255], duong_dan=t["ref"],
+                         kich_thuoc=t.get("kich_thuoc"), content_type=t.get("content_type"),
+                         nguoi_tai_len=nhan_vien_id_cua(db, nd.id))
+        db.add(tep)
+        db.flush()
+        tep_ids.append(tep.id)
+    r.nha_cung_cap_id = ncc.id
+    r.trang_thai = "DA_XAC_NHAN"
+    r.xac_nhan_luc = gio_hien_tai()
+    r.nguoi_xac_nhan = nd.id
+    r.ket_qua = {"ncc_id": ncc.id, "ncc_ten": ncc.ten, "ncc_moi": tao_moi, "ncc_cap_nhat": cap_nhat,
+                 "so_them": len(them), "so_trung": len(trung), "tep_ids": tep_ids}
+    ghi_audit(db, nd.id, "AI_BG_EMAIL_XAC_NHAN", "bg_email_cho", r.id,
+              moi={"ncc": ncc.ten, "ncc_moi": tao_moi, "so_them": len(them), "so_trung": len(trung),
+                   "tep": len(tep_ids), "tieu_de": (r.tieu_de or "")[:120]})
+    db.commit()
+    return {"ok": True, **r.ket_qua, "ds_them": them[:15], "ds_trung": trung[:15]}
+
+
+@router.post("/bao-gia-email/{bge_id}/bo-qua")
+def bo_qua_bao_gia_email(bge_id: int, db: Session = Depends(get_db),
+                         nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    """🚫 Bỏ qua thư (quảng cáo, không phải báo giá…): không ghi gì; đính kèm tạm bị xóa; thư không bị quét lại."""
+    from ..models import BgEmailCho
+    from ..nhac_viec_service import gio_hien_tai
+    r = db.get(BgEmailCho, bge_id)
+    if r is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy thư báo giá")
+    if r.trang_thai != "CHO_XAC_NHAN":
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Thư này đã xử lý ({r.trang_thai})")
+    for t in (r.dinh_kem or []):
+        if t.get("ref"):
+            try:
+                xoa_tep_chung(t["ref"])
+            except Exception:
+                pass
+    r.dinh_kem = [{k: v for k, v in (t or {}).items() if k != "ref"} for t in (r.dinh_kem or [])]
+    r.trang_thai = "BO_QUA"
+    r.xac_nhan_luc = gio_hien_tai()
+    r.nguoi_xac_nhan = nd.id
+    ghi_audit(db, nd.id, "AI_BG_EMAIL_BO_QUA", "bg_email_cho", r.id, moi={"tieu_de": (r.tieu_de or "")[:120]})
+    db.commit()
+    return {"ok": True}
+
+
 @router.get("/bao-gia-file")
 def ds_bao_gia_file(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
     """Danh mục Lưu file báo giá — các file báo giá NCC đã tải lên kho tệp dùng chung."""

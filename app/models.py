@@ -1416,6 +1416,26 @@ class KtHoaDonCho(Base):
     tao_luc: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
+class BgEmailCho(Base):
+    """📥 Báo giá NCC đọc từ EMAIL (AI) — CHỜ XÁC NHẬN rồi mới vào Sản phẩm NCC / hồ sơ NCC (mig 131)."""
+    __tablename__ = "bg_email_cho"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    message_id: Mapped[str | None] = mapped_column(String(250), unique=True, nullable=True)
+    tu_email: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    tieu_de: Mapped[str | None] = mapped_column(String(250), nullable=True)
+    ngay_thu: Mapped[date | None] = mapped_column(Date, nullable=True)
+    nha_cung_cap_id: Mapped[int | None] = mapped_column(ForeignKey("nha_cung_cap.id", ondelete="SET NULL"), nullable=True)
+    ncc_ai: Mapped[dict | None] = mapped_column(JSONB, nullable=True)      # NCC AI trích: ten, ma_so_thue, email…
+    san_pham: Mapped[list | None] = mapped_column(JSONB, nullable=True)    # dòng sản phẩm AI trích
+    dinh_kem: Mapped[list | None] = mapped_column(JSONB, nullable=True)    # [{ten_file, content_type, kich_thuoc, ref, doc_duoc}]
+    nguon_doc: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    trang_thai: Mapped[str] = mapped_column(String(16), default="CHO_XAC_NHAN")   # CHO_XAC_NHAN | DA_XAC_NHAN | BO_QUA
+    ket_qua: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    tao_luc: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    xac_nhan_luc: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    nguoi_xac_nhan: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+
+
 class DinhMucTieuHao(Base):
     __tablename__ = "dinh_muc_tieu_hao"
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)

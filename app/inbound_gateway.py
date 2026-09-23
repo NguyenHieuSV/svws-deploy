@@ -118,8 +118,8 @@ class ImapInboundProvider:
 
 
 def _dinh_kem(m, mo_eml: bool = True) -> list[dict]:
-    """Nhặt file đính kèm hóa đơn (PDF / XML / ảnh) — tối đa 3 file, mỗi file ≤ 8MB.
-    Thư đính kèm dạng file .eml cũng được MỞ RA để nhặt PDF/XML nằm bên trong."""
+    """Nhặt file đính kèm (PDF / XML / ảnh / Excel .xlsx / CSV — báo giá NCC hay gửi Excel) — tối đa 3 file,
+    mỗi file ≤ 8MB. Thư đính kèm dạng file .eml cũng được MỞ RA để nhặt file nằm bên trong."""
     out = []
     if not m.is_multipart():
         return out
@@ -144,7 +144,9 @@ def _dinh_kem(m, mo_eml: bool = True) -> list[dict]:
         low = fn.lower()
         if not (ct == "application/pdf" or low.endswith((".pdf", ".xml"))
                 or ct.startswith("image/") or low.endswith((".png", ".jpg", ".jpeg"))
-                or ct in ("application/xml", "text/xml")):
+                or ct in ("application/xml", "text/xml")
+                or low.endswith((".xlsx", ".xlsm", ".csv"))
+                or ct in ("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "text/csv")):
             continue
         try:
             data = p.get_payload(decode=True) or b""
@@ -182,6 +184,7 @@ def _imap_lay_thu(tu_ngay=None) -> list[dict]:
                     "tieu_de": _txt(m.get("Subject")),
                     "noi_dung": nd,
                     "dinh_kem": _dinh_kem(m),
+                    "ngay": m.get("Date"),
                     "message_id": m.get("Message-ID"),
                     "in_reply_to": m.get("In-Reply-To")})
     M.logout()
