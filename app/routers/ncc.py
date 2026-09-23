@@ -908,7 +908,7 @@ def quet_bao_gia_email(tu_ngay: date | None = None, db: Session = Depends(get_db
     them_email = {(e.email or "").strip().lower() for e in db.query(CtNccEmail).all()}
     mien_cty = (settings.email_from_ncc or "").split("@")[-1].strip().lower()
     them = trung = khong_khop = khong_doc = con_lai = 0
-    GIOI_HAN = 15                                   # trần thư gọi AI mỗi lần quét
+    GIOI_HAN = 5                                    # trần thư gọi AI mỗi lần quét (mỗi thư 1–2 lượt AI, tránh quá hạn HTTP)
     for m in thu:
         mid = (m.get("message_id") or "").strip()[:250] or None
         if mid and db.query(BgEmailCho.id).filter_by(message_id=mid).first() is not None:
@@ -992,6 +992,7 @@ def quet_bao_gia_email(tu_ngay: date | None = None, db: Session = Depends(get_db
         if not items:
             khong_doc += 1
         them += 1
+        db.commit()                                 # lưu NGAY từng thư — kết nối có quá hạn thì thư đã đọc vẫn còn, quét lại đọc tiếp
     ghi_audit(db, nd.id, "AI_QUET_BG_EMAIL", "bg_email_cho", None,
               moi={"provider": prov.ten, "tu_ngay": str(moc), "so_thu": len(thu), "them": them, "trung": trung,
                    "khong_khop": khong_khop, "khong_doc": khong_doc, "con_lai": con_lai})
