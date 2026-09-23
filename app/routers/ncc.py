@@ -1249,7 +1249,7 @@ def ds_thanh_toan_mua(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "
                                       _LCBl.trang_thai.in_(["CHO_DUYET", "DA_DUYET"])).order_by(_LCBl.id).all()):
         lenh_hl[_l.don_mua_id] = _l
     out = []
-    for dm in db.query(DonMua).order_by(DonMua.id.desc()).limit(300).all():
+    for dm in db.query(DonMua).order_by(DonMua.id.desc()).limit(3000).all():
         # LOGIC: PO chỉ chạy sang Thanh toán mua hàng khi ĐÃ DUYỆT.
         # PO chưa duyệt nhưng đã có số liệu trả từ trước vẫn hiển thị để không mất vết.
         if dm.trang_thai != "DA_DUYET" and not dm.tt_du and float(dm.de_nghi_tt or 0) <= 0:
@@ -3074,7 +3074,7 @@ def ds_cong_no(nha_cung_cap_id: int | None = None, chua_tra: bool = False,
     q = db.query(CongNo).filter(CongNo.loai == "PHAI_TRA")
     if nha_cung_cap_id:
         q = q.filter(CongNo.nha_cung_cap_id == nha_cung_cap_id)
-    rows = q.order_by(CongNo.id.desc()).limit(300).all()
+    rows = q.order_by(CongNo.id.desc()).limit(3000).all()     # không cắt 300 — sổ công nợ NCC đã > 300 dòng (ô Overall Financial đếm thiếu)
     hom_nay = date.today()
     from ..models import HangHoa as _HH
     hh_tens = {}
