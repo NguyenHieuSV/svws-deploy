@@ -1670,13 +1670,11 @@ def chot_thanh_toan_mua(dm_id: int, db: Session = Depends(get_db),
         raise HTTPException(status.HTTP_400_BAD_REQUEST,
                             "Chưa có Đề nghị thanh toán — nhập số tiền ở bảng Thanh toán mua hàng trước.")
     if dn < tong and not dm.ngay_tt_tiep:
+        # (từ 23/09/2026) không bắt buộc Ngày TT tiếp theo — khoản vẫn hiện ở Công nợ phải trả (nhãn «chưa đặt hạn»);
+        # có hạn trên dòng công nợ thì lấy làm ngày TT tiếp theo
         cn = db.query(CongNo).filter_by(don_mua_id=dm.id).first()
         if cn is not None and cn.han:
             dm.ngay_tt_tiep = cn.han
-        else:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST,
-                                "Khoản còn nợ cần Ngày thanh toán tiếp theo — nhập ở bảng "
-                                "Thanh toán mua hàng rồi tick lại.")
     # 🔒 Đề nghị không vượt số đã trả thật → không có gì để chi (chặn lệnh trùng cọc / đợt cũ)
     da_tra = _da_tra_that(db, dm)
     dot = dn - da_tra
