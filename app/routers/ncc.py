@@ -1151,36 +1151,48 @@ def bo_sung_spec_bao_gia_email(db: Session = Depends(get_db),
             continue
         if xu_ly >= 5:
             break
-        kems = []
-        for t in (r.dinh_kem or []):
-            if not t.get("ref"):
-                continue
-            try:
-                kems.append({"ten_file": t.get("ten_file"), "content_type": t.get("content_type"),
-                             "kich_thuoc": t.get("kich_thuoc"), "data": doc_tep_chung(t["ref"])})
-            except Exception:
-                continue
-        items, nguon, _ai = _bge_doc(kems, r.noi_dung or "", True)
-        nguon_spec = (f"AI · email {r.ngay_thu or ''} {(r.tieu_de or '')[:60]}").strip()[:160]
-        so_spec = 0
-        for it in items:
-            if not it.get("spec"):
-                continue
-            sp = _spn_khop(db, r.nha_cung_cap_id, it.get("ten") or "", it.get("ma_sp"))
-            if sp is not None and _spn_cap_nhat_spec(sp, it.get("spec"), nguon_spec):
-                so_spec += 1
-        kq["spec_xu_ly"] = so_spec
-        kq["spec_luc"] = str(gio_hien_tai())[:16]
-        r.ket_qua = kq
-        xu_ly += 1
-        so_spec_tong += so_spec
-        chi_tiet.append({"id": r.id, "tieu_de": (r.tieu_de or "")[:60], "so_sp_ai": len(items), "so_spec": so_spec})
-        db.commit()                              # lưu từng thư — quá hạn kết nối thì phần đã làm vẫn còn
-    ghi_audit(db, nd.id, "AI_BG_EMAIL_BO_SUNG_SPEC", "bg_email_cho", None,
-              moi={"xu_ly": xu_ly, "so_spec": so_spec_tong})
-    db.commit()
-    con = sum(1 for r in rows if "spec_xu_ly" not in dict(r.ket_qua or {}))
-    return {"ok": True, "xu_ly": xu_ly, "so_spec": so_spec_tong, "con_lai": con, "chi_tiet": chi_tiet}
+        rid, tieu_de_r = r.id, (r.tieu_de or "")[:60]
+        try:
+            kems = []
+            for t in (r.dinh_kem or []):
+                if not t.get("ref"):
+                    continue
+                try:
+                    kems.append({"ten_file": t.get("ten_file"), "content_type": t.get("content_type"),
+                                 "kich_thuoc": t.get("kich_thuoc"), "data": doc_tep_chung(t["ref"])})
+                except Exception:
+                    continue
+            items, nguon, _ai = _bge_doc(kems, r.noi_dung or "", True)
+            nguon_spec = (f"AI · email {r.ngay_thu or ''} {(r.tieu_de or '')[:60]}").strip()[:160]
+            so_spec = 0
+            for it in items:
+                if not it.get("spec"):
+                    continue
+                sp = _spn_khop(db, r.nha_cung_cap_id, it.get("ten") or "", it.get("ma_sp"))
+                if sp is not None and _spn_cap_nhat_spec(sp, it.get("spec"), nguon_spec):
+                    so_spec += 1
+            kq["spec_xu_ly"] = so_spec
+            kq["spec_luc"] = str(gio_hien_tai())[:16]
+            r.ket_qua = kq
+            xu_ly += 1
+            so_spec_tong += so_spec
+            chi_tiet.append({"id": rid, "tieu_de": tieu_de_r, "so_sp_ai": len(items), "so_spec": so_spec})
+            db.commit()                          # lưu từng thư — quá hạn kết nối thì phần đã làm vẫn còn
+        except Exception as e:                   # một thư lỗi (AI / file) → ghi lỗi, đi tiếp thư khác
+            db.rollback()
+            chi_tiet.append({"id": rid, "tieu_de": tieu_de_r, "loi": str(e)[:200]})
+            xu_ly += 1
+    try:
+        ghi_audit(db, nd.id, "AI_BG_EMAIL_BO_SUNG_SPEC", "bg_email_cho", None,
+                  moi={"xu_ly": xu_ly, "so_spec": so_spec_tong, "loi": sum(1 for c in chi_tiet if c.get("loi"))})
+        db.commit()
+    except Exception:
+        db.rollback()
+    con = (db.query(BgEmailCho).filter(BgEmailCho.trang_thai == "DA_XAC_NHAN", BgEmailCho.nha_cung_cap_id.isnot(None))
+           .count()) - (db.query(BgEmailCho).filter(BgEmailCho.trang_thai == "DA_XAC_NHAN",
+                                                    BgEmailCho.ket_qua.has_key("spec_xu_ly")).count())
+    return {"ok": True, "xu_ly": xu_ly, "so_spec": so_spec_tong, "con_lai": max(con, 0), "chi_tiet": chi_tiet,
+            "loi_ds": [c for c in chi_tiet if c.get("loi")]}
 
 
 @router.get("/bao-gia-email")
