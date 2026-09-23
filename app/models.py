@@ -392,6 +392,9 @@ class SanPhamNcc(Base):
     don_vi: Mapped[str | None] = mapped_column(String(30), nullable=True)
     don_gia: Mapped[Decimal] = mapped_column(Numeric(18, 0), default=0)
     ghi_chu: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    spec: Mapped[str | None] = mapped_column(Text, nullable=True)            # mig 133: thông số kỹ thuật (AI đọc từ email / file)
+    spec_nguon: Mapped[str | None] = mapped_column(String(160), nullable=True)  # "TAY" | "AI · email …" | "AI · file …"
+    spec_luc: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
 class BaoGiaForm(Base):
@@ -1430,6 +1433,7 @@ class BgEmailCho(Base):
     dinh_kem: Mapped[list | None] = mapped_column(JSONB, nullable=True)    # [{ten_file, content_type, kich_thuoc, ref, doc_duoc}]
     nguon_doc: Mapped[str | None] = mapped_column(String(40), nullable=True)
     noi_dung: Mapped[str | None] = mapped_column(Text, nullable=True)         # thân thư (mig 132) — để 🔁 AI đọc lại
+    loai: Mapped[str | None] = mapped_column(String(12), default="BAO_GIA")   # mig 133: BAO_GIA | SPEC (datasheet / catalogue)
     trang_thai: Mapped[str] = mapped_column(String(16), default="CHO_XAC_NHAN")   # CHO_XAC_NHAN | DA_XAC_NHAN | BO_QUA
     ket_qua: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     tao_luc: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

@@ -307,12 +307,17 @@ def doc_bao_gia_file(data: bytes, content_type: str, filename: str) -> list[dict
     import urllib.request
     khoi = _khoi_noi_dung_file(data, content_type, filename)
     sys = ("Bạn là trợ lý mua hàng của công ty xử lý nước SVWS. Người dùng gửi một FILE BÁO GIÁ "
-           "của nhà cung cấp. Hãy đọc và trích TOÀN BỘ các dòng sản phẩm/dịch vụ thành JSON. "
+           "(hoặc DATASHEET / CATALOGUE / bảng thông số kỹ thuật) của nhà cung cấp. "
+           "Hãy đọc và trích TOÀN BỘ các dòng sản phẩm/dịch vụ thành JSON. "
            "CHỈ trả về đúng một mảng JSON, không thêm chữ nào khác, mỗi phần tử dạng: "
            '{"ten":"<tên sản phẩm>","ma_sp":"<mã SP hoặc null>","mo_ta":"<mô tả/quy cách hoặc null>",'
            '"nha_san_xuat":"<hãng sản xuất/xuất xứ hoặc null>","don_vi":"<đơn vị tính hoặc null>",'
            '"don_gia":<đơn giá VND dạng số, hoặc null>,"so_luong":<số lượng trong báo giá dạng số, hoặc null>,'
-           '"thue_suat":<% thuế VAT của dòng dạng số (ví dụ 8 hoặc 10), hoặc null>}. '
+           '"thue_suat":<% thuế VAT của dòng dạng số (ví dụ 8 hoặc 10), hoặc null>,'
+           '"spec":"<THÔNG SỐ KỸ THUẬT của sản phẩm: công suất, lưu lượng, áp suất, cột áp, kích thước, vật liệu, '
+           'điện áp, công nghệ, dải đo, độ chính xác, tiêu chuẩn… viết gọn 1–4 dòng, các thông số cách nhau bằng dấu «; », '
+           'hoặc null nếu file không ghi>"}. '
+           "File datasheet / catalogue không có giá thì don_gia = null nhưng VẪN trích sản phẩm và spec. '
            "Đơn giá: bỏ dấu chấm/phẩy ngăn cách nghìn, quy về số VND; nếu giá bằng ngoại tệ thì để null. "
            "Thuế suất VAT: lấy đúng % ghi trong báo giá cho từng dòng (thường 0/5/8/10). Nếu báo giá "
            "chỉ ghi một mức VAT chung thì áp mức đó cho mọi dòng; nếu không thấy VAT thì để null. "
@@ -364,7 +369,8 @@ def doc_bao_gia_file(data: bytes, content_type: str, filename: str) -> list[dict
                     "mo_ta": (str(it.get("mo_ta")).strip() if it.get("mo_ta") else None),
                     "nha_san_xuat": (str(it.get("nha_san_xuat")).strip()[:150] if it.get("nha_san_xuat") else None),
                     "don_vi": (str(it.get("don_vi")).strip()[:30] if it.get("don_vi") else None),
-                    "don_gia": gia, "thue_suat": ts})
+                    "don_gia": gia, "thue_suat": ts,
+                    "spec": (str(it.get("spec")).strip()[:2000] if it.get("spec") and str(it.get("spec")).strip().lower() not in ("null", "none") else None)})
     return out
 
 

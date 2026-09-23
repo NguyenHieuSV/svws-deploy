@@ -221,13 +221,54 @@ class SanPhamNccVao(_SPBase):
     don_vi: str | None = None
     don_gia: float = 0
     ghi_chu: str | None = None
+    spec: str | None = None               # thông số kỹ thuật (nhập tay → nguồn TAY, AI không ghi đè)
 
 
 def _spn_ra(sp: SanPhamNcc, ten_ncc: str | None = None):
     return {"id": sp.id, "nha_cung_cap_id": sp.nha_cung_cap_id, "ten_ncc": ten_ncc,
             "ten": sp.ten, "ma_sp": sp.ma_sp, "mo_ta": sp.mo_ta,
             "nha_san_xuat": sp.nha_san_xuat, "don_vi": sp.don_vi,
-            "don_gia": float(sp.don_gia or 0), "ghi_chu": sp.ghi_chu}
+            "don_gia": float(sp.don_gia or 0), "ghi_chu": sp.ghi_chu,
+            "spec": getattr(sp, "spec", None), "spec_nguon": getattr(sp, "spec_nguon", None),
+            "spec_luc": (str(sp.spec_luc)[:10] if getattr(sp, "spec_luc", None) else None)}
+
+
+def _spn_cap_nhat_spec(sp: SanPhamNcc, spec, nguon: str) -> bool:
+    """Ghi SPEC do AI trích vào sản phẩm: trống → ghi; đang là spec AI cũ → thay bằng bản mới;
+    spec NHẬP TAY (nguồn TAY) → giữ nguyên, không ghi đè. Trả True nếu có thay đổi."""
+    from ..nhac_viec_service import gio_hien_tai
+    s = str(spec or "").strip()
+    if not s:
+        return False
+    cu = str(sp.spec or "").strip()
+    if cu and not str(sp.spec_nguon or "").startswith("AI"):
+        return False
+    if cu == s:
+        return False
+    sp.spec = s[:2000]
+    sp.spec_nguon = nguon[:160]
+    sp.spec_luc = gio_hien_tai()
+    return True
+
+
+def _spn_khop(db, ncc_id: int, ten: str, ma_sp):
+    """Tìm sản phẩm có sẵn của NCC khớp dòng AI trích: cùng mã SP (nếu có) → cùng tên → tên chứa nhau."""
+    t = (ten or "").strip().lower()
+    m = str(ma_sp or "").strip().lower()
+    ds = db.query(SanPhamNcc).filter_by(nha_cung_cap_id=ncc_id).all()
+    if m:
+        for sp in ds:
+            if str(sp.ma_sp or "").strip().lower() == m:
+                return sp
+    for sp in ds:
+        if (sp.ten or "").strip().lower() == t:
+            return sp
+    if len(t) >= 12:
+        for sp in ds:
+            u = (sp.ten or "").strip().lower()
+            if u and (u in t or t in u):
+                return sp
+    return None
 
 
 @router.get("/san-pham")
@@ -239,7 +280,7 @@ def ds_san_pham(ncc_id: int | None = None, q: str | None = None,
     if q:
         like = f"%{q.strip()}%"
         qr = qr.filter((SanPhamNcc.ten.ilike(like)) | (SanPhamNcc.ma_sp.ilike(like))
-                       | (SanPhamNcc.nha_san_xuat.ilike(like)))
+                       | (SanPhamNcc.nha_san_xuat.ilike(like)) | (SanPhamNcc.spec.ilike(like)))
     ten_ncc = {n.id: n.ten for n in db.query(NhaCungCap).all()}
     return [_spn_ra(sp, ten_ncc.get(sp.nha_cung_cap_id))
             for sp in qr.order_by(SanPhamNcc.nha_cung_cap_id, SanPhamNcc.ten).limit(500).all()]
@@ -256,6 +297,9 @@ def tao_san_pham(data: SanPhamNccVao, db: Session = Depends(get_db),
     sp = SanPhamNcc(nha_cung_cap_id=data.nha_cung_cap_id, ten=data.ten.strip(),
                     ma_sp=data.ma_sp, mo_ta=data.mo_ta, nha_san_xuat=data.nha_san_xuat,
                     don_vi=data.don_vi, don_gia=data.don_gia, ghi_chu=data.ghi_chu)
+    if (data.spec or "").strip():
+        from ..nhac_viec_service import gio_hien_tai as _gh
+        sp.spec, sp.spec_nguon, sp.spec_luc = data.spec.strip()[:2000], "TAY", _gh()
     db.add(sp); db.flush()
     ghi_audit(db, nd.id, "TAO", "san_pham_ncc", sp.id, moi={"ten": sp.ten, "ncc": ncc.ten})
     db.commit(); db.refresh(sp)
@@ -273,6 +317,11 @@ def sua_san_pham(sp_id: int, data: SanPhamNccVao, db: Session = Depends(get_db),
     sp.ten = data.ten.strip(); sp.ma_sp = data.ma_sp; sp.mo_ta = data.mo_ta
     sp.nha_san_xuat = data.nha_san_xuat; sp.don_vi = data.don_vi
     sp.don_gia = data.don_gia; sp.ghi_chu = data.ghi_chu
+    if str(data.spec or "").strip() != str(sp.spec or "").strip():   # sửa tay → nguồn TAY, AI không ghi đè
+        from ..nhac_viec_service import gio_hien_tai as _gh
+        sp.spec = (data.spec or "").strip()[:2000] or None
+        sp.spec_nguon = "TAY" if sp.spec else None
+        sp.spec_luc = _gh() if sp.spec else None
     ghi_audit(db, nd.id, "SUA", "san_pham_ncc", sp.id, cu=cu,
               moi={"ten": sp.ten, "don_gia": data.don_gia})
     db.commit(); db.refresh(sp)
@@ -819,19 +868,25 @@ async def luu_bao_gia_file(nha_cung_cap_id: int = Form(...), file: UploadFile = 
         raise HTTPException(status.HTTP_400_BAD_REQUEST,
                             "AI không tìm thấy dòng sản phẩm nào trong file — kiểm tra lại nội dung báo giá.")
     # đối chiếu trùng (cùng tên + mã) trong danh mục sản phẩm của NCC này
-    hien_co = {( (sp.ten or "").strip().lower(), (sp.ma_sp or "").strip().lower() )
+    from ..nhac_viec_service import gio_hien_tai as _gh
+    hien_co = {((sp.ten or "").strip().lower(), (sp.ma_sp or "").strip().lower()): sp
                for sp in db.query(SanPhamNcc).filter_by(nha_cung_cap_id=nha_cung_cap_id).all()}
-    them, trung = [], []
+    them, trung, spec_cn = [], [], 0
     for it in items:
         khoa = (it["ten"].strip().lower(), (it["ma_sp"] or "").strip().lower())
         if khoa in hien_co:
             trung.append(it["ten"])
+            if _spn_cap_nhat_spec(hien_co[khoa], it.get("spec"), f"AI · file {ten_file}"):
+                spec_cn += 1                  # SP trùng vẫn được CẬP NHẬT SPEC từ file mới
             continue
-        hien_co.add(khoa)
-        db.add(SanPhamNcc(nha_cung_cap_id=nha_cung_cap_id, ten=it["ten"], ma_sp=it["ma_sp"],
-                          mo_ta=it["mo_ta"], nha_san_xuat=it["nha_san_xuat"],
-                          don_vi=it["don_vi"], don_gia=it["don_gia"] or 0,
-                          ghi_chu=f"AI nhập từ file {ten_file}"))
+        sp_moi = SanPhamNcc(nha_cung_cap_id=nha_cung_cap_id, ten=it["ten"], ma_sp=it["ma_sp"],
+                            mo_ta=it["mo_ta"], nha_san_xuat=it["nha_san_xuat"],
+                            don_vi=it["don_vi"], don_gia=it["don_gia"] or 0,
+                            ghi_chu=f"AI nhập từ file {ten_file}")
+        if it.get("spec"):
+            sp_moi.spec, sp_moi.spec_nguon, sp_moi.spec_luc = str(it["spec"])[:2000], f"AI · file {ten_file}"[:160], _gh()
+        db.add(sp_moi)
+        hien_co[khoa] = sp_moi
         them.append(it["ten"])
     # lưu file vào kho tệp dùng chung (danh mục Lưu file báo giá)
     ref = luu_tep_chung(data, "bao_gia_ncc", nha_cung_cap_id, ten_file, file.content_type)
@@ -845,7 +900,7 @@ async def luu_bao_gia_file(nha_cung_cap_id: int = Form(...), file: UploadFile = 
               moi={"ncc": ncc.ten, "file": ten_file, "so_them": len(them), "so_trung": len(trung)})
     db.commit()
     return {"ok": True, "tep_id": tep.id, "ncc": ncc.ten,
-            "so_doc": len(items), "so_them": len(them), "so_trung": len(trung),
+            "so_doc": len(items), "so_them": len(them), "so_trung": len(trung), "so_spec": spec_cn,
             "ds_trung": trung[:10], "ds_them": them[:10]}
 
 
@@ -854,6 +909,9 @@ _BGE_TU_KHOA = ("bao gia", "quotation", "quote", "chao gia", "bang gia", "price 
 # thư KHÔNG phải báo giá dù đến từ email NCC: hóa đơn điện tử (đã có luồng Kế toán → Hóa đơn chờ), trả lời PO, thanh toán…
 _BGE_LOAI_TRU = ("hoa don", "invoice", "e-invoice", "einvoice", "don dat hang", "purchase order", "thanh toan",
                  "payment", "bien ban", "hop dong", "contract", "nhac no", "cong no")
+# thư DATASHEET / CATALOGUE / thông số kỹ thuật (không có giá) → loại SPEC: xác nhận chỉ để cập nhật cột Spec
+_BGE_TU_KHOA_SPEC = ("spec", "specification", "thong so", "datasheet", "data sheet", "catalog", "catalogue",
+                     "ky thuat", "brochure", "tds ")
 
 
 def _bge_kd(s: str) -> str:
@@ -879,7 +937,8 @@ def _bge_dict(db, r):
             "nha_cung_cap_id": r.nha_cung_cap_id, "ncc_ten": ncc.ten if ncc else None,
             "ncc_ai": r.ncc_ai, "san_pham": r.san_pham or [], "so_sp": len(r.san_pham or []),
             "dinh_kem": [{k: v for k, v in (t or {}).items() if k != "ref"} for t in (r.dinh_kem or [])],
-            "nguon_doc": r.nguon_doc, "trang_thai": r.trang_thai, "ket_qua": r.ket_qua,
+            "nguon_doc": r.nguon_doc, "loai": (getattr(r, "loai", None) or "BAO_GIA"),
+            "trang_thai": r.trang_thai, "ket_qua": r.ket_qua,
             "tao_luc": str(r.tao_luc)[:16] if r.tao_luc else None,
             "xac_nhan_luc": str(r.xac_nhan_luc)[:16] if r.xac_nhan_luc else None,
             "nguoi_xac_nhan": (getattr(nd, "ho_ten", None) or nd.email) if nd else None}
@@ -974,15 +1033,17 @@ def quet_bao_gia_email(tu_ngay: date | None = None, db: Session = Depends(get_db
         if tu_cty and not any(x in td for x in ("fw:", "fwd:", "chuyen tiep")):
             continue                                # thư công ty tự gửi (RFQ đi, nội bộ) — chỉ nhận thư CHUYỂN TIẾP
         co_tu_khoa = any(k in td for k in _BGE_TU_KHOA)
+        co_spec = any(k in (td + " ") for k in _BGE_TU_KHOA_SPEC)
         kems = m.get("dinh_kem") or []
         co_xml = any(str(t.get("ten_file") or "").lower().endswith(".xml") for t in kems)   # HĐ điện tử kèm XML
-        if (any(k in td for k in _BGE_LOAI_TRU) or co_xml) and not co_tu_khoa:
+        if (any(k in td for k in _BGE_LOAI_TRU) or co_xml) and not (co_tu_khoa or co_spec):
             khong_khop += 1                     # hóa đơn / trả lời PO / thanh toán — không phải báo giá
             continue
-        # nhận: tiêu đề có chữ báo giá, HOẶC thư từ NCC đã có hồ sơ KÈM file (báo giá thường gửi PDF/Excel)
-        if not (co_tu_khoa or ((nguoi in tin_cay or nguoi in them_email) and kems)):
+        # nhận: tiêu đề có chữ báo giá / datasheet, HOẶC thư từ NCC đã có hồ sơ KÈM file (báo giá thường gửi PDF/Excel)
+        if not (co_tu_khoa or co_spec or ((nguoi in tin_cay or nguoi in them_email) and kems)):
             khong_khop += 1
             continue
+        loai_thu = "SPEC" if (co_spec and not co_tu_khoa) else "BAO_GIA"
         if them >= GIOI_HAN:
             con_lai += 1
             continue
@@ -1004,7 +1065,7 @@ def quet_bao_gia_email(tu_ngay: date | None = None, db: Session = Depends(get_db
         r = BgEmailCho(message_id=mid, tu_email=(nguoi[:160] or None), tieu_de=(tieu_de or None),
                        ngay_thu=_bge_ngay(m.get("ngay")), nha_cung_cap_id=ncc_id, ncc_ai=ncc_ai,
                        san_pham=items, nguon_doc=(nguon[:40] if nguon else None), noi_dung=(nd_thu[:20000] or None),
-                       trang_thai="CHO_XAC_NHAN", tao_luc=gio_hien_tai())
+                       loai=loai_thu, trang_thai="CHO_XAC_NHAN", tao_luc=gio_hien_tai())
         db.add(r)
         db.flush()
         dk = []
@@ -1125,22 +1186,26 @@ def xac_nhan_bao_gia_email(bge_id: int, data: BgEmailXacNhanVao | None = None, d
     if data.chon is not None:
         _c = set(int(i) for i in data.chon)
         items = [it for i, it in enumerate(items) if i in _c]
-    hien_co = {((sp.ten or "").strip().lower(), (sp.ma_sp or "").strip().lower())
-               for sp in db.query(SanPhamNcc).filter_by(nha_cung_cap_id=ncc.id).all()}
-    them, trung = [], []
+    nguon_spec = (f"AI · email {r.ngay_thu or ''} {(r.tieu_de or '')[:60]}").strip()[:160]
+    them, trung, spec_cn = [], [], 0
     for it in items:
         ten = str(it.get("ten") or "").strip()
         if not ten:
             continue
-        khoa = (ten.lower(), str(it.get("ma_sp") or "").strip().lower())
-        if khoa in hien_co:
-            trung.append(ten)
+        sp_co = _spn_khop(db, ncc.id, ten, it.get("ma_sp"))
+        if sp_co is not None:
+            trung.append(ten)                       # SP đã có: KHÔNG tạo trùng, chỉ CẬP NHẬT SPEC (giá giữ nguyên)
+            if _spn_cap_nhat_spec(sp_co, it.get("spec"), nguon_spec):
+                spec_cn += 1
             continue
-        hien_co.add(khoa)
-        db.add(SanPhamNcc(nha_cung_cap_id=ncc.id, ten=ten[:250], ma_sp=(it.get("ma_sp") or None),
-                          mo_ta=(it.get("mo_ta") or None), nha_san_xuat=(it.get("nha_san_xuat") or None),
-                          don_vi=(it.get("don_vi") or None), don_gia=(it.get("don_gia") or 0),
-                          ghi_chu=(f"AI đọc từ email {r.ngay_thu or ''} — {(r.tieu_de or '')[:80]}")[:200]))
+        sp_moi = SanPhamNcc(nha_cung_cap_id=ncc.id, ten=ten[:250], ma_sp=(it.get("ma_sp") or None),
+                            mo_ta=(it.get("mo_ta") or None), nha_san_xuat=(it.get("nha_san_xuat") or None),
+                            don_vi=(it.get("don_vi") or None), don_gia=(it.get("don_gia") or 0),
+                            ghi_chu=(f"AI đọc từ email {r.ngay_thu or ''} — {(r.tieu_de or '')[:80]}")[:200])
+        if it.get("spec"):
+            sp_moi.spec, sp_moi.spec_nguon, sp_moi.spec_luc = str(it["spec"])[:2000], nguon_spec, gio_hien_tai()
+        db.add(sp_moi)
+        db.flush()
         them.append(ten)
     tep_ids = []
     for t in (r.dinh_kem or []):
@@ -1158,7 +1223,7 @@ def xac_nhan_bao_gia_email(bge_id: int, data: BgEmailXacNhanVao | None = None, d
     r.xac_nhan_luc = gio_hien_tai()
     r.nguoi_xac_nhan = nd.id
     r.ket_qua = {"ncc_id": ncc.id, "ncc_ten": ncc.ten, "ncc_moi": tao_moi, "ncc_cap_nhat": cap_nhat,
-                 "so_them": len(them), "so_trung": len(trung), "tep_ids": tep_ids}
+                 "so_them": len(them), "so_trung": len(trung), "so_spec": spec_cn, "tep_ids": tep_ids}
     ghi_audit(db, nd.id, "AI_BG_EMAIL_XAC_NHAN", "bg_email_cho", r.id,
               moi={"ncc": ncc.ten, "ncc_moi": tao_moi, "so_them": len(them), "so_trung": len(trung),
                    "tep": len(tep_ids), "tieu_de": (r.tieu_de or "")[:120]})
