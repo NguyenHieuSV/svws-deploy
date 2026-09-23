@@ -1429,6 +1429,7 @@ class BgEmailCho(Base):
     san_pham: Mapped[list | None] = mapped_column(JSONB, nullable=True)    # dòng sản phẩm AI trích
     dinh_kem: Mapped[list | None] = mapped_column(JSONB, nullable=True)    # [{ten_file, content_type, kich_thuoc, ref, doc_duoc}]
     nguon_doc: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    noi_dung: Mapped[str | None] = mapped_column(Text, nullable=True)         # thân thư (mig 132) — để 🔁 AI đọc lại
     trang_thai: Mapped[str] = mapped_column(String(16), default="CHO_XAC_NHAN")   # CHO_XAC_NHAN | DA_XAC_NHAN | BO_QUA
     ket_qua: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     tao_luc: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

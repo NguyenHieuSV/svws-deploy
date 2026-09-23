@@ -885,6 +885,56 @@ def _bge_dict(db, r):
             "nguoi_xac_nhan": (getattr(nd, "ho_ten", None) or nd.email) if nd else None}
 
 
+def _bge_uu_tien(kems):
+    """Sắp đính kèm theo thứ tự AI nên đọc: PDF / Excel / CSV trước, rồi ảnh; BỎ ảnh chữ ký / logo chèn trong thư
+    (tên image001.png… hoặc ảnh < 40KB) — nếu không AI sẽ đọc nhầm ảnh chữ ký thay vì file báo giá."""
+    import re as _re
+    out = []
+    for t in kems or []:
+        fn = str(t.get("ten_file") or "").lower()
+        ct = str(t.get("content_type") or "").lower()
+        la_anh = ct.startswith("image/") or fn.endswith((".png", ".jpg", ".jpeg", ".webp", ".gif"))
+        if la_anh and (_re.match(r"^image\d+\.", fn) or int(t.get("kich_thuoc") or len(t.get("data") or b"")) < 40 * 1024):
+            continue
+        uu = 0 if fn.endswith((".pdf", ".xlsx", ".xlsm", ".csv")) else (1 if la_anh else 2)
+        out.append((uu, t))
+    return [t for _, t in sorted(out, key=lambda x: x[0])]
+
+
+def _bge_doc(kems, nd_thu: str, nguoi_biet: bool):
+    """AI đọc một thư: đính kèm (theo ưu tiên) rồi thân thư → (items, nguon, ncc_ai)."""
+    items, nguon, ncc_ai = [], None, None
+    for tep in _bge_uu_tien(kems):
+        try:
+            its = doc_bao_gia_file(tep.get("data") or b"", tep.get("content_type") or "", tep.get("ten_file") or "")
+        except ValueError:
+            its = []
+        if its:
+            items, nguon = its, f"đính kèm: {tep.get('ten_file')}"
+            if not nguoi_biet:
+                try:
+                    ds = doc_thong_tin_ncc(tep.get("data") or b"", tep.get("content_type") or "",
+                                           tep.get("ten_file") or "")
+                    ncc_ai = ds[0] if ds else None
+                except ValueError:
+                    ncc_ai = None
+            break
+    nd_thu = (nd_thu or "").strip()
+    if not items and len(nd_thu) >= 80:
+        try:
+            items = doc_bao_gia_file(nd_thu.encode("utf-8"), "text/plain", "than_thu.txt")
+            nguon = "thân thư"
+        except ValueError:
+            items = []
+        if items and not nguoi_biet:
+            try:
+                ds = doc_thong_tin_ncc(nd_thu.encode("utf-8"), "text/plain", "than_thu.txt")
+                ncc_ai = ds[0] if ds else None
+            except ValueError:
+                ncc_ai = None
+    return items, nguon, ncc_ai
+
+
 @router.post("/bao-gia-email/quet")
 def quet_bao_gia_email(tu_ngay: date | None = None, db: Session = Depends(get_db),
                        nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
@@ -936,35 +986,8 @@ def quet_bao_gia_email(tu_ngay: date | None = None, db: Session = Depends(get_db
         if them >= GIOI_HAN:
             con_lai += 1
             continue
-        items, nguon, ncc_ai = [], None, None
-        for tep in kems:
-            try:
-                its = doc_bao_gia_file(tep.get("data") or b"", tep.get("content_type") or "", tep.get("ten_file") or "")
-            except ValueError:
-                its = []
-            if its:
-                items, nguon = its, f"đính kèm: {tep.get('ten_file')}"
-                if nguoi not in tin_cay:
-                    try:
-                        ds = doc_thong_tin_ncc(tep.get("data") or b"", tep.get("content_type") or "",
-                                               tep.get("ten_file") or "")
-                        ncc_ai = ds[0] if ds else None
-                    except ValueError:
-                        ncc_ai = None
-                break
         nd_thu = (m.get("noi_dung") or "").strip()
-        if not items and len(nd_thu) >= 80:
-            try:
-                items = doc_bao_gia_file(nd_thu.encode("utf-8"), "text/plain", "than_thu.txt")
-                nguon = "thân thư"
-            except ValueError:
-                items = []
-            if items and nguoi not in tin_cay:
-                try:
-                    ds = doc_thong_tin_ncc(nd_thu.encode("utf-8"), "text/plain", "than_thu.txt")
-                    ncc_ai = ds[0] if ds else None
-                except ValueError:
-                    ncc_ai = None
+        items, nguon, ncc_ai = _bge_doc(kems, nd_thu, nguoi in tin_cay)
         ncc_id = tin_cay.get(nguoi)
         if ncc_id is None and ncc_ai:                # AI đọc được công ty → thử khớp hồ sơ có sẵn (MST · tên · email)
             n0 = None
@@ -980,7 +1003,7 @@ def quet_bao_gia_email(tu_ngay: date | None = None, db: Session = Depends(get_db
             ncc_ai = {"ten": None, "email": nguoi}
         r = BgEmailCho(message_id=mid, tu_email=(nguoi[:160] or None), tieu_de=(tieu_de or None),
                        ngay_thu=_bge_ngay(m.get("ngay")), nha_cung_cap_id=ncc_id, ncc_ai=ncc_ai,
-                       san_pham=items, nguon_doc=(nguon[:40] if nguon else None),
+                       san_pham=items, nguon_doc=(nguon[:40] if nguon else None), noi_dung=(nd_thu[:20000] or None),
                        trang_thai="CHO_XAC_NHAN", tao_luc=gio_hien_tai())
         db.add(r)
         db.flush()
@@ -1008,6 +1031,45 @@ def quet_bao_gia_email(tu_ngay: date | None = None, db: Session = Depends(get_db
     db.commit()
     return {"ok": True, "provider": prov.ten, "tu_ngay": str(moc), "so_thu": len(thu), "them": them,
             "trung": trung, "khong_khop": khong_khop, "khong_doc": khong_doc, "con_lai": con_lai}
+
+
+@router.post("/bao-gia-email/{bge_id}/doc-lai")
+def doc_lai_bao_gia_email(bge_id: int, db: Session = Depends(get_db),
+                          nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    """🔁 AI đọc lại một thư đang chờ (từ đính kèm đã lưu tạm — ưu tiên PDF/Excel, bỏ ảnh chữ ký — rồi thân thư);
+    ghi đè sản phẩm / NCC AI trích của dòng đó."""
+    from ..models import BgEmailCho
+    r = db.get(BgEmailCho, bge_id)
+    if r is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy thư báo giá")
+    if r.trang_thai != "CHO_XAC_NHAN":
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Thư này đã xử lý ({r.trang_thai})")
+    kems = []
+    for t in (r.dinh_kem or []):
+        if not t.get("ref"):
+            continue
+        try:
+            kems.append({"ten_file": t.get("ten_file"), "content_type": t.get("content_type"),
+                         "kich_thuoc": t.get("kich_thuoc"), "data": doc_tep_chung(t["ref"])})
+        except Exception:
+            continue
+    items, nguon, ncc_ai = _bge_doc(kems, r.noi_dung or "", bool(r.nha_cung_cap_id))
+    r.san_pham = items
+    r.nguon_doc = (nguon[:40] if nguon else None)
+    if ncc_ai:
+        r.ncc_ai = ncc_ai
+    if r.nha_cung_cap_id is None and ncc_ai:
+        n0 = None
+        if ncc_ai.get("ma_so_thue"):
+            n0 = db.query(NhaCungCap).filter(NhaCungCap.ma_so_thue == ncc_ai["ma_so_thue"]).first()
+        if n0 is None and ncc_ai.get("ten"):
+            n0 = db.query(NhaCungCap).filter(NhaCungCap.ten.ilike(ncc_ai["ten"])).first()
+        if n0 is not None:
+            r.nha_cung_cap_id = n0.id
+    r.dinh_kem = [dict(t, doc_duoc=bool(nguon and nguon.endswith(str(t.get("ten_file"))))) for t in (r.dinh_kem or [])]
+    ghi_audit(db, nd.id, "AI_BG_EMAIL_DOC_LAI", "bg_email_cho", r.id, moi={"so_sp": len(items), "nguon": nguon})
+    db.commit()
+    return _bge_dict(db, r)
 
 
 @router.get("/bao-gia-email")
