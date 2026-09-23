@@ -1133,6 +1133,56 @@ def doc_lai_bao_gia_email(bge_id: int, db: Session = Depends(get_db),
     return _bge_dict(db, r)
 
 
+@router.post("/bao-gia-email/bo-sung-spec")
+def bo_sung_spec_bao_gia_email(db: Session = Depends(get_db),
+                               nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    """🔧 Thư ĐÃ XÁC NHẬN nhưng chưa xử lý spec (xác nhận trước khi có cột Spec, hoặc AI lần đó chưa trích spec):
+    AI đọc lại đính kèm đã lưu / thân thư → điền SPEC cho sản phẩm khớp (mã SP · tên) của NCC đó — giá giữ nguyên,
+    spec nhập tay không ghi đè. Tối đa 5 thư mỗi lần gọi (mỗi thư một lượt AI)."""
+    from ..models import BgEmailCho
+    from ..nhac_viec_service import gio_hien_tai
+    rows = (db.query(BgEmailCho).filter(BgEmailCho.trang_thai == "DA_XAC_NHAN", BgEmailCho.nha_cung_cap_id.isnot(None))
+            .order_by(BgEmailCho.id.desc()).limit(60).all())
+    xu_ly = so_spec_tong = 0
+    chi_tiet = []
+    for r in rows:
+        kq = dict(r.ket_qua or {})
+        if "spec_xu_ly" in kq:
+            continue
+        if xu_ly >= 5:
+            break
+        kems = []
+        for t in (r.dinh_kem or []):
+            if not t.get("ref"):
+                continue
+            try:
+                kems.append({"ten_file": t.get("ten_file"), "content_type": t.get("content_type"),
+                             "kich_thuoc": t.get("kich_thuoc"), "data": doc_tep_chung(t["ref"])})
+            except Exception:
+                continue
+        items, nguon, _ai = _bge_doc(kems, r.noi_dung or "", True)
+        nguon_spec = (f"AI · email {r.ngay_thu or ''} {(r.tieu_de or '')[:60]}").strip()[:160]
+        so_spec = 0
+        for it in items:
+            if not it.get("spec"):
+                continue
+            sp = _spn_khop(db, r.nha_cung_cap_id, it.get("ten") or "", it.get("ma_sp"))
+            if sp is not None and _spn_cap_nhat_spec(sp, it.get("spec"), nguon_spec):
+                so_spec += 1
+        kq["spec_xu_ly"] = so_spec
+        kq["spec_luc"] = str(gio_hien_tai())[:16]
+        r.ket_qua = kq
+        xu_ly += 1
+        so_spec_tong += so_spec
+        chi_tiet.append({"id": r.id, "tieu_de": (r.tieu_de or "")[:60], "so_sp_ai": len(items), "so_spec": so_spec})
+        db.commit()                              # lưu từng thư — quá hạn kết nối thì phần đã làm vẫn còn
+    ghi_audit(db, nd.id, "AI_BG_EMAIL_BO_SUNG_SPEC", "bg_email_cho", None,
+              moi={"xu_ly": xu_ly, "so_spec": so_spec_tong})
+    db.commit()
+    con = sum(1 for r in rows if "spec_xu_ly" not in dict(r.ket_qua or {}))
+    return {"ok": True, "xu_ly": xu_ly, "so_spec": so_spec_tong, "con_lai": con, "chi_tiet": chi_tiet}
+
+
 @router.get("/bao-gia-email")
 def ds_bao_gia_email(tat_ca: bool = False, db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
     """Hàng báo giá từ email: mặc định chỉ thư CHỜ XÁC NHẬN; tat_ca=true → cả đã xác nhận / bỏ qua (200 thư gần nhất)."""
