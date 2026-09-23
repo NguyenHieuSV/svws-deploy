@@ -1324,6 +1324,7 @@ class CtBcvhChiTieu(Base):
     chi_tieu: Mapped[str] = mapped_column(String(250))    # tên chỉ tiêu / tên hóa chất-vật tư
     don_vi: Mapped[str | None] = mapped_column(String(20), nullable=True)
     thu_tu: Mapped[int] = mapped_column(Integer, default=0)
+    tinh_tien: Mapped[bool | None] = mapped_column(Boolean, default=True)   # mig 128: đồng hồ KHOI_LUONG có tính tiền
 
 
 class ChiPhiVanHanh(Base):

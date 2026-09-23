@@ -411,6 +411,7 @@ class CtChiTieuVao(BaseModel):
     vi_tri: str | None = None
     chi_tieu: str          # tên chỉ tiêu / hóa chất-vật tư / hệ thống
     don_vi: str | None = None
+    tinh_tien: bool = True   # KHOI_LUONG: đồng hồ tính tiền (khối lượng × đơn giá = doanh thu tháng) hay chỉ tham khảo
 
 
 @router.get("/tai-san/{ts_id}/chi-tieu")
@@ -420,7 +421,7 @@ def ds_chi_tieu(ts_id: int, loai: str | None = None, db: Session = Depends(get_d
     if loai:
         q = q.filter(CtBcvhChiTieu.loai == loai)
     return [{"id": c.id, "loai": c.loai or "KY_THUAT", "vi_tri": c.vi_tri,
-             "chi_tieu": c.chi_tieu, "don_vi": c.don_vi}
+             "chi_tieu": c.chi_tieu, "don_vi": c.don_vi, "tinh_tien": c.tinh_tien is not False}
             for c in q.order_by(CtBcvhChiTieu.thu_tu, CtBcvhChiTieu.id).all()]
 
 
@@ -430,7 +431,8 @@ def them_chi_tieu(ts_id: int, data: CtChiTieuVao, db: Session = Depends(get_db),
     if db.get(TaiSanChoThue, ts_id) is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy dự án cho thuê")
     c = CtBcvhChiTieu(tai_san_id=ts_id, loai=data.loai, vi_tri=(data.vi_tri or "").strip()[:150] or None,
-                      chi_tieu=data.chi_tieu.strip()[:250], don_vi=(data.don_vi or "").strip()[:20] or None)
+                      chi_tieu=data.chi_tieu.strip()[:250], don_vi=(data.don_vi or "").strip()[:20] or None,
+                      tinh_tien=data.tinh_tien)
     db.add(c); db.flush()
     ghi_audit(db, nd.id, "TAO", "ct_bcvh_chi_tieu", c.id, moi={"tai_san_id": ts_id, "loai": data.loai, "chi_tieu": c.chi_tieu})
     db.commit()
@@ -441,6 +443,7 @@ class CtChiTieuSua(BaseModel):
     vi_tri: str | None = None
     chi_tieu: str | None = None
     don_vi: str | None = None
+    tinh_tien: bool | None = None
 
 
 @router.put("/chi-tieu/{ct_id}")
@@ -458,6 +461,9 @@ def sua_chi_tieu(ct_id: int, data: CtChiTieuSua, db: Session = Depends(get_db),
         c.vi_tri = data.vi_tri.strip()[:150] or None
     if data.don_vi is not None:
         c.don_vi = data.don_vi.strip()[:20] or None
+    if data.tinh_tien is not None:
+        cu["tinh_tien"] = c.tinh_tien
+        c.tinh_tien = data.tinh_tien
     ghi_audit(db, nd.id, "SUA", "ct_bcvh_chi_tieu", c.id, cu=cu,
               moi={"vi_tri": c.vi_tri, "chi_tieu": c.chi_tieu, "don_vi": c.don_vi})
     db.commit()
@@ -577,7 +583,10 @@ def tong_hop_thang(ts_id: int, thang: str | None = None, db: Session = Depends(g
         if r.don_vi:
             e["don_vi"] = r.don_vi
         e["series"].append({"ngay": str(r.ngay), "chi_so": float(r.luong_ton)})
+    _he_tk = {(c.chi_tieu or "").strip().lower() for c in
+              db.query(CtBcvhChiTieu).filter_by(tai_san_id=ts_id, loai="KHOI_LUONG").all() if c.tinh_tien is False}
     for ten, e in kl.items():
+        e["tinh_tien"] = (ten or "").strip().lower() not in _he_tk     # 💰 đồng hồ tính tiền / tham khảo
         moc = (db.query(CtBaoCaoVh)
                .filter(CtBaoCaoVh.tai_san_id == ts_id, CtBaoCaoVh.loai == "KHOI_LUONG",
                        CtBaoCaoVh.noi_dung == ten, CtBaoCaoVh.luong_ton.isnot(None),
@@ -698,6 +707,49 @@ def luu_bao_cao_kl(ts_id: int, data: BcKlBatch, cho_phep_giam: bool = False,
               moi={"tai_san_id": ts_id, "loai": "KHOI_LUONG", "ngay": str(ng), "so_dong": n})
     db.commit()
     return {"so_dong": n, "ngay": str(ng)}
+
+
+class ChuyenKlVao(BaseModel):
+    he_thong: str                     # tên hệ thống (đồng hồ) đang ghi ở dự án này
+    tai_san_id_den: int               # dự án nhận
+    he_thong_moi: str | None = None   # tên hệ thống ở dự án nhận (mặc định giữ tên)
+    xoa_chi_tieu: bool = True         # gỡ hệ thống khỏi danh mục dự án cũ
+
+
+@router.post("/tai-san/{ts_id}/bao-cao-kl/chuyen")
+def chuyen_he_thong_kl(ts_id: int, data: ChuyenKlVao, db: Session = Depends(get_db),
+                       nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC")), _ql: NguoiDung = Depends(quan_ly_ct)):
+    """🔁 Chuyển TOÀN BỘ chỉ số của một hệ thống (đồng hồ) ghi nhầm dự án sang dự án khác — đổi tên hệ thống nếu cần,
+    tự thêm vào danh mục dự án nhận, gỡ khỏi danh mục dự án cũ. Dùng khi vận hành ghi đồng hồ RO dưới dự án nước thải…"""
+    tu, den = db.get(TaiSanChoThue, ts_id), db.get(TaiSanChoThue, data.tai_san_id_den)
+    if tu is None or den is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy dự án")
+    if tu.id == den.id:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Dự án nhận phải khác dự án hiện tại")
+    ten = data.he_thong.strip()
+    ten_moi = (data.he_thong_moi or "").strip() or ten
+    rows = (db.query(CtBaoCaoVh).filter(CtBaoCaoVh.tai_san_id == ts_id, CtBaoCaoVh.loai == "KHOI_LUONG",
+                                        func.lower(func.trim(CtBaoCaoVh.noi_dung)) == ten.lower()).all())
+    if not rows:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Hệ thống '{ten}' chưa có chỉ số nào ở dự án này")
+    for r in rows:
+        r.tai_san_id, r.noi_dung = den.id, ten_moi
+    nguon = [c for c in db.query(CtBcvhChiTieu).filter_by(tai_san_id=ts_id, loai="KHOI_LUONG").all()
+             if (c.chi_tieu or "").strip().lower() == ten.lower()]
+    co_dich = any((c.chi_tieu or "").strip().lower() == ten_moi.lower() for c in
+                  db.query(CtBcvhChiTieu).filter_by(tai_san_id=den.id, loai="KHOI_LUONG").all())
+    if not co_dich:
+        db.add(CtBcvhChiTieu(tai_san_id=den.id, loai="KHOI_LUONG", chi_tieu=ten_moi[:250],
+                             don_vi=(nguon[0].don_vi if nguon else None) or (rows[0].don_vi or None),
+                             tinh_tien=(nguon[0].tinh_tien if nguon else True)))
+    if data.xoa_chi_tieu:
+        for c in nguon:
+            db.delete(c)
+    ghi_audit(db, nd.id, "CHUYEN_KL", "ct_bao_cao_vh", ts_id,
+              cu={"tai_san_id": ts_id, "he_thong": ten},
+              moi={"tai_san_id": den.id, "he_thong": ten_moi, "so_dong": len(rows), "xoa_chi_tieu": data.xoa_chi_tieu})
+    db.commit()
+    return {"ok": True, "so_dong": len(rows), "tu": tu.ma, "den": den.ma, "he_thong": ten_moi}
 
 
 class BcvhSua(BaseModel):
@@ -1925,12 +1977,33 @@ def du_an_cac_thang(ts_id: int, so_thang: int = 12, db: Session = Depends(get_db
         if r.don_vi and not don_vi_kl:
             don_vi_kl = r.don_vi
         he_thong.setdefault((r.noi_dung or "").strip().lower(), []).append(r)
+    # 💰 chỉ đồng hồ TÍNH TIỀN mới vào khối lượng doanh thu; đồng hồ THAM KHẢO (nước vào nhà máy, RO về DAF…) để riêng
+    _he_tk = {(c.chi_tieu or "").strip().lower() for c in
+              db.query(CtBcvhChiTieu).filter_by(tai_san_id=ts_id, loai="KHOI_LUONG").all() if c.tinh_tien is False}
     kl_thang: dict[str, float] = {}
-    for arr in he_thong.values():
+    kl_tham_khao: dict[str, float] = {}
+    for ten_he, arr in he_thong.items():
+        dich = kl_tham_khao if ten_he in _he_tk else kl_thang
         for i in range(1, len(arr)):
             mk = arr[i].ngay.strftime("%Y-%m") if arr[i].ngay else None
             if mk:
-                kl_thang[mk] = kl_thang.get(mk, 0.0) + (float(arr[i].luong_ton) - float(arr[i - 1].luong_ton))
+                dich[mk] = dich.get(mk, 0.0) + (float(arr[i].luong_ton) - float(arr[i - 1].luong_ton))
+    # 🔍 ĐỐI CHIẾU với ĐƠN BÁN của tháng: m³ trên dòng đơn (dòng có số lượng > 1) · giá trị đơn (chưa VAT)
+    from ..dau_tu_cho_thue import don_thang_cua_du_an as _dtd
+    doi_chieu = {}
+    for m in months:
+        _y, _m = int(m[:4]), int(m[5:7])
+        m3, dtd, thieu = 0.0, 0.0, 0
+        for dh in _dtd(db, ts, date(_y, _m, 1)):
+            if (getattr(dh, "loai_don", None) or "").upper() == "DAU_TU":
+                continue
+            dtd += float(dh.tong_tien or 0)
+            sl = sum(float(ct.so_luong or 0) for ct in (dh.chi_tiet or []) if float(ct.so_luong or 0) > 1)
+            if sl > 0:
+                m3 += sl
+            elif float(dh.tong_tien or 0) > 0:
+                thieu += 1                                 # đơn ghi 1 dòng trọn gói → không biết m³
+        doi_chieu[m] = {"m3_don": m3, "dt_don": dtd, "don_khong_m3": thieu}
     theo_m3 = (ts.don_vi_gia or "").upper() == "VND/M3"
     # 🏗 khấu hao tháng (vốn đầu tư / số tháng hợp đồng) + sản lượng TỐI THIỂU cam kết — app/dau_tu_cho_thue.py
     from ..dau_tu_cho_thue import tong_hop as _dt_th, m3_tinh_tien as _m3_tt
@@ -1940,6 +2013,7 @@ def du_an_cac_thang(ts_id: int, so_thang: int = 12, db: Session = Depends(get_db
     rows = []
     for m in months:
         o = cpm[m]
+        dc = doi_chieu[m]
         cp = round(o["tong"])
         kl = round(kl_thang.get(m, 0.0), 1)
         kl_tt = _m3_tt(ts, kl) if theo_m3 else kl
@@ -1949,6 +2023,9 @@ def du_an_cac_thang(ts_id: int, so_thang: int = 12, db: Session = Depends(get_db
         rows.append({"thang": m, "ma_ban_hang": (", ".join(o["don"]) if o["don"] else _ma_thang(prefix, m)),
                      "chua_co_don": not o["don"], "don": o["don"], "ma_le": o.get("ma_le") or [],
                      "khoi_luong_tinh_tien": kl_tt, "ap_toi_thieu": bool(theo_m3 and kl_tt > kl),
+                     "kl_tham_khao": round(kl_tham_khao.get(m, 0.0), 1),
+                     "m3_don": round(dc["m3_don"], 1), "dt_don": round(dc["dt_don"]), "don_khong_m3": dc["don_khong_m3"],
+                     "chenh_m3": (round(kl - dc["m3_don"], 1) if dc["m3_don"] else None),
                      "khau_hao": kh_m, "loi_nhuan_sau_kh": doanh_thu - cp - kh_m,
                      "khoi_luong": kl,
                      "don_vi_kl": don_vi_kl or "m³",
@@ -1960,7 +2037,7 @@ def du_an_cac_thang(ts_id: int, so_thang: int = 12, db: Session = Depends(get_db
                      "doanh_thu": doanh_thu, "chi_phi": cp, "loi_nhuan": doanh_thu - cp})
     if not _duoc_xem_gia(nd_xem):                # 🔒 giá thuê · doanh thu · lợi nhuận: chỉ CEO + TP_QLNB
         for x in rows:
-            x["don_gia"] = x["doanh_thu"] = x["loi_nhuan"] = None
+            x["don_gia"] = x["doanh_thu"] = x["loi_nhuan"] = x["dt_don"] = None
         dt = None
     if nd_xem.vai_tro.ma != "CEO":               # 🔒 vốn đầu tư · khấu hao · hoàn vốn: CHỈ CEO
         for x in rows:
