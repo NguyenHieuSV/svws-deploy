@@ -1268,6 +1268,7 @@ def ds_thanh_toan_mua(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "
                        .order_by(_TT.id.desc()).first())
             if tt_cuoi and tt_cuoi.ngay:
                 ngay_tt = str(tt_cuoi.ngay)
+        _dt = float(_da_tra_that(db, dm))            # đã trả THẬT (sổ công nợ)
         out.append({"id": dm.id, "so": dm.so, "ngay": str(dm.ngay or "")[:10],
                     "ncc_mst": ncc.ma_so_thue if ncc else None,
                     "so_hoa_don": dm.so_hoa_don or so_hd, "ma_don_ban": _ma_ban_hang_po(db, dm),
@@ -1286,7 +1287,8 @@ def ds_thanh_toan_mua(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "
                     "tt_du": bool(dm.tt_du),
                     "ngay_tt_du": str(dm.ngay_tt_du) if dm.ngay_tt_du else None,
                     "trang_thai": dm.trang_thai,
-                    "da_tra": float(_da_tra_that(db, dm)),
+                    "da_tra": _dt, "con_lai": max(float(dm.tong_tien or 0) - _dt, 0.0),
+                    "cn_so_hd": (cn.so_ct if cn else None),      # số hóa đơn THẬT trên sổ công nợ (quy tắc tab Công nợ)
                     "lenh_cho": ({"id": lenh_hl[dm.id].id, "trang_thai": lenh_hl[dm.id].trang_thai,
                                   "so_tien": float(lenh_hl[dm.id].so_tien or 0),
                                   "so_tien_dot": _dot_chi_po(db, lenh_hl[dm.id], dm),
@@ -2870,6 +2872,9 @@ def duyet_don_mua(dm_id: int, db: Session = Depends(get_db),
                 f"> hạn mức {han_muc:,.0f}. Cần thanh toán bớt hoặc nâng hạn mức.")
     dm.trang_thai = "DA_DUYET"
     dm.nguoi_duyet = nhan_vien_id_cua(db, nd.id)
+    # 📒 PO đã duyệt = NGHĨA VỤ phải trả → ghi ngay dòng công nợ (so_tien = tổng PO, đã trả 0) để không PO nào nằm
+    #    ngoài sổ; số hóa đơn / hạn bổ sung sau (Thanh toán mua hàng · Nhận hàng). Một PO — một công nợ.
+    _dam_bao_cong_no_po(db, dm)
     da_gui = gui_email_ncc(db, dm)  # gửi xác nhận PO từ đầu mối mua hàng
     ghi_audit(db, nd.id, "DUYET", "don_mua", dm.id,
               moi={"trang_thai": "DA_DUYET", "email_ncc": da_gui})
@@ -3017,11 +3022,23 @@ def nhan_hang(dm_id: int, data: NhanHangVao, db: Session = Depends(get_db),
                     da_hach_toan=False, trang_thai="GHI_NHAN")
         db.add(hd); db.flush()
         hd.so = f"HDM-{date.today():%Y%m%d}-{hd.id}"; hd_mua_id = hd.id
-        cn = CongNo(loai="PHAI_TRA", hoa_don_id=hd.id, nha_cung_cap_id=dm.nha_cung_cap_id,
-                    don_mua_id=dm.id,   # gắn PO — luồng thanh toán mua tìm thấy, hết 2 bản công nợ song song
-                    so_tien=tong_hd, da_thanh_toan=0, han=data.han_thanh_toan,
-                    trang_thai="CHUA_TRA")
-        db.add(cn); db.flush(); cn_id = cn.id
+        cn = db.query(CongNo).filter_by(don_mua_id=dm.id).order_by(CongNo.id).first()
+        if cn is not None:
+            # 🔒 MỘT PO — MỘT CÔNG NỢ: PO đã có nghĩa vụ (ghi lúc duyệt PO / duyệt lệnh chi) → gắn hóa đơn mua vào
+            #    dòng sẵn có, KHÔNG tạo dòng thứ hai (tránh đếm nợ hai lần)
+            if cn.hoa_don_id is None:
+                cn.hoa_don_id = hd.id
+            if Decimal(cn.so_tien or 0) < Decimal(tong_hd):
+                cn.so_tien = tong_hd
+            if data.han_thanh_toan and not cn.han:
+                cn.han = data.han_thanh_toan
+            db.flush(); cn_id = cn.id
+        else:
+            cn = CongNo(loai="PHAI_TRA", hoa_don_id=hd.id, nha_cung_cap_id=dm.nha_cung_cap_id,
+                        don_mua_id=dm.id,   # gắn PO — luồng thanh toán mua tìm thấy, hết 2 bản công nợ song song
+                        so_tien=tong_hd, da_thanh_toan=0, han=data.han_thanh_toan,
+                        trang_thai="CHUA_TRA")
+            db.add(cn); db.flush(); cn_id = cn.id
     # TỰ CHẤM ĐIỂM NCC khi đã nhận ĐỦ (đúng hạn + đủ lượng + QC)
     diem_ncc = None
     if da_du and settings.auto_cham_diem_ncc:
