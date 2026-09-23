@@ -1714,7 +1714,7 @@ def _loai_lenh(db, r, dm, cn, ph, dot_chi):
         if dot <= 0:
             if st <= 0:
                 return {"ma": "CONG_NO_100", "nhan": "Công nợ 100% (0 ₫)"}
-            return {"ma": "KHONG_CHI_THEM", "nhan": "Đã trả đủ số đề nghị — không chi thêm (0 ₫)"}
+            return {"ma": "KHONG_CHI_THEM", "nhan": "Không chi thêm — đã trả đủ số đề nghị"}
     else:
         truoc = float(db.query(func.coalesce(func.sum(_L.so_tien), 0))
                       .filter(_L.don_mua_id == dm.id, _L.trang_thai == "DA_CHI", _L.id < r.id).scalar() or 0)
