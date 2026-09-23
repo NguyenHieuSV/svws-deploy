@@ -317,7 +317,7 @@ def doc_bao_gia_file(data: bytes, content_type: str, filename: str) -> list[dict
            '"spec":"<THÔNG SỐ KỸ THUẬT của sản phẩm: công suất, lưu lượng, áp suất, cột áp, kích thước, vật liệu, '
            'điện áp, công nghệ, dải đo, độ chính xác, tiêu chuẩn… viết gọn 1–4 dòng, các thông số cách nhau bằng dấu «; », '
            'hoặc null nếu file không ghi>"}. '
-           "File datasheet / catalogue không có giá thì don_gia = null nhưng VẪN trích sản phẩm và spec. '
+           "File datasheet / catalogue không có giá thì don_gia = null nhưng VẪN trích sản phẩm và spec. "
            "Đơn giá: bỏ dấu chấm/phẩy ngăn cách nghìn, quy về số VND; nếu giá bằng ngoại tệ thì để null. "
            "Thuế suất VAT: lấy đúng % ghi trong báo giá cho từng dòng (thường 0/5/8/10). Nếu báo giá "
            "chỉ ghi một mức VAT chung thì áp mức đó cho mọi dòng; nếu không thấy VAT thì để null. "
