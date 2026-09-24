@@ -1951,14 +1951,24 @@ def chi_phi_vh_tong_hop(ts_id: int, db: Session = Depends(get_db), _=Depends(yeu
 
 
 @router.get("/du-an/{ts_id}/cac-thang")
-def du_an_cac_thang(ts_id: int, so_thang: int = 12, db: Session = Depends(get_db),
+def du_an_cac_thang(ts_id: int, so_thang: int = 12, nam: int | None = None, db: Session = Depends(get_db),
                     nd_xem: NguoiDung = Depends(yeu_cau(MODULE, "XEM"))):
     ts = db.get(TaiSanChoThue, ts_id)
     if ts is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy dự án")
+    if nam:
+        months = [f"{int(nam):04d}-{m:02d}" for m in range(1, 13)]      # cả năm dương lịch
+    else:
+        so_thang = max(1, min(int(so_thang), 24))
+        months = _month_list(date.today().strftime("%Y-%m"), so_thang)
+    return _du_an_thang(db, ts, months, nd_xem)
+
+
+def _du_an_thang(db, ts, months, nd_xem, dt_th=None):
+    """Bảng tháng của MỘT dự án (doanh thu · chi phí · khối lượng · khấu hao) — dùng chung cho /cac-thang và
+    📊 tổng kết thu/chi theo mã (CEO). dt_th: kết quả dau_tu_cho_thue.tong_hop(tat_ca=True) nạp sẵn (tránh tính lặp)."""
+    ts_id = ts.id
     prefix = ts.ten_du_an or ts.ma
-    so_thang = max(1, min(int(so_thang), 24))
-    months = _month_list(date.today().strftime("%Y-%m"), so_thang)
     # 💰 chi phí THẬT theo tháng — CÙNG CÔNG THỨC với Kế toán / Overall Financial (PO + chứng từ mua của đơn tháng +
     #    chi phí vận hành được tính) — app/dau_tu_cho_thue.chi_phi_du_an_theo_thang
     from ..dau_tu_cho_thue import chi_phi_du_an_theo_thang as _cpdt
@@ -2007,7 +2017,7 @@ def du_an_cac_thang(ts_id: int, so_thang: int = 12, db: Session = Depends(get_db
     theo_m3 = (ts.don_vi_gia or "").upper() == "VND/M3"
     # 🏗 khấu hao tháng (vốn đầu tư / số tháng hợp đồng) + sản lượng TỐI THIỂU cam kết — app/dau_tu_cho_thue.py
     from ..dau_tu_cho_thue import tong_hop as _dt_th, m3_tinh_tien as _m3_tt
-    _da = next((x for x in _dt_th(db, tat_ca=True)["du_an"] if x["tai_san_id"] == ts_id), None)
+    _da = next((x for x in (dt_th or _dt_th(db, tat_ca=True))["du_an"] if x["tai_san_id"] == ts_id), None)
     kh_thang = float(_da["khau_hao_thang"]) if _da else 0.0
     _bd = (_da or {}).get("ngay_bat_dau_hd")
     rows = []
@@ -2048,6 +2058,52 @@ def du_an_cac_thang(ts_id: int, so_thang: int = 12, db: Session = Depends(get_db
                if _da else None)
     return {"tai_san_id": ts_id, "ten_du_an": prefix, "gia_thue_thang": dt,
             "dang_thue": dang_thue, "cac_thang": rows, "dau_tu": _da}
+
+
+@router.get("/tong-ket-thang")
+def tong_ket_thang(nam: int | None = None, so_thang: int = 12, db: Session = Depends(get_db),
+                   nd: NguoiDung = Depends(chi_vai_tro("CEO"))):
+    """📊 CHỈ CEO — tổng kết THU / CHI / LÃI theo từng MÃ DỊCH VỤ cho thuê, theo tháng (năm dương lịch hoặc N tháng gần nhất).
+    Thu = giá trị ĐƠN BÁN của tháng (chưa VAT); tháng chưa có đơn → ước tính giá thuê × khối lượng tính tiền (đánh dấu thu_uoc).
+    Chi = cùng công thức bảng tháng dự án / Kế toán (PO + chứng từ mua của đơn tháng + chi phí vận hành).
+    Lãi = Thu − Chi; kèm khấu hao tháng (kh) để tùy chọn trừ."""
+    if nam:
+        months = [f"{int(nam):04d}-{m:02d}" for m in range(1, 13)]
+    else:
+        so_thang = max(1, min(int(so_thang), 24))
+        months = _month_list(date.today().strftime("%Y-%m"), so_thang)
+    from ..dau_tu_cho_thue import tong_hop as _dt_th
+    dt_th = _dt_th(db, tat_ca=True)
+    out = []
+    tong_thang = {m: {"thu": 0, "chi": 0, "lai": 0, "kh": 0} for m in months}
+    for ts in db.query(TaiSanChoThue).order_by(TaiSanChoThue.ma).all():
+        try:
+            r = _du_an_thang(db, ts, months, nd, dt_th)
+        except Exception as e:                       # một dự án lỗi dữ liệu không làm mất cả bảng
+            out.append({"tai_san_id": ts.id, "ma": ts.ma, "ten": ts.ten_du_an or ts.ma, "loi": f"{type(e).__name__}: {str(e)[:120]}",
+                        "thang": {}, "tong": {"thu": 0, "chi": 0, "lai": 0, "kh": 0}})
+            continue
+        thang, T = {}, {"thu": 0, "chi": 0, "lai": 0, "kh": 0}
+        for x in r["cac_thang"]:
+            thu_don = float(x.get("dt_don") or 0)
+            thu_uoc = float(x.get("doanh_thu") or 0)
+            thu = thu_don if thu_don > 0 else thu_uoc
+            chi = float(x.get("chi_phi") or 0)
+            kh = float(x.get("khau_hao") or 0)
+            c = {"thu": round(thu), "thu_uoc": bool(thu_don <= 0 and thu_uoc > 0), "thu_don": round(thu_don),
+                 "thu_uoc_tinh": round(thu_uoc), "chi": round(chi), "lai": round(thu - chi), "kh": round(kh),
+                 "kl": x.get("khoi_luong"), "don": x.get("don") or []}
+            thang[x["thang"]] = c
+            for k in ("thu", "chi", "lai", "kh"):
+                T[k] += c[k]
+                tong_thang[x["thang"]][k] += c[k]
+        out.append({"tai_san_id": ts.id, "ma": ts.ma, "ten": ts.ten_du_an or ts.ma,
+                    "khach_hang": _ten_kh(db, ts.khach_hang_id), "tinh_trang": ts.tinh_trang,
+                    "don_vi_gia": ts.don_vi_gia or "VND/THANG", "thang": thang, "tong": T,
+                    "phat_sinh": any((c["thu"] or c["chi"]) for c in thang.values())})
+    out.sort(key=lambda x: -(x["tong"]["thu"] + x["tong"]["chi"]))
+    tong = {k: sum(v[k] for v in tong_thang.values()) for k in ("thu", "chi", "lai", "kh")}
+    return {"months": months, "nam": nam, "du_an": out, "tong_thang": tong_thang, "tong": tong}
 
 
 # ===================== 🏗 ĐẦU TƯ – CHO THUÊ: vốn đầu tư · khấu hao · hoàn vốn =====================
