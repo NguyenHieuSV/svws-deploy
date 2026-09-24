@@ -1441,6 +1441,29 @@ class BgEmailCho(Base):
     nguoi_xac_nhan: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
 
 
+class CauHinhQuetMail(Base):
+    """📬 Cấu hình TỰ QUÉT THƯ HÀNG TUẦN (mig 134) — một dòng id=1."""
+    __tablename__ = "cau_hinh_quet_mail"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
+    bat: Mapped[bool] = mapped_column(Boolean, default=True)
+    thu: Mapped[int] = mapped_column(Integer, default=0)        # 0 = Thứ Hai … 6 = Chủ Nhật
+    gio: Mapped[int] = mapped_column(Integer, default=6)        # giờ Việt Nam
+    so_ngay: Mapped[int] = mapped_column(Integer, default=8)    # quét N ngày gần nhất
+    cap_nhat: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class LichQuetMail(Base):
+    """📬 Nhật ký các lần tự quét thư (mig 134)."""
+    __tablename__ = "lich_quet_mail"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    nguon: Mapped[str] = mapped_column(String(10), default="LICH")       # LICH | TAY
+    bat_dau: Mapped[datetime] = mapped_column(DateTime)
+    ket_thuc: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    trang_thai: Mapped[str] = mapped_column(String(12), default="DANG_CHAY")   # DANG_CHAY | XONG | LOI
+    ket_qua: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    nguoi_dung_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+
+
 class DinhMucTieuHao(Base):
     __tablename__ = "dinh_muc_tieu_hao"
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)

@@ -57,6 +57,17 @@ def _vong_lap():
                     print(f"[SCHEDULER] Nhắc BCVH tuần: {kq2}")
                 finally:
                     db.close()
+            # 📬 Tự quét thư hàng tuần — «đến hạn thì chạy»: mốc thứ+giờ (VN) lưu trong CSDL; app ngủ qua giờ hẹn
+            # thì lần thức đầu tiên trong tuần chạy bù. Chạy ở luồng riêng (AI đọc thư mất vài phút).
+            db = SessionLocal()
+            try:
+                from .quet_mail_service import den_han, chay_nen
+                ok_qm, _c, _moc = den_han(db, gio_hien_tai())
+            finally:
+                db.close()
+            if ok_qm:
+                print("[SCHEDULER] 📬 Quét thư tuần: đến hạn → chạy")
+                chay_nen("LICH")
         except Exception as e:                     # không bao giờ để luồng nền chết
             print(f"[SCHEDULER] Lỗi bỏ qua: {type(e).__name__}: {e}")
         time.sleep(_CHU_KY)
