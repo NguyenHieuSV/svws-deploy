@@ -58,7 +58,11 @@ def den_han(db, bay_gio):
     moc = moc_gan_nhat(c, bay_gio)
     cuoi = lan_chay_cuoi(db)
     if cuoi is not None and cuoi.bat_dau >= moc:
-        return False, c, moc
+        # tuần này đã chạy — nhưng nếu lần đó LỖI (hộp thư / AI) thì THỬ LẠI sau 6 giờ, không đợi cả tuần
+        if cuoi.trang_thai == "LOI" and (bay_gio - cuoi.bat_dau) >= timedelta(hours=6):
+            pass
+        else:
+            return False, c, moc
     if dang_chay(db):
         return False, c, moc
     return True, c, moc

@@ -27,11 +27,13 @@ def _trang_thai(db):
     moc = qm.moc_gan_nhat(c, bay_gio)
     cuoi = qm.lan_chay_cuoi(db)
     da_chay_tuan = cuoi is not None and cuoi.bat_dau >= moc
-    lan_toi = (moc + timedelta(days=7)) if da_chay_tuan else moc
+    loi_cuoi = bool(cuoi is not None and cuoi.trang_thai == "LOI")
+    lan_toi = (moc + timedelta(days=7)) if (da_chay_tuan and not loi_cuoi) else (
+        (cuoi.bat_dau + timedelta(hours=6)) if (da_chay_tuan and loi_cuoi) else moc)
     return {"bat": bool(c.bat), "thu": int(c.thu or 0), "thu_ten": qm.THU[int(c.thu or 0) % 7], "gio": int(c.gio or 0),
             "so_ngay": int(c.so_ngay or 8),
             "webhook_rieng": bool((settings.gchat_webhook_quet_mail or "").strip()),
-            "moc_gan_nhat": str(moc)[:16], "da_chay_tuan_nay": da_chay_tuan,
+            "moc_gan_nhat": str(moc)[:16], "da_chay_tuan_nay": da_chay_tuan, "loi_lan_cuoi": loi_cuoi,
             "lan_toi": str(lan_toi)[:16], "den_han_chua_chay": (bool(c.bat) and not da_chay_tuan),
             "dang_chay": qm.dang_chay(db),
             "lich": [_lich_dict(r) for r in db.query(LichQuetMail).order_by(LichQuetMail.id.desc()).limit(12).all()]}
