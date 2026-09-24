@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from ..database import get_db
-from ..rbac import yeu_cau, kiem_han_muc, chi_vai_tro
+from ..rbac import yeu_cau, kiem_han_muc, chi_vai_tro, yeu_cau_bat_ky
 import re as _re_mod
 _re_ma_bg = _re_mod.compile(r"^(TM|DA|DV|OP)-")   # số báo giá mang tiền tố mã bán hàng → áp quy luật mã
 from ..deps import nhan_vien_id_cua
@@ -1906,6 +1906,41 @@ class DonHangTrucTiepVao(_DHBase):
     ngay: date | None = None
     thanh_toan_coc: Decimal = Decimal(0)   # tiền cọc khách đã trả (VND)
     chi_tiet: list[DonHangCtTrucTiepVao]
+
+
+@router.get("/goi-y-ma")
+def goi_y_ma_don(ma: str, db: Session = Depends(get_db),
+                 _=Depends(yeu_cau_bat_ky(("ban_hang", "XEM"), ("cho_thue", "XEM"), ("ncc", "XEM")))):
+    """Gợi ý mã đơn bán KẾ TIẾP trong tháng: GỐC-MMYY-NN (NN = số thứ tự 2 chữ số chưa dùng). Mã gõ chưa có MMYY
+    nhưng trùng gốc một dự án cho thuê → lấy tháng hiện tại. Dùng cho form đơn hàng (gợi ý dưới ô mã) và bảng tháng
+    Cho thuê. Quy ước: mọi hóa đơn của cùng tháng dùng chung GỐC-MMYY, chỉ khác NN."""
+    from ..ma_code import phan_tich, chuan_hoa
+    from ..dau_tu_cho_thue import goc_du_an
+    from ..models import TaiSanChoThue
+    s = chuan_hoa(ma)
+    if not s:
+        return {"goi_y": None}
+    p = phan_tich(s)
+    goc = p.get("goc_khong_thang") or s
+    mmyy = p.get("thang")
+    ts_khop = next((t for t in db.query(TaiSanChoThue).all() if goc_du_an(t).upper() == goc.upper()), None)
+    if not mmyy:
+        if ts_khop is None:
+            return {"goi_y": None, "ly_do": "mã chưa có tháng MMYY"}
+        mmyy = date.today().strftime("%m%y")
+    tien_to = f"{goc}-{mmyy}".upper()
+    don = sorted({(so or "").strip().upper() for (so,) in db.query(DonHang.so).filter(DonHang.so.isnot(None)).all()
+                  if so and ((so.strip().upper() == tien_to) or so.strip().upper().startswith(tien_to + "-"))})
+    nn = 0
+    for so in don:
+        h = so[len(tien_to):].lstrip("-").split("-")[0]
+        if h.isdigit():
+            nn = max(nn, int(h))
+    k = nn + 1
+    while f"{tien_to}-{k:02d}" in don:
+        k += 1
+    return {"goi_y": f"{tien_to}-{k:02d}", "tien_to": tien_to, "so_don_thang": len(don), "don_thang": don[:20],
+            "du_an": ({"id": ts_khop.id, "ma": ts_khop.ma, "ten": ts_khop.ten_du_an or ts_khop.ma} if ts_khop else None)}
 
 
 @router.post("/don-hang", response_model=DonHangRa, status_code=201)
