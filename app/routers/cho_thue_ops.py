@@ -2084,9 +2084,19 @@ def tong_ket_thang(nam: int | None = None, so_thang: int = 12, db: Session = Dep
                         "thang": {}, "tong": {"thu": 0, "chi": 0, "lai": 0, "kh": 0}})
             continue
         thang, T = {}, {"thu": 0, "chi": 0, "lai": 0, "kh": 0}
+        _da_i = r.get("dau_tu") or {}
+        _bd, _kt = str(_da_i.get("ngay_bat_dau_hd") or "")[:7], str(_da_i.get("ngay_ket_thuc_hd") or "")[:7]
         for x in r["cac_thang"]:
+            m0 = x["thang"]
             thu_don = float(x.get("dt_don") or 0)
             thu_uoc = float(x.get("doanh_thu") or 0)
+            if thu_don <= 0 and thu_uoc > 0:
+                # ước tính (giá thuê × tháng / m³) CHỈ tính trong KỲ HỢP ĐỒNG, hoặc tháng có hoạt động thật
+                # (khối lượng / chi phí / đơn) — không cộng giá thuê cho tháng trước khi dự án chạy
+                trong_hd = bool(_bd or _kt) and (not _bd or m0 >= _bd) and (not _kt or m0 <= _kt)
+                hoat_dong = float(x.get("khoi_luong") or 0) > 0 or float(x.get("chi_phi") or 0) > 0 or bool(x.get("don"))
+                if not (trong_hd or hoat_dong):
+                    thu_uoc = 0.0
             thu = thu_don if thu_don > 0 else thu_uoc
             chi = float(x.get("chi_phi") or 0)
             kh = float(x.get("khau_hao") or 0)
