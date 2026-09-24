@@ -3311,6 +3311,94 @@ def sua_don_mua(dm_id: int, data: DonMuaVao, ep_ma: bool = False, db: Session = 
 
 
 # ----- DUYỆT (cần mức ncc=DUYET) + KIỂM HẠN MỨC TIỀN theo vai trò -----
+def _bo_sung_du_toan_theo_po(db, dm, nd):
+    """CEO duyệt PO mang cờ vuot_du_toan → TỰ BỔ SUNG DỰ TOÁN của mã cho khớp số ĐÃ CAM KẾT (PO không từ chối +
+    đề xuất còn hiệu lực, gồm PO này):
+      • mã CHƯA có dự toán → tạo Dự toán hàng bán mới, mỗi mặt hàng đã cam kết một mục;
+      • mặt hàng NGOÀI dự toán → thêm mục; mặt hàng VƯỢT → thêm mục «bổ sung» = phần chênh (dự toán = đã cam kết);
+      • mã là mã DỰ ÁN (có BOQ) → bổ sung vào BOQ dự án thay vì Dự toán hàng bán.
+    Cờ đổi thành «✅ ĐÃ BỔ SUNG DỰ TOÁN …» (giữ lý do cũ làm vết). Trả tóm tắt hoặc None."""
+    from ..du_toan_ks import du_toan_cua_ma, da_dung_theo_ma
+    from ..models import DuToanBan, DuToanBanMuc, DuAn, DuAnDuToan, HangHoa, DonHang, KhachHang
+    ly_do_cu = str(dm.vuot_du_toan or "")
+    if not ly_do_cu or ly_do_cu.startswith("✅"):
+        return None
+    ma = _ma_hieu_luc(db, don_hang_id=dm.don_hang_id, ma_ban=dm.ma_ban)
+    if not ma:
+        return None
+    cts = [c for c in db.query(DonMuaCt).filter_by(don_mua_id=dm.id).all() if c.hang_hoa_id]
+    if not cts:
+        return None
+    hh = {h.id: h for h in db.query(HangHoa).filter(HangHoa.id.in_(list({c.hang_hoa_id for c in cts}))).all()}
+    dt = du_toan_cua_ma(db, ma) or {}
+    db.flush()
+    dung = da_dung_theo_ma(db, ma)            # đã gồm PO này (trạng thái vừa đặt DA_DUYET)
+    gia_po = {}
+    for c in cts:
+        gia_po.setdefault(c.hang_hoa_id, float(c.don_gia or 0))
+    da = db.query(DuAn).filter(func.lower(func.trim(DuAn.ma)) == ma.lower()).first()
+    dtb = None
+    if da is None:
+        dtb = db.query(DuToanBan).filter(func.lower(func.trim(DuToanBan.ma)) == ma.lower()).first()
+    tao_moi = False
+    if da is None and dtb is None:
+        kh_ten = None
+        if dm.don_hang_id:
+            dh = db.get(DonHang, dm.don_hang_id)
+            kh = db.get(KhachHang, dh.khach_hang_id) if (dh is not None and getattr(dh, "khach_hang_id", None)) else None
+            kh_ten = kh.ten if kh is not None else None
+        dtb = DuToanBan(ma=ma[:60], khach_hang=kh_ten, ngay=date.today(), nguoi_tao=_dtb_ten_nguoi(db, nd),
+                        mo_ta=(f"Tự lập khi CEO duyệt PO {dm.so or dm.id} (mã chưa có dự toán) — "
+                               "các mục = số đã cam kết mua; kiểm tra và bổ sung phần còn lại của dự toán"))
+        db.add(dtb)
+        db.flush()
+        tao_moi = True
+    ghi = f"Bổ sung theo PO {dm.so or dm.id} — CEO duyệt {date.today():%d/%m/%Y}"
+    thu_tu = 0
+    if da is not None:
+        thu_tu = int(db.query(func.coalesce(func.max(DuAnDuToan.thu_tu), 0)).filter_by(du_an_id=da.id).scalar() or 0)
+    them = []
+    for hid in sorted({c.hang_hoa_id for c in cts}):
+        h = hh.get(hid)
+        ten = (h.ten if h is not None else f"HH#{hid}")
+        dvi = getattr(h, "don_vi", None) if h is not None else None
+        b = dt.get(hid)
+        d = dung.get(hid, {"sl": 0.0, "tien": 0.0})
+        gia = gia_po.get(hid) or 0.0
+        if b is None:
+            sl, tien, loai = float(d["sl"]), float(d["tien"]), "NGOAI"
+        elif float(b["tien"]) > 0:
+            if float(d["tien"]) <= float(b["tien"]) + 0.5:
+                continue
+            tien, sl, loai = float(d["tien"]) - float(b["tien"]), max(float(d["sl"]) - float(b["sl"]), 0.0), "VUOT"
+        else:
+            if float(d["sl"]) <= float(b["sl"]) + 1e-9:
+                continue
+            sl, loai = float(d["sl"]) - float(b["sl"]), "VUOT"
+            tien = sl * gia
+        if tien <= 0 and sl <= 0:
+            continue
+        if sl <= 0:
+            sl = 1.0
+        don_gia = int(round(tien / sl)) if tien > 0 else int(round(gia))
+        if da is not None:
+            thu_tu += 1
+            db.add(DuAnDuToan(du_an_id=da.id, loai="THIET_BI", ten=ten[:250], hang_hoa_id=hid, don_vi=dvi,
+                              so_luong=Decimal(str(round(sl, 3))), don_gia=Decimal(str(don_gia)),
+                              ghi_chu=ghi[:300], thu_tu=thu_tu))
+        else:
+            db.add(DuToanBanMuc(du_toan_id=dtb.id, ten=ten[:250], hang_hoa_id=hid, don_vi=dvi,
+                                so_luong=Decimal(str(round(sl, 2))), don_gia=Decimal(str(don_gia)), ghi_chu=ghi))
+        them.append({"hang_hoa_id": hid, "ten": ten[:80], "loai": loai, "sl": round(sl, 2), "tien": int(round(sl * don_gia))})
+    dm.vuot_du_toan = (f"✅ ĐÃ BỔ SUNG DỰ TOÁN {date.today():%d/%m/%Y} ({len(them)} mục"
+                       + (", tạo dự toán mới" if tao_moi else "") + ") — " + ly_do_cu)[:300]
+    kq = {"ma": ma, "dich": ("BOQ dự án" if da is not None else "Dự toán hàng bán"), "tao_moi": tao_moi,
+          "so_muc": len(them), "muc": them[:20]}
+    ghi_audit(db, nd.id, "BO_SUNG_DU_TOAN", ("du_an_du_toan" if da is not None else "du_toan_ban"),
+              (da.id if da is not None else dtb.id), moi={"po": dm.so, **kq})
+    return kq
+
+
 @router.post("/don-mua/{dm_id}/duyet", response_model=DonMuaRa)
 def duyet_don_mua(dm_id: int, db: Session = Depends(get_db),
                   nd: NguoiDung = Depends(yeu_cau(MODULE, "XEM"))):  # thấy được; quyền duyệt do han_muc
@@ -3343,9 +3431,16 @@ def duyet_don_mua(dm_id: int, db: Session = Depends(get_db),
     # 📒 PO đã duyệt = NGHĨA VỤ phải trả → ghi ngay dòng công nợ (so_tien = tổng PO, đã trả 0) để không PO nào nằm
     #    ngoài sổ; số hóa đơn / hạn bổ sung sau (Thanh toán mua hàng · Nhận hàng). Một PO — một công nợ.
     _dam_bao_cong_no_po(db, dm)
+    # 📋 PO vượt / ngoài / chưa có dự toán mà CEO đã duyệt → TỰ BỔ SUNG DỰ TOÁN của mã cho khớp thực tế
+    bs_dt = None
+    if getattr(dm, "vuot_du_toan", None):
+        try:
+            bs_dt = _bo_sung_du_toan_theo_po(db, dm, nd)
+        except Exception as _e:                       # không để lỗi bổ sung dự toán chặn việc duyệt PO
+            bs_dt = {"loi": f"{type(_e).__name__}: {str(_e)[:150]}"}
     da_gui = gui_email_ncc(db, dm)  # gửi xác nhận PO từ đầu mối mua hàng
     ghi_audit(db, nd.id, "DUYET", "don_mua", dm.id,
-              moi={"trang_thai": "DA_DUYET", "email_ncc": da_gui})
+              moi={"trang_thai": "DA_DUYET", "email_ncc": da_gui, "bo_sung_du_toan": bs_dt})
     db.commit()
     db.refresh(dm)
     return dm
