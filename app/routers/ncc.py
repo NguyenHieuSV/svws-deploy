@@ -5252,18 +5252,15 @@ def dtb_tao(data: DuToanBanVao, ep_ma: bool = False, db: Session = Depends(get_d
     return {"id": d.id, "ma": d.ma}
 
 
-def _dtb_nhap_tu_file(db, nd, dt, data: bytes, content_type, ten_file: str) -> dict:
-    """📎 AI đọc file dự toán / BOQ / báo giá NCC (PDF · ảnh · Excel · CSV) → thêm mục vào Dự toán hàng bán.
-    Trùng TÊN với mục đã có → bỏ qua (không ghi đè SL / giá). Tên khớp hàng kho → gắn hang_hoa_id. File lưu Kho tệp."""
-    try:
-        items = doc_bao_gia_file(data, content_type, ten_file)
-    except ValueError as e:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e))
-    if not items:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST,
-                            "AI không tìm thấy dòng sản phẩm / hạng mục nào trong file — kiểm tra file có bảng "
-                            "tên · số lượng · đơn giá rõ ràng.")
-    da_co = {(m.ten or "").strip().lower() for m in db.query(DuToanBanMuc).filter_by(du_toan_id=dt.id).all()}
+def _viec_nen_dict(v):
+    return {"id": v.id, "loai": v.loai, "doi_tuong_id": v.doi_tuong_id, "ten_file": v.ten_file,
+            "trang_thai": v.trang_thai, "bat_dau": str(v.bat_dau)[:16] if v.bat_dau else None,
+            "ket_thuc": str(v.ket_thuc)[:16] if v.ket_thuc else None, "ket_qua": v.ket_qua or {}}
+
+
+def _dtb_them_muc_tu_items(db, dt_id: int, items: list, ten_file: str) -> dict:
+    """Thêm các dòng AI trích vào dự toán (trùng TÊN bỏ qua; tên khớp hàng kho → gắn hang_hoa_id)."""
+    da_co = {(m.ten or "").strip().lower() for m in db.query(DuToanBanMuc).filter_by(du_toan_id=dt_id).all()}
     them, bo_qua = [], []
     for it in items[:150]:
         ten = str(it.get("ten") or "").strip()
@@ -5275,23 +5272,75 @@ def _dtb_nhap_tu_file(db, nd, dt, data: bytes, content_type, ten_file: str) -> d
         hh = db.query(HangHoa).filter(func.lower(func.trim(HangHoa.ten)) == ten.lower()).first()
         qc = " — ".join([str(p) for p in (it.get("mo_ta"), it.get("nha_san_xuat"), it.get("spec")) if p])
         dvi = (str(it.get("don_vi"))[:40] if it.get("don_vi") else (getattr(hh, "don_vi", None) if hh is not None else None))
-        db.add(DuToanBanMuc(du_toan_id=dt.id, ten=ten[:250], hang_hoa_id=(hh.id if hh is not None else None),
+        db.add(DuToanBanMuc(du_toan_id=dt_id, ten=ten[:250], hang_hoa_id=(hh.id if hh is not None else None),
                             quy_cach=(qc[:2000] or None), don_vi=dvi,
                             so_luong=Decimal(str(it.get("so_luong") or 1)),
                             don_gia=Decimal(str(it.get("don_gia") or 0)),
                             ghi_chu=(f"AI nhập từ file {ten_file}")[:300]))
         da_co.add(ten.lower())
         them.append(ten)
+    return {"so_doc": len(items), "them": len(them), "bo_qua": len(bo_qua), "ds_them": them[:15], "ds_bo_qua": bo_qua[:15]}
+
+
+def _dtb_nen_chay(viec_id: int, dt_id: int, nd_id, data: bytes, content_type, ten_file: str):
+    """Luồng nền: AI đọc file → thêm mục → cập nhật viec_nen (XONG / LOI). Session riêng."""
+    from ..database import SessionLocal
+    from ..models import ViecNen
+    from ..nhac_viec_service import gio_hien_tai
+    db = SessionLocal()
+    try:
+        v = db.get(ViecNen, viec_id)
+        try:
+            items = doc_bao_gia_file(data, content_type, ten_file)
+            if not items:
+                raise ValueError("AI không tìm thấy dòng sản phẩm / hạng mục nào trong file — kiểm tra file có bảng "
+                                 "tên · số lượng · đơn giá rõ ràng.")
+            kq = _dtb_them_muc_tu_items(db, dt_id, items, ten_file)
+            if v is not None:
+                v.trang_thai, v.ket_thuc, v.ket_qua = "XONG", gio_hien_tai(), kq
+            ghi_audit(db, nd_id, "AI_NHAP_DU_TOAN", "du_toan_ban", dt_id,
+                      moi={"file": ten_file, "so_doc": kq["so_doc"], "them": kq["them"], "bo_qua": kq["bo_qua"], "nen": True})
+            db.commit()
+        except Exception as e:
+            db.rollback()
+            if v is not None:
+                v = db.get(ViecNen, viec_id)
+                v.trang_thai, v.ket_thuc = "LOI", gio_hien_tai()
+                v.ket_qua = {"loi": (str(e) if isinstance(e, ValueError) else f"{type(e).__name__}: {str(e)[:200]}")}
+                db.commit()
+    finally:
+        db.close()
+
+
+def _dtb_nap_file_nen(db, nd, dt, data: bytes, content_type, ten_file: str) -> dict:
+    """📎 Nạp file: LƯU file vào Kho tệp + tạo việc nền ngay, AI đọc ở luồng riêng → trả lời tức thì (không giữ HTTP,
+    không bị Render ngắt khi file dài). Trả {viec_id, tep_id}."""
+    import threading
+    from ..models import ViecNen
+    from ..nhac_viec_service import gio_hien_tai
     ref = luu_tep_chung(data, "du_toan_ban", dt.id, ten_file, content_type)
     tep = TepDinhKem(doi_tuong="DU_TOAN_BAN_FILE", doi_tuong_id=dt.id, loai="KHAC", ten_file=ten_file[:255],
                      duong_dan=ref, kich_thuoc=len(data), content_type=content_type,
                      nguoi_tai_len=nhan_vien_id_cua(db, nd.id))
     db.add(tep)
-    db.flush()
-    ghi_audit(db, nd.id, "AI_NHAP_DU_TOAN", "du_toan_ban", dt.id,
-              moi={"file": ten_file, "so_doc": len(items), "them": len(them), "bo_qua": len(bo_qua)})
-    return {"so_doc": len(items), "them": len(them), "bo_qua": len(bo_qua),
-            "ds_them": them[:15], "ds_bo_qua": bo_qua[:15], "tep_id": tep.id}
+    v = ViecNen(loai="DTB_NAP_FILE", doi_tuong_id=dt.id, ten_file=ten_file[:255], trang_thai="DANG_CHAY",
+                bat_dau=gio_hien_tai(), nguoi_dung_id=nd.id)
+    db.add(v)
+    db.commit()
+    threading.Thread(target=_dtb_nen_chay, args=(v.id, dt.id, nd.id, data, content_type, ten_file),
+                     name=f"svws-dtb-nap-{v.id}", daemon=True).start()
+    return {"viec_id": v.id, "tep_id": tep.id}
+
+
+@router.get("/viec-nen/{viec_id}")
+def xem_viec_nen(viec_id: int, db: Session = Depends(get_db),
+                 _=Depends(yeu_cau_bat_ky(("ncc", "XEM"), ("ban_hang", "XEM")))):
+    """⏳ Tiến độ / kết quả một việc chạy nền (AI đọc file dự toán…)."""
+    from ..models import ViecNen
+    v = db.get(ViecNen, viec_id)
+    if v is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy việc nền")
+    return _viec_nen_dict(v)
 
 
 @router.post("/du-toan-ban/tu-file")
@@ -5318,9 +5367,9 @@ def dtb_tao_tu_file(ma: str = Form(...), khach_hang: str | None = Form(None), mo
     db.add(d)
     db.flush()
     ghi_audit(db, nd.id, "TAO", "du_toan_ban", d.id, moi={"ma": ma, "tu_file": ten_file})
-    kq = _dtb_nhap_tu_file(db, nd, d, data, file.content_type, ten_file)
     db.commit()
-    return {"ok": True, "id": d.id, "ma": d.ma, **kq}
+    kq = _dtb_nap_file_nen(db, nd, d, data, file.content_type, ten_file)
+    return {"ok": True, "id": d.id, "ma": d.ma, "dang_chay": True, "ten_file": ten_file, **kq}
 
 
 @router.post("/du-toan-ban/{dt_id}/nhap-file")
@@ -5334,9 +5383,8 @@ def dtb_nhap_file(dt_id: int, file: UploadFile = File(...), db: Session = Depend
     data = file.file.read()
     if len(data) > 15 * 1024 * 1024:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "File quá lớn (tối đa 15MB)")
-    kq = _dtb_nhap_tu_file(db, nd, dt, data, file.content_type, ten_file)
-    db.commit()
-    return {"ok": True, "id": dt.id, "ma": dt.ma, **kq}
+    kq = _dtb_nap_file_nen(db, nd, dt, data, file.content_type, ten_file)
+    return {"ok": True, "id": dt.id, "ma": dt.ma, "dang_chay": True, "ten_file": ten_file, **kq}
 
 
 # LƯU Ý thứ tự route: các đường /du-toan-ban/muc/{...} phải khai TRƯỚC /du-toan-ban/{dt_id}
@@ -5443,8 +5491,11 @@ def dtb_chi_tiet(dt_id: int, db: Session = Depends(get_db), _=Depends(yeu_cau_ba
                       "chenh_thuc": (t["don_gia"] - dg) if t else None,
                       "ung_vien_gia": (mua_cu.get(r.id) or {}).get("rows") or [],
                       "ung_vien_tong": (mua_cu.get(r.id) or {}).get("tong") or 0})
+    from ..models import ViecNen as _VN
+    viec = [_viec_nen_dict(v) for v in db.query(_VN).filter_by(loai="DTB_NAP_FILE", doi_tuong_id=dt_id)
+            .order_by(_VN.id.desc()).limit(3).all()]
     return {"id": d.id, "ma": d.ma, "khach_hang": d.khach_hang, "mo_ta": d.mo_ta,
-            "ngay": str(d.ngay) if d.ngay else None, "nguoi_tao": d.nguoi_tao,
+            "ngay": str(d.ngay) if d.ngay else None, "nguoi_tao": d.nguoi_tao, "viec_nen": viec,
             "items": items, "tong": sum(x["thanh_tien"] for x in items),
             "tong_thuc": sum((x["gia_thuc"] or 0) * x["so_luong"] for x in items if x["gia_thuc"] is not None),
             "so_dong_thuc": sum(1 for x in items if x["gia_thuc"] is not None)}

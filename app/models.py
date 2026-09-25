@@ -1464,6 +1464,20 @@ class LichQuetMail(Base):
     nguoi_dung_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
 
 
+class ViecNen(Base):
+    """⏳ Việc chạy NỀN (mig 135): AI đọc file dự toán… — trả lời ngay, xử lý luồng riêng, lưu tiến độ / kết quả."""
+    __tablename__ = "viec_nen"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    loai: Mapped[str] = mapped_column(String(30))
+    doi_tuong_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    ten_file: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    trang_thai: Mapped[str] = mapped_column(String(12), default="DANG_CHAY")   # DANG_CHAY | XONG | LOI
+    bat_dau: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    ket_thuc: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    ket_qua: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    nguoi_dung_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+
+
 class DinhMucTieuHao(Base):
     __tablename__ = "dinh_muc_tieu_hao"
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
