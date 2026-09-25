@@ -808,13 +808,13 @@ def _ai_ap_mot_ncc(db, info, ten_file):
 
 
 @router.post("/nha-cung-cap/ai-cap-nhat")
-async def ai_cap_nhat_ncc(file: UploadFile = File(...), db: Session = Depends(get_db),
+def ai_cap_nhat_ncc(file: UploadFile = File(...), db: Session = Depends(get_db),
                           nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
     """AI đọc file báo giá / hồ sơ / danh sách NCC (PDF, ảnh, CSV) — nhận diện MỘT hoặc
     NHIỀU nhà cung cấp trong cùng file: đã có (trùng MST/tên) → điền bổ sung ô trống;
     chưa có → tạo mới (cần kiểm chứng). File gốc lưu vào kho tệp dùng chung."""
     ten_file = file.filename or "ho_so_ncc"
-    data = await file.read()
+    data = file.file.read()
     if len(data) > 15 * 1024 * 1024:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "File quá lớn (tối đa 15MB)")
     try:
@@ -847,7 +847,7 @@ async def ai_cap_nhat_ncc(file: UploadFile = File(...), db: Session = Depends(ge
 
 # ----- Lưu file báo giá NCC + AI đọc & nhập vào danh mục sản phẩm -----
 @router.post("/bao-gia-file")
-async def luu_bao_gia_file(nha_cung_cap_id: int = Form(...), file: UploadFile = File(...),
+def luu_bao_gia_file(nha_cung_cap_id: int = Form(...), file: UploadFile = File(...),
                            db: Session = Depends(get_db),
                            nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
     """Tải file báo giá của NCC lên kho tệp dùng chung; AI đọc file, trích các dòng
@@ -857,7 +857,7 @@ async def luu_bao_gia_file(nha_cung_cap_id: int = Form(...), file: UploadFile = 
     if ncc is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy nhà cung cấp")
     ten_file = file.filename or "bao_gia"
-    data = await file.read()
+    data = file.file.read()
     if len(data) > 15 * 1024 * 1024:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "File quá lớn (tối đa 15MB)")
     try:
@@ -5295,7 +5295,7 @@ def _dtb_nhap_tu_file(db, nd, dt, data: bytes, content_type, ten_file: str) -> d
 
 
 @router.post("/du-toan-ban/tu-file")
-async def dtb_tao_tu_file(ma: str = Form(...), khach_hang: str | None = Form(None), mo_ta: str | None = Form(None),
+def dtb_tao_tu_file(ma: str = Form(...), khach_hang: str | None = Form(None), mo_ta: str | None = Form(None),
                           ngay: str | None = Form(None), ep_ma: bool = Form(False), file: UploadFile = File(...),
                           db: Session = Depends(get_db),
                           nd: NguoiDung = Depends(yeu_cau_bat_ky(("ncc", "THAO_TAC"), ("ban_hang", "THAO_TAC")))):
@@ -5310,7 +5310,7 @@ async def dtb_tao_tu_file(ma: str = Form(...), khach_hang: str | None = Form(Non
     if db.query(DuToanBan).filter(func.lower(DuToanBan.ma) == ma.lower()).first():
         raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Mã hàng bán '{ma}' đã có dự toán — mở dự toán đó và dùng 📎 Nạp thêm từ file")
     ten_file = file.filename or "du_toan"
-    data = await file.read()
+    data = file.file.read()
     if len(data) > 15 * 1024 * 1024:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "File quá lớn (tối đa 15MB)")
     d = DuToanBan(ma=ma, khach_hang=(khach_hang or "").strip() or None, mo_ta=(mo_ta or "").strip() or None,
@@ -5324,14 +5324,14 @@ async def dtb_tao_tu_file(ma: str = Form(...), khach_hang: str | None = Form(Non
 
 
 @router.post("/du-toan-ban/{dt_id}/nhap-file")
-async def dtb_nhap_file(dt_id: int, file: UploadFile = File(...), db: Session = Depends(get_db),
+def dtb_nhap_file(dt_id: int, file: UploadFile = File(...), db: Session = Depends(get_db),
                         nd: NguoiDung = Depends(yeu_cau_bat_ky(("ncc", "THAO_TAC"), ("ban_hang", "THAO_TAC")))):
     """📎 Nạp thêm mục vào dự toán đang có từ file đính kèm (AI đọc) — trùng tên bỏ qua."""
     dt = db.get(DuToanBan, dt_id)
     if dt is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy dự toán")
     ten_file = file.filename or "du_toan"
-    data = await file.read()
+    data = file.file.read()
     if len(data) > 15 * 1024 * 1024:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "File quá lớn (tối đa 15MB)")
     kq = _dtb_nhap_tu_file(db, nd, dt, data, file.content_type, ten_file)

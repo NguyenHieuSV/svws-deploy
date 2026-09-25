@@ -1025,7 +1025,7 @@ def xuat_excel_du_toan(da_id: int, db: Session = Depends(get_db),
 
 
 @router.post("/{da_id}/du-toan/ai-nhap")
-async def ai_nhap_du_toan(da_id: int, file: UploadFile = File(...), loai: str = Form("THIET_BI"),
+def ai_nhap_du_toan(da_id: int, file: UploadFile = File(...), loai: str = Form("THIET_BI"),
                           db: Session = Depends(get_db),
                           nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
     """AI đọc file báo giá (PDF/ảnh/Excel/CSV) → đổ danh sách thiết bị/vật tư
@@ -1035,7 +1035,7 @@ async def ai_nhap_du_toan(da_id: int, file: UploadFile = File(...), loai: str = 
     from ..models import TepDinhKem
     _da_404(db, da_id)
     ten_file = file.filename or "bao_gia"
-    data = await file.read()
+    data = file.file.read()
     if len(data) > 15 * 1024 * 1024:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "File quá lớn (tối đa 15MB)")
     try:

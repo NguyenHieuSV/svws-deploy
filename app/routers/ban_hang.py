@@ -2006,7 +2006,7 @@ def tao_don_hang_truc_tiep(data: DonHangTrucTiepVao, ep_ma: bool = False, db: Se
 
 
 @router.post("/don-hang/ai-tu-po")
-async def tao_don_hang_tu_po_ai(file: UploadFile = File(...), db: Session = Depends(get_db),
+def tao_don_hang_tu_po_ai(file: UploadFile = File(...), db: Session = Depends(get_db),
                                 nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
     """AI đọc file PO/đơn đặt hàng KHÁCH gửi → tạo đơn hàng bán + đính kèm file PO
     (đơn tự vào bảng 'Danh sách đơn hàng bán đã có PO/HĐ'). Khớp khách theo MST rồi
@@ -2014,7 +2014,7 @@ async def tao_don_hang_tu_po_ai(file: UploadFile = File(...), db: Session = Depe
     from ..ai_gateway import doc_po_khach_file
     from ..models import TepDinhKem
     from ..luu_tru import luu as _luu
-    raw = await file.read()
+    raw = file.file.read()
     if not raw:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "File PO rỗng")
     try:
