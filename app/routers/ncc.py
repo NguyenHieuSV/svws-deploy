@@ -5252,6 +5252,93 @@ def dtb_tao(data: DuToanBanVao, ep_ma: bool = False, db: Session = Depends(get_d
     return {"id": d.id, "ma": d.ma}
 
 
+def _dtb_nhap_tu_file(db, nd, dt, data: bytes, content_type, ten_file: str) -> dict:
+    """📎 AI đọc file dự toán / BOQ / báo giá NCC (PDF · ảnh · Excel · CSV) → thêm mục vào Dự toán hàng bán.
+    Trùng TÊN với mục đã có → bỏ qua (không ghi đè SL / giá). Tên khớp hàng kho → gắn hang_hoa_id. File lưu Kho tệp."""
+    try:
+        items = doc_bao_gia_file(data, content_type, ten_file)
+    except ValueError as e:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e))
+    if not items:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "AI không tìm thấy dòng sản phẩm / hạng mục nào trong file — kiểm tra file có bảng "
+                            "tên · số lượng · đơn giá rõ ràng.")
+    da_co = {(m.ten or "").strip().lower() for m in db.query(DuToanBanMuc).filter_by(du_toan_id=dt.id).all()}
+    them, bo_qua = [], []
+    for it in items[:150]:
+        ten = str(it.get("ten") or "").strip()
+        if not ten:
+            continue
+        if ten.lower() in da_co:
+            bo_qua.append(ten)
+            continue
+        hh = db.query(HangHoa).filter(func.lower(func.trim(HangHoa.ten)) == ten.lower()).first()
+        qc = " — ".join([str(p) for p in (it.get("mo_ta"), it.get("nha_san_xuat"), it.get("spec")) if p])
+        dvi = (str(it.get("don_vi"))[:40] if it.get("don_vi") else (getattr(hh, "don_vi", None) if hh is not None else None))
+        db.add(DuToanBanMuc(du_toan_id=dt.id, ten=ten[:250], hang_hoa_id=(hh.id if hh is not None else None),
+                            quy_cach=(qc[:2000] or None), don_vi=dvi,
+                            so_luong=Decimal(str(it.get("so_luong") or 1)),
+                            don_gia=Decimal(str(it.get("don_gia") or 0)),
+                            ghi_chu=(f"AI nhập từ file {ten_file}")[:300]))
+        da_co.add(ten.lower())
+        them.append(ten)
+    ref = luu_tep_chung(data, "du_toan_ban", dt.id, ten_file, content_type)
+    tep = TepDinhKem(doi_tuong="DU_TOAN_BAN_FILE", doi_tuong_id=dt.id, loai="KHAC", ten_file=ten_file[:255],
+                     duong_dan=ref, kich_thuoc=len(data), content_type=content_type,
+                     nguoi_tai_len=nhan_vien_id_cua(db, nd.id))
+    db.add(tep)
+    db.flush()
+    ghi_audit(db, nd.id, "AI_NHAP_DU_TOAN", "du_toan_ban", dt.id,
+              moi={"file": ten_file, "so_doc": len(items), "them": len(them), "bo_qua": len(bo_qua)})
+    return {"so_doc": len(items), "them": len(them), "bo_qua": len(bo_qua),
+            "ds_them": them[:15], "ds_bo_qua": bo_qua[:15], "tep_id": tep.id}
+
+
+@router.post("/du-toan-ban/tu-file")
+async def dtb_tao_tu_file(ma: str = Form(...), khach_hang: str | None = Form(None), mo_ta: str | None = Form(None),
+                          ngay: str | None = Form(None), ep_ma: bool = Form(False), file: UploadFile = File(...),
+                          db: Session = Depends(get_db),
+                          nd: NguoiDung = Depends(yeu_cau_bat_ky(("ncc", "THAO_TAC"), ("ban_hang", "THAO_TAC")))):
+    """📎 Tạo dự toán hàng bán MỚI + AI đọc file đính kèm điền danh mục — một bước (form đầu panel Dự toán)."""
+    ma = (ma or "").strip()
+    if not ma:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Nhập Mã hàng bán")
+    if len(ma) > 30:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Mã tối đa 30 ký tự (bằng giới hạn số đơn hàng / báo giá)")
+    from ..ma_code import bat_buoc as _bb_ma
+    ma = _bb_ma(ma, nd, ep_ma, nhan="Mã dự toán")
+    if db.query(DuToanBan).filter(func.lower(DuToanBan.ma) == ma.lower()).first():
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Mã hàng bán '{ma}' đã có dự toán — mở dự toán đó và dùng 📎 Nạp thêm từ file")
+    ten_file = file.filename or "du_toan"
+    data = await file.read()
+    if len(data) > 15 * 1024 * 1024:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "File quá lớn (tối đa 15MB)")
+    d = DuToanBan(ma=ma, khach_hang=(khach_hang or "").strip() or None, mo_ta=(mo_ta or "").strip() or None,
+                  ngay=date.fromisoformat(ngay) if ngay else date.today(), nguoi_tao=_dtb_ten_nguoi(db, nd))
+    db.add(d)
+    db.flush()
+    ghi_audit(db, nd.id, "TAO", "du_toan_ban", d.id, moi={"ma": ma, "tu_file": ten_file})
+    kq = _dtb_nhap_tu_file(db, nd, d, data, file.content_type, ten_file)
+    db.commit()
+    return {"ok": True, "id": d.id, "ma": d.ma, **kq}
+
+
+@router.post("/du-toan-ban/{dt_id}/nhap-file")
+async def dtb_nhap_file(dt_id: int, file: UploadFile = File(...), db: Session = Depends(get_db),
+                        nd: NguoiDung = Depends(yeu_cau_bat_ky(("ncc", "THAO_TAC"), ("ban_hang", "THAO_TAC")))):
+    """📎 Nạp thêm mục vào dự toán đang có từ file đính kèm (AI đọc) — trùng tên bỏ qua."""
+    dt = db.get(DuToanBan, dt_id)
+    if dt is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy dự toán")
+    ten_file = file.filename or "du_toan"
+    data = await file.read()
+    if len(data) > 15 * 1024 * 1024:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "File quá lớn (tối đa 15MB)")
+    kq = _dtb_nhap_tu_file(db, nd, dt, data, file.content_type, ten_file)
+    db.commit()
+    return {"ok": True, "id": dt.id, "ma": dt.ma, **kq}
+
+
 # LƯU Ý thứ tự route: các đường /du-toan-ban/muc/{...} phải khai TRƯỚC /du-toan-ban/{dt_id}
 # để "muc" không bị bắt nhầm vào tham số số nguyên dt_id.
 @router.put("/du-toan-ban/muc/{muc_id}")
