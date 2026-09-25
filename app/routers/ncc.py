@@ -5582,6 +5582,13 @@ def dtb_xoa(dt_id: int, db: Session = Depends(get_db),
         raise HTTPException(status.HTTP_409_CONFLICT,
                             f"Dự toán có {len(_dang)} dòng đang ở đề xuất mua — từ chối/xóa các đề xuất đó trước khi xóa dự toán.")
     db.query(DuToanBanMuc).filter_by(du_toan_id=dt_id).delete()
+    # 📎 file dự toán đã nạp (Kho tệp) xóa theo — tránh tệp mồ côi
+    for t in db.query(TepDinhKem).filter_by(doi_tuong="DU_TOAN_BAN_FILE", doi_tuong_id=dt_id).all():
+        try:
+            xoa_tep_chung(t.duong_dan)
+        except Exception:
+            pass
+        db.delete(t)
     ghi_audit(db, nd.id, "XOA", "du_toan_ban", dt_id, moi={"ma": d.ma})
     db.delete(d); db.commit()
     return {"ok": True}
