@@ -93,8 +93,9 @@ def gui_thu(db: Session = Depends(get_db), nd: NguoiDung = Depends(chi_vai_tro("
 @router.get("/tong-quan")
 def tong_quan(db: Session = Depends(get_db), _=Depends(yeu_cau("ncc", "XEM"))):
     """Dòng «Việc cần chú ý»: hàng chờ hóa đơn / báo giá + lần quét cuối."""
-    from ..models import KtHoaDonCho, BgEmailCho
+    from ..models import KtHoaDonCho, BgEmailCho, KtThuKhachCho
     cuoi = qm.lan_chay_cuoi(db)
     return {"cho": {"hoa_don": db.query(KtHoaDonCho).filter_by(trang_thai="CHO_XAC_NHAN").count(),
-                    "bao_gia": db.query(BgEmailCho).filter_by(trang_thai="CHO_XAC_NHAN").count()},
+                    "bao_gia": db.query(BgEmailCho).filter_by(trang_thai="CHO_XAC_NHAN").count(),
+                    "thu_khach": db.query(KtThuKhachCho).filter_by(trang_thai="CHO_XAC_NHAN").count()},
             "lan_cuoi": _lich_dict(cuoi) if cuoi else None}

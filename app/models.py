@@ -1091,6 +1091,33 @@ class NhanSuThueNgoai(Base):
     tao_luc: Mapped[datetime | None] = mapped_column(DateTime, server_default=func.now())
 
 
+class KtThuKhachCho(Base):
+    """mig 137: thư KHÁCH HÀNG về hóa đơn bán / thanh toán — AI đọc, chờ kế toán xác nhận."""
+    __tablename__ = "kt_thu_khach_cho"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    message_id: Mapped[str | None] = mapped_column(String(250), unique=True, nullable=True)
+    tu_email: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    tieu_de: Mapped[str | None] = mapped_column(String(250), nullable=True)
+    noi_dung: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ngay_thu: Mapped[date | None] = mapped_column(Date, nullable=True)
+    khach_hang_id: Mapped[int | None] = mapped_column(ForeignKey("khach_hang.id", ondelete="SET NULL"), nullable=True)
+    ai_khach_ten: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    loai: Mapped[str] = mapped_column(String(24), default="KHAC")
+    so_hoa_don: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    so_tien: Mapped[Decimal | None] = mapped_column(Numeric(18, 0), nullable=True)
+    ngay_chuyen: Mapped[date | None] = mapped_column(Date, nullable=True)
+    ngan_hang: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    ma_don: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    ai_tom_tat: Mapped[str | None] = mapped_column(String(400), nullable=True)
+    hoa_don_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    cong_no_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    trang_thai: Mapped[str] = mapped_column(String(16), default="CHO_XAC_NHAN")
+    ket_qua: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    nguoi_xu_ly: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    xu_ly_luc: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    tao_luc: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
 class ThanhToanThueNgoai(Base):
     """mig 136: một lần chi trả cho cá nhân thuê ngoài — thuế TNCN khấu trừ theo thuế suất toàn phần."""
     __tablename__ = "thanh_toan_thue_ngoai"

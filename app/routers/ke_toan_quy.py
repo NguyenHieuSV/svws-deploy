@@ -3069,3 +3069,433 @@ def sao_ke_ghi_chi_phan(d_id: int, data: SkGhiVao, db: Session = Depends(get_db)
               moi={"cong_no_id": cn.id, "so_tien": float(so_tien), "quy_id": data.quy_id})
     db.commit()
     return {"ok": True, "phieu_so": p.so}
+
+
+# =====================================================================================
+# 📨 THƯ KHÁCH HÀNG VỀ HÓA ĐƠN BÁN / THANH TOÁN (mig 137): AI đọc thư khách gửi về hộp thư
+# công ty (xác nhận đã nhận HĐ · báo chuyển khoản · yêu cầu điều chỉnh · hỏi HĐ) → hàng chờ,
+# tự khớp khách (email), hóa đơn bán (số HĐ), công nợ phải thu; kế toán ghi thu / ghi nhận / tạo việc.
+# =====================================================================================
+import re as _tkc_re
+import unicodedata as _tkc_ud
+from pydantic import BaseModel as _TkcBase
+
+TKC_LOAI = {"XAC_NHAN_NHAN_HD": "Khách xác nhận đã nhận hóa đơn", "THONG_BAO_THANH_TOAN": "Khách báo đã thanh toán",
+            "YEU_CAU_DIEU_CHINH": "Yêu cầu điều chỉnh / hủy hóa đơn", "HOI_HOA_DON": "Hỏi / xin gửi lại hóa đơn",
+            "KHAC": "Khác"}
+_TKC_TU_KHOA = ("hoa don", "invoice", "thanh toan", "payment", "chuyen khoan", "remittance", "uy nhiem chi", " unc",
+                "da nhan", "cong no", "dieu chinh", "sai sot", "hoan tien", "debit note", "credit note", "receipt")
+
+
+def _tkc_kd(s: str) -> str:
+    s = _tkc_ud.normalize("NFD", s or "")
+    s = "".join(c for c in s if _tkc_ud.category(c) != "Mn")
+    return s.replace("đ", "d").replace("Đ", "D").lower()
+
+
+def _tkc_email_khach(db) -> dict:
+    """email (thường) → khach_hang_id — email chính + người liên hệ phụ."""
+    from ..models import KhachHang
+    out = {}
+    for k in db.query(KhachHang).all():
+        e = (k.email or "").strip().lower()
+        if e and e not in out:
+            out[e] = k.id
+        for lh in (k.lien_he_phu or []) if isinstance(k.lien_he_phu, list) else []:
+            e2 = str((lh or {}).get("email") or "").strip().lower()
+            if e2 and e2 not in out:
+                out[e2] = k.id
+    return out
+
+
+def _tkc_doc_regex(tieu_de: str, nd: str) -> dict:
+    """Bộ đọc dự phòng khi AI tắt / lỗi: phân loại theo từ khóa, nhặt số HĐ · số tiền · ngày."""
+    t = _tkc_kd((tieu_de or "") + " \n " + (nd or "")[:3000])
+    if any(k in t for k in ("dieu chinh", "sai sot", "huy hoa don", "thay the", "xuat lai", "sai ")):
+        loai = "YEU_CAU_DIEU_CHINH"
+    elif any(k in t for k in ("da chuyen", "da thanh toan", "uy nhiem chi", " unc", "remittance", "payment advice", "chuyen khoan")):
+        loai = "THONG_BAO_THANH_TOAN"
+    elif any(k in t for k in ("da nhan hoa don", "da nhan duoc hoa don", "received the invoice", "xac nhan da nhan")):
+        loai = "XAC_NHAN_NHAN_HD"
+    elif any(k in t for k in ("gui hoa don", "xin hoa don", "chua nhan duoc hoa don", "send the invoice", "invoice for")):
+        loai = "HOI_HOA_DON"
+    else:
+        loai = "KHAC"
+    so_hd = None
+    m = _tkc_re.search(r"(?:so\s*(?:hd|hoa\s*don)|invoice\s*(?:no\.?|number|#)?|hoa\s*don\s*(?:so)?)\s*[:#]?\s*([a-z0-9][a-z0-9/\-]{2,20})", t)
+    if m:
+        so_hd = m.group(1).upper()
+    so_tien = None
+    nums = [int(_tkc_re.sub(r"[.,]", "", x)) for x in _tkc_re.findall(r"\b\d{1,3}(?:[.,]\d{3}){1,4}\b", t)]
+    nums = [n for n in nums if n >= 100000]
+    if nums:
+        so_tien = max(nums)
+    ngay = None
+    m2 = _tkc_re.search(r"\b(\d{1,2})[/-](\d{1,2})[/-](20\d{2})\b", t)
+    if m2:
+        try:
+            ngay = date(int(m2.group(3)), int(m2.group(2)), int(m2.group(1))).isoformat()
+        except ValueError:
+            ngay = None
+    return {"loai": loai, "so_hoa_don": so_hd, "so_tien": so_tien, "ngay_chuyen": ngay}
+
+
+def _tkc_so_chuan(s: str) -> str:
+    return _tkc_re.sub(r"\D", "", s or "").lstrip("0")
+
+
+def _tkc_khop_hoa_don(db, so_hoa_don: str | None, khach_hang_id: int | None):
+    """Tìm hóa đơn BÁN theo số (so sánh phần chữ số, bỏ số 0 đầu); ưu tiên đúng khách."""
+    from ..models import HoaDon
+    if not so_hoa_don:
+        return None
+    for tok in [x.strip() for x in str(so_hoa_don).split(",") if x.strip()][:4]:
+        chuan = _tkc_so_chuan(tok)
+        if len(chuan) < 2:
+            continue
+        cands = db.query(HoaDon).filter(HoaDon.loai == "BAN", HoaDon.so.isnot(None),
+                                        HoaDon.so.ilike(f"%{chuan[-3:]}%")).order_by(HoaDon.id.desc()).limit(80).all()
+        khop = [h for h in cands if _tkc_so_chuan(h.so) == chuan]
+        if not khop:
+            continue
+        if khach_hang_id:
+            cung = [h for h in khop if h.khach_hang_id == khach_hang_id]
+            if cung:
+                return cung[0]
+        return khop[0]
+    return None
+
+
+def _tkc_ung_vien(db, khach_hang_id: int | None):
+    from ..models import CongNo, HoaDon
+    if not khach_hang_id:
+        return []
+    out = []
+    for cn in db.query(CongNo).filter(CongNo.loai == "PHAI_THU", CongNo.khach_hang_id == khach_hang_id,
+                                      CongNo.trang_thai != "THU_DU").order_by(CongNo.id.desc()).limit(15).all():
+        hd = db.get(HoaDon, cn.hoa_don_id) if cn.hoa_don_id else None
+        out.append({"cong_no_id": cn.id, "hoa_don_id": cn.hoa_don_id, "hoa_don_so": (hd.so if hd else None) or cn.so_ct,
+                    "so_tien": float(cn.so_tien or 0), "con_lai": float((cn.so_tien or 0) - (cn.da_thanh_toan or 0)),
+                    "han": str(cn.han) if cn.han else None})
+    return out
+
+
+def _tkc_khop(db, r):
+    """Khớp hóa đơn bán + công nợ phải thu cho một thư (không ghi đè lựa chọn tay đã có)."""
+    from ..models import CongNo, HoaDon
+    hd = None
+    if not r.hoa_don_id:
+        hd = _tkc_khop_hoa_don(db, r.so_hoa_don, r.khach_hang_id)
+        if hd is not None:
+            r.hoa_don_id = hd.id
+            if not r.khach_hang_id and hd.khach_hang_id:
+                r.khach_hang_id = hd.khach_hang_id
+    if not r.cong_no_id:
+        if r.hoa_don_id:
+            cn = db.query(CongNo).filter(CongNo.loai == "PHAI_THU", CongNo.hoa_don_id == r.hoa_don_id).first()
+            if cn is not None:
+                r.cong_no_id = cn.id
+        if not r.cong_no_id and r.khach_hang_id:
+            uv = _tkc_ung_vien(db, r.khach_hang_id)
+            st = float(r.so_tien or 0)
+            if len(uv) == 1:
+                r.cong_no_id = uv[0]["cong_no_id"]
+            elif st > 0:
+                dung = [u for u in uv if abs(u["con_lai"] - st) <= max(1000.0, st * 0.005) or abs(u["so_tien"] - st) <= max(1000.0, st * 0.005)]
+                if len(dung) == 1:
+                    r.cong_no_id = dung[0]["cong_no_id"]
+
+
+def quet_thu_khach_email(tu_ngay: date | None, db: Session, nd: NguoiDung) -> dict:
+    """🤖 Quét hộp thư công ty tìm thư KHÁCH về hóa đơn bán / thanh toán → hàng chờ kt_thu_khach_cho.
+    Bỏ qua: thư NCC (đã có luồng hóa đơn mua), thư công ty tự gửi (trừ chuyển tiếp), thư đã vào hàng chờ hóa đơn mua."""
+    from ..inbound_gateway import lay_inbound_provider
+    from ..ai_gateway import doc_thu_khach_hoa_don
+    from ..models import KtThuKhachCho, KtHoaDonCho, NhaCungCap, CtNccEmail, KhachHang
+    from ..nhac_viec_service import gio_hien_tai
+    from ..config import settings as _st
+    from datetime import timedelta as _td
+    from email.utils import parsedate_to_datetime as _pd
+    prov = lay_inbound_provider()
+    moc = tu_ngay or (date.today() - _td(days=30))
+    try:
+        thu = prov.lay_thu(moc) if hasattr(prov, "lay_thu") else prov.lay_thu_moi()
+    except Exception as e:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Không đọc được hộp thư ({prov.ten}): {str(e)[:150]}")
+    email_kh = _tkc_email_khach(db)
+    email_ncc = {(n.email or "").strip().lower() for n in db.query(NhaCungCap).all()} | \
+                {(e.email or "").strip().lower() for e in db.query(CtNccEmail).all()}
+    email_ncc.discard("")
+    mien_cty = ((_st.email_from_ncc or _st.email_from or "").split("@")[-1] or "").strip().lower()
+    ds_kh = db.query(KhachHang).all()
+    them = trung = dung_ai = khong_khop = con_lai = 0
+    GIOI_HAN = 20
+    for m in thu:
+        mid = (m.get("message_id") or "").strip()[:250] or None
+        if mid and db.query(KtThuKhachCho).filter_by(message_id=mid).first() is not None:
+            trung += 1
+            continue
+        if mid and db.query(KtHoaDonCho).filter_by(message_id=mid).first() is not None:
+            khong_khop += 1                                 # đã là hóa đơn MUA
+            continue
+        nguoi = (m.get("tu_email") or "").strip().lower()
+        tieu_de = (m.get("tieu_de") or "")[:250]
+        td = _tkc_kd(tieu_de)
+        if nguoi in email_ncc:
+            khong_khop += 1
+            continue
+        if mien_cty and nguoi.endswith("@" + mien_cty) and not any(x in td for x in ("fw:", "fwd:", "chuyen tiep")):
+            khong_khop += 1
+            continue
+        nd_thu = (m.get("noi_dung") or "")
+        kh_id = email_kh.get(nguoi)
+        van_ban = td + " " + _tkc_kd(nd_thu[:2500])
+        co_tu_khoa = any(k in van_ban for k in _TKC_TU_KHOA)
+        if not kh_id and not co_tu_khoa:
+            khong_khop += 1
+            continue
+        if kh_id and not co_tu_khoa:
+            khong_khop += 1                                 # thư khách nhưng không nói về hóa đơn / thanh toán
+            continue
+        if them >= GIOI_HAN:
+            con_lai += 1
+            continue
+        info = doc_thu_khach_hoa_don(tieu_de, nd_thu)
+        if info is not None:
+            dung_ai += 1
+        else:
+            info = _tkc_doc_regex(tieu_de, nd_thu)
+        loai = str(info.get("loai") or "KHAC")
+        if loai not in TKC_LOAI:
+            loai = "KHAC"
+        if not kh_id and loai == "KHAC":
+            khong_khop += 1                                 # người lạ + AI nói không liên quan → bỏ
+            continue
+        if not kh_id and info.get("khach_ten"):
+            kt = _tkc_kd(str(info.get("khach_ten")))
+            for k in ds_kh:
+                tk_ = _tkc_kd(k.ten)
+                if tk_ and (tk_ in kt or kt in tk_):
+                    kh_id = k.id
+                    break
+        ngay_thu = None
+        try:
+            ngay_thu = _pd(m.get("ngay")).date() if m.get("ngay") else None
+        except Exception:
+            ngay_thu = None
+        so_tien = None
+        try:
+            so_tien = int(float(info.get("so_tien"))) if info.get("so_tien") not in (None, "") else None
+        except (TypeError, ValueError):
+            so_tien = None
+        ngay_ck = None
+        try:
+            ngay_ck = date.fromisoformat(str(info.get("ngay_chuyen"))[:10]) if info.get("ngay_chuyen") else None
+        except ValueError:
+            ngay_ck = None
+        r = KtThuKhachCho(message_id=mid, tu_email=(nguoi[:160] or None), tieu_de=(tieu_de or None),
+                          noi_dung=nd_thu[:4000] or None, ngay_thu=ngay_thu, khach_hang_id=kh_id,
+                          ai_khach_ten=(str(info.get("khach_ten") or "")[:200] or None), loai=loai,
+                          so_hoa_don=(str(info.get("so_hoa_don") or "")[:80] or None), so_tien=so_tien, ngay_chuyen=ngay_ck,
+                          ngan_hang=(str(info.get("ngan_hang") or "")[:120] or None),
+                          ma_don=(str(info.get("ma_don") or "")[:60] or None),
+                          ai_tom_tat=(str(info.get("tom_tat") or "")[:400] or None),
+                          trang_thai="CHO_XAC_NHAN", tao_luc=gio_hien_tai())
+        _tkc_khop(db, r)
+        db.add(r)
+        them += 1
+    db.commit()
+    ghi_audit(db, nd.id, "QUET_THU_KHACH", "kt_thu_khach_cho", None,
+              moi={"tu_ngay": str(moc), "thu_moi": len(thu), "da_them": them, "ai": dung_ai, "con_lai": con_lai})
+    db.commit()
+    return {"ok": True, "che_do": prov.ten, "thu_moi": len(thu), "tu_ngay": str(moc), "da_them": them,
+            "trung_bo_qua": trung, "ai": dung_ai, "khong_khop": khong_khop, "con_lai": con_lai}
+
+
+def _tkc_dict(db, r) -> dict:
+    from ..models import KhachHang, HoaDon, CongNo
+    kh = db.get(KhachHang, r.khach_hang_id) if r.khach_hang_id else None
+    hd = db.get(HoaDon, r.hoa_don_id) if r.hoa_don_id else None
+    cn = db.get(CongNo, r.cong_no_id) if r.cong_no_id else None
+    return {"id": r.id, "tu_email": r.tu_email, "tieu_de": r.tieu_de, "noi_dung": r.noi_dung,
+            "ngay_thu": str(r.ngay_thu) if r.ngay_thu else None,
+            "khach_hang_id": r.khach_hang_id, "khach_ten": kh.ten if kh else None, "ai_khach_ten": r.ai_khach_ten,
+            "loai": r.loai, "loai_ten": TKC_LOAI.get(r.loai, r.loai), "so_hoa_don": r.so_hoa_don,
+            "so_tien": float(r.so_tien) if r.so_tien is not None else None,
+            "ngay_chuyen": str(r.ngay_chuyen) if r.ngay_chuyen else None, "ngan_hang": r.ngan_hang, "ma_don": r.ma_don,
+            "ai_tom_tat": r.ai_tom_tat, "hoa_don_id": r.hoa_don_id, "hoa_don_so": hd.so if hd else None,
+            "hoa_don_tong": float(hd.tong_tien or 0) if hd else None,
+            "cong_no_id": r.cong_no_id,
+            "cong_no": ({"so_tien": float(cn.so_tien or 0), "da_thanh_toan": float(cn.da_thanh_toan or 0),
+                         "con_lai": float((cn.so_tien or 0) - (cn.da_thanh_toan or 0)), "trang_thai": cn.trang_thai}
+                        if cn else None),
+            "ung_vien": _tkc_ung_vien(db, r.khach_hang_id) if r.trang_thai == "CHO_XAC_NHAN" else [],
+            "trang_thai": r.trang_thai, "ket_qua": r.ket_qua, "xu_ly_luc": str(r.xu_ly_luc)[:16] if r.xu_ly_luc else None}
+
+
+class TkcSuaVao(_TkcBase):
+    loai: str | None = None
+    khach_hang_id: int | None = None
+    so_hoa_don: str | None = None
+    cong_no_id: int | None = None
+    so_tien: Decimal | None = None
+    ngay_chuyen: date | None = None
+
+
+class TkcXuLyVao(_TkcBase):
+    hanh_dong: str            # GHI_THU | GHI_NHAN | TAO_VIEC
+    so_tien: Decimal | None = None
+    ngay: date | None = None
+    ghi_chu: str | None = None
+
+
+@router.post("/thu-khach-cho/quet")
+def quet_thu_khach_cho(tu_ngay: date | None = None, db: Session = Depends(get_db),
+                       nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    return quet_thu_khach_email(tu_ngay, db, nd)
+
+
+@router.get("/thu-khach-cho")
+def ds_thu_khach_cho(tat_ca: bool = False, db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
+    from ..models import KtThuKhachCho
+    q = db.query(KtThuKhachCho)
+    if not tat_ca:
+        q = q.filter(KtThuKhachCho.trang_thai == "CHO_XAC_NHAN")
+    return [_tkc_dict(db, r) for r in q.order_by(KtThuKhachCho.id.desc()).limit(300).all()]
+
+
+@router.put("/thu-khach-cho/{tk_id}")
+def sua_thu_khach_cho(tk_id: int, data: TkcSuaVao, db: Session = Depends(get_db),
+                      nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    from ..models import KtThuKhachCho, CongNo
+    r = db.get(KtThuKhachCho, tk_id)
+    if r is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy thư")
+    if r.trang_thai != "CHO_XAC_NHAN":
+        raise HTTPException(status.HTTP_409_CONFLICT, "Thư đã xử lý — không sửa")
+    doi_kh = data.khach_hang_id is not None and data.khach_hang_id != r.khach_hang_id
+    if data.loai is not None and data.loai in TKC_LOAI:
+        r.loai = data.loai
+    if data.khach_hang_id is not None:
+        r.khach_hang_id = data.khach_hang_id or None
+    if data.so_hoa_don is not None:
+        r.so_hoa_don = (data.so_hoa_don or "").strip()[:80] or None
+        r.hoa_don_id = None
+    if data.so_tien is not None:
+        r.so_tien = data.so_tien or None
+    if data.ngay_chuyen is not None:
+        r.ngay_chuyen = data.ngay_chuyen
+    if data.cong_no_id is not None:
+        if data.cong_no_id:
+            cn = db.get(CongNo, data.cong_no_id)
+            if cn is None or cn.loai != "PHAI_THU":
+                raise HTTPException(status.HTTP_400_BAD_REQUEST, "Công nợ không hợp lệ (phải là khoản phải thu)")
+            r.cong_no_id = cn.id
+            if cn.hoa_don_id:
+                r.hoa_don_id = cn.hoa_don_id
+        else:
+            r.cong_no_id = None
+    if doi_kh:
+        r.cong_no_id = None
+        r.hoa_don_id = None
+    _tkc_khop(db, r)
+    db.commit()
+    return _tkc_dict(db, r)
+
+
+@router.post("/thu-khach-cho/{tk_id}/xu-ly")
+def xu_ly_thu_khach_cho(tk_id: int, data: TkcXuLyVao, db: Session = Depends(get_db),
+                        nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    """GHI_THU: ghi tiền khách đã trả vào công nợ phải thu (ThanhToan + Nợ 112 / Có 131) ·
+    GHI_NHAN: chỉ ghi vết (khách đã nhận HĐ / đã trả lời) · TAO_VIEC: nhắc việc điều chỉnh / gửi lại HĐ."""
+    from ..models import KtThuKhachCho, CongNo, ThanhToan, NhacViec, HoaDon
+    from ..hach_toan import hach_toan_thu_tien
+    from ..nhac_viec_service import gio_hien_tai
+    from ..deps import nhan_vien_id_cua
+    from datetime import timedelta as _td
+    r = db.get(KtThuKhachCho, tk_id)
+    if r is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy thư")
+    if r.trang_thai != "CHO_XAC_NHAN":
+        raise HTTPException(status.HTTP_409_CONFLICT, "Thư đã xử lý")
+    hd_act = (data.hanh_dong or "").upper()
+    kq = {"hanh_dong": hd_act}
+    thong_bao = "Đã xử lý"
+    if hd_act == "GHI_THU":
+        if not r.cong_no_id:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Chưa chọn công nợ phải thu để ghi tiền vào")
+        cn = db.query(CongNo).filter_by(id=r.cong_no_id).with_for_update().first()
+        if cn is None or cn.loai != "PHAI_THU":
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Công nợ không hợp lệ")
+        tt = Decimal(str(int(float(data.so_tien if data.so_tien is not None else (r.so_tien or 0)))))
+        if tt <= 0:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Số tiền phải lớn hơn 0")
+        con_lai = Decimal(cn.so_tien or 0) - Decimal(cn.da_thanh_toan or 0)
+        if tt > con_lai:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                f"Số tiền {int(tt):,} vượt số còn phải thu {int(con_lai):,}".replace(",", "."))
+        ngay = data.ngay or r.ngay_chuyen or date.today()
+        db.add(ThanhToan(cong_no_id=cn.id, so_tien=tt, ngay=ngay, hinh_thuc="CK"))
+        cn.da_thanh_toan = Decimal(cn.da_thanh_toan or 0) + tt
+        cn.trang_thai = "THU_DU" if cn.da_thanh_toan >= Decimal(cn.so_tien or 0) else "THU_MOT_PHAN"
+        hach_toan_thu_tien(db, cn, tt, tien_mat=False)
+        cn.ghi_chu = (((cn.ghi_chu or "") + f" · Khách báo CK {ngay} (thư {r.tu_email or ''})").strip(" ·"))[:300]
+        ghi_audit(db, nd.id, "THU_TIEN", "cong_no", cn.id, moi={"so_tien": float(tt), "trang_thai": cn.trang_thai, "tu_thu_khach": r.id})
+        kq.update({"cong_no_id": cn.id, "so_tien": float(tt), "ngay": str(ngay), "trang_thai_cn": cn.trang_thai})
+        thong_bao = f"Đã ghi thu {int(tt):,} đ vào công nợ #{cn.id} — {'thu đủ' if cn.trang_thai == 'THU_DU' else 'còn ' + format(int(Decimal(cn.so_tien or 0) - cn.da_thanh_toan), ',') + ' đ'}".replace(",", ".")
+    elif hd_act == "GHI_NHAN":
+        if r.cong_no_id:
+            cn = db.get(CongNo, r.cong_no_id)
+            if cn is not None:
+                nhan = {"XAC_NHAN_NHAN_HD": "Khách xác nhận đã nhận HĐ", "THONG_BAO_THANH_TOAN": "Khách báo đã thanh toán",
+                        "YEU_CAU_DIEU_CHINH": "Khách yêu cầu điều chỉnh HĐ", "HOI_HOA_DON": "Khách hỏi HĐ"}.get(r.loai, "Thư khách")
+                cn.ghi_chu = (((cn.ghi_chu or "") + f" · {nhan} {r.ngay_thu or date.today()}").strip(" ·"))[:300]
+        thong_bao = "Đã ghi nhận thư khách"
+    elif hd_act == "TAO_VIEC":
+        nv_id = nhan_vien_id_cua(db, nd.id)
+        if not nv_id:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Tài khoản chưa gắn hồ sơ nhân viên — không tạo được việc nhắc")
+        bay_gio = gio_hien_tai()
+        hd = db.get(HoaDon, r.hoa_don_id) if r.hoa_don_id else None
+        tieu_de = f"{TKC_LOAI.get(r.loai, 'Thư khách')}: {r.tieu_de or ''}"[:300]
+        v = NhacViec(nguoi_tao=nv_id, nhan_vien_id=nv_id, tieu_de=tieu_de, thoi_diem=bay_gio,
+                     han_hoan_thanh=bay_gio + _td(days=2), muc_do="CAO" if r.loai == "YEU_CAU_DIEU_CHINH" else "BINH_THUONG",
+                     ma_lien_quan=((hd.so if hd else None) or r.so_hoa_don or r.ma_don or None),
+                     chuan_bi=(r.ai_tom_tat or None), ghi_chu=(f"Từ thư {r.tu_email or ''} ngày {r.ngay_thu or ''}. " + (data.ghi_chu or ""))[:1000],
+                     trang_thai="CHO_LAM")
+        db.add(v); db.flush()
+        kq["nhac_viec_id"] = v.id
+        thong_bao = "Đã tạo việc nhắc (Working time & Report → Work Reminder)"
+    else:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Hành động không hợp lệ")
+    if data.ghi_chu:
+        kq["ghi_chu"] = data.ghi_chu[:300]
+    r.trang_thai, r.ket_qua, r.nguoi_xu_ly, r.xu_ly_luc = "DA_XU_LY", kq, nd.id, gio_hien_tai()
+    ghi_audit(db, nd.id, "XU_LY", "kt_thu_khach_cho", r.id, moi=kq)
+    db.commit()
+    return {"ok": True, "thong_bao": thong_bao, "ket_qua": kq}
+
+
+@router.post("/thu-khach-cho/{tk_id}/bo-qua")
+def bo_qua_thu_khach_cho(tk_id: int, db: Session = Depends(get_db), nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    from ..models import KtThuKhachCho
+    from ..nhac_viec_service import gio_hien_tai
+    r = db.get(KtThuKhachCho, tk_id)
+    if r is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy thư")
+    r.trang_thai, r.nguoi_xu_ly, r.xu_ly_luc = "BO_QUA", nd.id, gio_hien_tai()
+    ghi_audit(db, nd.id, "BO_QUA", "kt_thu_khach_cho", r.id)
+    db.commit()
+    return {"ok": True}
+
+
+@router.delete("/thu-khach-cho/{tk_id}")
+def xoa_thu_khach_cho(tk_id: int, db: Session = Depends(get_db), nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC")),
+                      __: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
+    from ..models import KtThuKhachCho
+    r = db.get(KtThuKhachCho, tk_id)
+    if r is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy thư")
+    ghi_audit(db, nd.id, "XOA", "kt_thu_khach_cho", tk_id, cu={"tieu_de": r.tieu_de})
+    db.delete(r); db.commit()
+    return {"ok": True}
