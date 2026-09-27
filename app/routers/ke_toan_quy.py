@@ -3280,18 +3280,23 @@ def quet_thu_khach_email(tu_ngay: date | None, db: Session, nd: NguoiDung) -> di
             con_lai += 1
             continue
         info = None
+        ai_hong = False
         try:
             info = doc_thu_khach_hoa_don(tieu_de, nd_thu, bao_loi=True)
         except Exception as e:
+            ai_hong = True
             ai_loi_n += 1
             if ai_loi is None:
                 ai_loi = str(e)[:200]
         if info is not None:
             dung_ai += 1
+        elif ai_hong:
+            khong_khop += 1                                 # AI LỖI (trần chi tiêu, mạng…) → bỏ qua, lượt sau đọc lại (không lưu nên không trùng)
+            continue
         elif kh_id:
-            info = _tkc_doc_regex(tieu_de, nd_thu)          # AI tắt / lỗi: chỉ đọc regex cho thư của KHÁCH đã biết
+            info = _tkc_doc_regex(tieu_de, nd_thu)          # AI TẮT theo cấu hình: chỉ đọc regex cho thư của KHÁCH đã biết
         else:
-            khong_khop += 1                                 # người lạ mà AI không xác nhận được → bỏ
+            khong_khop += 1                                 # người lạ mà không có AI → bỏ
             continue
         loai = str(info.get("loai") or "KHAC")
         if loai == "KHONG_PHAI_KHACH":
