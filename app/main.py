@@ -5,7 +5,8 @@ from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from .routers import (auth, kho, ncc, du_an, ban_hang, ke_toan, tai_chinh,
                       nhan_su, cho_thue, crm, ban_hang_ext, ke_toan_quy, vay, quy_trich_lap,
-                      cau_hinh, nhan_su_kpi, cho_thue_ops, dich_vu_kt, quet_mail)
+                      cau_hinh, nhan_su_kpi, cho_thue_ops, dich_vu_kt, quet_mail,
+                      doc_anh_bcvh)
 from svws_registry import registry
 
 app = FastAPI(title="SVWS — Backend hợp nhất (9 module nghiệp vụ)")
@@ -14,7 +15,8 @@ app.add_middleware(
     CORSMiddleware, allow_origins=["*"], allow_credentials=False,
     allow_methods=["*"], allow_headers=["*"],
 )
-for r in (auth, kho, ncc, du_an, ban_hang, ke_toan, tai_chinh, nhan_su, cho_thue, crm, ban_hang_ext, ke_toan_quy, vay, quy_trich_lap, cau_hinh, nhan_su_kpi, cho_thue_ops, dich_vu_kt, quet_mail):
+for r in (auth, kho, ncc, du_an, ban_hang, ke_toan, tai_chinh, nhan_su, cho_thue, crm, ban_hang_ext, ke_toan_quy, vay, quy_trich_lap, cau_hinh, nhan_su_kpi, cho_thue_ops, dich_vu_kt, quet_mail,
+                      doc_anh_bcvh):
     app.include_router(r.router)
 app.include_router(registry.router)
 
@@ -41,6 +43,7 @@ def _init_registry():
 _HTML = os.path.join(os.path.dirname(__file__), "..", "svws_app.html")
 _HUONG_DAN = os.path.join(os.path.dirname(__file__), "..", "huong_dan.html")
 _SO_TAY = os.path.join(os.path.dirname(__file__), "..", "so_tay_quy_che.docx")
+_CHUP_ANH = os.path.join(os.path.dirname(__file__), "..", "static", "chup-anh.html")
 
 
 # no-cache: trình duyệt phải hỏi lại server mỗi lần mở (ETag 304 nếu chưa đổi)
@@ -62,6 +65,14 @@ def huong_dan():
         return FileResponse(_HUONG_DAN, media_type="text/html; charset=utf-8",
                             headers=_NO_CACHE)
     return {"he_thong": "SVWS", "trang_thai": "chua co huong dan"}
+
+
+@app.get("/chup-anh")
+def chup_anh():
+    """Trang điện thoại: chụp ảnh hiện trường → AI điền Báo cáo vận hành (Cho thuê)."""
+    if os.path.exists(_CHUP_ANH):
+        return FileResponse(_CHUP_ANH, media_type="text/html; charset=utf-8", headers=_NO_CACHE)
+    return {"he_thong": "SVWS", "trang_thai": "chua co trang chup anh"}
 
 
 @app.get("/so-tay-quy-che")
