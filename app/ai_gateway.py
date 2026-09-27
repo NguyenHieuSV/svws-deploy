@@ -1346,7 +1346,7 @@ def _goi_claude_nhieu_khoi(khoi: list[dict], sys: str, max_tokens: int = 6000, t
 
 
 def doc_anh_bcvh(anh: list[tuple[bytes, str, str]], mau: dict, ngay: str,
-                 goi_y: list[str] | None = None) -> dict:
+                 goi_y: list[str] | None = None, ngay_chup: list[str] | None = None) -> dict:
     """AI đọc ẢNH HIỆN TRƯỜNG (máy đo, đồng hồ, áp kế, HMI, sổ nhật ký, phiếu phân tích,
     phiếu giao hóa chất…) và phân về 3 bảng Báo cáo vận hành của dự án cho thuê.
 
@@ -1354,6 +1354,7 @@ def doc_anh_bcvh(anh: list[tuple[bytes, str, str]], mau: dict, ngay: str,
     mau  : {"ten_du_an", "khach_hang", "ky_thuat": [{vi_tri, chi_tieu, don_vi}],
             "hoa_chat": [{ten, don_vi}], "khoi_luong": [{he_thong, don_vi}]}
     goi_y: vị trí người chụp chọn cho từng ảnh ("" = để AI đoán)
+    ngay_chup: ngày giờ chụp từng ảnh ("YYYY-MM-DD HH:MM", lấy từ EXIF của file ảnh; "" = không rõ)
 
     Trả: {"anh": [...], "ky_thuat": [...], "hoa_chat": [...], "khoi_luong": [...]}
     Ném ValueError (tiếng Việt) khi chưa cấu hình AI / lỗi gọi API / trả sai định dạng."""
@@ -1362,6 +1363,7 @@ def doc_anh_bcvh(anh: list[tuple[bytes, str, str]], mau: dict, ngay: str,
     if not anh:
         raise ValueError("Chưa có ảnh nào.")
     goi_y = goi_y or []
+    ngay_chup = ngay_chup or []
 
     def _ds(xs, f):
         return "; ".join(f(x) for x in xs) or "(chưa có — đặt tên hợp lý)"
@@ -1390,6 +1392,9 @@ def doc_anh_bcvh(anh: list[tuple[bytes, str, str]], mau: dict, ngay: str,
         "không khớp thì đặt tên ngắn gọn tiếng Việt.\n"
         "- Số: chuỗi (ket_qua) hoặc số thuần (luong_nhap, luong_ton, chi_so); dấu chấm thập phân; "
         "bỏ dấu phân cách hàng nghìn kiểu Việt Nam (10.100 kg → 10100). Ngày dạng YYYY-MM-DD.\n"
+        "- NGÀY của mỗi dòng, theo thứ tự ưu tiên: (1) ngày IN/GHI TRONG ẢNH (màn hình máy đo, HMI, ngày ghi "
+        "trong sổ nhật ký, ngày giao trên phiếu); (2) NGÀY CHỤP của ảnh đó (cho trong phần ngữ cảnh); "
+        "(3) ngày báo cáo mặc định.\n"
         "- KHÔNG đoán bừa. tin_cay: 'cao' đọc rõ, 'tb' phải ước lượng, 'thap' mờ/khuất; ly_do ngắn khi khác 'cao'.\n"
         "Trả về DUY NHẤT một JSON object:\n"
         '{"anh":[{"so":1,"loai":"may_do_cam_tay","mo_ta":"Palintest 7500 — COD"}],'
@@ -1400,7 +1405,7 @@ def doc_anh_bcvh(anh: list[tuple[bytes, str, str]], mau: dict, ngay: str,
     ngu_canh = (
         f"Dự án: {mau.get('ten_du_an') or ''}"
         + (f" — khách hàng {mau['khach_hang']}" if mau.get("khach_hang") else "") + "\n"
-        f"Ngày báo cáo mặc định (khi ảnh không ghi ngày): {ngay}\n"
+        f"Ngày báo cáo mặc định (khi ảnh không ghi ngày và không rõ ngày chụp): {ngay}\n"
         "Danh mục KY_THUAT (vị trí | chỉ tiêu | đơn vị): "
         + _ds(mau.get("ky_thuat") or [], lambda c: f"{c.get('vi_tri') or '-'} | {c['chi_tieu']} | {c.get('don_vi') or ''}") + "\n"
         "Danh mục HOA_CHAT_VT (tên | đơn vị): "
@@ -1408,6 +1413,9 @@ def doc_anh_bcvh(anh: list[tuple[bytes, str, str]], mau: dict, ngay: str,
         "Danh mục KHOI_LUONG (hệ thống đồng hồ | đơn vị): "
         + _ds(mau.get("khoi_luong") or [], lambda c: f"{c['he_thong']} | {c.get('don_vi') or ''}") + "\n"
     )
+    nc = [f"Ảnh {i + 1}: chụp lúc {g}." for i, g in enumerate(ngay_chup) if g and g.strip()]
+    if nc:
+        ngu_canh += "Ngày giờ chụp (theo file ảnh):\n" + "\n".join(nc) + "\n"
     gy = [f"Ảnh {i + 1}: người chụp ghi vị trí '{g}'." for i, g in enumerate(goi_y) if g and g.strip()]
     if gy:
         ngu_canh += "Gợi ý của người chụp:\n" + "\n".join(gy) + "\n"
