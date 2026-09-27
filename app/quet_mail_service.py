@@ -13,7 +13,9 @@ from .database import SessionLocal
 
 THU = ["Thứ Hai", "Thứ Ba", "Thứ Tư", "Thứ Năm", "Thứ Sáu", "Thứ Bảy", "Chủ Nhật"]
 _khoa = threading.Lock()                       # một lần chạy tại một thời điểm (trong tiến trình này)
-_TONG = ("them", "khong_doc", "dung_ai", "xu_ly", "so_spec")   # cộng dồn qua các vòng lặp; khóa khác lấy giá trị cuối
+# cộng dồn qua các vòng lặp = việc MỚI làm ở từng vòng (hóa đơn trả da_them/ai; báo giá trả them/khong_doc; spec xu_ly/so_spec).
+# Khóa khác (thu_moi/so_thu, trung, khong_khop, con_lai) là trạng thái lặp lại mỗi vòng → lấy giá trị cuối.
+_TONG = ("them", "da_them", "ai", "dung_ai", "khong_doc", "xu_ly", "so_spec")
 
 
 def cau_hinh(db):
@@ -146,8 +148,13 @@ def gui_ban_tin(kq: dict) -> dict:
     hd, bg, sp, cho = kq.get("hoa_don") or {}, kq.get("bao_gia") or {}, kq.get("spec") or {}, kq.get("cho") or {}
     text = ("📬 *TỰ QUÉT THƯ HÀNG TUẦN* — " + ("theo lịch" if kq.get("nguon") == "LICH" else "chạy tay")
             + f" · thư từ {kq.get('tu_ngay')}\n"
-            f"• 🧾 Hóa đơn mua: {hd.get('them', 0)} thư mới → Kế toán › Hóa đơn chờ (đang chờ: {cho.get('hoa_don', '?')})\n"
-            f"• 💰 Báo giá / datasheet: {bg.get('them', 0)} thư mới → Nhà cung cấp › Báo giá chờ (đang chờ: {cho.get('bao_gia', '?')})\n"
+            f"• 🧾 Hóa đơn mua: {hd.get('da_them', hd.get('them', 0))} thư mới"
+            + (f" (AI đọc {hd.get('ai', 0)})" if hd.get('ai') else "")
+            + f" → Kế toán › Hóa đơn chờ (đang chờ: {cho.get('hoa_don', '?')})\n"
+            f"• 💰 Báo giá / datasheet: {bg.get('them', 0)} thư mới"
+            + (f" ({bg.get('khong_doc', 0)} thư AI chưa đọc được)" if bg.get('khong_doc') else "")
+            + (f" · còn {bg.get('con_lai', 0)} thư đọc tiếp lượt sau" if bg.get('con_lai') else "")
+            + f" → Nhà cung cấp › Báo giá chờ (đang chờ: {cho.get('bao_gia', '?')})\n"
             f"• 🔧 Spec: đọc lại {sp.get('xu_ly', 0)} thư đã xác nhận, điền spec {sp.get('so_spec', 0)} sản phẩm\n"
             + ("• ⚠ Lỗi: " + " | ".join(kq.get("loi") or [])[:400] + "\n" if kq.get("loi") else "")
             + "→ Vào app xác nhận từng thư — AI không tự ghi gì khi chưa xác nhận.")
