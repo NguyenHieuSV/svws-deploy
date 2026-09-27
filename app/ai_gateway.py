@@ -1295,3 +1295,137 @@ def doc_sao_ke_tep(data: bytes, content_type: str, filename: str) -> list | None
         return _vot_json_mang(txt)
     except Exception:
         return None
+
+
+# ================== ĐỌC ẢNH HIỆN TRƯỜNG → BÁO CÁO VẬN HÀNH (Cho thuê) ==================
+LOAI_ANH_BCVH = {"may_do_cam_tay", "dong_ho_luu_luong", "dong_ho_tong", "ap_ke", "ong_dong_sv30",
+                 "man_hinh_hmi", "so_nhat_ky_viet_tay", "phieu_phan_tich", "nhan_thiet_bi",
+                 "phieu_giao_hang", "hoa_don", "khac"}
+
+
+def _anh_sang_khoi(data: bytes, content_type: str, filename: str) -> dict:
+    """Ảnh người dùng chụp → khối image gửi Claude (chỉ nhận JPEG/PNG/WEBP, ≤ 5 MB)."""
+    import base64
+    ct = (content_type or "").lower()
+    fn = (filename or "").lower()
+    if ct not in ("image/jpeg", "image/png", "image/webp"):
+        if fn.endswith((".jpg", ".jpeg")):
+            ct = "image/jpeg"
+        elif fn.endswith(".png"):
+            ct = "image/png"
+        elif fn.endswith(".webp"):
+            ct = "image/webp"
+        else:
+            raise ValueError(f"Ảnh '{filename}' không phải JPEG/PNG/WEBP — chụp lại hoặc chọn ảnh khác.")
+    if len(data) > 5 * 1024 * 1024:
+        raise ValueError(f"Ảnh '{filename}' lớn hơn 5 MB — trang chụp ảnh sẽ tự thu nhỏ, hãy tải lại trang.")
+    return {"type": "image", "source": {"type": "base64", "media_type": ct,
+                                        "data": base64.b64encode(data).decode()}}
+
+
+def _goi_claude_nhieu_khoi(khoi: list[dict], sys: str, max_tokens: int = 6000, timeout: int = 180) -> str:
+    """Gửi nhiều khối (ảnh + chữ) trong MỘT lượt hỏi, trả text đã bỏ ```json."""
+    import urllib.request
+    body = {"model": settings.anthropic_model, "max_tokens": max_tokens, "system": sys,
+            "messages": [{"role": "user", "content": khoi}]}
+    req = urllib.request.Request(
+        "https://api.anthropic.com/v1/messages",
+        data=json.dumps(body).encode("utf-8"),
+        headers={"content-type": "application/json",
+                 "x-api-key": settings.anthropic_api_key,
+                 "anthropic-version": "2023-06-01"})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            resp = json.loads(r.read().decode("utf-8"))
+    except Exception as e:
+        raise ValueError(_loi_ai_ro_rang(e))
+    if resp.get("stop_reason") == "max_tokens":
+        raise ValueError("Ảnh có quá nhiều số liệu cho một lần đọc — chia thành ít ảnh hơn rồi đọc lại.")
+    txt = "".join(b.get("text", "") for b in resp.get("content", []) if b.get("type") == "text")
+    return txt.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+
+
+def doc_anh_bcvh(anh: list[tuple[bytes, str, str]], mau: dict, ngay: str,
+                 goi_y: list[str] | None = None) -> dict:
+    """AI đọc ẢNH HIỆN TRƯỜNG (máy đo, đồng hồ, áp kế, HMI, sổ nhật ký, phiếu phân tích,
+    phiếu giao hóa chất…) và phân về 3 bảng Báo cáo vận hành của dự án cho thuê.
+
+    anh  : [(bytes, content_type, filename)] theo thứ tự người dùng chụp (Ảnh 1..N)
+    mau  : {"ten_du_an", "khach_hang", "ky_thuat": [{vi_tri, chi_tieu, don_vi}],
+            "hoa_chat": [{ten, don_vi}], "khoi_luong": [{he_thong, don_vi}]}
+    goi_y: vị trí người chụp chọn cho từng ảnh ("" = để AI đoán)
+
+    Trả: {"anh": [...], "ky_thuat": [...], "hoa_chat": [...], "khoi_luong": [...]}
+    Ném ValueError (tiếng Việt) khi chưa cấu hình AI / lỗi gọi API / trả sai định dạng."""
+    if not settings.anthropic_api_key:
+        raise ValueError("Chưa bật AI đọc ảnh: vào Render → Environment, đặt ANTHROPIC_API_KEY rồi Save.")
+    if not anh:
+        raise ValueError("Chưa có ảnh nào.")
+    goi_y = goi_y or []
+
+    def _ds(xs, f):
+        return "; ".join(f(x) for x in xs) or "(chưa có — đặt tên hợp lý)"
+
+    sys_p = (
+        "Bạn là kỹ sư vận hành hệ thống xử lý nước của công ty SVWS (Sóng Việt). "
+        "Người dùng gửi các ẢNH HIỆN TRƯỜNG đánh số Ảnh 1..N. Đọc số liệu và phân vào 3 bảng "
+        "BÁO CÁO VẬN HÀNH của dự án: KY_THUAT (chất lượng nước / thông số vận hành), "
+        "HOA_CHAT_VT (hóa chất - vật tư: lượng nhập, lượng tồn), KHOI_LUONG (chỉ số tổng của đồng hồ nước).\n"
+        "Quy tắc đọc:\n"
+        "- Phân loại mỗi ảnh: may_do_cam_tay, dong_ho_luu_luong (rotameter/lưu lượng tức thời), "
+        "dong_ho_tong (đồng hồ nước có bộ đếm tổng m³), ap_ke, ong_dong_sv30, man_hinh_hmi, "
+        "so_nhat_ky_viet_tay, phieu_phan_tich, nhan_thiet_bi, phieu_giao_hang, hoa_don, khac.\n"
+        "- KY_THUAT: mỗi giá trị đo một dòng. Máy đo cầm tay: lấy phép thử + giá trị trên màn hình. "
+        "Rotameter: đọc theo hướng dẫn in trên ống (thường tại mép lớn nhất của phao); tag in trên ống "
+        "(vd 'SP RO1') là vị trí; thang thứ hai ghi vào ghi_chu. Áp kế nhiều thang: ưu tiên bar hoặc kg/cm², "
+        "ghi psi vào ghi_chu. Ống đong SV30: mức ranh giới bùn lắng – nước trong (ml/L); không thấy ranh giới "
+        "thì ket_qua rỗng và nêu lý do. HMI: mỗi tag một dòng, tag ghi vào ghi_chu. Sổ nhật ký / phiếu phân tích: "
+        "mỗi ô số liệu một dòng, giữ ngày ghi trong sổ/phiếu. Nhãn thiết bị: chi_tieu 'Nhãn thiết bị', "
+        "ket_qua = model, ghi_chu = serial/công suất.\n"
+        "- KHOI_LUONG: chỉ số TỔNG (bộ đếm tích lũy) của đồng hồ nước, số thuần (m³). Không lấy lưu lượng tức thời.\n"
+        "- HOA_CHAT_VT: phiếu giao hàng / phiếu xuất kho của NHÀ CUNG CẤP gửi đến → mỗi mặt hàng một dòng với "
+        "luong_nhap = số lượng giao, ngay = ngày giao trên phiếu, ghi_chu = 'Phiếu <số> — <tên NCC>'. "
+        "Ảnh mức bồn / sổ ghi tồn → luong_ton. Không có thì để null.\n"
+        "- Dùng ĐÚNG tên vị trí / chỉ tiêu / hóa chất / hệ thống trong danh mục của dự án khi khớp nghĩa; "
+        "không khớp thì đặt tên ngắn gọn tiếng Việt.\n"
+        "- Số: chuỗi (ket_qua) hoặc số thuần (luong_nhap, luong_ton, chi_so); dấu chấm thập phân; "
+        "bỏ dấu phân cách hàng nghìn kiểu Việt Nam (10.100 kg → 10100). Ngày dạng YYYY-MM-DD.\n"
+        "- KHÔNG đoán bừa. tin_cay: 'cao' đọc rõ, 'tb' phải ước lượng, 'thap' mờ/khuất; ly_do ngắn khi khác 'cao'.\n"
+        "Trả về DUY NHẤT một JSON object:\n"
+        '{"anh":[{"so":1,"loai":"may_do_cam_tay","mo_ta":"Palintest 7500 — COD"}],'
+        '"ky_thuat":[{"anh":1,"ngay":"YYYY-MM-DD","vi_tri":"","chi_tieu":"","ket_qua":"","don_vi":"","ghi_chu":"","tin_cay":"cao","ly_do":""}],'
+        '"hoa_chat":[{"anh":2,"ngay":"YYYY-MM-DD","ten":"","luong_nhap":null,"luong_ton":null,"don_vi":"","ghi_chu":"","tin_cay":"cao","ly_do":""}],'
+        '"khoi_luong":[{"anh":3,"ngay":"YYYY-MM-DD","he_thong":"","chi_so":null,"don_vi":"m3","ghi_chu":"","tin_cay":"cao","ly_do":""}]}'
+    )
+    ngu_canh = (
+        f"Dự án: {mau.get('ten_du_an') or ''}"
+        + (f" — khách hàng {mau['khach_hang']}" if mau.get("khach_hang") else "") + "\n"
+        f"Ngày báo cáo mặc định (khi ảnh không ghi ngày): {ngay}\n"
+        "Danh mục KY_THUAT (vị trí | chỉ tiêu | đơn vị): "
+        + _ds(mau.get("ky_thuat") or [], lambda c: f"{c.get('vi_tri') or '-'} | {c['chi_tieu']} | {c.get('don_vi') or ''}") + "\n"
+        "Danh mục HOA_CHAT_VT (tên | đơn vị): "
+        + _ds(mau.get("hoa_chat") or [], lambda c: f"{c['ten']} | {c.get('don_vi') or ''}") + "\n"
+        "Danh mục KHOI_LUONG (hệ thống đồng hồ | đơn vị): "
+        + _ds(mau.get("khoi_luong") or [], lambda c: f"{c['he_thong']} | {c.get('don_vi') or ''}") + "\n"
+    )
+    gy = [f"Ảnh {i + 1}: người chụp ghi vị trí '{g}'." for i, g in enumerate(goi_y) if g and g.strip()]
+    if gy:
+        ngu_canh += "Gợi ý của người chụp:\n" + "\n".join(gy) + "\n"
+    khoi: list[dict] = [{"type": "text", "text": ngu_canh}]
+    for i, (data, ct, fn) in enumerate(anh, 1):
+        khoi.append({"type": "text", "text": f"Ảnh {i}:"})
+        khoi.append(_anh_sang_khoi(data, ct, fn))
+    khoi.append({"type": "text", "text": "Đọc toàn bộ ảnh trên và trả JSON theo đúng mẫu."})
+    txt = _goi_claude_nhieu_khoi(khoi, sys_p)
+    import re as _re
+    m = _re.search(r"\{[\s\S]*\}", txt)
+    try:
+        out = json.loads(m.group(0) if m else txt)
+    except Exception:
+        raise ValueError("AI trả kết quả không đúng định dạng — bấm đọc lại, hoặc chụp rõ hơn.")
+    if not isinstance(out, dict):
+        raise ValueError("AI trả kết quả không đúng định dạng — bấm đọc lại.")
+    for k in ("anh", "ky_thuat", "hoa_chat", "khoi_luong"):
+        if not isinstance(out.get(k), list):
+            out[k] = []
+    return out
