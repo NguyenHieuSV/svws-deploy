@@ -390,6 +390,10 @@ def ds_cong_no_khach(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "X
             "khach_ten": kh.ten if kh else None,
             "dien_giai": (hd.dien_giai if hd else None) or cn.ghi_chu,
             "so_hd": cn.so_ct or (hd.so if hd else None),
+            "gui_khach_luc": str(hd.gui_khach_luc)[:16] if (hd and getattr(hd, "gui_khach_luc", None)) else None,
+            "gui_khach_den": getattr(hd, "gui_khach_den", None) if hd else None,
+            "hd_so_that": bool(hd and hd.so and str(hd.so).strip().lower() != str((dh.so if dh else "") or "").strip().lower()
+                               and not __import__("re").fullmatch(r"(hd|dh)-\d+", str(hd.so).strip().lower())),
             # Giá trị đơn hàng: lấy từ tab Đơn hàng & PO/Hợp đồng (thiếu đơn thì dùng công nợ)
             "gia_tri_don": float(dh.tong_tien or 0) if dh else None,
             # Tách VAT theo hóa đơn của khoản công nợ (chưa VAT / VAT / tổng)

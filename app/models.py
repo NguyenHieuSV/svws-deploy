@@ -481,6 +481,9 @@ class HoaDon(Base):
     dien_giai: Mapped[str | None] = mapped_column(String(200), nullable=True)
     da_hach_toan: Mapped[bool] = mapped_column(Boolean, default=False)
     trang_thai: Mapped[str] = mapped_column(String(20), default="GHI_NHAN")
+    gui_khach_luc: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)     # mig 138: hóa đơn BÁN đã gửi khách
+    gui_khach_den: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    gui_khach_nguon: Mapped[str | None] = mapped_column(String(16), nullable=True)     # EMAIL | TAY
 
 
 class CongNo(Base):
@@ -1113,6 +1116,28 @@ class KtThuKhachCho(Base):
     cong_no_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     trang_thai: Mapped[str] = mapped_column(String(16), default="CHO_XAC_NHAN")
     ket_qua: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    nguoi_xu_ly: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    xu_ly_luc: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    tao_luc: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class KtHdGuiKhach(Base):
+    """mig 138: thư công ty GỬI ĐI có hóa đơn bán (Bcc về inf@) — khớp hóa đơn bán để ghi 'đã gửi khách'."""
+    __tablename__ = "kt_hd_gui_khach"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    message_id: Mapped[str | None] = mapped_column(String(250), unique=True, nullable=True)
+    tu_email: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    den_email: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    tieu_de: Mapped[str | None] = mapped_column(String(250), nullable=True)
+    ngay_gui: Mapped[date | None] = mapped_column(Date, nullable=True)
+    so_hoa_don: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    so_tien: Mapped[Decimal | None] = mapped_column(Numeric(18, 0), nullable=True)
+    ten_file: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    ai_khach_ten: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    khach_hang_id: Mapped[int | None] = mapped_column(ForeignKey("khach_hang.id", ondelete="SET NULL"), nullable=True)
+    hoa_don_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    cong_no_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    trang_thai: Mapped[str] = mapped_column(String(16), default="CHUA_KHOP")
     nguoi_xu_ly: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     xu_ly_luc: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     tao_luc: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

@@ -127,17 +127,22 @@ def chay(db, nguon="LICH", nd=None) -> dict:
     kq["spec"] = _lap("Spec", lambda: bo_sung_spec_bao_gia_email(db, nd), 3)
     from .routers.ke_toan_quy import quet_thu_khach_email
     kq["thu_khach"] = _lap("Thư khách", lambda: quet_thu_khach_email(tu, db, nd), 2)   # 📨 thư khách về HĐ bán / thanh toán
+    from .routers.ke_toan_quy import quet_hd_gui_khach_email, _hdgk_chua_gui
+    kq["hd_gui_khach"] = _lap("HĐ gửi khách", lambda: quet_hd_gui_khach_email(tu, db, nd), 2)   # 📤 hóa đơn bán đã gửi khách (Bcc)
     try:
-        from .models import KtHoaDonCho, BgEmailCho, KtThuKhachCho
+        from .models import KtHoaDonCho, BgEmailCho, KtThuKhachCho, KtHdGuiKhach
         kq["cho"] = {"hoa_don": db.query(KtHoaDonCho).filter_by(trang_thai="CHO_XAC_NHAN").count(),
                      "bao_gia": db.query(BgEmailCho).filter_by(trang_thai="CHO_XAC_NHAN").count(),
-                     "thu_khach": db.query(KtThuKhachCho).filter_by(trang_thai="CHO_XAC_NHAN").count()}
+                     "thu_khach": db.query(KtThuKhachCho).filter_by(trang_thai="CHO_XAC_NHAN").count(),
+                     "hd_chua_khop": db.query(KtHdGuiKhach).filter_by(trang_thai="CHUA_KHOP").count(),
+                     "hd_chua_gui": len(_hdgk_chua_gui(db))}
     except Exception:
         kq["cho"] = {}
     kq["gui_chat"] = gui_ban_tin(kq)
     r = db.get(LichQuetMail, rid)
     r.ket_thuc = gio_hien_tai()
-    r.trang_thai = "LOI" if (kq["loi"] and not kq["hoa_don"] and not kq["bao_gia"] and not kq.get("thu_khach")) else "XONG"
+    r.trang_thai = "LOI" if (kq["loi"] and not kq["hoa_don"] and not kq["bao_gia"] and not kq.get("thu_khach")
+                             and not kq.get("hd_gui_khach")) else "XONG"
     r.ket_qua = kq
     db.commit()
     return kq
@@ -150,6 +155,7 @@ def gui_ban_tin(kq: dict) -> dict:
     from .chat_gateway import gui_webhook_rieng
     hd, bg, sp, cho = kq.get("hoa_don") or {}, kq.get("bao_gia") or {}, kq.get("spec") or {}, kq.get("cho") or {}
     tk = kq.get("thu_khach") or {}
+    gk = kq.get("hd_gui_khach") or {}
     text = ("📬 *TỰ QUÉT THƯ HÀNG TUẦN* — " + ("theo lịch" if kq.get("nguon") == "LICH" else "chạy tay")
             + f" · thư từ {kq.get('tu_ngay')}\n"
             f"• 🧾 Hóa đơn mua: {hd.get('da_them', hd.get('them', 0))} thư mới"
@@ -162,6 +168,9 @@ def gui_ban_tin(kq: dict) -> dict:
             f"• 📨 Thư khách về hóa đơn bán / thanh toán: {tk.get('da_them', 0)} thư mới"
             + (f" · còn {tk.get('con_lai', 0)} thư đọc tiếp lượt sau" if tk.get('con_lai') else "")
             + f" → Kế toán › Hóa đơn › Thư khách chờ (đang chờ: {cho.get('thu_khach', '?')})\n"
+            f"• 📤 Hóa đơn bán đã gửi khách: {gk.get('da_them', 0)} thư (khớp {gk.get('da_khop', 0)}, chưa khớp {gk.get('chua_khop', 0)})"
+            + (f" · ⚠ {cho.get('hd_chua_gui')} hóa đơn bán phát hành > 3 ngày CHƯA gửi khách" if cho.get('hd_chua_gui') else "")
+            + "\n"
             f"• 🔧 Spec: đọc lại {sp.get('xu_ly', 0)} thư đã xác nhận, điền spec {sp.get('so_spec', 0)} sản phẩm\n"
             + ("• ⚠ Lỗi: " + " | ".join(kq.get("loi") or [])[:400] + "\n" if kq.get("loi") else "")
             + "→ Vào app xác nhận từng thư — AI không tự ghi gì khi chưa xác nhận.")

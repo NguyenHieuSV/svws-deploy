@@ -1679,15 +1679,21 @@ def quet_hoa_don_email(tu_ngay: date | None = None, db: Session = Depends(get_db
             theo_email[k] = e
     them = trung = dung_ai = khong_khop = con_lai = 0
     GIOI_HAN = 25          # mỗi lần quét AI đọc tối đa 25 thư mới — phần còn lại quét lần sau
+    from ..config import settings as _st_ct
+    mien_cty = ((_st_ct.email_from_ncc or _st_ct.email_from or "").split("@")[-1] or "").strip().lower()
     for m in thu:
         mid = (m.get("message_id") or "").strip()[:250] or None
         if mid and db.query(CtHoaDonDauVao).filter_by(message_id=mid).first():
             trung += 1
             continue
+        tieu_de = (m.get("tieu_de") or "")[:250]
+        nguoi_gui = (m.get("tu_email") or "").strip().lower()
+        if mien_cty and nguoi_gui.endswith("@" + mien_cty) and not any(x in tieu_de.lower() for x in ("fw:", "fwd:", "chuyển tiếp", "chuyen tiep")):
+            khong_khop += 1                                 # 📤 thư công ty gửi đi (hóa đơn BÁN, Bcc về inf@) → không phải hóa đơn đầu vào
+            continue
         if them >= GIOI_HAN:
             con_lai += 1
             continue
-        tieu_de = (m.get("tieu_de") or "")[:250]
         nd_thu = m.get("noi_dung") or ""
         tU = (tieu_de + "\n" + nd_thu).upper()
         ts_id, ma_da, best = None, None, ""

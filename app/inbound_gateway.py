@@ -7,7 +7,7 @@ import email, imaplib
 import html as _html
 import re as _re
 from email.header import decode_header, make_header
-from email.utils import parseaddr
+from email.utils import parseaddr, getaddresses
 from typing import Protocol
 from .config import settings
 
@@ -180,7 +180,12 @@ def _imap_lay_thu(tu_ngay=None) -> list[dict]:
         kem = _thu_long(m)
         if kem:
             nd = (nd + "\n\n" + kem).strip()
+        try:
+            den = ", ".join(a for _, a in getaddresses([m.get("To") or "", m.get("Cc") or ""]) if a)[:300]
+        except Exception:
+            den = ""
         out.append({"tu_email": parseaddr(m.get("From"))[1],
+                    "den_email": den,
                     "tieu_de": _txt(m.get("Subject")),
                     "noi_dung": nd,
                     "dinh_kem": _dinh_kem(m),
