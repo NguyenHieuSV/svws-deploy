@@ -122,3 +122,14 @@ def test_doc_anh_chan_quyen_va_gioi_han(du_an):
 def test_trang_chup_anh():
     r = _client.get("/chup-anh")
     assert r.status_code == 200 and "Chụp ảnh" in r.text and "/doc-anh" in r.text
+
+
+def test_cai_app_pwa():
+    m = _client.get("/chup-anh/manifest.webmanifest")
+    assert m.status_code == 200 and m.json()["display"] == "standalone"
+    for ic in m.json()["icons"]:
+        assert _client.get(ic["src"]).status_code == 200
+    assert _client.get("/chup-anh/apple-touch-icon.png").status_code == 200
+    assert _client.get("/chup-anh-sw.js").headers["content-type"].startswith("text/javascript")
+    assert _client.get("/chup-anh/khong-co.txt").status_code == 404
+    assert 'rel="manifest"' in _client.get("/chup-anh").text

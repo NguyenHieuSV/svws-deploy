@@ -75,6 +75,29 @@ def chup_anh():
     return {"he_thong": "SVWS", "trang_thai": "chua co trang chup anh"}
 
 
+# --- Cài "BCVH SVWS" như app trên điện thoại (PWA): manifest, icon, service worker ---
+_PWA_DIR = os.path.join(os.path.dirname(__file__), "..", "static", "pwa")
+_PWA_TEP = {"manifest.webmanifest": "application/manifest+json",
+            "icon-192.png": "image/png", "icon-512.png": "image/png",
+            "icon-maskable-512.png": "image/png", "apple-touch-icon.png": "image/png"}
+
+
+@app.get("/chup-anh/{ten}")
+def chup_anh_pwa(ten: str):
+    if ten not in _PWA_TEP:
+        from fastapi import HTTPException
+        raise HTTPException(404, "Không có tệp này")
+    return FileResponse(os.path.join(_PWA_DIR, ten), media_type=_PWA_TEP[ten],
+                        headers={"Cache-Control": "public, max-age=86400"})
+
+
+@app.get("/chup-anh-sw.js")
+def chup_anh_sw():
+    """Service worker đặt ở gốc site để đăng ký scope '/chup-anh' (trang không có dấu / cuối)."""
+    return FileResponse(os.path.join(_PWA_DIR, "sw.js"), media_type="text/javascript; charset=utf-8",
+                        headers=_NO_CACHE)
+
+
 @app.get("/so-tay-quy-che")
 def so_tay_quy_che():
     """Tải Sổ tay quy chế công ty (bản Word) cho mọi người tham khảo."""
