@@ -3607,6 +3607,11 @@ def quet_hd_gui_khach_email(tu_ngay: date | None, db: Session, nd: NguoiDung) ->
     if not mien_cty:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Chưa cấu hình EMAIL_FROM — không xác định được tên miền công ty")
     email_kh, mien_kh = _tkc_email_khach(db)
+    from ..models import NhaCungCap as _NCC_gk, CtNccEmail as _CtE_gk
+    email_ncc = {(n.email or "").strip().lower() for n in db.query(_NCC_gk).all()} | \
+                {(e.email or "").strip().lower() for e in db.query(_CtE_gk).all()}
+    email_ncc.discard("")
+    _TEN_CTY = ("song viet", "songviet", "svws")
     them = da_khop = trung = dung_ai = khong_khop = con_lai = 0
     GIOI_HAN = 20
     for m in thu:
@@ -3628,15 +3633,19 @@ def quet_hd_gui_khach_email(tu_ngay: date | None, db: Session, nd: NguoiDung) ->
         if them >= GIOI_HAN:
             con_lai += 1
             continue
-        # người nhận → khách
+        # người nhận → khách; gửi tới NCC (trả lời NCC kèm hóa đơn của họ) → không phải hóa đơn bán
         den = (m.get("den_email") or "").strip().lower()
         kh_id = None
+        toi_ncc = False
         for a in [x.strip() for x in den.split(",") if x.strip()]:
             if a.endswith("@" + mien_cty):
                 continue
-            kh_id = email_kh.get(a) or mien_kh.get(a.split("@")[-1] if "@" in a else "")
-            if kh_id:
-                break
+            if a in email_ncc:
+                toi_ncc = True
+            kh_id = kh_id or email_kh.get(a) or mien_kh.get(a.split("@")[-1] if "@" in a else "")
+        if toi_ncc and not kh_id:
+            khong_khop += 1
+            continue
         # đọc số HĐ · tiền: ưu tiên file XML/PDF, rồi thân thư, rồi regex
         info, ten_file = None, None
         for t in kems:
@@ -3661,6 +3670,10 @@ def quet_hd_gui_khach_email(tu_ngay: date | None, db: Session, nd: NguoiDung) ->
                 dung_ai += 1
         if info is None:
             info = _tkc_doc_regex(tieu_de, nd_thu)
+        ben_ban = _tkc_kd(str(info.get("ncc_ten") or ""))
+        if ben_ban and not any(t in ben_ban for t in _TEN_CTY):
+            khong_khop += 1                                 # hóa đơn do bên khác phát hành (NCC) → không phải hóa đơn bán của công ty
+            continue
         so_hd = (str(info.get("so_hoa_don") or "").strip()[:80] or None)
         so_tien = None
         try:
