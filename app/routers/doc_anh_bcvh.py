@@ -100,6 +100,7 @@ async def doc_anh(ts_id: int,
                   files: list[UploadFile] = File(...),
                   ngay: str | None = Form(None),
                   goi_y: str = Form("[]"),
+                  ngay_chup: str = Form("[]"),
                   db: Session = Depends(get_db),
                   _=Depends(yeu_cau(MODULE, "THAO_TAC"))):
     """AI đọc 1–10 ảnh hiện trường → đề xuất dòng cho 3 bảng BCVH (CHƯA lưu)."""
@@ -115,17 +116,23 @@ async def doc_anh(ts_id: int,
         ds_goi_y = [str(x or "") for x in json.loads(goi_y or "[]")][:TOI_DA_ANH]
     except Exception:
         ds_goi_y = []
+    try:   # ngày giờ chụp từng ảnh (trang đọc EXIF trước khi thu nhỏ) — "YYYY-MM-DD HH:MM" hoặc ""
+        ds_ngay_chup = [(str(x or "") if re.fullmatch(r"\d{4}-\d{2}-\d{2}( \d{2}:\d{2})?", str(x or "")) else "")
+                        for x in json.loads(ngay_chup or "[]")][:TOI_DA_ANH]
+    except Exception:
+        ds_ngay_chup = []
     anh = [(await f.read(), f.content_type or "", f.filename or f"anh{i + 1}.jpg")
            for i, f in enumerate(files)]
     mau = _mau_du_an(db, ts)
     try:
-        kq = await run_in_threadpool(ai_gateway.doc_anh_bcvh, anh, mau, ngay_bc, ds_goi_y)
+        kq = await run_in_threadpool(ai_gateway.doc_anh_bcvh, anh, mau, ngay_bc, ds_goi_y, ds_ngay_chup)
     except ValueError as e:
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(e))
-    return hau_xu_ly(db, ts_id, mau, kq, ngay_bc, len(anh))
+    return hau_xu_ly(db, ts_id, mau, kq, ngay_bc, len(anh), ds_ngay_chup)
 
 
-def hau_xu_ly(db: Session, ts_id: int, mau: dict, kq: dict, ngay_bc: str, so_anh: int) -> dict:
+def hau_xu_ly(db: Session, ts_id: int, mau: dict, kq: dict, ngay_bc: str, so_anh: int,
+              ngay_chup: list[str] | None = None) -> dict:
     """Chuẩn hoá tên theo danh mục + gắn cảnh báo so với dữ liệu đã ghi. Tách riêng để test không cần AI."""
     ds_vt = sorted({c["vi_tri"] for c in mau["ky_thuat"] if c.get("vi_tri")})
     ds_ct = sorted({c["chi_tieu"] for c in mau["ky_thuat"]})
@@ -158,10 +165,27 @@ def hau_xu_ly(db: Session, ts_id: int, mau: dict, kq: dict, ngay_bc: str, so_anh
         except (TypeError, ValueError):
             return None
 
+    ngay_chup = ngay_chup or []
+
+    def _ngay_anh(n):
+        """Ngày chụp (YYYY-MM-DD) của ảnh số n, "" nếu không rõ."""
+        return (ngay_chup[n - 1][:10] if n and n <= len(ngay_chup) and ngay_chup[n - 1] else "")
+
+    def _ngay_dong(x, n):
+        # ưu tiên ngày AI đọc trong ảnh; không có thì ngày chụp của chính ảnh đó; cuối cùng ngày báo cáo
+        return _ngay(x.get("ngay"), _ngay_anh(n) or ngay_bc)
+
+    def _cb_ngay(r, cb):
+        nc = _ngay_anh(r["anh"])
+        if nc and r["ngay"] != nc:
+            cb.append(_cb("info", f"Ngày trên ảnh ({r['ngay'][8:10]}/{r['ngay'][5:7]}) khác ngày chụp "
+                                  f"({nc[8:10]}/{nc[5:7]}) — kiểm tra đồng hồ máy đo / ngày ghi sổ."))
+
     # ---- Kỹ thuật ----
     ky_thuat = []
     for x in kq.get("ky_thuat") or []:
-        r = {"anh": _anh_so(x.get("anh")), "ngay": _ngay(x.get("ngay"), ngay_bc),
+        n_anh = _anh_so(x.get("anh"))
+        r = {"anh": n_anh, "ngay": _ngay_dong(x, n_anh),
              "vi_tri": str(x.get("vi_tri") or "").strip(), "chi_tieu": str(x.get("chi_tieu") or "").strip(),
              "ket_qua": "" if x.get("ket_qua") is None else str(x.get("ket_qua")).strip(),
              "don_vi": str(x.get("don_vi") or "").strip(), "ghi_chu": str(x.get("ghi_chu") or "").strip(),
@@ -176,6 +200,7 @@ def hau_xu_ly(db: Session, ts_id: int, mau: dict, kq: dict, ngay_bc: str, so_anh
             r["don_vi"] = r["don_vi"] or (dv_ct.get(_chuan(khop_ct)) or "")
         cb = []
         _cb_tin_cay(r, cb)
+        _cb_ngay(r, cb)
         if not r["ket_qua"]:
             cb.append(_cb("warn", "Chưa có giá trị — dòng trống sẽ không được lưu."))
         if ds_vt and not r["vi_tri"]:
@@ -197,7 +222,8 @@ def hau_xu_ly(db: Session, ts_id: int, mau: dict, kq: dict, ngay_bc: str, so_anh
     # ---- Hóa chất - vật tư ----
     hoa_chat = []
     for x in kq.get("hoa_chat") or []:
-        r = {"anh": _anh_so(x.get("anh")), "ngay": _ngay(x.get("ngay"), ngay_bc),
+        n_anh = _anh_so(x.get("anh"))
+        r = {"anh": n_anh, "ngay": _ngay_dong(x, n_anh),
              "ten": str(x.get("ten") or "").strip(), "luong_nhap": _so(x.get("luong_nhap")),
              "luong_ton": _so(x.get("luong_ton")), "don_vi": str(x.get("don_vi") or "").strip(),
              "ghi_chu": str(x.get("ghi_chu") or "").strip(),
@@ -230,7 +256,8 @@ def hau_xu_ly(db: Session, ts_id: int, mau: dict, kq: dict, ngay_bc: str, so_anh
     # ---- Khối lượng ----
     khoi_luong = []
     for x in kq.get("khoi_luong") or []:
-        r = {"anh": _anh_so(x.get("anh")), "ngay": _ngay(x.get("ngay"), ngay_bc),
+        n_anh = _anh_so(x.get("anh"))
+        r = {"anh": n_anh, "ngay": _ngay_dong(x, n_anh),
              "he_thong": str(x.get("he_thong") or "").strip(), "chi_so": _so(x.get("chi_so")),
              "don_vi": str(x.get("don_vi") or "").strip() or "m3", "ghi_chu": str(x.get("ghi_chu") or "").strip(),
              "tin_cay": _tin_cay(x.get("tin_cay")), "ly_do": str(x.get("ly_do") or "").strip()}
@@ -241,6 +268,7 @@ def hau_xu_ly(db: Session, ts_id: int, mau: dict, kq: dict, ngay_bc: str, so_anh
             r["don_vi"] = dv_kl.get(_chuan(khop)) or r["don_vi"]
         cb = []
         _cb_tin_cay(r, cb)
+        _cb_ngay(r, cb)
         if not r["he_thong"]:
             cb.append(_cb("warn", "Chọn hệ thống (đồng hồ) cho chỉ số này."))
         elif ds_kl and not khop:
@@ -258,6 +286,7 @@ def hau_xu_ly(db: Session, ts_id: int, mau: dict, kq: dict, ngay_bc: str, so_anh
         n = _anh_so(a.get("so"))
         if n:
             loai = a.get("loai") if a.get("loai") in ai_gateway.LOAI_ANH_BCVH else "khac"
-            anh.append({"so": n, "loai": loai, "mo_ta": str(a.get("mo_ta") or "")[:200]})
+            anh.append({"so": n, "loai": loai, "mo_ta": str(a.get("mo_ta") or "")[:200],
+                        "ngay_chup": ngay_chup[n - 1] if n <= len(ngay_chup) else ""})
     return {"ngay": ngay_bc, "anh": anh, "ky_thuat": ky_thuat, "hoa_chat": hoa_chat,
             "khoi_luong": khoi_luong, "mau": mau}

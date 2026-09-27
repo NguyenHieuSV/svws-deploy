@@ -60,7 +60,7 @@ def test_doc_anh_hau_xu_ly_va_luu(du_an, monkeypatch):
     ts, H = du_an
     monkeypatch.setattr(settings, "anthropic_api_key", "test")
 
-    def gia(anh, mau, ngay, goi_y):
+    def gia(anh, mau, ngay, goi_y, ngay_chup=None):
         assert len(anh) == 3 and goi_y[0] == "Sau DAF"
         assert any(c["chi_tieu"] == "COD (mg/l)" for c in mau["ky_thuat"])
         return {
@@ -133,3 +133,34 @@ def test_cai_app_pwa():
     assert _client.get("/chup-anh-sw.js").headers["content-type"].startswith("text/javascript")
     assert _client.get("/chup-anh/khong-co.txt").status_code == 404
     assert 'rel="manifest"' in _client.get("/chup-anh").text
+
+
+def test_ngay_chup_tu_exif(du_an, monkeypatch):
+    """Ảnh cũ: dòng không có ngày trong ảnh lấy NGÀY CHỤP của chính ảnh đó; ngày trong ảnh khác ngày chụp → nhắc."""
+    ts, H = du_an
+    monkeypatch.setattr(settings, "anthropic_api_key", "test")
+    nhan = {}
+
+    def gia(anh, mau, ngay, goi_y, ngay_chup=None):
+        nhan["ngay_chup"] = ngay_chup
+        return {"anh": [{"so": 1, "loai": "may_do_cam_tay"}, {"so": 2, "loai": "man_hinh_hmi"}],
+                "ky_thuat": [{"anh": 1, "vi_tri": "Sau DAF", "chi_tieu": "COD (mg/l)", "ket_qua": "80", "tin_cay": "cao"},
+                             {"anh": 2, "ngay": "2026-09-20", "vi_tri": "Sau DAF", "chi_tieu": "COD (mg/l)",
+                              "ket_qua": "90", "tin_cay": "cao"}],
+                "hoa_chat": [], "khoi_luong": []}
+    monkeypatch.setattr(ai_gateway, "doc_anh_bcvh", gia)
+    r = _client.post(f"/cho-thue/tai-san/{ts}/doc-anh", headers=H, files=_anh(2),
+                     data={"ngay": "2026-09-27", "ngay_chup": '["2026-09-24 08:15","2026-09-24 09:00"]'})
+    assert r.status_code == 200, r.text
+    kq = r.json()
+    assert nhan["ngay_chup"] == ["2026-09-24 08:15", "2026-09-24 09:00"]
+    kt = kq["ky_thuat"]
+    assert kt[0]["ngay"] == "2026-09-24"                       # không có ngày trong ảnh → ngày chụp
+    assert not any("khác ngày chụp" in c["noi_dung"] for c in kt[0]["canh_bao"])
+    assert kt[1]["ngay"] == "2026-09-20"                       # ngày trong ảnh được ưu tiên
+    assert any("khác ngày chụp" in c["noi_dung"] for c in kt[1]["canh_bao"])
+    assert kq["anh"][0]["ngay_chup"] == "2026-09-24 08:15"
+    # giá trị rác bị bỏ qua, không làm hỏng request
+    r = _client.post(f"/cho-thue/tai-san/{ts}/doc-anh", headers=H, files=_anh(1),
+                     data={"ngay": "2026-09-27", "ngay_chup": '["hôm qua"]'})
+    assert r.status_code == 200 and r.json()["ky_thuat"][0]["ngay"] == "2026-09-27"
