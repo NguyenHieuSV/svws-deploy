@@ -4424,10 +4424,18 @@ def gan_ma_chi_phi(data: GanMaVao, db: Session = Depends(get_db),
             if dm is None:
                 continue
             cu = {"ma_ban": dm.ma_ban, "don_hang_id": dm.don_hang_id}
+            ma_cu_po = _ma_ban_hang_po(db, dm)
             dm.ma_ban = ma
             dh_id = so_dh.get(ma.lower())
-            if dh_id and not dm.don_hang_id:
+            if str(ma_cu_po or "").strip().lower() != ma.lower():
+                # 🔁 CHUYỂN MÃ: mã mới là số một đơn bán → gắn đơn đó; không thì GỠ đơn cũ (PO không còn tính vào mã cũ)
+                dm.don_hang_id = dh_id if dh_id else None
+            elif dh_id and not dm.don_hang_id:
                 dm.don_hang_id = dh_id
+            from ..models import ChiPhiVanHanh as _CPVg
+            for _cp in db.query(_CPVg).filter(_CPVg.don_mua_id == dm.id).all():   # chi phí VH đang nối PO → đổi mã theo
+                _cp.ma_ban_hang = ma[:40]
+                _cp.don_hang_id = dm.don_hang_id
             ghi_audit(db, nd.id, "GAN_MA", "don_mua", dm.id, cu=cu,
                       moi={"ma_ban": ma, "don_hang_id": dm.don_hang_id})
             n_po += 1
