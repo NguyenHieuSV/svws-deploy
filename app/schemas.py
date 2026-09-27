@@ -895,6 +895,10 @@ class ThamSoLuongVao(BaseModel):
     luong_toi_thieu_vung: Decimal | None = None
     tru_bh_nv: bool | None = None
     bac_thue: list | None = None
+    tn_nguong_khau_tru: Decimal | None = None          # mig 136: thuê ngoài
+    tn_tl_thue_cu_tru: Decimal | None = None
+    tn_tl_thue_khong_cu_tru: Decimal | None = None
+    tn_nguong_khong_tien_mat: Decimal | None = None
 
 
 class ChamCongRecord(BaseModel):

@@ -412,7 +412,8 @@ def lay_tham_so_luong_ep(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE
         "tl_bhxh_nv", "tl_bhyt_nv", "tl_bhtn_nv", "tl_bhxh_dn", "tl_bhyt_dn", "tl_bhtn_dn", "tl_kpcd_dn",
         "tran_bhxh_bhyt", "tran_bhtn", "giam_tru_ban_than", "giam_tru_phu_thuoc",
         "mien_thue_an", "hs_ot_thuong", "hs_ot_cuoi_tuan", "hs_ot_le",
-        "luong_co_so", "luong_toi_thieu_vung")} | {
+        "luong_co_so", "luong_toi_thieu_vung",
+        "tn_nguong_khau_tru", "tn_tl_thue_cu_tru", "tn_tl_thue_khong_cu_tru", "tn_nguong_khong_tien_mat")} | {
         "bac_thue": bac, "tru_bh_nv": bool(ts.tru_bh_nv)}
 
 
@@ -423,7 +424,8 @@ def cap_nhat_tham_so_luong(data: ThamSoLuongVao, db: Session = Depends(get_db),
     for k in ("tl_bhxh_nv", "tl_bhyt_nv", "tl_bhtn_nv", "tl_bhxh_dn", "tl_bhyt_dn", "tl_bhtn_dn", "tl_kpcd_dn",
               "tran_bhxh_bhyt", "tran_bhtn", "giam_tru_ban_than", "giam_tru_phu_thuoc",
               "mien_thue_an", "hs_ot_thuong", "hs_ot_cuoi_tuan", "hs_ot_le",
-              "luong_co_so", "luong_toi_thieu_vung"):
+              "luong_co_so", "luong_toi_thieu_vung",
+              "tn_nguong_khau_tru", "tn_tl_thue_cu_tru", "tn_tl_thue_khong_cu_tru", "tn_nguong_khong_tien_mat"):
         v = getattr(data, k)
         if v is not None:
             setattr(ts, k, v)
@@ -2472,3 +2474,486 @@ async def nhap_cham_cong_excel(thang: str, file: UploadFile = File(...),
               moi={"thang": thang, "cap_nhat": cap_nhat})
     db.commit()
     return {"cap_nhat": cap_nhat, "bo_qua": bo_qua, "chi_tiet": chi_tiet}
+
+
+# =====================================================================================
+# 👷 NHÂN SỰ THUÊ NGOÀI (mig 136) — cá nhân KHÔNG ký HĐLĐ: dịch vụ / khoán việc / CTV /
+# thời vụ / hộ kinh doanh. Không đóng BHXH qua công ty, không giảm trừ gia cảnh; thuế TNCN
+# khấu trừ TẠI NGUỒN theo THUẾ SUẤT TOÀN PHẦN (TT 111/2013/TT-BTC Điều 25 khoản 1 điểm i:
+# cư trú 10% khi mỗi lần trả ≥ 2.000.000 đ; Điều 18: không cư trú 20%). Có cam kết
+# 08/CK-TNCN (TT 80/2021) + MST + ước tính thu nhập cả năm chưa tới mức chịu thuế → tạm
+# không khấu trừ. Hộ kinh doanh xuất hóa đơn → không khấu trừ (hộ tự kê khai).
+# =====================================================================================
+from pydantic import BaseModel as _TnBase, Field as _TnField
+from sqlalchemy.orm.attributes import flag_modified as _tn_flag
+from ..models import NhanSuThueNgoai, ThanhToanThueNgoai
+
+TN_LOAI = {"DICH_VU": "Hợp đồng dịch vụ", "KHOAN_VIEC": "Hợp đồng khoán việc", "CTV": "Cộng tác viên",
+           "THOI_VU": "Thời vụ (HĐLĐ dưới 1 tháng)", "HO_KINH_DOANH": "Hộ / cá nhân kinh doanh (có hóa đơn)"}
+TN_HO_SO = [("hop_dong", "Hợp đồng (dịch vụ / khoán việc / CTV) đã ký"),
+            ("cccd", "Bản sao CCCD"),
+            ("mst", "Mã số thuế cá nhân"),
+            ("tai_khoan", "Số tài khoản ngân hàng (chi ≥ 5 triệu phải chuyển khoản)"),
+            ("cam_ket", "Cam kết 08/CK-TNCN (chỉ khi không khấu trừ)"),
+            ("hoa_don", "Hóa đơn của hộ kinh doanh (chỉ hộ / cá nhân kinh doanh)"),
+            ("giay_phep", "Giấy đăng ký hộ kinh doanh (chỉ hộ kinh doanh)")]
+
+
+class ThueNgoaiVao(_TnBase):
+    ma: str | None = None
+    ho_ten: str = _TnField(min_length=1, max_length=120)
+    ngay_sinh: date | None = None
+    cccd: str | None = None
+    cccd_ngay_cap: date | None = None
+    cccd_noi_cap: str | None = None
+    dia_chi: str | None = None
+    dien_thoai: str | None = None
+    email: str | None = None
+    ma_so_thue: str | None = None
+    cu_tru: bool = True
+    loai_hop_dong: str = _TnField(default="DICH_VU", pattern="^(DICH_VU|KHOAN_VIEC|CTV|THOI_VU|HO_KINH_DOANH)$")
+    so_hop_dong: str | None = None
+    ngay_ky: date | None = None
+    ngay_bat_dau: date | None = None
+    ngay_ket_thuc: date | None = None
+    noi_dung_cv: str | None = None
+    don_gia: Decimal = Decimal(0)
+    don_vi: str | None = None
+    ngan_hang: str | None = None
+    so_tai_khoan: str | None = None
+    chu_tai_khoan: str | None = None
+    cam_ket_08: bool = False
+    cam_ket_ngay: date | None = None
+    hkd_hoa_don: bool = False
+    tk_chi_phi: str = "642"
+    ho_so: dict | None = None
+    trang_thai: str = _TnField(default="DANG_HOP_TAC", pattern="^(DANG_HOP_TAC|KET_THUC)$")
+    ghi_chu: str | None = None
+
+
+class ThanhToanTnVao(_TnBase):
+    thue_ngoai_id: int
+    ky: str = _TnField(pattern=r"^\d{4}-\d{2}$")
+    ngay: date | None = None
+    noi_dung: str | None = None
+    khoi_luong: Decimal = Decimal(1)
+    don_gia: Decimal = Decimal(0)
+    khoan_khac: Decimal = Decimal(0)
+    hinh_thuc: str = _TnField(default="CK", pattern="^(CK|TM)$")
+    so_chung_tu: str | None = None
+    bien_ban_nghiem_thu: bool = False
+    chung_tu_khau_tru: str | None = None
+    so_hoa_don: str | None = None
+    ghi_chu: str | None = None
+
+
+class TnChiVao(_TnBase):
+    ngay_chi: date | None = None
+    so_chung_tu: str | None = None
+    hinh_thuc: str | None = None
+    chung_tu_khau_tru: str | None = None
+
+
+def _tn_vnd(x) -> str:
+    return f"{int(x or 0):,}".replace(",", ".")
+
+
+def _tn_ts(db):
+    ts = _lay_tham_so_luong(db)
+    return {"nguong": _Dec(str(getattr(ts, "tn_nguong_khau_tru", None) or 2000000)),
+            "tl_ct": _Dec(str(getattr(ts, "tn_tl_thue_cu_tru", None) or "0.10")),
+            "tl_kct": _Dec(str(getattr(ts, "tn_tl_thue_khong_cu_tru", None) or "0.20")),
+            "nguong_ck": _Dec(str(getattr(ts, "tn_nguong_khong_tien_mat", None) or 5000000)),
+            "gt_ban_than": _Dec(str(ts.giam_tru_ban_than or 11000000))}
+
+
+def _tn_luy_ke_nam(db, tn_id: int, nam: int, tru_id: int | None = None) -> _Dec:
+    q = db.query(func.coalesce(func.sum(ThanhToanThueNgoai.thu_nhap), 0)).filter(
+        ThanhToanThueNgoai.thue_ngoai_id == tn_id, ThanhToanThueNgoai.ky.like(f"{nam}-%"))
+    if tru_id:
+        q = q.filter(ThanhToanThueNgoai.id != tru_id)
+    return _Dec(str(q.scalar() or 0))
+
+
+def _tn_tinh_thue(db, ng: NhanSuThueNgoai, thu_nhap: _Dec, ky: str, tru_id: int | None = None):
+    """Trả (thue_suat, thue, ly_do, canh_bao[]) cho MỘT lần chi trả."""
+    p = _tn_ts(db)
+    cb = []
+    thu_nhap = _Dec(str(int(thu_nhap or 0)))
+    nam = int(ky[:4])
+    luy_ke = _tn_luy_ke_nam(db, ng.id, nam, tru_id) + thu_nhap
+    nguong_nam = p["gt_ban_than"] * 12
+    if ng.loai_hop_dong == "HO_KINH_DOANH" or ng.hkd_hoa_don:
+        ts, ly_do = _Dec(0), "Hộ / cá nhân kinh doanh xuất hóa đơn — hộ tự kê khai, DN không khấu trừ TNCN"
+        if not ng.hkd_hoa_don:
+            cb.append("Hộ kinh doanh nhưng chưa đánh dấu 'xuất hóa đơn' — không có hóa đơn thì phải khấu trừ như cá nhân")
+    elif not ng.cu_tru:
+        ts, ly_do = p["tl_kct"], f"Cá nhân KHÔNG cư trú — khấu trừ {int(p['tl_kct'] * 100)}% trên tổng thu nhập (TT 111/2013 Điều 18)"
+    elif thu_nhap < p["nguong"]:
+        ts, ly_do = _Dec(0), f"Dưới ngưỡng {_tn_vnd(p['nguong'])} đ/lần — không khấu trừ"
+    elif ng.cam_ket_08 and (ng.ma_so_thue or "").strip():
+        ts, ly_do = _Dec(0), "Có cam kết 08/CK-TNCN + MST — tạm thời không khấu trừ (cá nhân tự quyết toán)"
+        if luy_ke > nguong_nam:
+            cb.append(f"Lũy kế năm {nam} = {_tn_vnd(luy_ke)} đ đã vượt mức không phải nộp thuế "
+                      f"({_tn_vnd(nguong_nam)} đ = giảm trừ bản thân × 12) — cam kết 08 KHÔNG còn hợp lệ, phải khấu trừ "
+                      f"{int(p['tl_ct'] * 100)}%")
+            ts, ly_do = p["tl_ct"], f"Vượt mức cam kết — khấu trừ {int(p['tl_ct'] * 100)}%"
+    else:
+        ts, ly_do = p["tl_ct"], (f"Cư trú, không HĐLĐ / HĐLĐ < 3 tháng, ≥ {_tn_vnd(p['nguong'])} đ/lần — khấu trừ "
+                                 f"{int(p['tl_ct'] * 100)}% (TT 111/2013 Điều 25.1.i)")
+        if ng.cam_ket_08 and not (ng.ma_so_thue or "").strip():
+            cb.append("Có cam kết 08 nhưng THIẾU mã số thuế — cam kết chỉ hợp lệ khi cá nhân đã có MST tại thời điểm cam kết")
+    thue = _Dec(int(thu_nhap * ts))
+    return ts, thue, ly_do, cb
+
+
+def _tn_canh_bao_ho_so(ng: NhanSuThueNgoai, thu_nhap: _Dec, hinh_thuc: str, p: dict, thue: _Dec,
+                       chung_tu_khau_tru: str | None, bien_ban: bool, so_hoa_don: str | None):
+    cb = []
+    hs = ng.ho_so or {}
+    if not (ng.so_hop_dong or hs.get("hop_dong")):
+        cb.append("Chưa có hợp đồng — chi phí không có hợp đồng sẽ không được trừ khi tính thuế TNDN")
+    if not (ng.cccd or hs.get("cccd")):
+        cb.append("Thiếu CCCD — cần bản sao CCCD để chứng minh khoản chi cho cá nhân")
+    if not (ng.ma_so_thue or "").strip():
+        cb.append("Thiếu mã số thuế cá nhân — cần MST để kê khai 05/KK-TNCN và cấp chứng từ khấu trừ")
+    if thu_nhap >= p["nguong_ck"] and hinh_thuc != "CK":
+        cb.append(f"Chi ≥ {_tn_vnd(p['nguong_ck'])} đ bằng tiền mặt — phải CHUYỂN KHOẢN mới được trừ chi phí thuế TNDN "
+                  f"(NĐ 181/2025, Luật thuế TNDN 2025)")
+    if hinh_thuc == "CK" and not (ng.so_tai_khoan or "").strip():
+        cb.append("Chuyển khoản nhưng chưa có số tài khoản người nhận")
+    if not bien_ban and ng.loai_hop_dong in ("KHOAN_VIEC", "DICH_VU", "CTV"):
+        cb.append("Chưa có biên bản nghiệm thu / bảng kê khối lượng công việc")
+    if thue > 0 and not (chung_tu_khau_tru or "").strip():
+        cb.append("Đã khấu trừ thuế — phải cấp CHỨNG TỪ KHẤU TRỪ THUẾ TNCN điện tử cho cá nhân (NĐ 123/2020 Điều 32)")
+    if (ng.loai_hop_dong == "HO_KINH_DOANH" or ng.hkd_hoa_don) and not (so_hoa_don or "").strip():
+        cb.append("Hộ kinh doanh — thiếu số hóa đơn; không có hóa đơn thì không được trừ chi phí và phải khấu trừ TNCN")
+    if ng.loai_hop_dong == "THOI_VU" and ng.ngay_bat_dau and ng.ngay_ket_thuc \
+            and (ng.ngay_ket_thuc - ng.ngay_bat_dau).days >= 30:
+        cb.append("HĐLĐ từ đủ 1 tháng trở lên thuộc diện BHXH BẮT BUỘC (Luật BHXH 2024) — nên đưa vào Hồ sơ lương chính thức")
+    if ng.ngay_ket_thuc and ng.ngay_ket_thuc < date.today() and ng.trang_thai == "DANG_HOP_TAC":
+        cb.append(f"Hợp đồng đã hết hạn {ng.ngay_ket_thuc} — cần gia hạn / ký phụ lục trước khi chi trả")
+    return cb
+
+
+def _tn_dict(ng: NhanSuThueNgoai, db=None):
+    d = {c: getattr(ng, c) for c in ("id", "ma", "ho_ten", "ngay_sinh", "cccd", "cccd_ngay_cap", "cccd_noi_cap", "dia_chi",
+                                     "dien_thoai", "email", "ma_so_thue", "cu_tru", "loai_hop_dong", "so_hop_dong", "ngay_ky",
+                                     "ngay_bat_dau", "ngay_ket_thuc", "noi_dung_cv", "don_vi", "ngan_hang", "so_tai_khoan",
+                                     "chu_tai_khoan", "cam_ket_08", "cam_ket_ngay", "hkd_hoa_don", "tk_chi_phi", "trang_thai",
+                                     "ghi_chu")}
+    d["don_gia"] = _f(ng.don_gia)
+    d["ho_so"] = ng.ho_so or {}
+    d["loai_ten"] = TN_LOAI.get(ng.loai_hop_dong, ng.loai_hop_dong)
+    # hồ sơ: mục nào bắt buộc theo loại; thiếu gì
+    hs = ng.ho_so or {}
+    bat_buoc = ["hop_dong", "cccd", "mst", "tai_khoan"]
+    if ng.loai_hop_dong == "HO_KINH_DOANH" or ng.hkd_hoa_don:
+        bat_buoc += ["hoa_don", "giay_phep"]
+    if ng.cam_ket_08:
+        bat_buoc.append("cam_ket")
+    tu_dong = {"hop_dong": bool(ng.so_hop_dong), "cccd": bool(ng.cccd), "mst": bool((ng.ma_so_thue or "").strip()),
+               "tai_khoan": bool((ng.so_tai_khoan or "").strip()), "cam_ket": bool(ng.cam_ket_08 and ng.cam_ket_ngay)}
+    thieu = [k for k in bat_buoc if not (hs.get(k) or tu_dong.get(k))]
+    d["ho_so_thieu"] = thieu
+    d["ho_so_du"] = not thieu
+    if db is not None:
+        nam = date.today().year
+        d["luy_ke_nam"] = _f(_tn_luy_ke_nam(db, ng.id, nam))
+        d["so_lan_chi"] = db.query(func.count(ThanhToanThueNgoai.id)).filter(
+            ThanhToanThueNgoai.thue_ngoai_id == ng.id).scalar() or 0
+    return d
+
+
+def _tt_dict(t: ThanhToanThueNgoai, ng: NhanSuThueNgoai | None = None):
+    return {"id": t.id, "thue_ngoai_id": t.thue_ngoai_id, "ky": t.ky, "ngay": t.ngay, "noi_dung": t.noi_dung,
+            "khoi_luong": _f(t.khoi_luong), "don_gia": _f(t.don_gia), "khoan_khac": _f(t.khoan_khac),
+            "thu_nhap": _f(t.thu_nhap), "thue_suat": _f(t.thue_suat), "ly_do_thue": t.ly_do_thue,
+            "thue_tncn": _f(t.thue_tncn), "thuc_nhan": _f(t.thuc_nhan), "hinh_thuc": t.hinh_thuc,
+            "so_chung_tu": t.so_chung_tu, "bien_ban_nghiem_thu": bool(t.bien_ban_nghiem_thu),
+            "chung_tu_khau_tru": t.chung_tu_khau_tru, "so_hoa_don": t.so_hoa_don, "canh_bao": t.canh_bao or [],
+            "trang_thai": t.trang_thai, "ngay_duyet": t.ngay_duyet, "ngay_chi": t.ngay_chi, "ghi_chu": t.ghi_chu,
+            "ho_ten": ng.ho_ten if ng else None, "ma": ng.ma if ng else None,
+            "loai_hop_dong": ng.loai_hop_dong if ng else None, "ma_so_thue": ng.ma_so_thue if ng else None,
+            "cccd": ng.cccd if ng else None, "cu_tru": bool(ng.cu_tru) if ng else True}
+
+
+def _tn_ap_tinh(db, t: ThanhToanThueNgoai, ng: NhanSuThueNgoai):
+    """Tính lại thu nhập / thuế / thực nhận / cảnh báo cho một dòng chi trả (chưa chi)."""
+    p = _tn_ts(db)
+    thu_nhap = _Dec(int(_Dec(str(t.khoi_luong or 0)) * _Dec(str(t.don_gia or 0)))) + _Dec(int(t.khoan_khac or 0))
+    if thu_nhap <= 0:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Thu nhập phải > 0 (khối lượng × đơn giá + khoản khác)")
+    ts, thue, ly_do, cb = _tn_tinh_thue(db, ng, thu_nhap, t.ky, t.id)
+    t.thu_nhap, t.thue_suat, t.thue_tncn, t.thuc_nhan, t.ly_do_thue = thu_nhap, ts, thue, thu_nhap - thue, ly_do[:160]
+    cb += _tn_canh_bao_ho_so(ng, thu_nhap, t.hinh_thuc, p, thue, t.chung_tu_khau_tru, bool(t.bien_ban_nghiem_thu), t.so_hoa_don)
+    t.canh_bao = cb
+    _tn_flag(t, "canh_bao")
+
+
+@router.get("/thue-ngoai/loai")
+def tn_loai(_=Depends(yeu_cau(MODULE, "XEM"))):
+    return {"loai": TN_LOAI, "ho_so": TN_HO_SO}
+
+
+@router.get("/thue-ngoai")
+def tn_danh_sach(tat_ca: bool = False, db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
+    q = db.query(NhanSuThueNgoai)
+    if not tat_ca:
+        q = q.filter(NhanSuThueNgoai.trang_thai == "DANG_HOP_TAC")
+    return [_tn_dict(x, db) for x in q.order_by(NhanSuThueNgoai.trang_thai, NhanSuThueNgoai.ho_ten).all()]
+
+
+@router.post("/thue-ngoai", status_code=status.HTTP_201_CREATED)
+def tn_tao(data: ThueNgoaiVao, db: Session = Depends(get_db), nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    ng = NhanSuThueNgoai(nguoi_tao=nd.id)
+    for k, v in data.model_dump().items():
+        setattr(ng, k, v if k != "ho_so" else (v or {}))
+    if not ng.ma:
+        n = (db.query(func.count(NhanSuThueNgoai.id)).scalar() or 0) + 1
+        ng.ma = f"TN{n:03d}"
+    db.add(ng); db.flush()
+    ghi_audit(db, nd.id, "TAO", "nhan_su_thue_ngoai", ng.id, moi={"ho_ten": ng.ho_ten, "loai": ng.loai_hop_dong})
+    db.commit()
+    return _tn_dict(ng, db)
+
+
+@router.put("/thue-ngoai/{tn_id}")
+def tn_sua(tn_id: int, data: ThueNgoaiVao, db: Session = Depends(get_db),
+           nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    ng = db.get(NhanSuThueNgoai, tn_id)
+    if ng is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy nhân sự thuê ngoài")
+    cu = {"ho_ten": ng.ho_ten, "don_gia": _f(ng.don_gia), "cam_ket_08": ng.cam_ket_08, "cu_tru": ng.cu_tru}
+    for k, v in data.model_dump().items():
+        if k == "ho_so":
+            if v is not None:
+                ng.ho_so = v; _tn_flag(ng, "ho_so")
+        elif k == "ma":
+            if v:
+                ng.ma = v
+        else:
+            setattr(ng, k, v)
+    # các dòng chi trả CHƯA CHI → tính lại theo hồ sơ mới (cam kết, cư trú, hộ KD...)
+    for t in db.query(ThanhToanThueNgoai).filter(ThanhToanThueNgoai.thue_ngoai_id == ng.id,
+                                                 ThanhToanThueNgoai.trang_thai != "DA_CHI").all():
+        try:
+            _tn_ap_tinh(db, t, ng)
+        except HTTPException:
+            pass
+    ghi_audit(db, nd.id, "CAP_NHAT", "nhan_su_thue_ngoai", ng.id, cu=cu,
+              moi={"ho_ten": ng.ho_ten, "don_gia": _f(ng.don_gia), "cam_ket_08": ng.cam_ket_08, "cu_tru": ng.cu_tru})
+    db.commit()
+    return _tn_dict(ng, db)
+
+
+@router.delete("/thue-ngoai/{tn_id}")
+def tn_xoa(tn_id: int, db: Session = Depends(get_db), nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC")),
+           __: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN", "KTT"))):
+    ng = db.get(NhanSuThueNgoai, tn_id)
+    if ng is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy nhân sự thuê ngoài")
+    da_chi = db.query(func.count(ThanhToanThueNgoai.id)).filter(ThanhToanThueNgoai.thue_ngoai_id == tn_id,
+                                                                ThanhToanThueNgoai.trang_thai == "DA_CHI").scalar() or 0
+    if da_chi:
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            f"Đã có {da_chi} lần chi trả ĐÃ CHI — không xóa được hồ sơ; hãy chuyển trạng thái 'Kết thúc'.")
+    ghi_audit(db, nd.id, "XOA", "nhan_su_thue_ngoai", tn_id, cu={"ho_ten": ng.ho_ten})
+    db.delete(ng); db.commit()
+    return {"ok": True}
+
+
+@router.post("/thue-ngoai/tinh-thu")
+def tn_tinh_thu(data: ThanhToanTnVao, db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
+    """Xem trước thuế / thực nhận / cảnh báo (không lưu)."""
+    ng = db.get(NhanSuThueNgoai, data.thue_ngoai_id)
+    if ng is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy nhân sự thuê ngoài")
+    t = ThanhToanThueNgoai(thue_ngoai_id=ng.id, ky=data.ky, khoi_luong=data.khoi_luong, don_gia=data.don_gia,
+                           khoan_khac=data.khoan_khac, hinh_thuc=data.hinh_thuc, chung_tu_khau_tru=data.chung_tu_khau_tru,
+                           bien_ban_nghiem_thu=data.bien_ban_nghiem_thu, so_hoa_don=data.so_hoa_don)
+    _tn_ap_tinh(db, t, ng)
+    return _tt_dict(t, ng)
+
+
+@router.get("/thue-ngoai/chi-tra")
+def tn_ds_chi_tra(ky: str | None = None, nam: int | None = None, thue_ngoai_id: int | None = None,
+                  db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
+    q = db.query(ThanhToanThueNgoai, NhanSuThueNgoai).join(NhanSuThueNgoai, NhanSuThueNgoai.id == ThanhToanThueNgoai.thue_ngoai_id)
+    if ky:
+        q = q.filter(ThanhToanThueNgoai.ky == ky)
+    elif nam:
+        q = q.filter(ThanhToanThueNgoai.ky.like(f"{nam}-%"))
+    if thue_ngoai_id:
+        q = q.filter(ThanhToanThueNgoai.thue_ngoai_id == thue_ngoai_id)
+    rows = q.order_by(ThanhToanThueNgoai.ky.desc(), ThanhToanThueNgoai.ngay.desc(), ThanhToanThueNgoai.id.desc()).limit(2000).all()
+    ds = [_tt_dict(t, ng) for t, ng in rows]
+    tong = {"so_dong": len(ds), "thu_nhap": sum(x["thu_nhap"] for x in ds), "thue_tncn": sum(x["thue_tncn"] for x in ds),
+            "thuc_nhan": sum(x["thuc_nhan"] for x in ds), "canh_bao": sum(1 for x in ds if x["canh_bao"]),
+            "cho_duyet": sum(1 for x in ds if x["trang_thai"] == "NHAP"),
+            "da_duyet": sum(1 for x in ds if x["trang_thai"] == "DA_DUYET"),
+            "da_chi": sum(1 for x in ds if x["trang_thai"] == "DA_CHI")}
+    return {"danh_sach": ds, "tong": tong, "tham_so": {k: _f(v) for k, v in _tn_ts(db).items()}}
+
+
+@router.post("/thue-ngoai/chi-tra", status_code=status.HTTP_201_CREATED)
+def tn_tao_chi_tra(data: ThanhToanTnVao, db: Session = Depends(get_db),
+                   nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    ng = db.get(NhanSuThueNgoai, data.thue_ngoai_id)
+    if ng is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy nhân sự thuê ngoài")
+    t = ThanhToanThueNgoai(nguoi_tao=nd.id, ngay=data.ngay or date.today(), trang_thai="NHAP")
+    for k, v in data.model_dump().items():
+        if k != "ngay":
+            setattr(t, k, v)
+    _tn_ap_tinh(db, t, ng)
+    db.add(t); db.flush()
+    ghi_audit(db, nd.id, "TAO", "thanh_toan_thue_ngoai", t.id,
+              moi={"ho_ten": ng.ho_ten, "ky": t.ky, "thu_nhap": _f(t.thu_nhap), "thue": _f(t.thue_tncn)})
+    db.commit()
+    return _tt_dict(t, ng)
+
+
+@router.put("/thue-ngoai/chi-tra/{tt_id}")
+def tn_sua_chi_tra(tt_id: int, data: ThanhToanTnVao, db: Session = Depends(get_db),
+                   nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    t = db.get(ThanhToanThueNgoai, tt_id)
+    if t is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy dòng chi trả")
+    if t.trang_thai == "DA_CHI":
+        raise HTTPException(status.HTTP_409_CONFLICT, "Dòng đã CHI — không sửa được (xóa bút toán cần Kế toán trưởng)")
+    ng = db.get(NhanSuThueNgoai, data.thue_ngoai_id)
+    if ng is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy nhân sự thuê ngoài")
+    cu = {"thu_nhap": _f(t.thu_nhap), "thue": _f(t.thue_tncn)}
+    for k, v in data.model_dump().items():
+        if k == "ngay":
+            if v:
+                t.ngay = v
+        else:
+            setattr(t, k, v)
+    t.trang_thai = "NHAP"    # sửa số → duyệt lại
+    _tn_ap_tinh(db, t, ng)
+    ghi_audit(db, nd.id, "CAP_NHAT", "thanh_toan_thue_ngoai", t.id, cu=cu,
+              moi={"thu_nhap": _f(t.thu_nhap), "thue": _f(t.thue_tncn)})
+    db.commit()
+    return _tt_dict(t, ng)
+
+
+@router.delete("/thue-ngoai/chi-tra/{tt_id}")
+def tn_xoa_chi_tra(tt_id: int, db: Session = Depends(get_db), nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    t = db.get(ThanhToanThueNgoai, tt_id)
+    if t is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy dòng chi trả")
+    if t.trang_thai == "DA_CHI" and nd.vai_tro.ma not in ("CEO", "ADMIN", "KTT"):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Dòng đã CHI — chỉ CEO / Kế toán trưởng được xóa")
+    if t.trang_thai == "DA_CHI":
+        for bt in db.query(ButToan).filter(ButToan.nguon == "THUE_NGOAI", ButToan.nguon_id == t.id).all():
+            db.delete(bt)
+    ghi_audit(db, nd.id, "XOA", "thanh_toan_thue_ngoai", tt_id, cu={"thu_nhap": _f(t.thu_nhap), "trang_thai": t.trang_thai})
+    db.delete(t); db.commit()
+    return {"ok": True}
+
+
+@router.post("/thue-ngoai/chi-tra/{tt_id}/duyet")
+def tn_duyet_chi_tra(tt_id: int, db: Session = Depends(get_db), nd: NguoiDung = Depends(yeu_cau(MODULE, "XEM")),
+                     __: NguoiDung = Depends(chi_vai_tro("KTT", "CEO"))):
+    t = db.get(ThanhToanThueNgoai, tt_id)
+    if t is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy dòng chi trả")
+    if t.trang_thai != "NHAP":
+        raise HTTPException(status.HTTP_409_CONFLICT, "Dòng không ở trạng thái chờ duyệt")
+    ng = db.get(NhanSuThueNgoai, t.thue_ngoai_id)
+    _tn_ap_tinh(db, t, ng)   # chốt số theo tham số hiện hành
+    t.trang_thai, t.nguoi_duyet, t.ngay_duyet = "DA_DUYET", nd.id, date.today()
+    ghi_audit(db, nd.id, "DUYET", "thanh_toan_thue_ngoai", t.id, moi={"thu_nhap": _f(t.thu_nhap), "thue": _f(t.thue_tncn)})
+    db.commit()
+    return _tt_dict(t, ng)
+
+
+@router.post("/thue-ngoai/chi-tra/{tt_id}/chi")
+def tn_ghi_chi(tt_id: int, data: TnChiVao, db: Session = Depends(get_db), nd: NguoiDung = Depends(yeu_cau(MODULE, "XEM")),
+               __: NguoiDung = Depends(chi_vai_tro("KTT", "CEO", "ADMIN"))):
+    """✔ ĐÃ CHI: chốt dòng + bút toán (Nợ CP / Có 331 tổng thu nhập; Nợ 331 / Có 3335 thuế khấu trừ;
+    Nợ 331 / Có 111|112 thực trả)."""
+    from ..hach_toan import TK
+    t = db.get(ThanhToanThueNgoai, tt_id)
+    if t is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy dòng chi trả")
+    if t.trang_thai != "DA_DUYET":
+        raise HTTPException(status.HTTP_409_CONFLICT, "Phải được Kế toán trưởng / CEO DUYỆT trước khi ghi chi")
+    ng = db.get(NhanSuThueNgoai, t.thue_ngoai_id)
+    if data.hinh_thuc in ("CK", "TM"):
+        t.hinh_thuc = data.hinh_thuc
+    if data.so_chung_tu:
+        t.so_chung_tu = data.so_chung_tu[:60]
+    if data.chung_tu_khau_tru:
+        t.chung_tu_khau_tru = data.chung_tu_khau_tru[:60]
+    p = _tn_ts(db)
+    # chặn cứng: chi ≥ ngưỡng bằng tiền mặt → không hợp lệ về thuế TNDN
+    if _Dec(str(t.thu_nhap or 0)) >= p["nguong_ck"] and t.hinh_thuc != "CK":
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            f"Khoản chi {_tn_vnd(t.thu_nhap)} đ ≥ {_tn_vnd(p['nguong_ck'])} đ phải CHUYỂN KHOẢN "
+                            f"(chứng từ thanh toán không dùng tiền mặt) mới được trừ chi phí thuế TNDN.")
+    t.canh_bao = [c for c in _tn_canh_bao_ho_so(ng, _Dec(str(t.thu_nhap)), t.hinh_thuc, p, _Dec(str(t.thue_tncn)),
+                                                 t.chung_tu_khau_tru, bool(t.bien_ban_nghiem_thu), t.so_hoa_don)]
+    _tn_flag(t, "canh_bao")
+    t.trang_thai, t.ngay_chi = "DA_CHI", data.ngay_chi or date.today()
+    tkcp = ng.tk_chi_phi or TK["CP_LUONG"]
+    dg = f"Thuê ngoài {ng.ho_ten} kỳ {t.ky}"[:200]
+    bts = [ButToan(tk_no=tkcp, tk_co=TK["PHAI_TRA"], so_tien=t.thu_nhap, ngay=t.ngay_chi, nguon="THUE_NGOAI", nguon_id=t.id, dien_giai=dg)]
+    if t.thue_tncn and t.thue_tncn > 0:
+        bts.append(ButToan(tk_no=TK["PHAI_TRA"], tk_co=TK["THUE_TNCN"], so_tien=t.thue_tncn, ngay=t.ngay_chi,
+                           nguon="THUE_NGOAI", nguon_id=t.id, dien_giai=("Khấu trừ TNCN " + dg)[:200]))
+    bts.append(ButToan(tk_no=TK["PHAI_TRA"], tk_co=TK["TIEN_NH"] if t.hinh_thuc == "CK" else TK["TIEN_MAT"], so_tien=t.thuc_nhan,
+                       ngay=t.ngay_chi, nguon="THUE_NGOAI", nguon_id=t.id, dien_giai=("Chi trả " + dg)[:200]))
+    for bt in bts:
+        db.add(bt)
+    ghi_audit(db, nd.id, "GHI_CHI", "thanh_toan_thue_ngoai", t.id,
+              moi={"thuc_nhan": _f(t.thuc_nhan), "hinh_thuc": t.hinh_thuc, "so_chung_tu": t.so_chung_tu})
+    db.commit()
+    return _tt_dict(t, ng)
+
+
+@router.get("/thue-ngoai/tong-hop")
+def tn_tong_hop(nam: int | None = None, db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
+    """Tổng hợp theo tháng (cho tờ khai 05/KK-TNCN) + theo cá nhân (phụ lục 05-2/BK-QTT-TNCN cuối năm)."""
+    nam = nam or date.today().year
+    rows = db.query(ThanhToanThueNgoai, NhanSuThueNgoai).join(NhanSuThueNgoai, NhanSuThueNgoai.id == ThanhToanThueNgoai.thue_ngoai_id) \
+        .filter(ThanhToanThueNgoai.ky.like(f"{nam}-%")).all()
+    thang, ca_nhan = {}, {}
+    for t, ng in rows:
+        m = thang.setdefault(t.ky, {"ky": t.ky, "so_nguoi": set(), "so_lan": 0, "thu_nhap": 0.0, "thue": 0.0, "thuc_nhan": 0.0,
+                                    "khau_tru": 0.0, "khong_khau_tru": 0.0, "da_chi": 0, "chua_chi": 0})
+        m["so_nguoi"].add(ng.id); m["so_lan"] += 1
+        m["thu_nhap"] += _f(t.thu_nhap); m["thue"] += _f(t.thue_tncn); m["thuc_nhan"] += _f(t.thuc_nhan)
+        if _f(t.thue_tncn) > 0:
+            m["khau_tru"] += _f(t.thu_nhap)
+        else:
+            m["khong_khau_tru"] += _f(t.thu_nhap)
+        if t.trang_thai == "DA_CHI":
+            m["da_chi"] += 1
+        else:
+            m["chua_chi"] += 1
+        c = ca_nhan.setdefault(ng.id, {"id": ng.id, "ma": ng.ma, "ho_ten": ng.ho_ten, "ma_so_thue": ng.ma_so_thue, "cccd": ng.cccd,
+                                       "cu_tru": bool(ng.cu_tru), "loai": TN_LOAI.get(ng.loai_hop_dong, ng.loai_hop_dong),
+                                       "cam_ket_08": bool(ng.cam_ket_08), "so_lan": 0, "thu_nhap": 0.0, "thue": 0.0,
+                                       "thuc_nhan": 0.0, "chung_tu_kt": 0, "thieu_chung_tu": 0})
+        c["so_lan"] += 1; c["thu_nhap"] += _f(t.thu_nhap); c["thue"] += _f(t.thue_tncn); c["thuc_nhan"] += _f(t.thuc_nhan)
+        if _f(t.thue_tncn) > 0:
+            if (t.chung_tu_khau_tru or "").strip():
+                c["chung_tu_kt"] += 1
+            else:
+                c["thieu_chung_tu"] += 1
+    p = _tn_ts(db)
+    nguong_nam = _f(p["gt_ban_than"] * 12)
+    for c in ca_nhan.values():
+        c["vuot_cam_ket"] = bool(c["cam_ket_08"] and c["thu_nhap"] > nguong_nam)
+    out_thang = []
+    for k in sorted(thang):
+        m = thang[k]; m["so_nguoi"] = len(m["so_nguoi"]); out_thang.append(m)
+    return {"nam": nam, "theo_thang": out_thang,
+            "theo_ca_nhan": sorted(ca_nhan.values(), key=lambda x: -x["thu_nhap"]),
+            "tong": {"thu_nhap": sum(m["thu_nhap"] for m in out_thang), "thue": sum(m["thue"] for m in out_thang),
+                     "thuc_nhan": sum(m["thuc_nhan"] for m in out_thang), "so_nguoi": len(ca_nhan)},
+            "nguong_cam_ket_nam": nguong_nam, "tham_so": {k: _f(v) for k, v in p.items()}}
