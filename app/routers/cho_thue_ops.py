@@ -867,6 +867,9 @@ class ChiPhiVao(BaseModel):
     so_tien: Decimal = Field(gt=0)
     ngay: date | None = None
     mo_ta: str | None = None
+    so_hoa_don: str | None = None       # số hóa đơn NCC (khử trùng theo số HĐ; nối PO / hóa đơn mua cùng khoản)
+    ncc_ten: str | None = None
+    tu_noi: bool = True                 # có số HĐ → tự dò PO / hóa đơn MUA cùng khoản để nối (không đếm chi phí 2 lần)
 
 
 @router.get("/chi-phi")
@@ -961,14 +964,30 @@ def them_chi_phi(data: ChiPhiVao, db: Session = Depends(get_db),
             dh_id, ma = _d.id, _d.so
     elif ts is not None:                       # không gõ mã → đơn gốc của tháng, không có thì mã tháng chuẩn
         dh_id, ma, _uv = _chon_ma_cho_hd(db, ts, data.ngay or date.today())
+    so_hd = (data.so_hoa_don or "").strip()[:60] or None
+    if so_hd:                                  # 🛡 khử trùng: cùng dự án đã có khoản mang số hóa đơn này
+        from ..lai_lo_ma import so_hd_chuan
+        k = so_hd_chuan(so_hd)
+        for c0 in db.query(ChiPhiVanHanh).filter(ChiPhiVanHanh.so_hoa_don.isnot(None)).all():
+            if (c0.tai_san_id == data.tai_san_id or (ma and (c0.ma_ban_hang or "").lower() == ma.lower())) \
+                    and so_hd_chuan(c0.so_hoa_don) == k:
+                raise HTTPException(status.HTTP_409_CONFLICT,
+                                    f"Số hóa đơn {so_hd} đã có ở chi phí #{c0.id} ({float(c0.so_tien or 0):,.0f}đ, "
+                                    f"{c0.ngay}, mã {c0.ma_ban_hang or '—'}) — không ghi trùng.")
     c = ChiPhiVanHanh(tai_san_id=data.tai_san_id, ma_ban_hang=(ma or "")[:40] or None, don_hang_id=dh_id,
                       loai_chi_phi=data.loai_chi_phi,
                       so_tien=data.so_tien, ngay=data.ngay or date.today(), mo_ta=data.mo_ta,
+                      so_hoa_don=so_hd, ncc_ten=((data.ncc_ten or "").strip()[:200] or None),
                       nguon="THU_CONG")
     db.add(c); db.flush()
-    ghi_audit(db, nd.id, "TAO", "chi_phi_van_hanh", c.id, moi={"so_tien": float(data.so_tien)})
+    noi = None
+    if so_hd and data.tu_noi:
+        noi = _noi_cp_vao_chung_tu(db, c, so_hd, c.ncc_ten, c.so_tien, dh_id)
+    ghi_audit(db, nd.id, "TAO", "chi_phi_van_hanh", c.id,
+              moi={"so_tien": float(data.so_tien), "so_hoa_don": so_hd, "ma": c.ma_ban_hang,
+                   "noi_po": ((noi or {}).get("po") or {}).get("so"), "noi_hoa_don": ((noi or {}).get("hoa_don") or {}).get("so")})
     db.commit()
-    return {"id": c.id}
+    return {"id": c.id, "ma_ban_hang": c.ma_ban_hang, "don_hang_id": c.don_hang_id, "noi": noi}
 
 
 # ----- DUYET: xóa chi phí vận hành -----
