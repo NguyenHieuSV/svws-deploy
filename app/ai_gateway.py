@@ -1439,6 +1439,25 @@ def doc_anh_bcvh(anh: list[tuple[bytes, str, str]], mau: dict, ngay: str,
     return out
 
 
+def _vot_json_obj(txt: str) -> dict | None:
+    """Tách MỘT JSON object từ câu trả lời AI — chấp nhận xuống dòng thô trong chuỗi (strict=False),
+    bỏ chữ thừa trước/sau, rồi mới rơi về _vot_json_mang."""
+    t = (txt or "").strip()
+    for ung in (t, t[t.find("{"): t.rfind("}") + 1] if "{" in t and "}" in t else ""):
+        if not ung:
+            continue
+        try:
+            v = json.loads(ung, strict=False)
+            if isinstance(v, dict):
+                return v
+            if isinstance(v, list) and v and isinstance(v[0], dict):
+                return v[0]
+        except Exception:
+            continue
+    ds = _vot_json_mang(t)
+    return ds[0] if ds and isinstance(ds[0], dict) else None
+
+
 def doc_thu_khach_hoa_don(tieu_de: str, noi_dung: str, bao_loi: bool = False) -> dict | None:
     """AI đọc email KHÁCH HÀNG liên quan hóa đơn bán / thanh toán →
     {loai, khach_ten, so_hoa_don, so_tien, ngay_chuyen, ngan_hang, ma_don, tom_tat}. None khi AI tắt (nơi gọi dùng regex)."""
@@ -1461,11 +1480,11 @@ def doc_thu_khach_hoa_don(tieu_de: str, noi_dung: str, bao_loi: bool = False) ->
              '"ma_don": string|null (số PO / số đơn hàng / mã hợp đồng nếu có), '
              '"tom_tat": string (một câu tiếng Việt: khách muốn gì)}')
     try:
-        txt = _goi_claude_json(khoi, sys_p, "Phân loại và trích thông tin từ email trên.", max_tokens=400, timeout=60)
-        ds = _vot_json_mang(txt)
-        if not ds and bao_loi:
+        txt = _goi_claude_json(khoi, sys_p, "Phân loại và trích thông tin từ email trên.", max_tokens=600, timeout=60)
+        obj = _vot_json_obj(txt)
+        if obj is None and bao_loi:
             raise ValueError("AI trả lời không phải JSON: " + (txt or "")[:120])
-        return ds[0] if ds else None
+        return obj
     except Exception:
         if bao_loi:
             raise

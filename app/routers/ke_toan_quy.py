@@ -3302,10 +3302,8 @@ def quet_thu_khach_email(tu_ngay: date | None, db: Session, nd: NguoiDung) -> di
         if loai == "KHONG_PHAI_KHACH":
             khong_khop += 1                                 # AI: NCC / HĐĐT / vận chuyển / quảng cáo… → bỏ
             continue
-        if loai not in TKC_LOAI:
-            loai = "KHAC"
-        if not kh_id and loai == "KHAC":
-            khong_khop += 1                                 # người lạ + AI nói không liên quan → bỏ
+        if loai not in TKC_LOAI or loai == "KHAC":
+            khong_khop += 1                                 # không nói về hóa đơn / thanh toán (kể cả khách đã biết) → bỏ
             continue
         if not kh_id and info.get("khach_ten"):
             kt = _tkc_kd(str(info.get("khach_ten")))
