@@ -1439,7 +1439,7 @@ def doc_anh_bcvh(anh: list[tuple[bytes, str, str]], mau: dict, ngay: str,
     return out
 
 
-def doc_thu_khach_hoa_don(tieu_de: str, noi_dung: str) -> dict | None:
+def doc_thu_khach_hoa_don(tieu_de: str, noi_dung: str, bao_loi: bool = False) -> dict | None:
     """AI đọc email KHÁCH HÀNG liên quan hóa đơn bán / thanh toán →
     {loai, khach_ten, so_hoa_don, so_tien, ngay_chuyen, ngan_hang, ma_don, tom_tat}. None khi AI tắt (nơi gọi dùng regex)."""
     if (settings.ai_provider or "").upper() != "ANTHROPIC" or not settings.anthropic_api_key:
@@ -1447,10 +1447,13 @@ def doc_thu_khach_hoa_don(tieu_de: str, noi_dung: str) -> dict | None:
     khoi = {"type": "text", "text": f"TIÊU ĐỀ: {tieu_de}\n\nNỘI DUNG EMAIL:\n{(noi_dung or '')[:6000]}"}
     sys_p = ("Bạn là kế toán công nợ của công ty BÁN HÀNG (Sóng Việt). Đọc email do KHÁCH HÀNG gửi tới công ty, "
              "liên quan hóa đơn bán hoặc thanh toán, và trả về DUY NHẤT một JSON object: "
-             '{"loai": "XAC_NHAN_NHAN_HD"|"THONG_BAO_THANH_TOAN"|"YEU_CAU_DIEU_CHINH"|"HOI_HOA_DON"|"KHAC" '
-             "(XAC_NHAN_NHAN_HD = khách xác nhận đã nhận hóa đơn; THONG_BAO_THANH_TOAN = khách báo đã chuyển khoản / "
-             "gửi ủy nhiệm chi / lệnh thanh toán; YEU_CAU_DIEU_CHINH = khách yêu cầu sửa, thay thế, hủy hóa đơn hoặc báo "
-             "sai sót; HOI_HOA_DON = khách hỏi, đòi hóa đơn, xin gửi lại; KHAC = không liên quan hóa đơn/thanh toán), "
+             '{"loai": "XAC_NHAN_NHAN_HD"|"THONG_BAO_THANH_TOAN"|"YEU_CAU_DIEU_CHINH"|"HOI_HOA_DON"|"KHONG_PHAI_KHACH"|"KHAC" '
+             "(XAC_NHAN_NHAN_HD = khách xác nhận đã nhận hóa đơn CÔNG TY XUẤT CHO KHÁCH; THONG_BAO_THANH_TOAN = khách báo đã "
+             "chuyển khoản / gửi ủy nhiệm chi / lệnh thanh toán CHO CÔNG TY; YEU_CAU_DIEU_CHINH = khách yêu cầu công ty sửa, "
+             "thay thế, hủy hóa đơn đã xuất hoặc báo sai sót; HOI_HOA_DON = khách hỏi, đòi, xin công ty gửi lại hóa đơn; "
+             "KHONG_PHAI_KHACH = thư KHÔNG do khách hàng gửi: nhà cung cấp hoặc hệ thống hóa đơn điện tử gửi hóa đơn MUA cho "
+             "công ty, thông báo phát hành hóa đơn của bên bán, nhà cung cấp đòi tiền, ngân hàng, vận chuyển, quảng cáo, nội bộ; "
+             "KHAC = thư khách nhưng không liên quan hóa đơn/thanh toán), "
              '"khach_ten": string|null (tên công ty khách), '
              '"so_hoa_don": string|null (số hóa đơn được nhắc tới; nhiều số thì nối bằng dấu phẩy), '
              '"so_tien": number|null (số tiền khách báo đã thanh toán, hoặc số tiền hóa đơn; VNĐ, chỉ chữ số), '
@@ -1460,6 +1463,10 @@ def doc_thu_khach_hoa_don(tieu_de: str, noi_dung: str) -> dict | None:
     try:
         txt = _goi_claude_json(khoi, sys_p, "Phân loại và trích thông tin từ email trên.", max_tokens=400, timeout=60)
         ds = _vot_json_mang(txt)
+        if not ds and bao_loi:
+            raise ValueError("AI trả lời không phải JSON: " + (txt or "")[:120])
         return ds[0] if ds else None
     except Exception:
+        if bao_loi:
+            raise
         return None

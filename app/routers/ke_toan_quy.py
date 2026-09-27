@@ -3085,6 +3085,11 @@ TKC_LOAI = {"XAC_NHAN_NHAN_HD": "Khách xác nhận đã nhận hóa đơn", "TH
             "KHAC": "Khác"}
 _TKC_TU_KHOA = ("hoa don", "invoice", "thanh toan", "payment", "chuyen khoan", "remittance", "uy nhiem chi", " unc",
                 "da nhan", "cong no", "dieu chinh", "sai sot", "hoan tien", "debit note", "credit note", "receipt")
+_TKC_TU_DONG = ("no-reply", "noreply", "no_reply", "donotreply", "do-not-reply", "mailer-daemon", "postmaster", "notification")
+# tiêu đề kiểu hệ thống HĐĐT / NCC gửi hóa đơn MUA cho công ty — không phải thư khách
+_TKC_TD_NCC = ("gui hoa don dien tu", "gui hoa don", "thong bao phat hanh", "xuat hoa don cho quy khach", "hoa don dien tu so",
+               "thong bao hoa don dien tu", "cong van thong bao")
+_TKC_MIEN_CHUNG = ("gmail.com", "yahoo.com", "yahoo.com.vn", "hotmail.com", "outlook.com", "icloud.com", "live.com")
 
 
 def _tkc_kd(s: str) -> str:
@@ -3093,19 +3098,28 @@ def _tkc_kd(s: str) -> str:
     return s.replace("đ", "d").replace("Đ", "D").lower()
 
 
-def _tkc_email_khach(db) -> dict:
-    """email (thường) → khach_hang_id — email chính + người liên hệ phụ."""
+def _tkc_email_khach(db) -> tuple[dict, dict]:
+    """(email → khach_hang_id, tên miền → khach_hang_id) — email chính + người liên hệ phụ; tên miền chỉ khi
+    miền riêng của công ty (không phải gmail/yahoo…) và chỉ trỏ tới MỘT khách."""
     from ..models import KhachHang
-    out = {}
+    out, mien, mien_trung = {}, {}, set()
     for k in db.query(KhachHang).all():
-        e = (k.email or "").strip().lower()
-        if e and e not in out:
-            out[e] = k.id
+        emails = [(k.email or "").strip().lower()]
         for lh in (k.lien_he_phu or []) if isinstance(k.lien_he_phu, list) else []:
-            e2 = str((lh or {}).get("email") or "").strip().lower()
-            if e2 and e2 not in out:
-                out[e2] = k.id
-    return out
+            emails.append(str((lh or {}).get("email") or "").strip().lower())
+        for e in emails:
+            if not e or "@" not in e:
+                continue
+            if e not in out:
+                out[e] = k.id
+            d = e.split("@")[-1]
+            if d and d not in _TKC_MIEN_CHUNG:
+                if d in mien and mien[d] != k.id:
+                    mien_trung.add(d)
+                mien.setdefault(d, k.id)
+    for d in mien_trung:
+        mien.pop(d, None)
+    return out, mien
 
 
 def _tkc_doc_regex(tieu_de: str, nd: str) -> dict:
@@ -3222,13 +3236,14 @@ def quet_thu_khach_email(tu_ngay: date | None, db: Session, nd: NguoiDung) -> di
         thu = prov.lay_thu(moc) if hasattr(prov, "lay_thu") else prov.lay_thu_moi()
     except Exception as e:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Không đọc được hộp thư ({prov.ten}): {str(e)[:150]}")
-    email_kh = _tkc_email_khach(db)
+    email_kh, mien_kh = _tkc_email_khach(db)
     email_ncc = {(n.email or "").strip().lower() for n in db.query(NhaCungCap).all()} | \
                 {(e.email or "").strip().lower() for e in db.query(CtNccEmail).all()}
     email_ncc.discard("")
     mien_cty = ((_st.email_from_ncc or _st.email_from or "").split("@")[-1] or "").strip().lower()
     ds_kh = db.query(KhachHang).all()
-    them = trung = dung_ai = khong_khop = con_lai = 0
+    them = trung = dung_ai = khong_khop = con_lai = ai_loi_n = 0
+    ai_loi = None
     GIOI_HAN = 20
     for m in thu:
         mid = (m.get("message_id") or "").strip()[:250] or None
@@ -3248,24 +3263,40 @@ def quet_thu_khach_email(tu_ngay: date | None, db: Session, nd: NguoiDung) -> di
             khong_khop += 1
             continue
         nd_thu = (m.get("noi_dung") or "")
-        kh_id = email_kh.get(nguoi)
+        kh_id = email_kh.get(nguoi) or mien_kh.get(nguoi.split("@")[-1] if "@" in nguoi else "")
+        local = nguoi.split("@")[0]
+        if not kh_id and any(x in local for x in _TKC_TU_DONG):
+            khong_khop += 1                                 # hệ thống tự động (HĐĐT, vận chuyển…) — không phải khách
+            continue
+        if any(x in td for x in _TKC_TD_NCC):
+            khong_khop += 1                                 # NCC / hệ thống HĐĐT gửi hóa đơn MUA cho công ty
+            continue
         van_ban = td + " " + _tkc_kd(nd_thu[:2500])
         co_tu_khoa = any(k in van_ban for k in _TKC_TU_KHOA)
-        if not kh_id and not co_tu_khoa:
-            khong_khop += 1
-            continue
-        if kh_id and not co_tu_khoa:
-            khong_khop += 1                                 # thư khách nhưng không nói về hóa đơn / thanh toán
+        if not co_tu_khoa:
+            khong_khop += 1                                 # không nói về hóa đơn / thanh toán
             continue
         if them >= GIOI_HAN:
             con_lai += 1
             continue
-        info = doc_thu_khach_hoa_don(tieu_de, nd_thu)
+        info = None
+        try:
+            info = doc_thu_khach_hoa_don(tieu_de, nd_thu, bao_loi=True)
+        except Exception as e:
+            ai_loi_n += 1
+            if ai_loi is None:
+                ai_loi = str(e)[:200]
         if info is not None:
             dung_ai += 1
+        elif kh_id:
+            info = _tkc_doc_regex(tieu_de, nd_thu)          # AI tắt / lỗi: chỉ đọc regex cho thư của KHÁCH đã biết
         else:
-            info = _tkc_doc_regex(tieu_de, nd_thu)
+            khong_khop += 1                                 # người lạ mà AI không xác nhận được → bỏ
+            continue
         loai = str(info.get("loai") or "KHAC")
+        if loai == "KHONG_PHAI_KHACH":
+            khong_khop += 1                                 # AI: NCC / HĐĐT / vận chuyển / quảng cáo… → bỏ
+            continue
         if loai not in TKC_LOAI:
             loai = "KHAC"
         if not kh_id and loai == "KHAC":
@@ -3306,10 +3337,27 @@ def quet_thu_khach_email(tu_ngay: date | None, db: Session, nd: NguoiDung) -> di
         them += 1
     db.commit()
     ghi_audit(db, nd.id, "QUET_THU_KHACH", "kt_thu_khach_cho", None,
-              moi={"tu_ngay": str(moc), "thu_moi": len(thu), "da_them": them, "ai": dung_ai, "con_lai": con_lai})
+              moi={"tu_ngay": str(moc), "thu_moi": len(thu), "da_them": them, "ai": dung_ai, "con_lai": con_lai,
+                   "ai_loi": ai_loi, "ai_loi_n": ai_loi_n})
     db.commit()
     return {"ok": True, "che_do": prov.ten, "thu_moi": len(thu), "tu_ngay": str(moc), "da_them": them,
-            "trung_bo_qua": trung, "ai": dung_ai, "khong_khop": khong_khop, "con_lai": con_lai}
+            "trung_bo_qua": trung, "ai": dung_ai, "khong_khop": khong_khop, "con_lai": con_lai,
+            "ai_loi": ai_loi, "ai_loi_n": ai_loi_n}
+
+
+class TkcThuAiVao(_TkcBase):
+    tieu_de: str = ""
+    noi_dung: str = ""
+
+
+@router.post("/thu-khach-cho/thu-ai")
+def thu_ai_thu_khach(data: TkcThuAiVao, db: Session = Depends(get_db), _=Depends(chi_vai_tro("CEO", "ADMIN", "KTT"))):
+    """🧪 Thử AI phân loại một thư (chẩn đoán) — trả kết quả hoặc lỗi rõ ràng."""
+    from ..ai_gateway import doc_thu_khach_hoa_don
+    try:
+        return {"ok": True, "ket_qua": doc_thu_khach_hoa_don(data.tieu_de, data.noi_dung, bao_loi=True)}
+    except Exception as e:
+        return {"ok": False, "loi": str(e)[:300]}
 
 
 def _tkc_dict(db, r) -> dict:
