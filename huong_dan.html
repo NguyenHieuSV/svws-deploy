@@ -210,8 +210,9 @@
       <li><b>Lối tắt theo luồng nghiệp vụ</b>: các ô phân hệ xếp theo mạch Thương mại → Cung ứng &amp; Kho → Dịch vụ → Tài chính – Kế toán → Nội bộ; ô nào bạn chưa được cấp quyền sẽ khóa.</li>
       <li><b>Ma trận phân quyền</b>: bảng vai trò × phân hệ; Giám đốc chỉnh mức quyền (Không / Xem / Thao tác / Duyệt / Quản trị) cho từng vị trí, có ghi vết thay đổi.</li>
     </ul>
-    <p><b>Overall Financial</b> (menu riêng, dành cho Giám đốc) — bức tranh tiền của công ty:</p>
+    <p><b>Overall Financial</b> (menu riêng, dành cho Giám đốc) — bức tranh tiền của công ty. Có 2 tab: <b>Tổng quan</b> và <b>📊 Doanh thu theo mảng</b>:</p>
     <ul>
+      <li><b>📊 Doanh thu theo mảng (từ 27/09/2026)</b>: phân mảng theo tiền tố mã đơn hàng <b>TM-</b> thương mại · <b>DV-</b> dịch vụ · <b>DA-</b> dự án (mã OP- và mã lạ gom vào Khác). Mỗi mảng có: số mã, doanh thu, chi phí, lãi/lỗ, tỷ suất (cùng công thức Lãi/Lỗ Record nên tổng các mảng = tổng Record), <b>tiền thật đã thu / đã chi</b> theo sổ công nợ, dòng tiền ròng, còn phải thu / còn phải trả. Bên dưới là biểu đồ đường và bảng theo tháng của năm chọn (doanh thu hóa đơn bán · đã thu · đã chi) và danh sách mã lớn nhất từng mảng.</li>
       <li><b>Tài chính</b>: doanh thu đã xuất HĐ (+ phần chưa xuất HĐ) · Đã thu · <b>Khách hàng trả trước</b> = max(cọc ghi trên đơn, tạm ứng phiếu thu đã duyệt) · Còn phải thu (kèm “còn phải thu đơn chưa xuất HĐ”).</li>
       <li><b>📈 Lãi/Lỗ Record</b>: ① theo ngày (tự ghi mỗi giờ) · ② <b>từng mã đơn hàng</b>, gom thành <b>📂 nhóm gốc + tháng</b> (đơn tách -01/-02 và PO ghi mã gốc hiện chung một dòng tổng) · ③ chốt tháng. Bảng ② có <b>🔍 ô tìm mã</b> (gõ vài ký tự), nút <b>sắp xếp</b> (Mới nhất · Lỗ lớn nhất · Lãi lớn nhất · Chi phí lớn nhất · Doanh thu lớn nhất · A → Z) và cờ <b>⚠ doanh thu bất thường</b> cho mã có đơn bán, chi phí ≥ 5 triệu mà doanh thu &lt; 10% chi phí (thường do giá trị đơn bán nhập tạm — sửa ở Bán hàng → Đơn hàng).
         Các dòng riêng: <b>Chi phí vận hành OP</b>, <b>🧩 Chi phí chưa phân mã</b> (đã trừ vào lãi/lỗ tổng nhưng chưa vào mã nào), <b>📦 Mua dự trữ KHO</b> (tồn kho — chưa tính chi phí).</li>

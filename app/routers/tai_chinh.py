@@ -1615,3 +1615,103 @@ def xoa_sao_ke(sk_id: int, db: Session = Depends(get_db),
     db.delete(sk)
     db.commit()
     return {"ok": True}
+
+
+# =====================================================================================
+# 📊 DOANH THU THEO MẢNG (Overall Financial): TM thương mại · DV dịch vụ · DA dự án (+ Khác) —
+# cùng công thức Lãi/Lỗ Record (_tinh_lai_lo_tong) và dòng tiền thật theo mã (lai_lo_ma.dong_tien_theo_ma),
+# nên tổng các mảng = tổng Lãi/Lỗ Record.
+# =====================================================================================
+_MANG_TEN = {"TM": "Thương mại", "DV": "Dịch vụ", "DA": "Dự án", "KHAC": "Khác (OP · chưa phân mảng)"}
+
+
+def _mang_cua(ma) -> str:
+    from ..ma_code import phan_tich
+    l = phan_tich(ma)["loai"]
+    return l if l in ("TM", "DV", "DA") else "KHAC"
+
+
+@router.get("/doanh-thu-theo-mang")
+def doanh_thu_theo_mang(nam: int | None = None, db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM")),
+                        __=Depends(chi_vai_tro("CEO", "ADMIN"))):
+    from ..models import DonHang, DonMua, HoaDon
+    from ..lai_lo_ma import dong_tien_theo_ma
+    from ..nhac_viec_service import gio_hien_tai
+    hom_nay = gio_hien_tai().date()
+    nam = nam or hom_nay.year
+    seg = {k: {"ma": k, "ten": v, "so_ma": 0, "doanh_thu": 0.0, "chi_phi": 0.0, "da_thu": 0.0, "da_chi": 0.0,
+               "con_phai_thu": 0.0, "con_phai_tra": 0.0, "so_cn_thu": 0, "so_cn_tra": 0, "top": []}
+           for k, v in _MANG_TEN.items()}
+    # ① doanh thu / chi phí theo mã (Lãi/Lỗ Record)
+    t = _tinh_lai_lo_tong(db)
+    for x in t.get("theo_ma") or []:
+        if x.get("la_dau_tu"):
+            continue                                   # 🏗 vốn đầu tư cho thuê: tài sản, không phải doanh thu
+        s = seg[_mang_cua(x.get("ma_ban"))]
+        s["so_ma"] += 1
+        s["doanh_thu"] += float(x.get("doanh_thu") or 0)
+        s["chi_phi"] += float(x.get("tong_chi_phi") or 0)
+        s["top"].append({"ma": x.get("ma_ban"), "doanh_thu": float(x.get("doanh_thu") or 0),
+                         "chi_phi": float(x.get("tong_chi_phi") or 0), "lai": float(x.get("loi_nhuan") or 0)})
+    # ② tiền thật đã thu / đã chi theo mã
+    for k, o in dong_tien_theo_ma(db).items():
+        s = seg[_mang_cua(o.get("ma"))] if o.get("ma") and o.get("ma") != "(không gắn)" else seg["KHAC"]
+        s["da_thu"] += float(o.get("thu") or 0)
+        s["da_chi"] += float(o.get("chi") or 0)
+    # ③ công nợ còn lại theo mảng
+    so_dh = {i: (s or "").strip() for (i, s) in db.query(DonHang.id, DonHang.so).all()}
+    hd_dh = {i: d for (i, d) in db.query(HoaDon.id, HoaDon.don_hang_id).filter(HoaDon.don_hang_id.isnot(None)).all()}
+    po_ma = {i: (so_dh.get(dh) or (mb or "").strip()) for (i, dh, mb) in db.query(DonMua.id, DonMua.don_hang_id, DonMua.ma_ban).all()}
+
+    def ma_cn(c):
+        if c.loai == "PHAI_TRA":
+            if c.don_mua_id:
+                return po_ma.get(c.don_mua_id)
+            if c.hoa_don_id and hd_dh.get(c.hoa_don_id):
+                return so_dh.get(hd_dh[c.hoa_don_id])
+            return (c.ma_ban_ngoai or "").strip() or None
+        dh_id = c.don_hang_id or (hd_dh.get(c.hoa_don_id) if c.hoa_don_id else None)
+        return so_dh.get(dh_id) if dh_id else ((c.ma_ban_ngoai or "").strip() or None)
+
+    for c in db.query(CongNo).filter(CongNo.trang_thai != "THU_DU").all():
+        con = float(c.so_tien or 0) - float(c.da_thanh_toan or 0)
+        if con <= 0:
+            continue
+        s = seg[_mang_cua(ma_cn(c))]
+        if c.loai == "PHAI_THU":
+            s["con_phai_thu"] += con; s["so_cn_thu"] += 1
+        else:
+            s["con_phai_tra"] += con; s["so_cn_tra"] += 1
+    # ④ theo tháng của năm: doanh thu hóa đơn BÁN · đã thu (sổ thanh toán phải thu) · đã chi (sổ thanh toán phải trả)
+    thang = {f"{nam}-{m:02d}": {k: {"dt": 0.0, "thu": 0.0, "chi": 0.0} for k in _MANG_TEN} for m in range(1, 13)}
+    for hd in db.query(HoaDon).filter(HoaDon.loai == "BAN", HoaDon.ngay >= date(nam, 1, 1), HoaDon.ngay <= date(nam, 12, 31)).all():
+        k = str(hd.ngay)[:7]
+        ma = so_dh.get(hd.don_hang_id) if hd.don_hang_id else None
+        if k in thang:
+            thang[k][_mang_cua(ma)]["dt"] += float(hd.tong_tien or 0)
+    cn_map = {c.id: c for c in db.query(CongNo).all()}
+    for tt in db.query(ThanhToan).filter(ThanhToan.ngay >= date(nam, 1, 1), ThanhToan.ngay <= date(nam, 12, 31)).all():
+        c = cn_map.get(tt.cong_no_id)
+        if c is None:
+            continue
+        k = str(tt.ngay)[:7]
+        if k not in thang:
+            continue
+        m = _mang_cua(ma_cn(c))
+        thang[k][m]["thu" if c.loai == "PHAI_THU" else "chi"] += float(tt.so_tien or 0)
+    out_mang = []
+    for k in ("TM", "DV", "DA", "KHAC"):
+        s = seg[k]
+        s["lai"] = s["doanh_thu"] - s["chi_phi"]
+        s["ty_suat"] = round(s["lai"] / s["doanh_thu"] * 100, 1) if s["doanh_thu"] else None
+        s["dong_tien_rong"] = s["da_thu"] - s["da_chi"]
+        s["top"] = sorted(s["top"], key=lambda x: -x["doanh_thu"])[:8]
+        if k == "KHAC" and not (s["so_ma"] or s["da_thu"] or s["da_chi"] or s["con_phai_thu"] or s["con_phai_tra"]):
+            continue
+        out_mang.append(s)
+    tong = {kk: sum(float(s[kk]) for s in out_mang) for kk in
+            ("so_ma", "doanh_thu", "chi_phi", "lai", "da_thu", "da_chi", "dong_tien_rong", "con_phai_thu", "con_phai_tra")}
+    theo_thang = [dict(thang=k, **{m: v[m] for m in _MANG_TEN}) for k, v in sorted(thang.items())]
+    nam_co = sorted({int(str(n)[:4]) for (n,) in db.query(HoaDon.ngay).filter(HoaDon.loai == "BAN", HoaDon.ngay.isnot(None)).distinct().all()} | {hom_nay.year})
+    return {"nam": nam, "nam_co": nam_co, "mang": out_mang, "tong": tong, "theo_thang": theo_thang,
+            "ten": _MANG_TEN, "ngay_tinh": str(hom_nay)}
