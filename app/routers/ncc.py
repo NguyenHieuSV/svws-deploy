@@ -5728,3 +5728,59 @@ def dtb_tao_de_xuat(dt_id: int, data: DtbDeXuatVao, db: Session = Depends(get_db
     db.commit()
     return {"yeu_cau_mua_id": ycm.id, "so_dong": len(cap), "hang_moi": hang_moi,
             "bo_qua": bo_qua, "gan_don_hang": bool(dh)}
+
+
+# =====================================================================================
+# 📊 THỐNG KÊ HÓA ĐƠN MUA THẬT theo NCC × tháng (bảng Thống kê theo nhà cung cấp theo tháng ở Thanh toán mua hàng).
+# Hóa đơn THẬT = hóa đơn MUA có số hóa đơn của NCC (không phải số tự sinh HDM-… khi nhận hàng PO).
+# PO «đã có hóa đơn» khi: PO ghi số hóa đơn thật · công nợ nối PO ↔ hóa đơn thật · hóa đơn nhập ở Kế toán trùng khoản
+# với PO (cùng NCC + tiền / cùng số HĐ) · chi phí vận hành cho thuê có số HĐ đã nối PO.
+# =====================================================================================
+def _hd_la_that(hd) -> bool:
+    so = str(hd.so or "").strip()
+    return bool(so) and not so.upper().startswith("HDM-")
+
+
+@router.get("/thong-ke-hoa-don-thang")
+def thong_ke_hoa_don_thang(nam: int | None = None, db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
+    from datetime import date as _d
+    from ..models import HoaDon, ChiPhiVanHanh
+    from ..lai_lo_ma import po_trung_khoan
+    nam = nam or _d.today().year
+    ten = {n.id: n.ten for n in db.query(NhaCungCap).all()}
+    hds = [h for h in db.query(HoaDon).filter(HoaDon.loai == "MUA", HoaDon.ngay >= _d(nam, 1, 1), HoaDon.ngay <= _d(nam, 12, 31)).all()
+           if _hd_la_that(h)]
+    agg = {}
+    for h in hds:
+        k = h.nha_cung_cap_id or 0
+        m = int(h.ngay.month)
+        o = agg.setdefault(k, {"nha_cung_cap_id": h.nha_cung_cap_id, "ncc_ten": ten.get(h.nha_cung_cap_id) or "(hóa đơn chưa gắn NCC)",
+                               "thang": {}, "so_hd": {}, "tong": 0.0, "so": 0})
+        o["thang"][str(m)] = o["thang"].get(str(m), 0.0) + float(h.tong_tien or 0)
+        o["so_hd"][str(m)] = o["so_hd"].get(str(m), 0) + 1
+        o["tong"] += float(h.tong_tien or 0)
+        o["so"] += 1
+    # ---- PO đã có hóa đơn thật ----
+    pos = db.query(DonMua).filter(DonMua.trang_thai != "TU_CHOI").all()
+    po_co = set()
+    for p in pos:
+        s = str(p.so_hoa_don or "").strip()
+        if s and not s.upper().startswith("HDM-"):
+            po_co.add(p.id)
+    hd_that_ids = {h.id for h in db.query(HoaDon).filter(HoaDon.loai == "MUA").all() if _hd_la_that(h)}
+    for (dm_id, hd_id) in db.query(CongNo.don_mua_id, CongNo.hoa_don_id).filter(
+            CongNo.don_mua_id.isnot(None), CongNo.hoa_don_id.isnot(None)).all():
+        if hd_id in hd_that_ids:
+            po_co.add(dm_id)
+    da_dung = set(po_co)
+    for h in db.query(HoaDon).filter(HoaDon.loai == "MUA").all():       # hóa đơn nhập ở Kế toán chưa nối → dò PO trùng khoản
+        if not _hd_la_that(h):
+            continue
+        p = po_trung_khoan(pos, h.so, h.nha_cung_cap_id, h.tong_tien, h.tien_truoc_thue, da_dung)
+        if p is not None:
+            po_co.add(p.id)
+    for (dm_id,) in db.query(ChiPhiVanHanh.don_mua_id).filter(ChiPhiVanHanh.don_mua_id.isnot(None),
+                                                               ChiPhiVanHanh.so_hoa_don.isnot(None)).distinct().all():
+        po_co.add(dm_id)
+    return {"nam": nam, "hoa_don": sorted(agg.values(), key=lambda x: -x["tong"]), "po_co_hoa_don": sorted(po_co),
+            "so_hd_that": len(hds), "tong_hd_that": sum(o["tong"] for o in agg.values())}
