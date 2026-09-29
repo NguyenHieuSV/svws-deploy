@@ -5743,44 +5743,90 @@ def _hd_la_that(hd) -> bool:
 
 @router.get("/thong-ke-hoa-don-thang")
 def thong_ke_hoa_don_thang(nam: int | None = None, db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
+    """Hóa đơn mua THẬT theo NCC × tháng (theo ngày hóa đơn) từ 3 nguồn, khử trùng theo (NCC, số HĐ):
+    ① hóa đơn MUA ở Kế toán có số NCC · ② hóa đơn đầu vào Cho thuê / chi phí vận hành có số HĐ · ③ số hóa đơn ghi trên PO
+    (ngày = ngày PO). Kèm tập PO đã có hóa đơn thật."""
     from datetime import date as _d
     from ..models import HoaDon, ChiPhiVanHanh
-    from ..lai_lo_ma import po_trung_khoan
+    from ..lai_lo_ma import po_trung_khoan, so_hd_chuan
     nam = nam or _d.today().year
-    ten = {n.id: n.ten for n in db.query(NhaCungCap).all()}
-    hds = [h for h in db.query(HoaDon).filter(HoaDon.loai == "MUA", HoaDon.ngay >= _d(nam, 1, 1), HoaDon.ngay <= _d(nam, 12, 31)).all()
-           if _hd_la_that(h)]
-    agg = {}
-    for h in hds:
-        k = h.nha_cung_cap_id or 0
-        m = int(h.ngay.month)
-        o = agg.setdefault(k, {"nha_cung_cap_id": h.nha_cung_cap_id, "ncc_ten": ten.get(h.nha_cung_cap_id) or "(hóa đơn chưa gắn NCC)",
-                               "thang": {}, "so_hd": {}, "tong": 0.0, "so": 0})
-        o["thang"][str(m)] = o["thang"].get(str(m), 0.0) + float(h.tong_tien or 0)
-        o["so_hd"][str(m)] = o["so_hd"].get(str(m), 0) + 1
-        o["tong"] += float(h.tong_tien or 0)
-        o["so"] += 1
-    # ---- PO đã có hóa đơn thật ----
+    d1, d2 = _d(nam, 1, 1), _d(nam, 12, 31)
+    ds_ncc = db.query(NhaCungCap).all()
+    ten = {n.id: n.ten for n in ds_ncc}
+    ten_key = {str(n.ten or "").strip().lower(): n.id for n in ds_ncc if n.ten}
     pos = db.query(DonMua).filter(DonMua.trang_thai != "TU_CHOI").all()
+    po_ncc = {p0.id: p0.nha_cung_cap_id for p0 in pos}
+
+    def ncc_theo_ten(s):
+        k = str(s or "").strip().lower()
+        if not k:
+            return None
+        if k in ten_key:
+            return ten_key[k]
+        for t, i in ten_key.items():
+            if len(k) >= 8 and (k in t or t in k):
+                return i
+        return None
+
+    da_co = set()          # (ncc_key, so_chuan) đã tính
+    hd_ds = []             # {ncc_id, ncc_ten, so, ngay, tong, nguon}
+
+    def them(ncc_id, ten_ncc, so, ngay, tong, nguon):
+        if not so or ngay is None or not (d1 <= ngay <= d2):
+            return
+        sc = so_hd_chuan(so)
+        key = (ncc_id or str(ten_ncc or "").strip().lower() or "?", sc)
+        if not sc or key in da_co:
+            return
+        da_co.add(key)
+        hd_ds.append({"ncc_id": ncc_id, "ncc_ten": ten.get(ncc_id) or (ten_ncc or "(hóa đơn chưa gắn NCC)"),
+                      "so": so, "ngay": ngay, "tong": float(tong or 0), "nguon": nguon})
+
+    for h0 in db.query(HoaDon).filter(HoaDon.loai == "MUA", HoaDon.ngay >= d1, HoaDon.ngay <= d2).all():   # ① Kế toán
+        if _hd_la_that(h0):
+            them(h0.nha_cung_cap_id, None, h0.so, h0.ngay, h0.tong_tien, "KE_TOAN")
+    for c in db.query(ChiPhiVanHanh).filter(ChiPhiVanHanh.so_hoa_don.isnot(None), ChiPhiVanHanh.ngay >= d1,
+                                            ChiPhiVanHanh.ngay <= d2).all():                       # ② Cho thuê / chi phí VH
+        nid = po_ncc.get(c.don_mua_id) if c.don_mua_id else None
+        if nid is None:
+            nid = ncc_theo_ten(c.ncc_ten)
+        them(nid, c.ncc_ten, c.so_hoa_don, c.ngay, c.so_tien, "CHO_THUE")
+    for p0 in pos:                                                                                # ③ số HĐ ghi trên PO
+        s = str(p0.so_hoa_don or "").strip()
+        if s and not s.upper().startswith("HDM-") and p0.ngay:
+            them(p0.nha_cung_cap_id, None, s, p0.ngay, p0.tong_tien, "PO")
+    agg = {}
+    for r0 in hd_ds:
+        k = r0["ncc_id"] or ("t:" + r0["ncc_ten"].lower())
+        m = str(int(r0["ngay"].month))
+        o = agg.setdefault(k, {"nha_cung_cap_id": r0["ncc_id"], "ncc_ten": r0["ncc_ten"], "thang": {}, "so_hd": {}, "tong": 0.0, "so": 0,
+                               "nguon": {"KE_TOAN": 0, "CHO_THUE": 0, "PO": 0}})
+        o["thang"][m] = o["thang"].get(m, 0.0) + r0["tong"]
+        o["so_hd"][m] = o["so_hd"].get(m, 0) + 1
+        o["tong"] += r0["tong"]
+        o["so"] += 1
+        o["nguon"][r0["nguon"]] += 1
+    # ---- PO đã có hóa đơn thật ----
     po_co = set()
-    for p in pos:
-        s = str(p.so_hoa_don or "").strip()
+    for p0 in pos:
+        s = str(p0.so_hoa_don or "").strip()
         if s and not s.upper().startswith("HDM-"):
-            po_co.add(p.id)
-    hd_that_ids = {h.id for h in db.query(HoaDon).filter(HoaDon.loai == "MUA").all() if _hd_la_that(h)}
+            po_co.add(p0.id)
+    hd_that_ids = {h0.id for h0 in db.query(HoaDon).filter(HoaDon.loai == "MUA").all() if _hd_la_that(h0)}
     for (dm_id, hd_id) in db.query(CongNo.don_mua_id, CongNo.hoa_don_id).filter(
             CongNo.don_mua_id.isnot(None), CongNo.hoa_don_id.isnot(None)).all():
         if hd_id in hd_that_ids:
             po_co.add(dm_id)
     da_dung = set(po_co)
-    for h in db.query(HoaDon).filter(HoaDon.loai == "MUA").all():       # hóa đơn nhập ở Kế toán chưa nối → dò PO trùng khoản
-        if not _hd_la_that(h):
+    for h0 in db.query(HoaDon).filter(HoaDon.loai == "MUA").all():       # hóa đơn nhập ở Kế toán chưa nối → dò PO trùng khoản
+        if not _hd_la_that(h0):
             continue
-        p = po_trung_khoan(pos, h.so, h.nha_cung_cap_id, h.tong_tien, h.tien_truoc_thue, da_dung)
-        if p is not None:
-            po_co.add(p.id)
+        p1 = po_trung_khoan(pos, h0.so, h0.nha_cung_cap_id, h0.tong_tien, h0.tien_truoc_thue, da_dung)
+        if p1 is not None:
+            po_co.add(p1.id)
     for (dm_id,) in db.query(ChiPhiVanHanh.don_mua_id).filter(ChiPhiVanHanh.don_mua_id.isnot(None),
                                                                ChiPhiVanHanh.so_hoa_don.isnot(None)).distinct().all():
         po_co.add(dm_id)
     return {"nam": nam, "hoa_don": sorted(agg.values(), key=lambda x: -x["tong"]), "po_co_hoa_don": sorted(po_co),
-            "so_hd_that": len(hds), "tong_hd_that": sum(o["tong"] for o in agg.values())}
+            "so_hd_that": len(hd_ds), "tong_hd_that": sum(o["tong"] for o in agg.values()),
+            "nguon": {k: sum(1 for r0 in hd_ds if r0["nguon"] == k) for k in ("KE_TOAN", "CHO_THUE", "PO")}}
