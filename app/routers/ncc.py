@@ -5793,8 +5793,8 @@ def thong_ke_hoa_don_thang(nam: int | None = None, db: Session = Depends(get_db)
         them(nid, c.ncc_ten, c.so_hoa_don, c.ngay, c.so_tien, "CHO_THUE")
     for p0 in pos:                                                                                # ③ số HĐ ghi trên PO
         s = str(p0.so_hoa_don or "").strip()
-        if s and not s.upper().startswith("HDM-") and p0.ngay:
-            them(p0.nha_cung_cap_id, None, s, p0.ngay, p0.tong_tien, "PO")
+        if s and not s.upper().startswith("HDM-") and (p0.ngay_giao_thuc or p0.ngay):
+            them(p0.nha_cung_cap_id, None, s, p0.ngay_giao_thuc or p0.ngay, p0.tong_tien, "PO")   # ngày giao thực tế ≈ ngày hóa đơn
     agg = {}
     for r0 in hd_ds:
         k = r0["ncc_id"] or ("t:" + r0["ncc_ten"].lower())
