@@ -2395,11 +2395,20 @@ def ds_duyet_chi_bank(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "
         ngoai_lenh = []
     cho_duyet = [_lcb_dict(db, r) for r in rows if r.trang_thai == "CHO_DUYET"]
     da_duyet = [_lcb_dict(db, r) for r in rows if r.trang_thai == "DA_DUYET"]
-    _lcb_gan_nghi_trung(cho_duyet + da_duyet, lich_su)     # ⚠ lớp 1: nhãn nghi trùng
+    _lcb_gan_nghi_trung(cho_duyet + da_duyet, lich_su, bo_qua=_bo_qua_trung(db))     # ⚠ lớp 1: nhãn nghi trùng
     return {"cho_duyet": cho_duyet, "da_duyet": da_duyet, "lich_su": lich_su, "ngoai_lenh": ngoai_lenh}
 
 
-def _lcb_gan_nghi_trung(rows_active: list, lich_su: list, so_ngay: int = 30):
+def _bo_qua_trung(db) -> set:
+    """{(loai, khoa)} các nhóm CEO đã xác nhận KHÔNG trùng (mig 140)."""
+    from ..models import NghiTrungBoQua
+    try:
+        return {(r.loai, r.khoa) for r in db.query(NghiTrungBoQua).all()}
+    except Exception:
+        return set()
+
+
+def _lcb_gan_nghi_trung(rows_active: list, lich_su: list, so_ngay: int = 30, bo_qua: set | None = None):
     """Gắn nghi_trung[] cho lệnh CHỜ DUYỆT / ĐÃ DUYỆT: cùng NCC với lệnh khác (chờ · đã duyệt · đã chi) và
     (a) cùng SỐ HÓA ĐƠN NCC ở PO / công nợ khác → mạnh; (b) cùng SỐ TIỀN ĐỢT trong ≤ so_ngay ngày → nhẹ (kể cả cùng PO)."""
     from ..lai_lo_ma import so_hd_chuan
@@ -2430,9 +2439,10 @@ def _lcb_gan_nghi_trung(rows_active: list, lich_su: list, so_ngay: int = 30):
             sb, tb, nb = so_hd_chuan(b.get("so_hoa_don")), tien(b), ngay(b)
             gan = (na is None or nb is None or abs((na - nb).days) <= so_ngay)
             ly_do, manh = None, False
-            if sa and sa == sb and not cung_ct:
+            bq = bo_qua or set()
+            if sa and sa == sb and not cung_ct and ("HOA_DON", f"{a['ncc_id']}|{sa}") not in bq:
                 ly_do, manh = f"cùng số hóa đơn {a.get('so_hoa_don')} với lệnh {b.get('so')}", True
-            elif ta > 0 and abs(ta - tb) < 1 and gan:
+            elif ta > 0 and abs(ta - tb) < 1 and gan and ("LENH_TIEN", f"{a['ncc_id']}|{int(round(ta))}") not in bq:
                 ly_do = f"{'cùng PO, ' if cung_ct else ''}cùng số tiền {ta:,.0f} với lệnh {b.get('so')}".replace(",", ".")
             if ly_do:
                 ds.append({"id": b["id"], "so": b.get("so"), "trang_thai": b.get("trang_thai"), "so_tien": tb,
@@ -2451,6 +2461,8 @@ def _lcb_trung_hoa_don(db, r):
     so = so_hd_chuan((dm.so_hoa_don if dm else None) or (cn.so_ct if cn else None))
     if not ncc_id or not so:
         return []
+    if ("HOA_DON", f"{ncc_id}|{so}") in _bo_qua_trung(db):
+        return []                                       # ✅ CEO đã xác nhận không trùng
     po_ids = {p.id for p in db.query(DonMua).filter(DonMua.nha_cung_cap_id == ncc_id, DonMua.so_hoa_don.isnot(None)).all()
               if so_hd_chuan(p.so_hoa_don) == so and p.id != (r.don_mua_id or 0)}
     cn_ids = {c.id for c in db.query(CongNo).filter(CongNo.loai == "PHAI_TRA", CongNo.nha_cung_cap_id == ncc_id,
@@ -6050,9 +6062,10 @@ def ra_trung(so_ngay: int = 30, db: Session = Depends(get_db), _=Depends(chi_vai
         if c.don_mua_id and c.don_mua_id in po_by and so_hd_chuan(po_by[c.don_mua_id].so_hoa_don) == sc:
             continue                                   # công nợ của chính PO đó — không phải bản thứ hai
         nhom.setdefault((c.nha_cung_cap_id, sc), []).append(cn_item(c))
-    hoa_don = [{"ncc_id": k[0], "ncc_ten": ten_ncc.get(k[0]), "so_hd": v[0]["so_hd"], "items": v,
+    bq = _bo_qua_trung(db)
+    hoa_don = [{"ncc_id": k[0], "ncc_ten": ten_ncc.get(k[0]), "so_hd": v[0]["so_hd"], "items": v, "khoa": f"{k[0]}|{k[1]}",
                 "tong": sum(x["tong"] for x in v), "da_tra": sum(x["da_tra"] for x in v)}
-               for k, v in nhom.items() if len(v) > 1]
+               for k, v in nhom.items() if len(v) > 1 and ("HOA_DON", f"{k[0]}|{k[1]}") not in bq]
     hoa_don.sort(key=lambda g: -g["tong"])
     # ② PO cùng NCC + cùng tổng tiền trong ≤ so_ngay ngày (nghi tạo PO trùng)
     nhom2 = {}
@@ -6065,8 +6078,9 @@ def ra_trung(so_ngay: int = 30, db: Session = Depends(get_db), _=Depends(chi_vai
             continue
         v = sorted(v, key=lambda p: str(p.ngay or ""))
         gan = any(p1.ngay and p2.ngay and abs((p1.ngay - p2.ngay).days) <= so_ngay for i, p1 in enumerate(v) for p2 in v[i + 1:])
-        if gan:
-            po_cung_tien.append({"ncc_id": k[0], "ncc_ten": ten_ncc.get(k[0]), "tong": float(k[1]), "items": [po_item(p) for p in v]})
+        if gan and ("PO_TIEN", f"{k[0]}|{k[1]}") not in bq:
+            po_cung_tien.append({"ncc_id": k[0], "ncc_ten": ten_ncc.get(k[0]), "tong": float(k[1]), "khoa": f"{k[0]}|{k[1]}",
+                                 "items": [po_item(p) for p in v]})
     po_cung_tien.sort(key=lambda g: -g["tong"])
     # ③ lệnh chi đã duyệt / đã chi: cùng NCC + cùng số tiền đợt ở PO / công nợ KHÁC trong ≤ so_ngay ngày
     cn_by = {c.id: c for c in cns}
@@ -6093,12 +6107,52 @@ def ra_trung(so_ngay: int = 30, db: Session = Depends(get_db), _=Depends(chi_vai
             continue
         gan = any(a["ngay"] and b["ngay"] and abs((a["ngay"] - b["ngay"]).days) <= so_ngay and a["ct"] != b["ct"]
                   for i, a in enumerate(v) for b in v[i + 1:])
-        if gan:
-            lenh_cung_tien.append({"ncc_id": k[0], "ncc_ten": ten_ncc.get(k[0]), "tien": float(k[1]),
+        if gan and ("LENH_TIEN", f"{k[0]}|{k[1]}") not in bq:
+            lenh_cung_tien.append({"ncc_id": k[0], "ncc_ten": ten_ncc.get(k[0]), "tien": float(k[1]), "khoa": f"{k[0]}|{k[1]}",
                                    "items": [dict(x, ngay=str(x["ngay"]) if x["ngay"] else None) for x in v]})
     lenh_cung_tien.sort(key=lambda g: -g["tien"])
+    from ..models import NghiTrungBoQua
+    da_bo_qua = [{"id": r.id, "loai": r.loai, "khoa": r.khoa, "mo_ta": r.mo_ta, "ly_do": r.ly_do, "luc": str(r.tao_luc)[:16] if r.tao_luc else None}
+                 for r in db.query(NghiTrungBoQua).order_by(NghiTrungBoQua.id.desc()).all()]
     return {"so_ngay": so_ngay, "hoa_don": hoa_don, "po_cung_tien": po_cung_tien, "lenh_cung_tien": lenh_cung_tien,
-            "tong": {"hoa_don": len(hoa_don), "po_cung_tien": len(po_cung_tien), "lenh_cung_tien": len(lenh_cung_tien)}}
+            "tong": {"hoa_don": len(hoa_don), "po_cung_tien": len(po_cung_tien), "lenh_cung_tien": len(lenh_cung_tien)},
+            "da_bo_qua": da_bo_qua}
+
+
+class BoQuaTrungVao(_NccCnBase):
+    loai: str                       # HOA_DON | PO_TIEN | LENH_TIEN
+    khoa: str
+    mo_ta: str | None = None
+    ly_do: str | None = None
+
+
+@router.post("/ra-trung/bo-qua")
+def ra_trung_bo_qua(data: BoQuaTrungVao, db: Session = Depends(get_db), nd: NguoiDung = Depends(chi_vai_tro("CEO"))):
+    """✅ CEO xác nhận nhóm nghi trùng là KHÔNG trùng → bỏ cảnh báo (nhãn ⚠, chặn duyệt, panel Rà trùng)."""
+    from ..models import NghiTrungBoQua
+    if data.loai not in ("HOA_DON", "PO_TIEN", "LENH_TIEN") or not (data.khoa or "").strip():
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Thiếu loại / khóa nhóm")
+    r = db.query(NghiTrungBoQua).filter_by(loai=data.loai, khoa=data.khoa.strip()).first()
+    if r is None:
+        r = NghiTrungBoQua(loai=data.loai, khoa=data.khoa.strip()[:120], nguoi_dung_id=nd.id)
+        db.add(r)
+    r.mo_ta = (data.mo_ta or "").strip()[:300] or r.mo_ta
+    r.ly_do = (data.ly_do or "").strip()[:300] or r.ly_do
+    db.flush()
+    ghi_audit(db, nd.id, "KHONG_TRUNG", "nghi_trung_bo_qua", r.id, moi={"loai": data.loai, "khoa": data.khoa, "ly_do": data.ly_do})
+    db.commit()
+    return {"ok": True, "id": r.id}
+
+
+@router.delete("/ra-trung/bo-qua/{bq_id}")
+def ra_trung_bat_lai(bq_id: int, db: Session = Depends(get_db), nd: NguoiDung = Depends(chi_vai_tro("CEO"))):
+    from ..models import NghiTrungBoQua
+    r = db.get(NghiTrungBoQua, bq_id)
+    if r is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy")
+    ghi_audit(db, nd.id, "BAT_LAI_TRUNG", "nghi_trung_bo_qua", bq_id, cu={"loai": r.loai, "khoa": r.khoa})
+    db.delete(r); db.commit()
+    return {"ok": True}
 
 
 # =====================================================================================

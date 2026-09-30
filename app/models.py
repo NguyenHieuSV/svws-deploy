@@ -1143,6 +1143,18 @@ class KtHdGuiKhach(Base):
     tao_luc: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
+class NghiTrungBoQua(Base):
+    """mig 140: nhóm nghi trùng CEO đã xác nhận KHÔNG trùng → bỏ cảnh báo / bỏ chặn."""
+    __tablename__ = "nghi_trung_bo_qua"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    loai: Mapped[str] = mapped_column(String(12))
+    khoa: Mapped[str] = mapped_column(String(120))
+    mo_ta: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    ly_do: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    nguoi_dung_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    tao_luc: Mapped[datetime | None] = mapped_column(DateTime, server_default=func.now())
+
+
 class ThanhToanThueNgoai(Base):
     """mig 136: một lần chi trả cho cá nhân thuê ngoài — thuế TNCN khấu trừ theo thuế suất toàn phần."""
     __tablename__ = "thanh_toan_thue_ngoai"
