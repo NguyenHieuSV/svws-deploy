@@ -6099,3 +6099,116 @@ def ra_trung(so_ngay: int = 30, db: Session = Depends(get_db), _=Depends(chi_vai
     lenh_cung_tien.sort(key=lambda g: -g["tien"])
     return {"so_ngay": so_ngay, "hoa_don": hoa_don, "po_cung_tien": po_cung_tien, "lenh_cung_tien": lenh_cung_tien,
             "tong": {"hoa_don": len(hoa_don), "po_cung_tien": len(po_cung_tien), "lenh_cung_tien": len(lenh_cung_tien)}}
+
+
+# =====================================================================================
+# 🔗 HỒ SƠ LIÊN QUAN CỦA MỘT PO (bấm số PO ở Duyệt chi): đơn bán · dự án · hóa đơn · công nợ · lệnh chi · phiếu chi · đề xuất · tệp
+# =====================================================================================
+@router.get("/don-mua/{dm_id}/ho-so")
+def ho_so_don_mua(dm_id: int, db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
+    from ..models import (HoaDon, DonHang, KhachHang, TaiSanChoThue, DuAn, LenhChiBank, PhieuThuChi, ThanhToan,
+                          DonMuaDotTt, TepDinhKem, ChiPhiVanHanh, HangHoa)
+    from ..lai_lo_ma import so_hd_chuan
+    from ..ma_code import phan_tich
+    from ..dau_tu_cho_thue import goc_du_an
+    dm = db.get(DonMua, dm_id)
+    if dm is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đơn mua")
+    ma = _ma_ban_hang_po(db, dm) or (dm.ma_ban or "").strip() or None
+    ncc = db.get(NhaCungCap, dm.nha_cung_cap_id)
+    # ---- đơn bán ----
+    dh = db.get(DonHang, dm.don_hang_id) if dm.don_hang_id else None
+    if dh is None and ma:
+        dh = db.query(DonHang).filter(func.lower(func.trim(DonHang.so)) == ma.lower()).first()
+    don_hang = None
+    if dh is not None:
+        kh = db.get(KhachHang, dh.khach_hang_id) if dh.khach_hang_id else None
+        don_hang = {"id": dh.id, "so": dh.so, "khach": kh.ten if kh else None, "trang_thai": dh.trang_thai,
+                    "tong_tien": float(dh.tong_tien or 0), "so_hoa_don": dh.so_hoa_don, "ngay": str(dh.ngay) if dh.ngay else None}
+    # ---- dự án: DV- → tài sản cho thuê (gốc mã) · DA- → dự án ----
+    du_an = None
+    p = phan_tich(ma) if ma else {}
+    goc = (p.get("goc_khong_thang") or "").lower()
+    if p.get("loai") == "DV":
+        for ts in db.query(TaiSanChoThue).all():
+            if goc and goc_du_an(ts).lower() == goc:
+                du_an = {"loai": "CHO_THUE", "id": ts.id, "ma": ts.ma, "ten": ts.ten_du_an or ts.ma}
+                break
+    elif p.get("loai") == "DA":
+        best = None
+        for da in db.query(DuAn).filter(DuAn.ma.isnot(None)).all():
+            m0 = str(da.ma or "").strip().lower()
+            if m0 and (m0 == ma.lower() or ma.lower().startswith(m0 + "-") or (goc and (m0 == goc or goc.startswith(m0 + "-")))):
+                if best is None or len(m0) > len(str(best.ma)):
+                    best = da
+        if best is not None:
+            du_an = {"loai": "DU_AN", "id": best.id, "ma": best.ma, "ten": best.ten, "trang_thai": best.trang_thai}
+    # ---- hóa đơn mua liên quan ----
+    cn = db.query(CongNo).filter_by(don_mua_id=dm.id).first()
+    hd_ids = set()
+    for (hid,) in db.query(CongNo.hoa_don_id).filter(CongNo.don_mua_id == dm.id, CongNo.hoa_don_id.isnot(None)).all():
+        hd_ids.add(hid)
+    so = so_hd_chuan(dm.so_hoa_don)
+    if so:
+        for h0 in db.query(HoaDon).filter(HoaDon.loai == "MUA", HoaDon.nha_cung_cap_id == dm.nha_cung_cap_id).all():
+            if so_hd_chuan(h0.so) == so:
+                hd_ids.add(h0.id)
+    hoa_don_mua = []
+    for hid in sorted(hd_ids):
+        h0 = db.get(HoaDon, hid)
+        if h0 is not None:
+            hoa_don_mua.append({"id": h0.id, "so": h0.so, "ngay": str(h0.ngay) if h0.ngay else None, "tong_tien": float(h0.tong_tien or 0),
+                                "da_hach_toan": bool(h0.da_hach_toan), "trang_thai": h0.trang_thai,
+                                "tu_sinh": str(h0.so or "").upper().startswith("HDM-")})
+    hd_dau_vao = [{"id": c.id, "so_hoa_don": c.so_hoa_don, "ngay": str(c.ngay) if c.ngay else None, "so_tien": float(c.so_tien or 0),
+                   "ma": c.ma_ban_hang, "ncc_ten": c.ncc_ten}
+                  for c in db.query(ChiPhiVanHanh).filter(ChiPhiVanHanh.don_mua_id == dm.id).all()]
+    # ---- hóa đơn bán của mã ----
+    hoa_don_ban = []
+    if dh is not None:
+        for h1 in db.query(HoaDon).filter(HoaDon.loai == "BAN", HoaDon.don_hang_id == dh.id).order_by(HoaDon.id).all():
+            hoa_don_ban.append({"id": h1.id, "so": h1.so, "ngay": str(h1.ngay) if h1.ngay else None, "tong_tien": float(h1.tong_tien or 0),
+                                "hddt": h1.hddt_trang_thai, "gui_khach_luc": str(getattr(h1, "gui_khach_luc", None) or "")[:16] or None})
+    # ---- công nợ + đợt + thanh toán ----
+    cong_no = None
+    if cn is not None:
+        cong_no = {"id": cn.id, "so_tien": float(cn.so_tien or 0), "da_thanh_toan": float(cn.da_thanh_toan or 0),
+                   "con_lai": float((cn.so_tien or 0) - (cn.da_thanh_toan or 0)), "han": str(cn.han) if cn.han else None,
+                   "trang_thai": cn.trang_thai, "so_ct": cn.so_ct,
+                   "thanh_toan": [{"id": t.id, "ngay": str(t.ngay) if t.ngay else None, "so_tien": float(t.so_tien or 0), "hinh_thuc": t.hinh_thuc}
+                                  for t in db.query(ThanhToan).filter(ThanhToan.cong_no_id == cn.id).order_by(ThanhToan.id).all()]}
+    dot = [{"id": d0.id, "ngay": str(d0.ngay) if d0.ngay else None, "so_tien": float(d0.so_tien or 0), "hinh_thuc": d0.hinh_thuc, "ghi_chu": d0.ghi_chu}
+           for d0 in db.query(DonMuaDotTt).filter(DonMuaDotTt.don_mua_id == dm.id).order_by(DonMuaDotTt.id).all()]
+    # ---- lệnh chi + phiếu chi ----
+    lenh = db.query(LenhChiBank).filter(LenhChiBank.don_mua_id == dm.id).order_by(LenhChiBank.id).all()
+    lenh_chi = [{"id": l.id, "so_tien": float(l.so_tien or 0), "so_tien_dot": (float(l.so_tien_dot) if getattr(l, "so_tien_dot", None) is not None else None),
+                 "trang_thai": l.trang_thai, "de_nghi_luc": str(l.de_nghi_luc)[:16] if l.de_nghi_luc else None,
+                 "duyet_luc": str(l.duyet_luc)[:16] if l.duyet_luc else None, "chi_luc": str(l.chi_luc)[:16] if l.chi_luc else None} for l in lenh]
+    lenh_ids = [l.id for l in lenh]
+    q_ph = db.query(PhieuThuChi).filter(PhieuThuChi.loai == "CHI")
+    conds = []
+    if lenh_ids:
+        conds.append(PhieuThuChi.lenh_chi_id.in_(lenh_ids))
+    if cn is not None:
+        conds.append(PhieuThuChi.cong_no_id == cn.id)
+    phieu_chi = []
+    if conds:
+        from sqlalchemy import or_ as _or
+        for ph in q_ph.filter(_or(*conds)).order_by(PhieuThuChi.id).all():
+            phieu_chi.append({"id": ph.id, "so": ph.so, "ngay": str(ph.ngay) if ph.ngay else None, "so_tien": float(ph.so_tien or 0),
+                              "trang_thai": ph.trang_thai, "dien_giai": ph.dien_giai})
+    # ---- đề xuất mua gốc ----
+    de_xuat = []
+    for y in db.query(YeuCauMua).filter(YeuCauMua.don_mua_id == dm.id).order_by(YeuCauMua.id).all():
+        hh = db.get(HangHoa, y.hang_hoa_id) if y.hang_hoa_id else None
+        de_xuat.append({"id": y.id, "hang": hh.ten if hh else None, "so_luong": float(y.so_luong or 0), "trang_thai": y.trang_thai,
+                        "ngay": str(y.ngay) if y.ngay else None, "ly_do": y.ly_do})
+    # ---- tệp đính kèm PO ----
+    tep = [{"id": t.id, "ten_file": t.ten_file, "loai": t.loai, "url": f"/ban-hang/tep/{t.id}/tai-ve"}
+           for t in db.query(TepDinhKem).filter(TepDinhKem.doi_tuong == "DON_MUA", TepDinhKem.doi_tuong_id == dm.id).all()]
+    return {"po": {"id": dm.id, "so": dm.so, "ngay": str(dm.ngay) if dm.ngay else None, "tong_tien": float(dm.tong_tien or 0),
+                   "trang_thai": dm.trang_thai, "trang_thai_nhan": dm.trang_thai_nhan, "so_hoa_don": dm.so_hoa_don,
+                   "ncc_id": dm.nha_cung_cap_id, "ncc_ten": ncc.ten if ncc else None, "da_tra": float(_da_tra_that(db, dm))},
+            "ma": ma, "don_hang": don_hang, "du_an": du_an, "hoa_don_mua": hoa_don_mua, "hd_dau_vao": hd_dau_vao,
+            "hoa_don_ban": hoa_don_ban, "cong_no": cong_no, "dot": dot, "lenh_chi": lenh_chi, "phieu_chi": phieu_chi,
+            "de_xuat": de_xuat, "tep": tep}
