@@ -2017,7 +2017,7 @@ def xoa_dot_thanh_toan(dot_id: int, ly_do: str = "", db: Session = Depends(get_d
 
 
 @router.post("/don-mua/{dm_id}/thanh-toan")
-def cap_nhat_thanh_toan_mua(dm_id: int, data: ThanhToanMuaVao, db: Session = Depends(get_db),
+def cap_nhat_thanh_toan_mua(dm_id: int, data: ThanhToanMuaVao, ep: bool = False, db: Session = Depends(get_db),
                             nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
     """Ghi nhận đề nghị thanh toán của PO. Đề nghị = tổng → PO đánh dấu ĐÃ THANH
     TOÁN 100% (lưu ở tab Kiểm soát). Còn thiếu → phần còn lại nằm ở Công nợ phải trả."""
@@ -2029,7 +2029,14 @@ def cap_nhat_thanh_toan_mua(dm_id: int, data: ThanhToanMuaVao, db: Session = Dep
                             "PO chưa được duyệt — duyệt ở tab Đơn mua (PO) trước, "
                             "sau đó PO mới chạy sang Thanh toán mua hàng.")
     if data.so_hoa_don is not None:
-        dm.so_hoa_don = (data.so_hoa_don or "").strip()[:60] or None
+        _so_moi = (data.so_hoa_don or "").strip()[:60] or None
+        if _so_moi and not ep:                         # 🛡 lớp 3: cùng NCC + cùng số HĐ đã có PO / công nợ khác
+            from ..lai_lo_ma import so_hd_chuan as _shc
+            if _shc(_so_moi) != _shc(dm.so_hoa_don):
+                _tr = _trung_hoa_don_ncc(db, dm.nha_cung_cap_id, _shc(_so_moi), bo_po_id=dm.id)
+                if _tr:
+                    raise HTTPException(status.HTTP_409_CONFLICT, _bao_trung_hoa_don(_so_moi, _tr))
+        dm.so_hoa_don = _so_moi
     if "don_hang_id" in data.model_fields_set:
         if data.don_hang_id:
             from ..models import DonHang
@@ -2805,14 +2812,21 @@ class ChoNhapSuaVao(_NccCnBase):
 
 
 @router.put("/don-mua/{dm_id}/cho-nhap")
-def sua_cho_nhap(dm_id: int, data: ChoNhapSuaVao, db: Session = Depends(get_db),
+def sua_cho_nhap(dm_id: int, data: ChoNhapSuaVao, ep: bool = False, db: Session = Depends(get_db),
                  nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
     """CEO/ADMIN sửa thông tin nhận hàng của PO ở 'Chờ nhập kho' (số hóa đơn,
     ngày đặt, hẹn giao) — KHÔNG đụng nội dung/giá trị PO, giữ vết duyệt."""
     dm = db.get(DonMua, dm_id)
     if dm is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đơn mua")
-    dm.so_hoa_don = (str(data.so_hoa_don or "").strip()[:60]) or None
+    _so_moi = (str(data.so_hoa_don or "").strip()[:60]) or None
+    if _so_moi and not ep:                             # 🛡 lớp 3
+        from ..lai_lo_ma import so_hd_chuan as _shc
+        if _shc(_so_moi) != _shc(dm.so_hoa_don):
+            _tr = _trung_hoa_don_ncc(db, dm.nha_cung_cap_id, _shc(_so_moi), bo_po_id=dm.id)
+            if _tr:
+                raise HTTPException(status.HTTP_409_CONFLICT, _bao_trung_hoa_don(_so_moi, _tr))
+    dm.so_hoa_don = _so_moi
     dm.ngay_dat_hang = data.ngay_dat_hang
     dm.ngay_hen_giao = data.ngay_hen_giao
     ghi_audit(db, nd.id, "CAP_NHAT", "don_mua", dm.id,
@@ -4025,6 +4039,7 @@ def ai_nhap_cong_no_ncc(data: AiNhapNccVao, db: Session = Depends(get_db),
     da_noi_po = 0
     ma_sai = ma_da_sua = 0
     ma_sai_vd = []
+    trung_hd = 0
     for r in data.rows:
         so_ct = str(r.get("so_hoa_don") or "").strip()[:60] or None
         if not so_ct:                          # bắt buộc có số hóa đơn mới đưa vào công nợ
@@ -4091,6 +4106,11 @@ def ai_nhap_cong_no_ncc(data: AiNhapNccVao, db: Session = Depends(get_db),
         if vat > st:
             vat = Decimal(0)
         tt = "DA_TRA" if dtt >= st else ("TRA_MOT_PHAN" if dtt > 0 else "CHUA_TRA")
+        if not r.get("rieng"):                     # 🛡 lớp 3: cùng NCC + cùng số HĐ đã có PO / công nợ → không tạo bản thứ hai
+            from ..lai_lo_ma import so_hd_chuan as _shc2
+            if _trung_hoa_don_ncc(db, ncc_id, _shc2(so_ct)):
+                trung_hd += 1
+                continue
         _cn_moi = CongNo(loai="PHAI_TRA", nha_cung_cap_id=ncc_id, so_tien=st, tien_thue=vat,
                          da_thanh_toan=dtt, han=han, ngay_ct=ngay_ct, ngay_tt_tiep=ngay_tt,
                          ma_ban_ngoai=ma, so_ct=so_ct, trang_thai=tt, ghi_chu=ghi_chu)
@@ -4106,7 +4126,7 @@ def ai_nhap_cong_no_ncc(data: AiNhapNccVao, db: Session = Depends(get_db),
     db.commit()
     return {"da_tao": tao, "bo_qua_thieu_hd": bo_qua, "da_noi_po": da_noi_po,
             "bo_qua_thieu_ma": thieu_ma, "bo_qua_nghi_trung": nghi_trung,
-            "bo_qua_ma_sai": ma_sai, "ma_sai_vd": ma_sai_vd, "ma_da_sua": ma_da_sua}
+            "bo_qua_ma_sai": ma_sai, "ma_sai_vd": ma_sai_vd, "ma_da_sua": ma_da_sua, "bo_qua_trung_hd": trung_hd}
 
 
 class DepTrungNccVao(_NccCnBase):
@@ -5960,3 +5980,122 @@ def thong_ke_hoa_don_thang(nam: int | None = None, db: Session = Depends(get_db)
     return {"nam": nam, "hoa_don": sorted(agg.values(), key=lambda x: -x["tong"]), "po_co_hoa_don": sorted(po_co),
             "so_hd_that": len(hd_ds), "tong_hd_that": sum(o["tong"] for o in agg.values()),
             "nguon": {k: sum(1 for r0 in hd_ds if r0["nguon"] == k) for k in ("KE_TOAN", "CHO_THUE", "PO")}}
+
+
+# =====================================================================================
+# 🛡 LỚP 3 — TRÙNG SỐ HÓA ĐƠN NCC Ở GỐC: cùng NCC + cùng số HĐ (chuẩn hóa) đã có PO / công nợ khác.
+# =====================================================================================
+def _trung_hoa_don_ncc(db, ncc_id, so_chuan, bo_po_id=None, bo_cn_id=None) -> list:
+    from ..lai_lo_ma import so_hd_chuan
+    if not ncc_id or not so_chuan:
+        return []
+    out, po_ids = [], set()
+    for p in db.query(DonMua).filter(DonMua.nha_cung_cap_id == ncc_id, DonMua.so_hoa_don.isnot(None),
+                                     DonMua.trang_thai != "TU_CHOI").all():
+        if p.id != (bo_po_id or 0) and so_hd_chuan(p.so_hoa_don) == so_chuan:
+            po_ids.add(p.id)
+            out.append({"loai": "PO", "id": p.id, "so": p.so or f"PO-{p.id}", "ngay": str(p.ngay or "")[:10],
+                        "tong": float(p.tong_tien or 0), "da_tra": float(_da_tra_that(db, p)), "trang_thai": p.trang_thai,
+                        "so_hd": p.so_hoa_don})
+    for c in db.query(CongNo).filter(CongNo.loai == "PHAI_TRA", CongNo.nha_cung_cap_id == ncc_id, CongNo.so_ct.isnot(None)).all():
+        if c.id == (bo_cn_id or 0) or so_hd_chuan(c.so_ct) != so_chuan:
+            continue
+        if c.don_mua_id and (c.don_mua_id == (bo_po_id or 0) or c.don_mua_id in po_ids):
+            continue                                   # công nợ của chính PO đã liệt kê / PO đang xét
+        out.append({"loai": "CN", "id": c.id, "so": f"CN-{c.id}", "ngay": str(c.ngay_ct or c.han or "")[:10],
+                    "tong": float(c.so_tien or 0), "da_tra": float(c.da_thanh_toan or 0), "trang_thai": c.trang_thai,
+                    "so_hd": c.so_ct, "don_mua_id": c.don_mua_id, "hoa_don_id": c.hoa_don_id})
+    return out
+
+
+def _bao_trung_hoa_don(so_hd, ds) -> str:
+    vd = "; ".join(f"{x['so']} ({'đã trả ' if x['da_tra'] else ''}{x['da_tra']:,.0f}/{x['tong']:,.0f})" for x in ds[:4]).replace(",", ".")
+    return (f"TRÙNG HĐ: số hóa đơn {so_hd} của nhà cung cấp này đã có ở {vd}"
+            f"{' …' if len(ds) > 4 else ''}. Kiểm tra PO / công nợ nhập trùng trước khi lưu.")
+
+
+# =====================================================================================
+# 🔍 LỚP 4 — RÀ TRÙNG toàn bộ (CEO): hóa đơn · PO cùng tiền · lệnh chi cùng tiền
+# =====================================================================================
+@router.get("/ra-trung")
+def ra_trung(so_ngay: int = 30, db: Session = Depends(get_db), _=Depends(chi_vai_tro("CEO", "ADMIN"))):
+    from ..lai_lo_ma import so_hd_chuan
+    from ..models import LenhChiBank
+    from datetime import date as _d
+    ten_ncc = {n.id: n.ten for n in db.query(NhaCungCap).all()}
+    pos = db.query(DonMua).filter(DonMua.trang_thai != "TU_CHOI").order_by(DonMua.id.desc()).all()
+    cns = db.query(CongNo).filter(CongNo.loai == "PHAI_TRA").all()
+    po_by = {p.id: p for p in pos}
+
+    def po_item(p):
+        return {"loai": "PO", "id": p.id, "so": p.so or f"PO-{p.id}", "ngay": str(p.ngay or "")[:10], "tong": float(p.tong_tien or 0),
+                "da_tra": float(_da_tra_that(db, p)), "trang_thai": p.trang_thai, "so_hd": p.so_hoa_don,
+                "nhan_du": (p.trang_thai_nhan == "DU"), "ncc_ten": ten_ncc.get(p.nha_cung_cap_id)}
+
+    def cn_item(c):
+        return {"loai": "CN", "id": c.id, "so": f"CN-{c.id}", "ngay": str(c.ngay_ct or c.han or "")[:10], "tong": float(c.so_tien or 0),
+                "da_tra": float(c.da_thanh_toan or 0), "trang_thai": c.trang_thai, "so_hd": c.so_ct, "don_mua_id": c.don_mua_id,
+                "hoa_don_id": c.hoa_don_id, "ma": c.ma_ban_ngoai, "ncc_ten": ten_ncc.get(c.nha_cung_cap_id)}
+
+    # ① cùng NCC + cùng số hóa đơn (PO ↔ PO · PO ↔ công nợ ngoài · công nợ ↔ công nợ)
+    nhom = {}
+    for p in pos:
+        sc = so_hd_chuan(p.so_hoa_don)
+        if sc and p.nha_cung_cap_id:
+            nhom.setdefault((p.nha_cung_cap_id, sc), []).append(po_item(p))
+    for c in cns:
+        sc = so_hd_chuan(c.so_ct)
+        if not sc or not c.nha_cung_cap_id:
+            continue
+        if c.don_mua_id and c.don_mua_id in po_by and so_hd_chuan(po_by[c.don_mua_id].so_hoa_don) == sc:
+            continue                                   # công nợ của chính PO đó — không phải bản thứ hai
+        nhom.setdefault((c.nha_cung_cap_id, sc), []).append(cn_item(c))
+    hoa_don = [{"ncc_id": k[0], "ncc_ten": ten_ncc.get(k[0]), "so_hd": v[0]["so_hd"], "items": v,
+                "tong": sum(x["tong"] for x in v), "da_tra": sum(x["da_tra"] for x in v)}
+               for k, v in nhom.items() if len(v) > 1]
+    hoa_don.sort(key=lambda g: -g["tong"])
+    # ② PO cùng NCC + cùng tổng tiền trong ≤ so_ngay ngày (nghi tạo PO trùng)
+    nhom2 = {}
+    for p in pos:
+        if float(p.tong_tien or 0) > 0 and p.nha_cung_cap_id:
+            nhom2.setdefault((p.nha_cung_cap_id, int(round(float(p.tong_tien or 0)))), []).append(p)
+    po_cung_tien = []
+    for k, v in nhom2.items():
+        if len(v) < 2:
+            continue
+        v = sorted(v, key=lambda p: str(p.ngay or ""))
+        gan = any(p1.ngay and p2.ngay and abs((p1.ngay - p2.ngay).days) <= so_ngay for i, p1 in enumerate(v) for p2 in v[i + 1:])
+        if gan:
+            po_cung_tien.append({"ncc_id": k[0], "ncc_ten": ten_ncc.get(k[0]), "tong": float(k[1]), "items": [po_item(p) for p in v]})
+    po_cung_tien.sort(key=lambda g: -g["tong"])
+    # ③ lệnh chi đã duyệt / đã chi: cùng NCC + cùng số tiền đợt ở PO / công nợ KHÁC trong ≤ so_ngay ngày
+    cn_by = {c.id: c for c in cns}
+    lenh = []
+    for l in db.query(LenhChiBank).filter(LenhChiBank.trang_thai.in_(("DA_DUYET", "DA_CHI"))).order_by(LenhChiBank.id.desc()).limit(800).all():
+        p = po_by.get(l.don_mua_id) if l.don_mua_id else None
+        c = cn_by.get(getattr(l, "cong_no_id", None)) if getattr(l, "cong_no_id", None) else None
+        ncc_id = (p.nha_cung_cap_id if p else None) or (c.nha_cung_cap_id if c else None)
+        if not ncc_id:
+            continue
+        tien = float(l.so_tien_dot if getattr(l, "so_tien_dot", None) is not None else (l.so_tien or 0))
+        luc = l.chi_luc or l.duyet_luc or l.de_nghi_luc
+        lenh.append({"id": l.id, "ncc_id": ncc_id, "tien": int(round(tien)), "ngay": luc.date() if luc else None,
+                     "ct": f"po{l.don_mua_id}" if l.don_mua_id else f"cn{getattr(l, 'cong_no_id', None)}",
+                     "so": (p.so if p else None) or (f"CN-{c.id}" if c else f"#{l.id}"), "trang_thai": l.trang_thai,
+                     "so_hd": (p.so_hoa_don if p else None) or (c.so_ct if c else None)})
+    nhom3 = {}
+    for x in lenh:
+        if x["tien"] > 0:
+            nhom3.setdefault((x["ncc_id"], x["tien"]), []).append(x)
+    lenh_cung_tien = []
+    for k, v in nhom3.items():
+        if len({x["ct"] for x in v}) < 2:
+            continue
+        gan = any(a["ngay"] and b["ngay"] and abs((a["ngay"] - b["ngay"]).days) <= so_ngay and a["ct"] != b["ct"]
+                  for i, a in enumerate(v) for b in v[i + 1:])
+        if gan:
+            lenh_cung_tien.append({"ncc_id": k[0], "ncc_ten": ten_ncc.get(k[0]), "tien": float(k[1]),
+                                   "items": [dict(x, ngay=str(x["ngay"]) if x["ngay"] else None) for x in v]})
+    lenh_cung_tien.sort(key=lambda g: -g["tien"])
+    return {"so_ngay": so_ngay, "hoa_don": hoa_don, "po_cung_tien": po_cung_tien, "lenh_cung_tien": lenh_cung_tien,
+            "tong": {"hoa_don": len(hoa_don), "po_cung_tien": len(po_cung_tien), "lenh_cung_tien": len(lenh_cung_tien)}}
