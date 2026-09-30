@@ -2247,7 +2247,7 @@ def _lcb_dict(db, r):
                   or (f"PO-{r.don_mua_id}" if r.don_mua_id else "—"),
             "so_hoa_don": (dm.so_hoa_don if dm else None) or (cn.so_ct if cn else None),
             "ma_don_ban": (_ma_ban_hang_po(db, dm) if dm else None) or ma_cn or ma_ph,
-            "ncc_ten": ncc.ten if ncc else None,
+            "ncc_ten": ncc.ten if ncc else None, "ncc_id": (ncc.id if ncc else None),
             "tong_tien": float(dm.tong_tien or 0) if dm else (float(cn.so_tien or 0) if cn else float(r.so_tien or 0)),
             "so_tien": float(r.so_tien or 0),
             "de_nghi_luc": str(r.de_nghi_luc)[:16] if r.de_nghi_luc else None,
@@ -2386,9 +2386,79 @@ def ds_duyet_chi_bank(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "
         ngoai_lenh = _thuc_chi_ngoai_lenh(db, lich_su)
     except Exception:
         ngoai_lenh = []
-    return {"cho_duyet": [_lcb_dict(db, r) for r in rows if r.trang_thai == "CHO_DUYET"],
-            "da_duyet": [_lcb_dict(db, r) for r in rows if r.trang_thai == "DA_DUYET"],
-            "lich_su": lich_su, "ngoai_lenh": ngoai_lenh}
+    cho_duyet = [_lcb_dict(db, r) for r in rows if r.trang_thai == "CHO_DUYET"]
+    da_duyet = [_lcb_dict(db, r) for r in rows if r.trang_thai == "DA_DUYET"]
+    _lcb_gan_nghi_trung(cho_duyet + da_duyet, lich_su)     # ⚠ lớp 1: nhãn nghi trùng
+    return {"cho_duyet": cho_duyet, "da_duyet": da_duyet, "lich_su": lich_su, "ngoai_lenh": ngoai_lenh}
+
+
+def _lcb_gan_nghi_trung(rows_active: list, lich_su: list, so_ngay: int = 30):
+    """Gắn nghi_trung[] cho lệnh CHỜ DUYỆT / ĐÃ DUYỆT: cùng NCC với lệnh khác (chờ · đã duyệt · đã chi) và
+    (a) cùng SỐ HÓA ĐƠN NCC ở PO / công nợ khác → mạnh; (b) cùng SỐ TIỀN ĐỢT trong ≤ so_ngay ngày → nhẹ (kể cả cùng PO)."""
+    from ..lai_lo_ma import so_hd_chuan
+    from datetime import date as _d
+    tat_ca = rows_active + lich_su
+
+    def ngay(x):
+        s = (x.get("chi_luc") or x.get("duyet_luc") or x.get("de_nghi_luc") or "")[:10]
+        try:
+            return _d.fromisoformat(s) if s else None
+        except ValueError:
+            return None
+
+    def tien(x):
+        v = x.get("so_tien_chi")
+        return float(v if v is not None else (x.get("so_tien") or 0))
+
+    for a in rows_active:
+        if a.get("trang_thai") not in ("CHO_DUYET", "DA_DUYET") or not a.get("ncc_id"):
+            a["nghi_trung"] = []
+            continue
+        ds, na, ta, sa = [], ngay(a), tien(a), so_hd_chuan(a.get("so_hoa_don"))
+        for b in tat_ca:
+            if b["id"] == a["id"] or b.get("ncc_id") != a["ncc_id"]:
+                continue
+            cung_ct = bool((a.get("don_mua_id") and a.get("don_mua_id") == b.get("don_mua_id"))
+                           or (a.get("cong_no_id") and a.get("cong_no_id") == b.get("cong_no_id")))
+            sb, tb, nb = so_hd_chuan(b.get("so_hoa_don")), tien(b), ngay(b)
+            gan = (na is None or nb is None or abs((na - nb).days) <= so_ngay)
+            ly_do, manh = None, False
+            if sa and sa == sb and not cung_ct:
+                ly_do, manh = f"cùng số hóa đơn {a.get('so_hoa_don')} với lệnh {b.get('so')}", True
+            elif ta > 0 and abs(ta - tb) < 1 and gan:
+                ly_do = f"{'cùng PO, ' if cung_ct else ''}cùng số tiền {ta:,.0f} với lệnh {b.get('so')}".replace(",", ".")
+            if ly_do:
+                ds.append({"id": b["id"], "so": b.get("so"), "trang_thai": b.get("trang_thai"), "so_tien": tb,
+                           "ngay": str(nb) if nb else None, "ly_do": ly_do, "manh": manh})
+        ds.sort(key=lambda x: (not x["manh"], x["id"]))
+        a["nghi_trung"] = ds[:6]
+
+
+def _lcb_trung_hoa_don(db, r):
+    """Lớp 2: lệnh khác ĐÃ DUYỆT / ĐÃ CHI của cùng NCC + cùng SỐ HÓA ĐƠN ở PO / công nợ KHÁC → [(lệnh, số, đợt)]."""
+    from ..lai_lo_ma import so_hd_chuan
+    from ..models import LenhChiBank
+    dm = db.get(DonMua, r.don_mua_id) if r.don_mua_id else None
+    cn = db.get(CongNo, r.cong_no_id) if getattr(r, "cong_no_id", None) else None
+    ncc_id = (dm.nha_cung_cap_id if dm else None) or (cn.nha_cung_cap_id if cn else None)
+    so = so_hd_chuan((dm.so_hoa_don if dm else None) or (cn.so_ct if cn else None))
+    if not ncc_id or not so:
+        return []
+    po_ids = {p.id for p in db.query(DonMua).filter(DonMua.nha_cung_cap_id == ncc_id, DonMua.so_hoa_don.isnot(None)).all()
+              if so_hd_chuan(p.so_hoa_don) == so and p.id != (r.don_mua_id or 0)}
+    cn_ids = {c.id for c in db.query(CongNo).filter(CongNo.loai == "PHAI_TRA", CongNo.nha_cung_cap_id == ncc_id,
+                                                    CongNo.so_ct.isnot(None)).all()
+              if so_hd_chuan(c.so_ct) == so and c.id != (getattr(r, "cong_no_id", None) or 0)}
+    out = []
+    for l in db.query(LenhChiBank).filter(LenhChiBank.trang_thai.in_(("DA_DUYET", "DA_CHI"))).order_by(LenhChiBank.id.desc()).all():
+        if l.id == r.id:
+            continue
+        if (l.don_mua_id and l.don_mua_id in po_ids) or (getattr(l, "cong_no_id", None) and l.cong_no_id in cn_ids):
+            d0 = db.get(DonMua, l.don_mua_id) if l.don_mua_id else None
+            so_l = (d0.so if d0 else None) or (f"CN-{l.cong_no_id}" if getattr(l, "cong_no_id", None) else f"#{l.id}")
+            dot = float(l.so_tien_dot if getattr(l, "so_tien_dot", None) is not None else (l.so_tien or 0))
+            out.append((l, so_l, dot))
+    return out
 
 
 @router.post("/duyet-chi-bank/gui-thu")
@@ -2403,9 +2473,10 @@ def gui_thu_duyet_chi_chat(db: Session = Depends(get_db),
 
 
 @router.post("/lenh-chi-bank/{lcb_id}/duyet")
-def duyet_lenh_chi_bank(lcb_id: int, db: Session = Depends(get_db),
+def duyet_lenh_chi_bank(lcb_id: int, ep: bool = False, db: Session = Depends(get_db),
                         nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN", "KTT", "TP_QLNB"))):
-    """DUYỆT lệnh chi ngân hàng — sau bước này lệnh mới đổ về Kế toán để thực chi."""
+    """DUYỆT lệnh chi ngân hàng — sau bước này lệnh mới đổ về Kế toán để thực chi.
+    ep=true (chỉ CEO): vẫn duyệt dù trùng số hóa đơn với lệnh đã duyệt / đã chi (trả nhiều đợt cho cùng hóa đơn)."""
     from ..models import LenhChiBank
     from ..nhac_viec_service import gio_hien_tai
     r = db.get(LenhChiBank, lcb_id)
@@ -2413,8 +2484,23 @@ def duyet_lenh_chi_bank(lcb_id: int, db: Session = Depends(get_db),
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy lệnh chi")
     if r.trang_thai != "CHO_DUYET":
         raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Lệnh chi đang ở trạng thái {r.trang_thai}")
+    # 🛡 LỚP 2 — CHẶN DUYỆT TRÙNG: cùng NCC + cùng số hóa đơn đã có lệnh đã duyệt / đã chi ở PO hoặc công nợ khác
+    trung = _lcb_trung_hoa_don(db, r)
+    if trung and not (ep and nd.vai_tro.ma == "CEO"):
+        dm0 = db.get(DonMua, r.don_mua_id) if r.don_mua_id else None
+        cn0 = db.get(CongNo, r.cong_no_id) if getattr(r, "cong_no_id", None) else None
+        so_hd = (dm0.so_hoa_don if dm0 else None) or (cn0.so_ct if cn0 else None)
+        gia_tri = float((dm0.tong_tien if dm0 else None) or (cn0.so_tien if cn0 else None) or 0)
+        da = sum(t[2] for t in trung)
+        dot = float(r.so_tien_dot if getattr(r, "so_tien_dot", None) is not None else (r.so_tien or 0))
+        ds = "; ".join(f"{t[1]} ({'đã chi' if t[0].trang_thai == 'DA_CHI' else 'đã duyệt'} {t[2]:,.0f})" for t in trung[:4]).replace(",", ".")
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            f"TRÙNG: hóa đơn {so_hd} của nhà cung cấp này đã có lệnh {ds}. Tổng đã duyệt/chi {da:,.0f} + lệnh này "
+                            f"{dot:,.0f} so với giá trị chứng từ {gia_tri:,.0f}. Kiểm tra PO / công nợ nhập trùng trước khi duyệt"
+                            + (" — CEO có thể xác nhận vẫn duyệt nếu là trả nhiều đợt cho cùng hóa đơn." if nd.vai_tro.ma == "CEO"
+                               else " — chỉ CEO mới được duyệt đè.")).replace(",", ".")
     # TRẦN TIỀN NHIỀU CẤP: KTT duyệt theo hạn mức 'thu_chi' (bảng han_muc_duyet); CEO/ADMIN không trần
-    if nd.vai_tro not in ("CEO", "ADMIN"):
+    if nd.vai_tro.ma not in ("CEO", "ADMIN"):      # (sửa 30/09: vai_tro là đối tượng → phải so sánh .ma)
         kiem_han_muc(db, nd, "thu_chi", Decimal(r.so_tien or 0))
         # TÁCH VAI: người đề nghị không tự duyệt lệnh của chính mình (CEO/ADMIN miễn)
         if getattr(r, "nguoi_tao", None) == nd.id:
