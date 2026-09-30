@@ -1717,3 +1717,10 @@ class DuToanBanMuc(Base):
     ghi_chu: Mapped[str | None] = mapped_column(Text, nullable=True)
     hang_hoa_id: Mapped[int | None] = mapped_column(ForeignKey("hang_hoa.id", ondelete="SET NULL"), nullable=True)        # mig 117
     yeu_cau_mua_id: Mapped[int | None] = mapped_column(ForeignKey("yeu_cau_mua.id", ondelete="SET NULL"), nullable=True)  # mig 117
+    # mig 139: theo form Sản phẩm NCC — NCC · mã SP · spec · nhà sản xuất · liên kết dòng danh mục
+    nha_cung_cap_id: Mapped[int | None] = mapped_column(ForeignKey("nha_cung_cap.id", ondelete="SET NULL"), nullable=True)
+    ncc_ten: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    ma_sp: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    spec: Mapped[str | None] = mapped_column(Text, nullable=True)
+    nha_san_xuat: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    san_pham_ncc_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)

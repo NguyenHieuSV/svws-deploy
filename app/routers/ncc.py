@@ -5191,6 +5191,46 @@ class DtbMucVao(_NccCnBase):
     don_gia: float | None = None
     ghi_chu: str | None = None
     hang_hoa_id: int | None = None
+    nha_cung_cap_id: int | None = None      # mig 139: theo form Sản phẩm NCC
+    ncc_ten: str | None = None
+    ma_sp: str | None = None
+    spec: str | None = None
+    nha_san_xuat: str | None = None
+    san_pham_ncc_id: int | None = None      # chọn từ danh mục → máy chủ điền cả dòng từ danh mục
+
+
+def _dtb_ap_san_pham_ncc(db, m, data, tao: bool):
+    """Điền / cập nhật các cột theo form Sản phẩm NCC. Có san_pham_ncc_id → lấy từ danh mục làm chuẩn (dữ liệu không lệch),
+    ô nào người dùng đã gõ khác thì giữ theo người dùng; không có → ghi đúng những gì được gửi."""
+    sp = db.get(SanPhamNcc, data.san_pham_ncc_id) if data.san_pham_ncc_id else None
+    if sp is not None:
+        m.san_pham_ncc_id = sp.id
+        m.nha_cung_cap_id = sp.nha_cung_cap_id
+        ncc = db.get(NhaCungCap, sp.nha_cung_cap_id)
+        m.ncc_ten = (ncc.ten if ncc else None) or (data.ncc_ten or "").strip() or None
+        m.ten = (data.ten or "").strip() or sp.ten
+        m.ma_sp = ((data.ma_sp or "").strip() or sp.ma_sp or None)
+        m.quy_cach = ((data.quy_cach or "").strip() or sp.mo_ta or None)
+        m.spec = ((data.spec or "").strip() or sp.spec or None)
+        m.nha_san_xuat = ((data.nha_san_xuat or "").strip() or sp.nha_san_xuat or None)
+        m.don_vi = ((data.don_vi or "").strip() or sp.don_vi or None)
+        if (data.don_gia is None or float(data.don_gia or 0) <= 0) and float(sp.don_gia or 0) > 0:
+            m.don_gia = Decimal(str(sp.don_gia))
+        return
+    if data.nha_cung_cap_id is not None:
+        ncc = db.get(NhaCungCap, data.nha_cung_cap_id) if data.nha_cung_cap_id else None
+        m.nha_cung_cap_id = ncc.id if ncc else None
+        if ncc is not None:
+            m.ncc_ten = ncc.ten
+    if data.ncc_ten is not None and not m.nha_cung_cap_id:
+        m.ncc_ten = data.ncc_ten.strip()[:200] or None
+    for k, n in (("ma_sp", 60), ("spec", 0), ("nha_san_xuat", 150)):
+        v = getattr(data, k)
+        if v is not None:
+            v = v.strip()
+            setattr(m, k, (v[:n] if n else v) or None)
+    if tao and data.san_pham_ncc_id is None:
+        m.san_pham_ncc_id = None
 
 
 def _dtb_ten_nguoi(db: Session, nd: NguoiDung) -> str:
@@ -5418,6 +5458,7 @@ def dtb_sua_muc(muc_id: int, data: DtbMucVao, db: Session = Depends(get_db),
         m.don_gia = Decimal(str(data.don_gia))
     if data.hang_hoa_id is not None and db.get(HangHoa, data.hang_hoa_id) is not None:
         m.hang_hoa_id = data.hang_hoa_id          # 🔎 liên kết mặt hàng khi chọn từ Tìm giá / khớp kho
+    _dtb_ap_san_pham_ncc(db, m, data, tao=False)   # mig 139: NCC · mã SP · spec · NSX · liên kết danh mục
     db.commit()
     return {"ok": True}
 
@@ -5452,6 +5493,7 @@ def dtb_them_muc(dt_id: int, data: DtbMucVao, db: Session = Depends(get_db),
                      so_luong=Decimal(str(data.so_luong or 0)),
                      don_gia=Decimal(str(data.don_gia or 0)),
                      ghi_chu=(data.ghi_chu or "").strip() or None)
+    _dtb_ap_san_pham_ncc(db, m, data, tao=True)    # mig 139: NCC · mã SP · spec · NSX · liên kết danh mục
     db.add(m); db.flush()
     muc_id = m.id
     db.commit()
@@ -5488,6 +5530,8 @@ def dtb_chi_tiet(dt_id: int, db: Session = Depends(get_db), _=Depends(yeu_cau_ba
                       "so_luong": float(r.so_luong or 0), "don_gia": dg,
                       "thanh_tien": float(r.so_luong or 0) * dg, "ghi_chu": r.ghi_chu,
                       "hang_hoa_id": r.hang_hoa_id,
+                      "nha_cung_cap_id": r.nha_cung_cap_id, "ncc_ten": r.ncc_ten, "ma_sp": r.ma_sp, "spec": r.spec,
+                      "nha_san_xuat": r.nha_san_xuat, "san_pham_ncc_id": r.san_pham_ncc_id,
                       "dx_id": y.id if y else None, "dx_trang_thai": y.trang_thai if y else None,
                       # 💲 giá gợi ý theo mua thật / báo giá + giá mua thật dưới mã này
                       "gia_goi_y": g["gia_de_xuat"] if g else None,
