@@ -644,6 +644,62 @@ def chup_financial(db: Session = Depends(get_db), nd=Depends(chi_vai_tro("CEO", 
     return {"ok": True, "tep": t.ten_file}
 
 
+def _chi_nhan_su_nam(db, hom_nay) -> dict:
+    """👥 CHI PHÍ NHÂN SỰ lũy kế từ đầu năm tới tháng hiện tại (mig 142 — anh Hiếu chọn tính CẢ bảng lương chờ duyệt):
+    · bảng lương từng tháng = chi_phi_dn (tổng thu nhập + BHXH/BHYT/BHTN + KPCĐ phần DN — đúng số bút toán Nợ 642);
+      bảng chưa DA_DUYET = «tạm tính»
+    · thuê ngoài ĐÃ CHI = thu nhập + khoản khác, xếp theo kỳ YYYY-MM (thiếu kỳ → ngày chi)
+    · tháng CHƯA có bảng lương → DỰ PHÒNG = tổng khoản Chi cố định có chữ «lương»; tháng có bảng lương không cộng
+      khoản này (không tính 2 lần) — Chi phí khác cũng đã trừ khoản «lương» ra."""
+    import unicodedata
+    from ..models import BangLuong, ThanhToanThueNgoai, ChiCoDinh
+
+    def _kd(s):
+        s = unicodedata.normalize("NFD", str(s or ""))
+        return "".join(c for c in s if unicodedata.category(c) != "Mn").replace("đ", "d").replace("Đ", "D").lower()
+
+    nam, thang_hien = hom_nay.year, hom_nay.month
+    thangs = [f"{nam}-{m:02d}" for m in range(1, thang_hien + 1)]
+    luong = {t: {"chi_phi_dn": 0.0, "so_nv": 0, "cho_duyet": 0} for t in thangs}
+    for bl in db.query(BangLuong).filter(BangLuong.thang.in_(thangs)).all():
+        g = luong.get(str(bl.thang))
+        if g is None:
+            continue
+        cp = float(bl.chi_phi_dn or 0)
+        if cp <= 0:          # bản ghi cũ chưa lưu chi_phi_dn → tính lại đúng như bút toán lương
+            cp = (float(bl.luong_thuc_te or bl.luong_co_ban or 0) + float(bl.phu_cap or 0) + float(bl.ot or 0)
+                  + float(bl.bhxh_dn or 0) + float(bl.bhyt_dn or 0) + float(bl.bhtn_dn or 0)
+                  + float(getattr(bl, "kpcd_dn", 0) or 0))
+        g["chi_phi_dn"] += cp
+        g["so_nv"] += 1
+        if bl.trang_thai != "DA_DUYET":
+            g["cho_duyet"] += 1
+    tn = {t: 0.0 for t in thangs}
+    for t in db.query(ThanhToanThueNgoai).filter(ThanhToanThueNgoai.trang_thai == "DA_CHI").all():
+        k = str(t.ky or "")[:7]
+        if k not in tn:
+            k = str(t.ngay_chi or t.ngay or "")[:7]
+        if k in tn:
+            tn[k] += float(t.thu_nhap or 0) + float(t.khoan_khac or 0)
+    cd_luong = float(sum(float(c.so_tien or 0)
+                         for c in db.query(ChiCoDinh).filter(ChiCoDinh.dang_ap_dung.is_(True)).all()
+                         if "luong" in _kd(c.ten)))
+    theo_thang = []
+    for t in thangs:
+        l = luong[t]
+        du_phong = cd_luong if (l["so_nv"] == 0 and cd_luong > 0) else 0.0
+        theo_thang.append({"thang": t, "luong": l["chi_phi_dn"], "so_nv": l["so_nv"], "cho_duyet": l["cho_duyet"],
+                           "thue_ngoai": tn[t], "du_phong": du_phong, "tong": l["chi_phi_dn"] + tn[t] + du_phong})
+    return {"tong": sum(x["tong"] for x in theo_thang),
+            "luong": sum(x["luong"] for x in theo_thang),
+            "thue_ngoai": sum(x["thue_ngoai"] for x in theo_thang),
+            "du_phong": sum(x["du_phong"] for x in theo_thang),
+            "so_thang_luong": sum(1 for x in theo_thang if x["so_nv"]),
+            "so_thang_cho_duyet": sum(1 for x in theo_thang if x["cho_duyet"]),
+            "so_thang_thieu": sum(1 for x in theo_thang if not x["so_nv"]),
+            "cd_luong_thang": cd_luong, "theo_thang": theo_thang}
+
+
 def _tinh_lai_lo_tong(db: Session) -> dict:
     """Lãi/lỗ tổng: doanh thu & chi phí TỪNG MÃ đơn hàng bán (cùng công thức bảng
     Chi phí theo Mã bên Kiểm soát) + chi phí khác = chi cố định/tháng x số tháng từ đầu năm."""
@@ -672,9 +728,12 @@ def _tinh_lai_lo_tong(db: Session) -> dict:
                         "loi_nhuan": doanh_thu - chi_phi,
                         "ty_suat": round((doanh_thu - chi_phi) / doanh_thu * 100, 1)
                                    if doanh_thu else None})
-    chi_thang = float(db.query(func.coalesce(func.sum(ChiCoDinh.so_tien), 0))
-                      .filter(ChiCoDinh.dang_ap_dung.is_(True)).scalar() or 0)
     hom_nay = gio_hien_tai().date()
+    ns = _chi_nhan_su_nam(db, hom_nay)             # 👥 mig 142: lương (kể cả chờ duyệt) + thuê ngoài đã chi + dự phòng «lương»
+    chi_nhan_su = ns["tong"]
+    chi_thang_all = float(db.query(func.coalesce(func.sum(ChiCoDinh.so_tien), 0))
+                          .filter(ChiCoDinh.dang_ap_dung.is_(True)).scalar() or 0)
+    chi_thang = max(chi_thang_all - ns["cd_luong_thang"], 0.0)   # chi cố định KHÔNG gồm khoản «lương» (đã tính ở nhân sự)
     chi_khac = chi_thang * hom_nay.month          # lũy kế từ đầu năm, tính trọn tháng hiện tại
     # 🧾 CHI PHÍ HÓA ĐƠN MUA NGOÀI PO (ghi qua Kế toán: email / nhập tay) — trước đây bị bỏ sót
     from ..models import HoaDon
@@ -718,11 +777,12 @@ def _tinh_lai_lo_tong(db: Session) -> dict:
                                 "so_nghi": len(_dtct["nghi_dau_tu"]), "so_chua_noi": len(_dtct["don_dau_tu_chua_noi"])},
             "khau_hao_cho_thue": khau_hao_ct,
             "doanh_thu": tong_dt, "chi_phi_don": tong_cp, "lai_gop": lai_gop,
-            "chi_thang": chi_thang, "chi_phi_khac": chi_khac,
+            "chi_thang": chi_thang, "chi_thang_all": chi_thang_all, "chi_phi_khac": chi_khac,
+            "chi_nhan_su": chi_nhan_su, "nhan_su": ns,
             "chi_phi_hd_mua": chi_hd_mua,
             "chi_phi_op": chi_op, "chi_chua_ma": chi_chua_ma, "chi_kho": chi_kho,
             "so_ma_le": len(ma_le),
-            "lai_lo": lai_gop - chi_khac - chi_hd_mua - chi_op - chi_chua_ma - khau_hao_ct,
+            "lai_lo": lai_gop - chi_nhan_su - chi_khac - chi_hd_mua - chi_op - chi_chua_ma - khau_hao_ct,
             "theo_ma": theo_ma, "theo_nhom": gom_theo_nhom(theo_ma), "ngay": str(hom_nay)}
 
 
@@ -741,6 +801,7 @@ def luu_lai_lo_hom_nay(db: Session) -> dict:
     r.chi_phi_don = t["chi_phi_don"]
     r.lai_gop = t["lai_gop"]
     r.chi_phi_khac = t["chi_phi_khac"]
+    r.chi_nhan_su = t["chi_nhan_su"]
     r.lai_lo = t["lai_lo"]
     r.tao_luc = gio_hien_tai()
     return t
@@ -755,7 +816,8 @@ def lai_lo_record(db: Session = Depends(get_db), nd_xem=Depends(yeu_cau(MODULE, 
     rows = db.query(LaiLoRecord).order_by(LaiLoRecord.ngay.desc()).limit(400).all()
     ser = lambda r: {"ngay": str(r.ngay), "doanh_thu": float(r.doanh_thu or 0),
                      "chi_phi_don": float(r.chi_phi_don or 0), "lai_gop": float(r.lai_gop or 0),
-                     "chi_phi_khac": float(r.chi_phi_khac or 0), "lai_lo": float(r.lai_lo or 0)}
+                     "chi_phi_khac": float(r.chi_phi_khac or 0), "lai_lo": float(r.lai_lo or 0),
+                     "chi_nhan_su": float(getattr(r, "chi_nhan_su", 0) or 0)}
     theo_ngay = [ser(r) for r in rows]
     thang = {}
     for r in sorted(rows, key=lambda x: str(x.ngay)):     # bản ghi MUỘN NHẤT của mỗi tháng

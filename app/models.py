@@ -928,6 +928,7 @@ class LaiLoRecord(Base):
     chi_phi_khac: Mapped[Decimal] = mapped_column(Numeric(18, 0), default=0)
     lai_lo: Mapped[Decimal] = mapped_column(Numeric(18, 0), default=0)
     tao_luc: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    chi_nhan_su: Mapped[Decimal] = mapped_column(Numeric(18, 0), default=0)      # mig 142: lương + BH DN + thuê ngoài (lũy kế năm)
 
 
 class NganSach(Base):
