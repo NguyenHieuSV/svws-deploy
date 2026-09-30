@@ -328,7 +328,7 @@ def summary(key: str = Query("")):
         b = best.get(k)
         if b is None:
             b = best[k] = {"emp_code": r.emp_code, "name": r.name, "code": r.code, "tech": r.tech,
-                           "best_pct": r.pct, "kq": r.kq, "last": "", "tries": 0}
+                           "dm": r.dm, "best_pct": r.pct, "kq": r.kq, "last": "", "tries": 0}
         if r.pct > b["best_pct"]: b["best_pct"] = r.pct; b["kq"] = r.kq
         b["tries"] += 1
         b["last"] = max(b["last"], r.ts.strftime("%d/%m/%Y %H:%M"))
@@ -429,9 +429,9 @@ a{color:#0582ca;font-size:13.5px}.foot{margin-top:12px;text-align:center}
 <h1>💧 SVWS Training</h1>
 <p class=sub>Chương trình huấn luyện <b>công nghệ xử lý nước cấp – nước thải – khí thải</b> của Công ty TNHH GPKT Sóng Việt (SVWS), biên soạn theo chuẩn đào tạo kỹ sư nội bộ — mở miễn phí cho sinh viên ngành Môi trường, Cấp thoát nước, Hóa – Kỹ thuật.</p>
 <div class=stats>
-<div><b>53</b><span>chuyên đề<br>3 lĩnh vực</span></div>
+<div><b>95</b><span>chuyên đề<br>3 lĩnh vực</span></div>
 <div><b>31</b><span>mô phỏng<br>động</span></div>
-<div><b>356</b><span>câu hỏi<br>trắc nghiệm</span></div>
+<div><b>950</b><span>câu hỏi<br>trắc nghiệm</span></div>
 <div><b>100%</b><span>miễn phí<br>học mọi lúc</span></div>
 </div>
 <ul class=feat>
@@ -524,7 +524,9 @@ th,td{border:1px solid #e3eaf4;padding:7px 9px;text-align:left}th{background:#ee
 <button style="background:#13315c" onclick="dlcsv()">⬇ CSV điểm</button><span class=mut id=st></span></div>
 <h2>👷 Nhân viên <span class=mut id=empCount></span></h2><div id=emp></div>
 <h2>🎓 Sinh viên <span class=mut id=stuCount></span></h2><div id=stu></div>
-<h2>📊 Bảng điểm</h2><div id=out></div></div>
+<h2>📈 Thống kê học viên <span class=mut>(điểm cao nhất mỗi bài · ĐẠT = ≥80% · chương trình 95 chuyên đề)</span></h2><div id=stats></div>
+<h2>📚 Thống kê theo mục</h2><div id=dstats></div>
+<h2>📊 Bảng điểm chi tiết</h2><div id=out></div></div>
 <script>
 const $=id=>document.getElementById(id);const K=()=>$('k').value.trim();
 function tagOf(s){return s==='pending'?'<span class="tag tP">Chờ duyệt</span>':s==='active'?'<span class="tag tA">Active</span>':'<span class="tag tB">Khóa</span>';}
@@ -544,10 +546,36 @@ async function loadStu(){
  let h='<table><tr><th>Mã</th><th>Họ tên</th><th>SĐT</th><th>Email</th><th>Trường</th><th>Khóa</th><th>Ngày ĐK</th><th>Trạng thái</th><th>Thao tác</th></tr>';
  for(const x of d.students)h+='<tr><td>'+x.student_code+'</td><td>'+x.full_name+'</td><td>'+x.phone+'</td><td>'+x.email+(x.edu?' <span class=edu>★edu</span>':'')+'</td><td>'+x.school+'</td><td>'+x.course+'</td><td>'+x.created+'</td><td>'+tagOf(x.status)+'</td><td>'+btns(x,'students')+'</td></tr>';
  $('stu').innerHTML=h+'</table>';}catch(e){}}
+const TOTAL_TOPICS=95;
+function bar(p,c){return '<div style="background:#e6edf5;border-radius:6px;height:12px;min-width:90px;overflow:hidden"><div style="width:'+p+'%;height:100%;background:'+(c||'#0582ca')+'"></div></div>';}
+function domOf(code){return code.slice(0,2)==='NT'?'Nước thải':code.slice(0,2)==='NC'?'Nước cấp':code.slice(0,2)==='KT'?'Khí thải':'Khác';}
+function renderStats(sum){
+ const by={};
+ for(const x of sum){const s=by[x.emp_code]||(by[x.emp_code]={name:x.name,done:0,pass:0,sum:0,tries:0,last:''});
+  s.done++;s.sum+=x.best_pct;if(x.best_pct>=80)s.pass++;s.tries+=x.tries;if(x.last>s.last)s.last=x.last;}
+ const ks=Object.keys(by).sort((a,b)=>by[b].pass-by[a].pass||by[b].done-by[a].done);
+ if(!ks.length){$('stats').innerHTML='<p class=mut>Chưa có dữ liệu.</p>';return;}
+ let h='<table><tr><th>#</th><th>Mã</th><th>Họ tên</th><th>Đã làm</th><th>ĐẠT</th><th>Hoàn thành chương trình</th><th>Điểm TB</th><th>Lượt test</th><th>Hoạt động cuối</th></tr>';
+ ks.forEach((k,i)=>{const s=by[k];const pc=Math.round(100*s.pass/TOTAL_TOPICS);const avg=Math.round(s.sum/s.done);
+  h+='<tr><td>'+(i+1)+'</td><td>'+k+'</td><td>'+s.name+'</td><td>'+s.done+' / '+TOTAL_TOPICS+'</td><td class=pass>'+s.pass+'</td>'
+   +'<td><div style="display:flex;gap:8px;align-items:center">'+bar(pc,'#0a7a3d')+'<b>'+pc+'%</b></div></td>'
+   +'<td class='+(avg>=80?'pass':(avg>=60?'':'fail'))+'>'+avg+'%</td><td>'+s.tries+'</td><td>'+s.last+'</td></tr>';});
+ $('stats').innerHTML=h+'</table>';
+ const dm={};
+ for(const x of sum){const dn=x.dm||domOf(x.code);const s=dm[dn]||(dm[dn]={done:0,pass:0,sum:0,tries:0});
+  s.done++;s.sum+=x.best_pct;if(x.best_pct>=80)s.pass++;s.tries+=x.tries;}
+ let g='<table><tr><th>Mục</th><th>Lượt học viên–bài</th><th>ĐẠT</th><th>Tỷ lệ ĐẠT</th><th>Điểm TB</th><th>Tổng lượt test</th></tr>';
+ for(const dn of Object.keys(dm)){const s=dm[dn];const pr=Math.round(100*s.pass/s.done);const avg=Math.round(s.sum/s.done);
+  g+='<tr><td><b>'+dn+'</b></td><td>'+s.done+'</td><td class=pass>'+s.pass+'</td>'
+   +'<td><div style="display:flex;gap:8px;align-items:center">'+bar(pr,pr>=80?'#0a7a3d':'#b07000')+'<b>'+pr+'%</b></div></td>'
+   +'<td>'+avg+'%</td><td>'+s.tries+'</td></tr>';}
+ $('dstats').innerHTML=g+'</table><p class=mut>Tỷ lệ ĐẠT thấp ở một mục = tín hiệu rà lại nội dung/độ khó hoặc tổ chức ôn tập cho mục đó.</p>';
+}
 async function loadSum(){
  try{const r=await fetch('/training/api/summary?key='+encodeURIComponent(K()));
  if(!r.ok){$('st').textContent='Sai khóa hoặc lỗi ('+r.status+')';return;}
  const d=await r.json();$('st').textContent=d.staff_active+' NV active ('+d.staff_pending+' chờ) · '+d.students_active+' SV active ('+d.students_pending+' chờ) · '+d.total_results+' lượt test';
+ renderStats(d.summary);
  let h='<table><tr><th>Mã</th><th>Họ tên</th><th>Bài</th><th>Công nghệ</th><th>Cao nhất</th><th>KQ</th><th>Lần</th><th>Cuối</th></tr>';
  for(const x of d.summary){h+='<tr><td>'+x.emp_code+'</td><td>'+x.name+'</td><td>'+x.code+'</td><td>'+x.tech+'</td><td>'+x.best_pct+'%</td><td class='+(x.best_pct>=80?'pass':'fail')+'>'+(x.best_pct>=80?'ĐẠT':x.kq)+'</td><td>'+x.tries+'</td><td>'+x.last+'</td></tr>';}
  $('out').innerHTML=h+'</table>';}catch(e){$('st').textContent='Không kết nối được.';}}
@@ -579,7 +607,7 @@ def manifest():
         "icons": [{"src": "/training/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable"},
                   {"src": "/training/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable"}]})
 
-_SW = """const C='svws-trn-v4';
+_SW = """const C='svws-trn-v17';
 self.addEventListener('install',e=>{e.waitUntil(caches.open(C).then(c=>c.addAll(['/training','/training/icon-192.png'])));self.skipWaiting();});
 self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==C).map(k=>caches.delete(k)))));self.clients.claim();});
 self.addEventListener('fetch',e=>{
