@@ -1554,6 +1554,8 @@ class KtHoaDonCho(Base):
     don_hang_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     hoa_don_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     tao_luc: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    don_mua_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)      # mig 141: PO gợi ý / kế toán chọn
+    po_khop: Mapped[str | None] = mapped_column(String(20), nullable=True)         # SO_HD | TIEN | TIEN_TRUOC (+n) | TAY | BO
 
 
 class BgEmailCho(Base):

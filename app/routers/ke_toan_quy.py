@@ -1265,6 +1265,86 @@ def _khop_ncc(ds_ncc, ten_ai, email=None):
     return tot
 
 
+
+# ---- 🔗 mig 141: hóa đơn AI đọc ↔ PO của NCC (gợi ý khi quét / liệt kê; ghi lan số HĐ lên PO + công nợ khi kế toán Ghi) ----
+def _po_don_hang_id(db, dm):
+    """Mã đơn bán (DonHang.id) của PO: gắn trực tiếp, hoặc tra theo mã ma_ban."""
+    if dm is None:
+        return None
+    if dm.don_hang_id:
+        return dm.don_hang_id
+    from ..models import DonHang
+    ma = (getattr(dm, "ma_ban", None) or "").strip()
+    if ma:
+        o = db.query(DonHang).filter(DonHang.so == ma).first()
+        if o is not None:
+            return o.id
+    return None
+
+
+def _hdc_do_po(db, ncc_id, so_hoa_don, tong, truoc, ngay_hd=None, ds_po=None, tru=()):
+    """Dò PO của NCC khớp hóa đơn AI đọc. Ưu tiên: (0) PO đã ghi đúng số HĐ này; (1) PO CHƯA có số HĐ thật, cùng tổng
+    ±1.000đ; (2) PO chưa có số HĐ thật, cùng tiền hàng trước thuế ±1.000đ (AI ước VAT). PO trong ±240 ngày quanh ngày HĐ.
+    tru = PO đã gắn cho hàng chờ khác. Trả (DonMua | None, cách khớp, số ứng viên)."""
+    from ..lai_lo_ma import so_hd_chuan, LECH_TRUNG
+    from ..models import DonMua
+    if not ncc_id:
+        return None, None, 0
+    so = so_hd_chuan(so_hoa_don)
+    tong, truoc = float(tong or 0), float(truoc or 0)
+    if ds_po is None:
+        ds_po = db.query(DonMua).filter(DonMua.nha_cung_cap_id == ncc_id, DonMua.trang_thai != "TU_CHOI").all()
+    moc = ngay_hd or date.today()
+    uv = []
+    for p in ds_po:
+        if p.nha_cung_cap_id != ncc_id or p.trang_thai == "TU_CHOI" or p.id in tru:
+            continue
+        s_po = str(p.so_hoa_don or "").strip()
+        hd_that = bool(s_po) and not s_po.upper().startswith("HDM-")
+        if so and hd_that and so_hd_chuan(s_po) == so:
+            uv.append((0, p))
+            continue
+        if hd_that:
+            continue
+        if p.ngay and abs((moc - p.ngay).days) > 240:
+            continue
+        if tong > 0 and abs(float(p.tong_tien or 0) - tong) <= LECH_TRUNG:
+            uv.append((1, p))
+            continue
+        if truoc > 0 and abs(float(p.tien_hang or 0) - truoc) <= LECH_TRUNG:
+            uv.append((2, p))
+    if not uv:
+        return None, None, 0
+    uv.sort(key=lambda t: (t[0], -t[1].id))
+    return uv[0][1], {0: "SO_HD", 1: "TIEN", 2: "TIEN_TRUOC"}[uv[0][0]], len(uv)
+
+
+def _hdc_gan_po(db, r, dm, cach, n):
+    r.don_mua_id = dm.id
+    r.po_khop = (cach + (f"+{n - 1}" if n > 1 else ""))[:20]
+    if not r.don_hang_id:
+        r.don_hang_id = _po_don_hang_id(db, dm)
+
+
+def _hd_nhap_cua_po(db, dm, tong=None):
+    """Hóa đơn MUA nháp HDM-… tự sinh khi nhận hàng PO này (nhận ra qua công nợ của PO hoặc diễn giải «Nhận hàng PO …»).
+    tong=None → list mọi nháp; tong → nháp cùng tiền ±1.000đ (ưu tiên nháp gắn công nợ) hoặc None."""
+    from ..models import HoaDon as _HDn
+    from ..lai_lo_ma import LECH_TRUNG
+    if dm is None:
+        return [] if tong is None else None
+    ids = {c.hoa_don_id for c in db.query(CongNo).filter(CongNo.don_mua_id == dm.id).all() if c.hoa_don_id}
+    dau = f"Nhận hàng PO {dm.so or dm.id} ("
+    uv = [h for h in db.query(_HDn).filter(_HDn.loai == "MUA", _HDn.nha_cung_cap_id == dm.nha_cung_cap_id).all()
+          if str(h.so or "").upper().startswith("HDM-") and (h.id in ids or dau in str(h.dien_giai or ""))]
+    if tong is None:
+        return uv
+    for h in sorted(uv, key=lambda h: (0 if h.id in ids else 1, -h.id)):
+        if abs(float(h.tong_tien or 0) - float(tong or 0)) <= LECH_TRUNG:
+            return h
+    return None
+
+
 # ============ 📥 HÓA ĐƠN MUA TỪ EMAIL — chờ xác nhận trước khi vào bảng Hóa đơn ============
 @router.post("/hoa-don-cho/quet")
 def quet_hoa_don_mua_email(tu_ngay: date | None = None, db: Session = Depends(get_db),
@@ -1298,6 +1378,9 @@ def quet_hoa_don_mua_email(tu_ngay: date | None = None, db: Session = Depends(ge
         if k and k not in tin_cay:
             tin_cay[k] = n.id
     them_email = {(e.email or "").strip().lower() for e in db.query(CtNccEmail).all()}
+    from ..models import DonMua as _DMq                                   # 🔗 mig 141: dò PO gợi ý
+    ds_po = db.query(_DMq).filter(_DMq.trang_thai != "TU_CHOI").all()
+    po_da_gan = {x.don_mua_id for x in db.query(KtHoaDonCho).filter_by(trang_thai="CHO_XAC_NHAN").all() if x.don_mua_id}
     from ..config import settings as _st_mua
     mien_cty = ((_st_mua.email_from_ncc or _st_mua.email_from or "").split("@")[-1] or "").strip().lower()
     them = trung = dung_ai = khong_khop = con_lai = 0
@@ -1372,7 +1455,7 @@ def quet_hoa_don_mua_email(tu_ngay: date | None = None, db: Session = Depends(ge
                                   "pac", "naoh", "polymer", "loc", "bom")) else "642"
         # 🏢 NCC: ưu tiên email trùng hồ sơ → khớp theo tên AI đọc / tên miền riêng
         ncc_id = tin_cay.get(nguoi) or _khop_ncc(ds_ncc, str(info.get("ncc_ten") or ""), nguoi)
-        db.add(KtHoaDonCho(
+        _moi = KtHoaDonCho(
             tk_chi_phi=tk_ai,
             nha_cung_cap_id=ncc_id,
             tu_email=(m.get("tu_email") or "")[:160] or None,
@@ -1384,7 +1467,12 @@ def quet_hoa_don_mua_email(tu_ngay: date | None = None, db: Session = Depends(ge
             mo_ta=((("⚠ VAT ước 8% từ tổng — kiểm tra lại · " if vat_uoc else "")
                     + str(info.get("mo_ta") or ""))[:300]) or None,
             link_tra_cuu=link_tc, ma_tra_cuu=ma_tc,
-            tieu_de=tieu_de or None, message_id=mid, tao_luc=gio_hien_tai()))
+            tieu_de=tieu_de or None, message_id=mid, tao_luc=gio_hien_tai())
+        db.add(_moi)
+        _dm, _cach, _n = _hdc_do_po(db, ncc_id, _moi.so_hoa_don, tong, truoc, ngay_hd, ds_po, po_da_gan)   # 🔗 mig 141
+        if _dm is not None:
+            _hdc_gan_po(db, _moi, _dm, _cach, _n)
+            po_da_gan.add(_dm.id)
         them += 1
     # 🔁 Khớp lại các hàng chờ cũ chưa gắn NCC (quét trước khi có tự khớp theo tên)
     for r0 in db.query(KtHoaDonCho).filter_by(trang_thai="CHO_XAC_NHAN").all():
@@ -1392,6 +1480,12 @@ def quet_hoa_don_mua_email(tu_ngay: date | None = None, db: Session = Depends(ge
             m0 = _khop_ncc(ds_ncc, r0.ncc_ten or "", r0.tu_email)
             if m0:
                 r0.nha_cung_cap_id = m0
+        if r0.nha_cung_cap_id and not r0.don_mua_id and r0.po_khop != "BO":      # 🔗 mig 141: dò PO cho hàng chờ cũ
+            _dm, _cach, _n = _hdc_do_po(db, r0.nha_cung_cap_id, r0.so_hoa_don, r0.tong_tien, r0.tien_truoc_thue,
+                                        r0.ngay_hd, ds_po, po_da_gan)
+            if _dm is not None:
+                _hdc_gan_po(db, r0, _dm, _cach, _n)
+                po_da_gan.add(_dm.id)
     db.commit()
     return {"ok": True, "che_do": prov.ten, "thu_moi": len(thu), "tu_ngay": str(moc),
             "da_them": them, "trung_bo_qua": trung, "ai": dung_ai,
@@ -1401,13 +1495,28 @@ def quet_hoa_don_mua_email(tu_ngay: date | None = None, db: Session = Depends(ge
 @router.get("/hoa-don-cho")
 def ds_hoa_don_cho(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
     from ..models import KtHoaDonCho, NhaCungCap
+    from ..models import DonMua as _DMq
+    from .ncc import _ma_ban_hang_po
     out = []
     ds_ncc = db.query(NhaCungCap).all()
-    for r in db.query(KtHoaDonCho).order_by(KtHoaDonCho.id.desc()).limit(400).all():
+    rows = db.query(KtHoaDonCho).order_by(KtHoaDonCho.id.desc()).limit(400).all()
+    ds_po = db.query(_DMq).filter(_DMq.trang_thai != "TU_CHOI").all()
+    po_da_gan = {x.don_mua_id for x in rows if x.don_mua_id and x.trang_thai == "CHO_XAC_NHAN"}
+    doi = False
+    for r in rows:
         n = db.get(NhaCungCap, r.nha_cung_cap_id) if r.nha_cung_cap_id else None
         goi_y = None
         if r.nha_cung_cap_id is None and r.trang_thai == "CHO_XAC_NHAN":
             goi_y = _khop_ncc(ds_ncc, r.ncc_ten or "", r.tu_email)
+        # 🔗 mig 141: hàng chờ chưa gắn PO → dò theo NCC (hồ sơ / gợi ý) + số HĐ / số tiền, lưu lại để lần sau khỏi dò
+        if r.trang_thai == "CHO_XAC_NHAN" and not r.don_mua_id and r.po_khop != "BO" and (r.nha_cung_cap_id or goi_y):
+            _dm, _cach, _n = _hdc_do_po(db, r.nha_cung_cap_id or goi_y, r.so_hoa_don, r.tong_tien, r.tien_truoc_thue,
+                                        r.ngay_hd, ds_po, po_da_gan)
+            if _dm is not None:
+                _hdc_gan_po(db, r, _dm, _cach, _n)
+                po_da_gan.add(_dm.id)
+                doi = True
+        po = db.get(_DMq, r.don_mua_id) if r.don_mua_id else None
         out.append({"id": r.id, "nha_cung_cap_id": r.nha_cung_cap_id,
                     "goi_y_ncc_id": goi_y,
                     "ncc_ho_so": n.ten if n else None,
@@ -1422,7 +1531,15 @@ def ds_hoa_don_cho(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM
                     "link_tra_cuu": getattr(r, "link_tra_cuu", None),
                     "ma_tra_cuu": getattr(r, "ma_tra_cuu", None),
                     "don_hang_id": getattr(r, "don_hang_id", None),
+                    "don_mua_id": r.don_mua_id, "po_khop": r.po_khop,
+                    "po_so": (po.so or f"PO-{po.id}") if po else None,
+                    "po_tong": float(po.tong_tien or 0) if po else None,
+                    "po_so_hd": po.so_hoa_don if po else None,
+                    "po_ma": _ma_ban_hang_po(db, po) if po else None,
+                    "po_hd_nhap": bool(po is not None and r.trang_thai == "CHO_XAC_NHAN" and _hd_nhap_cua_po(db, po)),
                     "hoa_don_id": r.hoa_don_id, "trang_thai": r.trang_thai})
+    if doi:
+        db.commit()
     return out
 
 
@@ -1535,6 +1652,7 @@ class KtHdcSua(_BM_hdc):
     mo_ta: str | None = None
     tk_chi_phi: str | None = None
     don_hang_id: int | None = None
+    don_mua_id: int | None = None      # mig 141: 0 = bỏ liên kết PO
 
 
 @router.put("/hoa-don-cho/{h_id}")
@@ -1564,6 +1682,23 @@ def sua_hoa_don_cho(h_id: int, data: KtHdcSua, db: Session = Depends(get_db),
         r.tk_chi_phi = data.tk_chi_phi
     if data.don_hang_id is not None:
         r.don_hang_id = data.don_hang_id or None
+    if data.don_mua_id is not None:                                    # 🔗 mig 141: kế toán chọn / bỏ PO
+        if data.don_mua_id:
+            from ..models import DonMua as _DMs
+            _dm = db.get(_DMs, data.don_mua_id)
+            if _dm is None or (r.nha_cung_cap_id and _dm.nha_cung_cap_id != r.nha_cung_cap_id):
+                raise HTTPException(status.HTTP_400_BAD_REQUEST, "PO không tồn tại hoặc không thuộc nhà cung cấp này")
+            if r.don_mua_id != _dm.id:
+                r.don_mua_id, r.po_khop = _dm.id, "TAY"
+            if not r.don_hang_id:
+                r.don_hang_id = _po_don_hang_id(db, _dm)
+        else:
+            r.don_mua_id, r.po_khop = None, "BO"
+    elif r.don_mua_id and r.nha_cung_cap_id:                            # đổi NCC → PO cũ khác NCC thì bỏ liên kết
+        from ..models import DonMua as _DMs
+        _dm = db.get(_DMs, r.don_mua_id)
+        if _dm is None or _dm.nha_cung_cap_id != r.nha_cung_cap_id:
+            r.don_mua_id, r.po_khop = None, None
     r.tong_tien = (Decimal(r.tien_truoc_thue or 0) *
                    (1 + Decimal(r.thue_suat or 0) / 100)).quantize(Decimal("1"))
     ghi_audit(db, nd.id, "SUA_HD_CHO", "kt_hoa_don_cho", r.id,
@@ -1598,6 +1733,15 @@ def ghi_hoa_don_cho(h_id: int, tao_cong_no: bool = False, hach_toan: bool = True
                                                 nha_cung_cap_id=r.nha_cung_cap_id).first():
         raise HTTPException(status.HTTP_400_BAD_REQUEST,
                             f"Số hóa đơn '{r.so_hoa_don}' của NCC này đã có trong bảng Hóa đơn — trùng.")
+    # 🔗 mig 141: PO gợi ý / kế toán chọn — phải cùng NCC; PO đã có hóa đơn nháp HDM-… cùng tiền → điền số thật vào nháp
+    from ..models import DonMua as _DMg
+    from ..lai_lo_ma import so_hd_chuan as _shc
+    from .ncc import _ma_ban_hang_po, _trung_hoa_don_ncc, _bao_trung_hoa_don
+    dm = db.get(_DMg, r.don_mua_id) if r.don_mua_id else None
+    if dm is not None and dm.nha_cung_cap_id != r.nha_cung_cap_id:
+        dm = None
+    hd_nhap = _hd_nhap_cua_po(db, dm, r.tong_tien) if dm is not None else None
+    so_moi = (r.so_hoa_don or "").strip()
     # 🛡 CHỐNG GHI TRÙNG CHI PHÍ — kế toán xác nhận rõ ràng mới được bỏ qua
     if not bo_qua_trung:
         canh = []
@@ -1607,10 +1751,14 @@ def ghi_hoa_don_cho(h_id: int, tao_cong_no: bool = False, hach_toan: bool = True
             if ct is not None:
                 canh.append("email này ĐÃ GHI vào Chi phí vận hành dự án cho thuê "
                             f"(HĐ {ct.so_hoa_don or '—'}, {float(ct.so_tien or 0):,.0f}đ) — ghi tiếp sẽ đếm chi phí 2 lần")
-        nghi = (db.query(_HD).filter(_HD.loai == "MUA",
-                                     _HD.nha_cung_cap_id == r.nha_cung_cap_id,
-                                     _HD.tong_tien == Decimal(str(int(float(r.tong_tien or 0)))))
-                .order_by(_HD.id.desc()).first())
+        nghi = None
+        for _h in (db.query(_HD).filter(_HD.loai == "MUA",
+                                        _HD.nha_cung_cap_id == r.nha_cung_cap_id,
+                                        _HD.tong_tien == Decimal(str(int(float(r.tong_tien or 0)))))
+                   .order_by(_HD.id.desc()).all()):
+            if hd_nhap is None or _h.id != hd_nhap.id:      # hóa đơn nháp của PO đang gắn thì KHÔNG phải trùng — sẽ điền số thật vào
+                nghi = _h
+                break
         if nghi is not None:
             canh.append(f"đã có hóa đơn MUA '{nghi.so}' cùng NCC cùng số tiền "
                         f"{float(nghi.tong_tien or 0):,.0f}đ (có thể là hóa đơn tự sinh khi nhận hàng PO)")
@@ -1618,19 +1766,49 @@ def ghi_hoa_don_cho(h_id: int, tao_cong_no: bool = False, hach_toan: bool = True
         if _cpv is not None and _cpv.hoa_don_id is None:
             canh.append(f"hóa đơn số {r.so_hoa_don} ({float(_cpv.so_tien or 0):,.0f}đ) ĐÃ GHI ở Chi phí vận hành cho thuê "
                         f"(mã {_cpv.ma_ban_hang}) — ghi tiếp hệ thống sẽ NỐI hai bản ghi, không tính 2 lần")
+        if dm is not None and hd_nhap is None:
+            _nhaps = _hd_nhap_cua_po(db, dm)
+            if _nhaps:
+                canh.append(f"PO {dm.so or dm.id} đã có hóa đơn nháp {', '.join(str(h.so) for h in _nhaps[:3])} tự sinh khi nhận hàng "
+                            f"nhưng KHÁC tiền ({float(r.tong_tien or 0):,.0f}đ) — ghi tiếp sẽ tính chi phí 2 lần; nên sửa số hóa đơn nháp ở bảng Hóa đơn")
+        if dm is not None and so_moi and _shc(so_moi) != _shc(dm.so_hoa_don):
+            _tr = _trung_hoa_don_ncc(db, r.nha_cung_cap_id, _shc(so_moi), bo_po_id=dm.id)
+            if _tr:
+                canh.append(_bao_trung_hoa_don(so_moi, _tr))
         if canh:
             raise HTTPException(status.HTTP_409_CONFLICT, "⚠TRÙNG: " + "; ".join(canh))
-    data = HoaDonVao(loai="MUA", nha_cung_cap_id=r.nha_cung_cap_id,
-                     so=r.so_hoa_don or None, ngay=r.ngay_hd,
-                     don_hang_id=getattr(r, "don_hang_id", None),
-                     tk_chi_phi=(getattr(r, "tk_chi_phi", None) or None),
-                     tien_truoc_thue=Decimal(r.tien_truoc_thue or 0),
-                     thue_suat=Decimal(r.thue_suat or 8),
-                     dien_giai=(r.mo_ta or f"Hóa đơn email {r.tu_email or ''}")[:200] or None,
-                     tao_cong_no=False, hach_toan_luon=hach_toan)
-    r.trang_thai = "DA_GHI"          # đặt TRƯỚC khi tạo — cùng 1 commit với hóa đơn, hết khe hở ghi đúp
-    kq = tao_hoa_don(data, db, nd)
-    r.hoa_don_id = (kq or {}).get("id") if isinstance(kq, dict) else None
+    so_nhap_cu = None
+    if hd_nhap is not None:
+        # ✏️ PO đã có hóa đơn nháp HDM-… cùng tiền → điền SỐ THẬT + ngày + TK + mã vào hóa đơn nháp (KHÔNG tạo hóa đơn thứ hai)
+        so_nhap_cu = hd_nhap.so
+        if so_moi:
+            hd_nhap.so = so_moi[:40]
+        if r.ngay_hd:
+            hd_nhap.ngay = r.ngay_hd
+        if getattr(r, "tk_chi_phi", None):
+            hd_nhap.tk_chi_phi = r.tk_chi_phi
+        if not hd_nhap.don_hang_id and r.don_hang_id:
+            hd_nhap.don_hang_id = r.don_hang_id
+        hd_nhap.dien_giai = ((hd_nhap.dien_giai or "") + f" · HĐ {so_moi or '—'} từ email")[:200]
+        if hach_toan and not hd_nhap.da_hach_toan:
+            hach_toan_hoa_don_mua(db, hd_nhap)
+            hd_nhap.da_hach_toan = True
+            hd_nhap.trang_thai = "DA_HACH_TOAN"
+        r.trang_thai = "DA_GHI"
+        r.hoa_don_id = hd_nhap.id
+        kq = {"id": hd_nhap.id, "so": hd_nhap.so}
+    else:
+        data = HoaDonVao(loai="MUA", nha_cung_cap_id=r.nha_cung_cap_id,
+                         so=r.so_hoa_don or None, ngay=r.ngay_hd,
+                         don_hang_id=getattr(r, "don_hang_id", None),
+                         tk_chi_phi=(getattr(r, "tk_chi_phi", None) or None),
+                         tien_truoc_thue=Decimal(r.tien_truoc_thue or 0),
+                         thue_suat=Decimal(r.thue_suat or 8),
+                         dien_giai=(r.mo_ta or f"Hóa đơn email {r.tu_email or ''}")[:200] or None,
+                         tao_cong_no=False, hach_toan_luon=hach_toan)
+        r.trang_thai = "DA_GHI"          # đặt TRƯỚC khi tạo — cùng 1 commit với hóa đơn, hết khe hở ghi đúp
+        kq = tao_hoa_don(data, db, nd)
+        r.hoa_don_id = (kq or {}).get("id") if isinstance(kq, dict) else None
     # 🔗 NỐI với chi phí vận hành cho thuê cùng khoản (đã ghi từ email bên Cho thuê) → không tính chi phí 2 lần
     _cpv = _cp_vh_cung_khoan(db, r.so_hoa_don, r.tong_tien) if r.hoa_don_id else None
     if _cpv is not None and _cpv.hoa_don_id is None:
@@ -1638,12 +1816,76 @@ def ghi_hoa_don_cho(h_id: int, tao_cong_no: bool = False, hach_toan: bool = True
         _hdm = db.get(HoaDon, r.hoa_don_id)
         if _hdm is not None and not _hdm.don_hang_id and _cpv.don_hang_id:
             _hdm.don_hang_id = _cpv.don_hang_id      # hóa đơn MUA chưa gắn mã → nhận mã của khoản vận hành
+    # 🔗 mig 141: GHI LAN lên PO + công nợ phải trả của PO — PO hết «chưa có hóa đơn»; PO chưa gắn mã → nhận mã của hóa đơn
+    po_kq = None
+    if dm is not None:
+        s_cu = str(dm.so_hoa_don or "").strip()
+        ghi_so = bool(so_moi) and (not s_cu or s_cu.upper().startswith("HDM-"))
+        if ghi_so:
+            dm.so_hoa_don = so_moi[:60]
+        n_cn = 0
+        for cn in db.query(CongNo).filter(CongNo.don_mua_id == dm.id).all():
+            if so_moi and (not str(cn.so_ct or "").strip() or str(cn.so_ct).upper().startswith("HDM-")):
+                cn.so_ct = so_moi[:60]
+                n_cn += 1
+            if cn.hoa_don_id is None and r.hoa_don_id:
+                cn.hoa_don_id = r.hoa_don_id
+        _hdo = db.get(HoaDon, r.hoa_don_id) if r.hoa_don_id else None
+        if _hdo is not None:
+            if not _hdo.don_hang_id and dm.don_hang_id:
+                _hdo.don_hang_id = dm.don_hang_id
+            elif not dm.don_hang_id and _hdo.don_hang_id:
+                dm.don_hang_id = _hdo.don_hang_id
+        po_kq = {"id": dm.id, "so": dm.so or f"PO-{dm.id}", "ghi_so_hd": ghi_so, "cong_no": n_cn,
+                 "ma": _ma_ban_hang_po(db, dm), "noi_hd_nhap": so_nhap_cu}
     ghi_audit(db, nd.id, "GHI_HD_EMAIL_MUA", "kt_hoa_don_cho", r.id,
               moi={"hoa_don_id": r.hoa_don_id, "tong": float(r.tong_tien or 0),
-                   "bo_qua_canh_bao_trung": bool(bo_qua_trung)})
+                   "bo_qua_canh_bao_trung": bool(bo_qua_trung), "po": po_kq, "hd_nhap_cu": so_nhap_cu})
     db.commit()
     return {"ok": True, "hoa_don_id": r.hoa_don_id,
-            "so": (kq or {}).get("so") if isinstance(kq, dict) else r.so_hoa_don}
+            "so": (kq or {}).get("so") if isinstance(kq, dict) else r.so_hoa_don,
+            "po": po_kq, "noi_hd_nhap": so_nhap_cu}
+
+
+@router.get("/hoa-don-cho/{h_id}/po-ung-vien")
+def hdc_po_ung_vien(h_id: int, db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
+    """🔗 mig 141: PO của NCC (hồ sơ / gợi ý) để kế toán chọn khi Ghi — đánh dấu PO khớp số HĐ / tiền, PO đã có HĐ thật,
+    PO có hóa đơn nháp HDM-…; PO trong 400 ngày (PO đang gắn thì luôn có)."""
+    from ..models import KtHoaDonCho, NhaCungCap, DonMua as _DMu
+    from ..lai_lo_ma import so_hd_chuan, LECH_TRUNG
+    from .ncc import _ma_ban_hang_po
+    from datetime import timedelta as _td
+    r = db.get(KtHoaDonCho, h_id)
+    if r is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy")
+    ncc_id = r.nha_cung_cap_id or _khop_ncc(db.query(NhaCungCap).all(), r.ncc_ten or "", r.tu_email)
+    if not ncc_id:
+        return {"ncc_id": None, "don_mua_id": r.don_mua_id, "po": []}
+    so, tong, truoc = so_hd_chuan(r.so_hoa_don), float(r.tong_tien or 0), float(r.tien_truoc_thue or 0)
+    moc = date.today() - _td(days=400)
+    out = []
+    for p in (db.query(_DMu).filter(_DMu.nha_cung_cap_id == ncc_id, _DMu.trang_thai != "TU_CHOI")
+              .order_by(_DMu.id.desc()).all()):
+        if p.ngay and p.ngay < moc and p.id != r.don_mua_id:
+            continue
+        s_po = str(p.so_hoa_don or "").strip()
+        hd_that = bool(s_po) and not s_po.upper().startswith("HDM-")
+        khop = None
+        if so and hd_that and so_hd_chuan(s_po) == so:
+            khop = "SO_HD"
+        elif not hd_that and tong > 0 and abs(float(p.tong_tien or 0) - tong) <= LECH_TRUNG:
+            khop = "TIEN"
+        elif not hd_that and truoc > 0 and abs(float(p.tien_hang or 0) - truoc) <= LECH_TRUNG:
+            khop = "TIEN_TRUOC"
+        out.append({"id": p.id, "so": p.so or f"PO-{p.id}", "ngay": str(p.ngay or "")[:10],
+                    "tong": float(p.tong_tien or 0), "so_hoa_don": p.so_hoa_don, "hd_that": hd_that,
+                    "ma": _ma_ban_hang_po(db, p), "don_hang_id": _po_don_hang_id(db, p), "khop": khop,
+                    "hd_nhap": bool(_hd_nhap_cua_po(db, p))})
+        if len(out) >= 80:
+            break
+    thu_tu = {"SO_HD": 0, "TIEN": 1, "TIEN_TRUOC": 2}
+    out.sort(key=lambda x: (thu_tu.get(x["khop"], 3), 1 if x["hd_that"] else 0, -x["id"]))
+    return {"ncc_id": ncc_id, "don_mua_id": r.don_mua_id, "po": out}
 
 
 @router.post("/hoa-don-cho/{h_id}/bo-qua")
