@@ -1777,3 +1777,172 @@ def doanh_thu_theo_mang(nam: int | None = None, db: Session = Depends(get_db), _
     nam_co = sorted({int(str(n)[:4]) for (n,) in db.query(HoaDon.ngay).filter(HoaDon.loai == "BAN", HoaDon.ngay.isnot(None)).distinct().all()} | {hom_nay.year})
     return {"nam": nam, "nam_co": nam_co, "mang": out_mang, "tong": tong, "theo_thang": theo_thang,
             "ten": _MANG_TEN, "ngay_tinh": str(hom_nay)}
+
+
+# ============ 🏗 ĐẦU TƯ / KHẤU HAO theo mã dự án cho thuê — Overall Financial (chỉ CEO) ============
+def _thang_tu_den(tu: str, den: date) -> list:
+    y, m = int(tu[:4]), int(tu[5:7])
+    out = []
+    while (y, m) <= (den.year, den.month):
+        out.append(f"{y}-{m:02d}")
+        m += 1
+        if m > 12:
+            y, m = y + 1, 1
+    return out
+
+
+def _dau_tu_items_du_an(db, ts, du_an_row, po_mm_items):
+    """Khoản VỐN ĐẦU TƯ có NGÀY của một dự án cho thuê: nguyên giá đầu kỳ (ngày mua) · PO đã duyệt / công nợ nhập ngoài /
+    hóa đơn mua ngoài PO / chi phí vận hành của các ĐƠN ĐẦU TƯ (loại trùng PO như chi_phi_ma) · PO / công nợ mang MÃ MẸ.
+    → [{loai, so, ngay, tong, ma}]"""
+    from ..models import DonHang, DonMua, HoaDon, ChiPhiVanHanh
+    from ..lai_lo_ma import po_trung_khoan, VH_TINH_CHI_PHI, LECH_TRUNG
+    items = []
+    if float(ts.nguyen_gia or 0) > 0:
+        items.append({"loai": "NG", "so": "Nguyên giá đầu kỳ", "ngay": str(ts.ngay_mua) if ts.ngay_mua else None,
+                      "tong": float(ts.nguyen_gia or 0), "ma": ts.ma})
+    for d in du_an_row.get("don_dau_tu") or []:
+        dh = db.get(DonHang, d["don_hang_id"])
+        if dh is None:
+            continue
+        so = (dh.so or "").strip().lower()
+        q = db.query(DonMua).filter(DonMua.trang_thai != "TU_CHOI")
+        if so:
+            q = q.filter((DonMua.don_hang_id == dh.id) | (DonMua.don_hang_id.is_(None) & (func.lower(func.trim(DonMua.ma_ban)) == so)))
+        else:
+            q = q.filter(DonMua.don_hang_id == dh.id)
+        pos = q.all()
+        po_ids = {p.id for p in pos}
+        for p in pos:
+            if p.trang_thai == "DA_DUYET":
+                items.append({"loai": "PO", "so": p.so or f"PO-{p.id}", "ngay": str(p.ngay) if p.ngay else None,
+                              "tong": float(p.tong_tien or 0), "ma": dh.so})
+        da_dung = set()
+        if so:
+            for c in db.query(CongNo).filter(CongNo.loai == "PHAI_TRA", CongNo.don_mua_id.is_(None), CongNo.hoa_don_id.is_(None),
+                                             func.lower(CongNo.ma_ban_ngoai) == so).all():
+                if str(c.so_ct or "").upper().startswith("HDM-"):
+                    continue
+                p = po_trung_khoan(pos, c.so_ct, c.nha_cung_cap_id, c.so_tien,
+                                   float(c.so_tien or 0) - float(getattr(c, "tien_thue", 0) or 0), da_dung)
+                ngay = str(c.ngay_ct or c.han) if (c.ngay_ct or c.han) else None
+                if p is not None:
+                    chenh = max(float(c.so_tien or 0) - float(p.tong_tien or 0), 0.0)
+                    if chenh > LECH_TRUNG:
+                        items.append({"loai": "CN", "so": f"{c.so_ct or 'CN-' + str(c.id)} (chênh VAT)", "ngay": ngay, "tong": chenh, "ma": dh.so})
+                    continue
+                items.append({"loai": "CN", "so": c.so_ct or f"CN-{c.id}", "ngay": ngay, "tong": float(c.so_tien or 0), "ma": dh.so})
+        hd_po = {c.hoa_don_id for c in (db.query(CongNo).filter(CongNo.don_mua_id.in_(list(po_ids))).all() if po_ids else [])
+                 if c.hoa_don_id}
+        for h in db.query(HoaDon).filter(HoaDon.loai == "MUA", HoaDon.don_hang_id == dh.id).all():
+            if h.id in hd_po or str(h.dien_giai or "").startswith("Nhận hàng PO"):
+                continue
+            p = po_trung_khoan(pos, h.so, h.nha_cung_cap_id, h.tong_tien, h.tien_truoc_thue, da_dung)
+            ngay = str(h.ngay) if h.ngay else None
+            if p is not None:
+                chenh = max(float(h.tong_tien or 0) - float(p.tong_tien or 0), 0.0)
+                if chenh > LECH_TRUNG:
+                    items.append({"loai": "HD", "so": f"{h.so} (chênh VAT)", "ngay": ngay, "tong": chenh, "ma": dh.so})
+                continue
+            items.append({"loai": "HD", "so": h.so or f"HD-{h.id}", "ngay": ngay, "tong": float(h.tong_tien or 0), "ma": dh.so})
+        qv = db.query(ChiPhiVanHanh).filter(ChiPhiVanHanh.nguon.in_(VH_TINH_CHI_PHI))
+        if so:
+            qv = qv.filter((ChiPhiVanHanh.don_hang_id == dh.id) | (ChiPhiVanHanh.don_hang_id.is_(None) & (func.lower(func.trim(ChiPhiVanHanh.ma_ban_hang)) == so)))
+        else:
+            qv = qv.filter(ChiPhiVanHanh.don_hang_id == dh.id)
+        for v in qv.all():
+            if v.don_mua_id or v.hoa_don_id:
+                continue
+            if po_trung_khoan(pos, v.so_hoa_don, None, float(v.so_tien or 0), da_dung=da_dung) is not None:
+                continue
+            items.append({"loai": "VH", "so": v.so_hoa_don or (v.mo_ta or "Chi phí vận hành")[:40], "ngay": str(v.ngay) if v.ngay else None,
+                          "tong": float(v.so_tien or 0), "ma": dh.so})
+    for p in po_mm_items or []:
+        items.append({"loai": p["loai"], "so": p["so"], "ngay": p.get("ngay"), "tong": float(p["tong"] or 0), "ma": p.get("ma")})
+    return items
+
+
+@router.get("/dau-tu-khau-hao")
+def dau_tu_khau_hao(tu_thang: str = "2026-07", db: Session = Depends(get_db), _=Depends(chi_vai_tro("CEO"))):
+    """🏗 Overall Financial › Đầu tư / Khấu hao: theo MÃ dự án cho thuê, tính từ `tu_thang` (mặc định 07/2026):
+    vốn đầu tư thực tế phát sinh trong kỳ · khấu hao trong kỳ (vốn ÷ số tháng hợp đồng, từng tháng từ tháng bắt đầu HĐ) ·
+    doanh thu thực tế các đơn tháng (gồm VAT, cùng Lãi/Lỗ Record) · chi phí vận hành · lãi sau khấu hao; kèm bảng theo tháng.
+    Chỉ CEO — số vốn đầu tư."""
+    import re as _re
+    from ..dau_tu_cho_thue import tong_hop as _th, don_thang_cua_du_an, chi_phi_du_an_theo_thang, la_don_dau_tu, po_ma_me_cua_du_an
+    from ..lai_lo_ma import chi_phi_ma
+    from ..models import TaiSanChoThue, KhachHang
+    from ..nhac_viec_service import gio_hien_tai
+    hom_nay = gio_hien_tai().date()
+    nay = str(hom_nay)[:7]
+    if not _re.fullmatch(r"\d{4}-\d{2}", tu_thang or "") or not (1 <= int(tu_thang[5:7]) <= 12):
+        tu_thang = "2026-07"
+    if tu_thang > nay:
+        tu_thang = nay
+    months = _thang_tu_den(tu_thang, hom_nay)
+    th = _th(db, hom_nay)
+    ds_ts = {t.id: t for t in db.query(TaiSanChoThue).all()}
+    po_mm = po_ma_me_cua_du_an(db, list(ds_ts.values()))
+    kh_ten = {k.id: k.ten for k in db.query(KhachHang).all()}
+    out = []
+    keys = ("dau_tu_ky", "dau_tu_tong", "kh_ky", "kh_luy_ke", "dt_ky", "cp_vh_ky", "lai_ky")
+    tong = {k: 0.0 for k in keys}
+    tt_thang = {m: {"dau_tu": 0.0, "khau_hao": 0.0, "doanh_thu": 0.0, "cp_vh": 0.0} for m in months}
+    for r in th["du_an"]:
+        ts = ds_ts.get(r["tai_san_id"])
+        if ts is None:
+            continue
+        items = _dau_tu_items_du_an(db, ts, r, po_mm.get(ts.id, []))
+        von = float(r["von_dau_tu"] or 0)
+        kh = float(r["khau_hao_thang"] or 0)
+        bat_dau = ts.ngay_bat_dau_hd or ts.ngay_mua
+        n_hd = int(ts.so_thang_hd or 0)
+        # lịch khấu hao: từng tháng từ tháng bắt đầu HĐ, tối đa n_hd tháng, không vượt vốn (cùng cách tính kh_luy_ke)
+        kh_thang = {}
+        if bat_dau and kh > 0:
+            y, m, con = bat_dau.year, bat_dau.month, (von if von > 0 else float("inf"))
+            for _i in range(n_hd if n_hd > 0 else 600):
+                k = f"{y}-{m:02d}"
+                if k > nay or con <= 0:
+                    break
+                v = min(kh, con)
+                kh_thang[k] = v
+                con -= v
+                m += 1
+                if m > 12:
+                    y, m = y + 1, 1
+        cp_thang = chi_phi_du_an_theo_thang(db, ts, months)
+        theo, dau_tu_ky, kh_ky, dt_ky, cp_ky = [], 0.0, 0.0, 0.0, 0.0
+        for mk in months:
+            y, mm = int(mk[:4]), int(mk[5:7])
+            dt = 0.0
+            for dh in don_thang_cua_du_an(db, ts, date(y, mm, 1)):
+                if la_don_dau_tu(dh):
+                    continue
+                dt += float(chi_phi_ma(db, dh)["doanh_thu"] or 0)
+            dtu = sum(float(x["tong"]) for x in items if (x.get("ngay") or "")[:7] == mk)
+            khm = float(kh_thang.get(mk, 0.0))
+            cpm = float((cp_thang.get(mk) or {}).get("tong", 0.0))
+            theo.append({"thang": mk, "dau_tu": dtu, "khau_hao": khm, "doanh_thu": dt, "cp_vh": cpm, "lai": dt - cpm - khm})
+            dau_tu_ky += dtu; kh_ky += khm; dt_ky += dt; cp_ky += cpm
+            t0 = tt_thang[mk]
+            t0["dau_tu"] += dtu; t0["khau_hao"] += khm; t0["doanh_thu"] += dt; t0["cp_vh"] += cpm
+        row = {"tai_san_id": ts.id, "ma": ts.ma, "ten": ts.ten, "khach": kh_ten.get(ts.khach_hang_id),
+               "so_hop_dong": r.get("so_hop_dong"), "so_thang_hd": n_hd, "ngay_bat_dau_hd": str(bat_dau) if bat_dau else None,
+               "ngay_ket_thuc_hd": r.get("ngay_ket_thuc_hd"), "khau_hao_thang": kh, "khau_hao_nhap_tay": bool(r.get("khau_hao_nhap_tay")),
+               "dau_tu_ky": dau_tu_ky, "dau_tu_tong": von, "dau_tu_truoc_ky": max(von - dau_tu_ky, 0.0),
+               "dau_tu_khong_ngay": sum(float(x["tong"]) for x in items if not x.get("ngay")),
+               "kh_ky": kh_ky, "kh_luy_ke": float(r.get("khau_hao_luy_ke") or 0), "gia_tri_con_lai": float(r.get("gia_tri_con_lai") or 0),
+               "dt_ky": dt_ky, "cp_vh_ky": cp_ky, "lai_ky": dt_ky - cp_ky - kh_ky,
+               "dt_luy_ke": float(r.get("dt_luy_ke") or 0), "hoan_von_pct": r.get("hoan_von_pct"),
+               "von_chua_thu_hoi": float(r.get("von_chua_thu_hoi") or 0),
+               "thieu_thong_so": r.get("thieu_thong_so") or [], "theo_thang": theo,
+               "dau_tu_items": sorted(items, key=lambda x: (x.get("ngay") or "", str(x["so"])))[:80]}
+        out.append(row)
+        for k in keys:
+            tong[k] += float(row[k] or 0)
+    out.sort(key=lambda x: (-x["dau_tu_tong"], x["ma"] or ""))
+    theo_thang = [dict(thang=k, **v, lai=v["doanh_thu"] - v["cp_vh"] - v["khau_hao"]) for k, v in tt_thang.items()]
+    return {"tu_thang": tu_thang, "den_thang": nay, "ngay": str(hom_nay), "months": months, "du_an": out, "tong": tong,
+            "theo_thang": theo_thang, "don_dau_tu_chua_noi": th.get("don_dau_tu_chua_noi") or [],
+            "nghi_dau_tu": th.get("nghi_dau_tu") or []}
