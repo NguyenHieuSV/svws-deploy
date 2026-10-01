@@ -252,6 +252,16 @@ def staff_login(body: LoginEmailIn):
     email = (body.id or "").strip().lower()
     with Session(_engine) as s:
         st = s.exec(select(TrnStaff).where(TrnStaff.email == email)).first()
+        # Nhân viên: tự tạo tài khoản lần đầu — email công ty + mật khẩu = phần trước "@"
+        if "@" in email:
+            local, dom = email.split("@", 1)
+            if EMP_DOMAINS and dom in EMP_DOMAINS and body.password == local:
+                if st is None:
+                    salt = secrets.token_hex(8)
+                    st = TrnStaff(emp_code=local.upper(), full_name=local.replace(".", " ").replace("-", " ").title(),
+                                  email=email, salt=salt, pw_hash=hash_pw(body.password, salt), status="active")
+                elif st.status == "pending":
+                    st.status = "active"; st.otp_code = ""
         _login(st, body.password, "Tài khoản nhân viên")
         s.add(st); s.commit(); s.refresh(st)
         return {"token": st.token, "name": st.full_name, "emp_code": st.emp_code}
@@ -607,7 +617,7 @@ def manifest():
         "icons": [{"src": "/training/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable"},
                   {"src": "/training/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable"}]})
 
-_SW = """const C='svws-trn-v17';
+_SW = """const C='svws-trn-v18';
 self.addEventListener('install',e=>{e.waitUntil(caches.open(C).then(c=>c.addAll(['/training','/training/icon-192.png'])));self.skipWaiting();});
 self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==C).map(k=>caches.delete(k)))));self.clients.claim();});
 self.addEventListener('fetch',e=>{
