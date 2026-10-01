@@ -1733,8 +1733,9 @@ goHome();
    +'<button class="trnOff" id="trnOffB">Học offline — điểm chỉ lưu trên máy này</button></div>';
    document.body.appendChild(ov);
    let mode='emp';
-   const tE=ov.querySelector('#tabE'),tS=ov.querySelector('#tabS'),idI=ov.querySelector('#lgId'),err=ov.querySelector('#trnErr');
-   function sw(m){mode=m;tE.classList.toggle('on',m==='emp');tS.classList.toggle('on',m==='stu');idI.placeholder=m==='emp'?'Email công ty':'Email hoặc số điện thoại';err.textContent='';}
+   const tE=ov.querySelector('#tabE'),tS=ov.querySelector('#tabS'),idI=ov.querySelector('#lgId'),pwI=ov.querySelector('#lgPw'),err=ov.querySelector('#trnErr');
+   function sw(m){mode=m;tE.classList.toggle('on',m==='emp');tS.classList.toggle('on',m==='stu');idI.placeholder=m==='emp'?'Email công ty':'Email hoặc số điện thoại';pwI.placeholder=m==='emp'?'Mật khẩu = phần trước @ của email':'Mật khẩu';err.textContent='';}
+   sw('emp');
    tE.onclick=function(){sw('emp')}; tS.onclick=function(){sw('stu')};
    ov.querySelector('#trnRegB').onclick=function(){location.href='/training/register'+(mode==='emp'?'?nv=1':'');};
    ov.querySelector('#trnGo').onclick=async function(){
