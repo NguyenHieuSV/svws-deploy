@@ -1719,11 +1719,13 @@ def ds_thanh_toan_mua(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "
     """Danh sách PO kèm tình trạng thanh toán: tổng, đề nghị thanh toán lũy kế,
     ngày thanh toán tiếp theo, số hóa đơn mua + mã đơn bán liên quan."""
     from ..models import ThanhToan as _TT, HoaDon, HangHoa
-    hh_tens = {}
-    for _dmid, _ten in (db.query(DonMuaCt.don_mua_id, HangHoa.ten)
-                        .join(HangHoa, DonMuaCt.hang_hoa_id == HangHoa.id)
-                        .order_by(DonMuaCt.id).all()):
+    hh_tens, hh_ct = {}, {}        # hh_ct: [[tên hàng, thành tiền gồm VAT]] của PO — tìm / thống kê theo SẢN PHẨM (bảng NCC × tháng)
+    for _dmid, _ten, _sl, _dg, _ts in (db.query(DonMuaCt.don_mua_id, HangHoa.ten, DonMuaCt.so_luong, DonMuaCt.don_gia,
+                                                DonMuaCt.thue_suat)
+                                       .join(HangHoa, DonMuaCt.hang_hoa_id == HangHoa.id)
+                                       .order_by(DonMuaCt.id).all()):
         hh_tens.setdefault(_dmid, []).append(_ten or "")
+        hh_ct.setdefault(_dmid, []).append([_ten or "", round(float(_sl or 0) * float(_dg or 0) * (1 + float(_ts or 0) / 100))])
     from ..models import LenhChiBank as _LCBl
     lenh_hl = {}                                   # PO → lệnh đang CHỜ DUYỆT / ĐÃ DUYỆT (chờ chi) ở tab Duyệt chi
     for _l in (db.query(_LCBl).filter(_LCBl.don_mua_id.isnot(None),
@@ -1757,6 +1759,7 @@ def ds_thanh_toan_mua(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "
                                   + (f" +{len(hh_tens[dm.id]) - 2} mặt hàng nữa"
                                      if len(hh_tens[dm.id]) > 2 else ""))
                                  if dm.id in hh_tens else None),
+                    "hh_ct": hh_ct.get(dm.id) or [],
                     "don_hang_id": dm.don_hang_id,
                     "nha_cung_cap_id": dm.nha_cung_cap_id,
                     "ncc_ten": ncc.ten if ncc else None,
