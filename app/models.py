@@ -395,6 +395,7 @@ class SanPhamNcc(Base):
     spec: Mapped[str | None] = mapped_column(Text, nullable=True)            # mig 133: thông số kỹ thuật (AI đọc từ email / file)
     spec_nguon: Mapped[str | None] = mapped_column(String(160), nullable=True)  # "TAY" | "AI · email …" | "AI · file …"
     spec_luc: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    tep_bao_gia_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)   # mig 143: file báo giá (tep_dinh_kem) sản phẩm được đọc ra
 
 
 class BaoGiaForm(Base):

@@ -872,10 +872,12 @@ def luu_bao_gia_file(nha_cung_cap_id: int = Form(...), file: UploadFile = File(.
     hien_co = {((sp.ten or "").strip().lower(), (sp.ma_sp or "").strip().lower()): sp
                for sp in db.query(SanPhamNcc).filter_by(nha_cung_cap_id=nha_cung_cap_id).all()}
     them, trung, spec_cn = [], [], 0
+    sp_dung = []                                  # mig 143: sản phẩm có trong file → gắn file báo giá này
     for it in items:
         khoa = (it["ten"].strip().lower(), (it["ma_sp"] or "").strip().lower())
         if khoa in hien_co:
             trung.append(it["ten"])
+            sp_dung.append(hien_co[khoa])
             if _spn_cap_nhat_spec(hien_co[khoa], it.get("spec"), f"AI · file {ten_file}"):
                 spec_cn += 1                  # SP trùng vẫn được CẬP NHẬT SPEC từ file mới
             continue
@@ -887,6 +889,7 @@ def luu_bao_gia_file(nha_cung_cap_id: int = Form(...), file: UploadFile = File(.
             sp_moi.spec, sp_moi.spec_nguon, sp_moi.spec_luc = str(it["spec"])[:2000], f"AI · file {ten_file}"[:160], _gh()
         db.add(sp_moi)
         hien_co[khoa] = sp_moi
+        sp_dung.append(sp_moi)
         them.append(it["ten"])
     # lưu file vào kho tệp dùng chung (danh mục Lưu file báo giá)
     ref = luu_tep_chung(data, "bao_gia_ncc", nha_cung_cap_id, ten_file, file.content_type)
@@ -896,6 +899,8 @@ def luu_bao_gia_file(nha_cung_cap_id: int = Form(...), file: UploadFile = File(.
                      nguoi_tai_len=nhan_vien_id_cua(db, nd.id))
     db.add(tep)
     db.flush()
+    for _sp in sp_dung:
+        _sp.tep_bao_gia_id = tep.id               # 📎 sản phẩm ↔ file báo giá mới nhất
     ghi_audit(db, nd.id, "AI_NHAP_BG", "san_pham_ncc", None,
               moi={"ncc": ncc.ten, "file": ten_file, "so_them": len(them), "so_trung": len(trung)})
     db.commit()
@@ -1249,6 +1254,7 @@ def xac_nhan_bao_gia_email(bge_id: int, data: BgEmailXacNhanVao | None = None, d
         _c = set(int(i) for i in data.chon)
         items = [it for i, it in enumerate(items) if i in _c]
     nguon_spec = (f"AI · email {r.ngay_thu or ''} {(r.tieu_de or '')[:60]}").strip()[:160]
+    _sp_bg = []                                   # mig 143: sản phẩm của thư này → gắn file đính kèm
     them, trung, spec_cn = [], [], 0
     for it in items:
         ten = str(it.get("ten") or "").strip()
@@ -1257,6 +1263,7 @@ def xac_nhan_bao_gia_email(bge_id: int, data: BgEmailXacNhanVao | None = None, d
         sp_co = _spn_khop(db, ncc.id, ten, it.get("ma_sp"))
         if sp_co is not None:
             trung.append(ten)                       # SP đã có: KHÔNG tạo trùng, chỉ CẬP NHẬT SPEC (giá giữ nguyên)
+            _sp_bg.append(sp_co)
             if _spn_cap_nhat_spec(sp_co, it.get("spec"), nguon_spec):
                 spec_cn += 1
             continue
@@ -1269,6 +1276,7 @@ def xac_nhan_bao_gia_email(bge_id: int, data: BgEmailXacNhanVao | None = None, d
         db.add(sp_moi)
         db.flush()
         them.append(ten)
+        _sp_bg.append(sp_moi)
     tep_ids = []
     for t in (r.dinh_kem or []):
         if not t.get("ref"):
@@ -1280,6 +1288,9 @@ def xac_nhan_bao_gia_email(bge_id: int, data: BgEmailXacNhanVao | None = None, d
         db.add(tep)
         db.flush()
         tep_ids.append(tep.id)
+    if tep_ids:
+        for _sp in _sp_bg:
+            _sp.tep_bao_gia_id = tep_ids[0]       # 📎 sản phẩm ↔ file báo giá đính kèm thư
     r.nha_cung_cap_id = ncc.id
     r.trang_thai = "DA_XAC_NHAN"
     r.xac_nhan_luc = gio_hien_tai()
@@ -5555,6 +5566,53 @@ def dtb_nhap_file(dt_id: int, file: UploadFile = File(...), db: Session = Depend
 
 
 # ---- 🔁 GHI NGƯỢC dự toán → danh mục Sản phẩm NCC (03/10/2026 — anh Hiếu chọn «có kiểm soát») ----
+# ---- 📎 mig 143: FILE BÁO GIÁ của sản phẩm NCC / file nguồn của dòng dự toán ----
+def _sp_tep_bao_gia(db, sp):
+    """File báo giá (TepDinhKem BAO_GIA_NCC_FILE) mà sản phẩm danh mục được đọc ra: cột tep_bao_gia_id (mig 143).
+    Bản ghi cũ chưa có → dò theo ghi chú / nguồn spec «AI nhập từ file X» · «AI · file X» · «AI đọc từ email …» rồi GHI lại
+    (nơi gọi commit). Trả TepDinhKem | None."""
+    import re as _re
+    if sp is None:
+        return None
+    if getattr(sp, "tep_bao_gia_id", None):
+        t = db.get(TepDinhKem, sp.tep_bao_gia_id)
+        if t is not None and t.doi_tuong == "BAO_GIA_NCC_FILE":
+            return t
+    t = None
+    for s, mau in ((sp.ghi_chu, r"AI nhập từ file (.+)$"), (sp.spec_nguon, r"AI · file (.+)$")):
+        m = _re.search(mau, str(s or ""))
+        if m:
+            t = (db.query(TepDinhKem).filter(TepDinhKem.doi_tuong == "BAO_GIA_NCC_FILE",
+                                             TepDinhKem.doi_tuong_id == sp.nha_cung_cap_id,
+                                             TepDinhKem.ten_file.like(m.group(1).strip()[:150].replace("%", r"\%").replace("_", r"\_") + "%"))
+                 .order_by(TepDinhKem.id.desc()).first())
+            if t is not None:
+                break
+    if t is None and "AI đọc từ email" in str(sp.ghi_chu or ""):
+        from ..models import BgEmailCho
+        for b in (db.query(BgEmailCho).filter(BgEmailCho.trang_thai == "DA_XAC_NHAN",
+                                              BgEmailCho.nha_cung_cap_id == sp.nha_cung_cap_id)
+                  .order_by(BgEmailCho.id.desc()).all()):
+            ids = (b.ket_qua or {}).get("tep_ids") or []
+            nhan = (f"AI đọc từ email {b.ngay_thu or ''} — {(b.tieu_de or '')[:80]}")[:200]
+            if ids and nhan in str(sp.ghi_chu or ""):
+                t = db.get(TepDinhKem, ids[0])
+                break
+    if t is not None:
+        sp.tep_bao_gia_id = t.id
+    return t
+
+
+@router.get("/tep-bao-gia/{tep_id}/tai")
+def tai_tep_bao_gia(tep_id: int, db: Session = Depends(get_db),
+                    _=Depends(yeu_cau_bat_ky(("ncc", "XEM"), ("ban_hang", "XEM")))):
+    """📎 Tải file báo giá NCC (kho «Lưu file báo giá») hoặc file nguồn đã nạp vào dự toán — link ở cột Ghi chú bảng Dự toán."""
+    t = db.get(TepDinhKem, tep_id)
+    if t is None or t.doi_tuong not in ("BAO_GIA_NCC_FILE", "DU_TOAN_BAN_FILE"):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy file báo giá")
+    return phan_hoi_tai(t.duong_dan, t.ten_file, t.content_type)
+
+
 DTB_GIA_NGHI = 1000        # đ — đơn giá dưới mức này coi là nghi nhập sai → không tự đưa vào danh mục
 
 
@@ -5851,10 +5909,28 @@ def dtb_chi_tiet(dt_id: int, db: Session = Depends(get_db), _=Depends(yeu_cau_ba
         mua_cu = goi_y_mua_cu(db, thieu) if thieu else {}
     except Exception:
         mua_cu = {}
+    # 📎 mig 143: file báo giá của sản phẩm danh mục / file nguồn «AI nhập từ file …» của dòng → cột Ghi chú thành link
+    import re as _re_tep
+    tep_dt = {_t.ten_file: _t for _t in (db.query(TepDinhKem).filter_by(doi_tuong="DU_TOAN_BAN_FILE", doi_tuong_id=dt_id)
+                                         .order_by(TepDinhKem.id).all())}
+    _doi_tep = False
     items = []
     for r in mucs:
         y = _dtb_dx_hieu_luc(db, r)
         h = hh_cua.get(r.id)
+        _tep = None
+        _sp = db.get(SanPhamNcc, r.san_pham_ncc_id) if r.san_pham_ncc_id else None
+        if _sp is not None:
+            _cu = _sp.tep_bao_gia_id
+            _t = _sp_tep_bao_gia(db, _sp)
+            if _t is not None:
+                _tep = {"id": _t.id, "ten_file": _t.ten_file, "loai": "BAO_GIA"}
+                _doi_tep = _doi_tep or (_cu != _sp.tep_bao_gia_id)
+        if _tep is None:
+            _m = _re_tep.search(r"AI nhập từ file (.+)$", str(r.ghi_chu or ""))
+            _t = tep_dt.get(_m.group(1).strip()[:255]) if _m else None
+            if _t is not None:
+                _tep = {"id": _t.id, "ten_file": _t.ten_file, "loai": "DU_TOAN"}
         g = gia.get(h) if h else None
         t = thuc.get(h) if h else None
         dg = float(r.don_gia or 0)
@@ -5864,6 +5940,7 @@ def dtb_chi_tiet(dt_id: int, db: Session = Depends(get_db), _=Depends(yeu_cau_ba
                       "hang_hoa_id": r.hang_hoa_id,
                       "nha_cung_cap_id": r.nha_cung_cap_id, "ncc_ten": r.ncc_ten, "ma_sp": r.ma_sp, "spec": r.spec,
                       "nha_san_xuat": r.nha_san_xuat, "san_pham_ncc_id": r.san_pham_ncc_id,
+                      "tep": _tep,
                       "dx_id": y.id if y else None, "dx_trang_thai": y.trang_thai if y else None,
                       # 💲 giá gợi ý theo mua thật / báo giá + giá mua thật dưới mã này
                       "gia_goi_y": g["gia_de_xuat"] if g else None,
@@ -5880,6 +5957,8 @@ def dtb_chi_tiet(dt_id: int, db: Session = Depends(get_db), _=Depends(yeu_cau_ba
     from ..models import ViecNen as _VN
     viec = [_viec_nen_dict(v) for v in db.query(_VN).filter_by(loai="DTB_NAP_FILE", doi_tuong_id=dt_id)
             .order_by(_VN.id.desc()).limit(3).all()]
+    if _doi_tep:
+        db.commit()                               # lưu liên kết sản phẩm ↔ file vừa dò bù
     return {"id": d.id, "ma": d.ma, "khach_hang": d.khach_hang, "mo_ta": d.mo_ta,
             "ngay": str(d.ngay) if d.ngay else None, "nguoi_tao": d.nguoi_tao, "viec_nen": viec,
             "items": items, "tong": sum(x["thanh_tien"] for x in items),
