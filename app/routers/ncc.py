@@ -5574,6 +5574,22 @@ def _dtb_ghi_chu_gia(ghi_chu, cu, moi, ma_dt) -> str:
     return (dong + (" · " + ghi_chu if ghi_chu else ""))[:300]
 
 
+def _dtb_khop_chat(db, ncc_id, ten, ma_sp):
+    """Khớp CHẶT với danh mục của NCC: cùng MÃ SP (khi dòng có mã) hoặc TRÙNG TÊN (không phân biệt hoa/thường, khoảng trắng).
+    Không dùng «tên chứa nhau» như lúc AI đọc báo giá (_spn_khop) — nối nhầm sản phẩm sẽ dẫn tới sửa nhầm giá danh mục."""
+    t = " ".join(str(ten or "").split()).lower()
+    mm = str(ma_sp or "").strip().lower()
+    ds = db.query(SanPhamNcc).filter_by(nha_cung_cap_id=ncc_id).all()
+    if mm:
+        for sp in ds:
+            if str(sp.ma_sp or "").strip().lower() == mm:
+                return sp
+    for sp in ds:
+        if " ".join(str(sp.ten or "").split()).lower() == t:
+            return sp
+    return None
+
+
 def _dtb_xet_danh_muc(db, m) -> dict:
     """Xét một dòng dự toán với danh mục Sản phẩm NCC (CHỈ ĐỌC). trang_thai:
     DA_LIEN_KET · TAO_MOI · LIEN_KET (danh mục của NCC đã có sản phẩm khớp mã / tên) · THIEU_NCC · THIEU_GIA · GIA_NGHI."""
@@ -5585,7 +5601,7 @@ def _dtb_xet_danh_muc(db, m) -> dict:
     ncc_id = m.nha_cung_cap_id or _dtb_ncc_theo_ten(db, m.ncc_ten)
     if not ncc_id:
         return {"trang_thai": "THIEU_NCC", "sp_id": None, "gia_danh_muc": None, "ncc_id": None}
-    sp = _spn_khop(db, ncc_id, m.ten, m.ma_sp)
+    sp = _dtb_khop_chat(db, ncc_id, m.ten, m.ma_sp)
     if sp is not None:
         return {"trang_thai": "LIEN_KET", "sp_id": sp.id, "gia_danh_muc": float(sp.don_gia or 0), "ncc_id": ncc_id}
     if gia <= 0:
@@ -5609,7 +5625,9 @@ def _dtb_ghi_danh_muc(db, m, nd, ma_dt=None, ep_gia_nghi: bool = False, doi_gia:
     kq = {"hanh_dong": None, "trang_thai": tt, "sp_id": x.get("sp_id"), "gia_lech": None}
 
     def lech(sp_id, gia_dm):
-        return {"sp_id": sp_id, "ten": m.ten, "gia_danh_muc": float(gia_dm or 0), "gia_du_toan": gia}
+        _sp = db.get(SanPhamNcc, sp_id)
+        return {"sp_id": sp_id, "ten": m.ten, "ten_danh_muc": _sp.ten if _sp else m.ten,
+                "gia_danh_muc": float(gia_dm or 0), "gia_du_toan": gia}
 
     if tt == "DA_LIEN_KET":
         if doi_gia and gia >= DTB_GIA_NGHI and abs(gia - float(x["gia_danh_muc"] or 0)) > 1:
