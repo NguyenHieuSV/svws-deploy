@@ -37,7 +37,7 @@ def bang_gia(db: Session, hang_hoa_ids=None) -> dict:
             continue
         o["lich_su"].append({"don_gia": _f(ct.don_gia), "so_luong": _f(ct.so_luong),
                              "ngay": str(dm.ngay or "")[:10], "so_po": dm.so, "don_mua_id": dm.id,
-                             "ncc": ncc_ten.get(dm.nha_cung_cap_id),
+                             "ncc": ncc_ten.get(dm.nha_cung_cap_id), "ncc_id": dm.nha_cung_cap_id,
                              "da_nhan": _f(ct.so_luong_nhan) > 0})
     hom_nay = date.today()
     qb = db.query(BaoGiaNcc).order_by(BaoGiaNcc.id.desc())
@@ -53,7 +53,7 @@ def bang_gia(db: Session, hang_hoa_ids=None) -> dict:
             continue
         o["bao_gia"] = {"don_gia": _f(bg.don_gia), "ngay": str(bg.ngay or "")[:10],
                         "hieu_luc_den": str(bg.hieu_luc_den) if bg.hieu_luc_den else None,
-                        "ncc": ncc_ten.get(bg.nha_cung_cap_id)}
+                        "ncc": ncc_ten.get(bg.nha_cung_cap_id), "ncc_id": bg.nha_cung_cap_id}
     qh = db.query(HangHoa.id, HangHoa.gia_von, HangHoa.ten, HangHoa.don_vi, HangHoa.gia_ban)
     if ids:
         qh = qh.filter(HangHoa.id.in_(ids))
@@ -81,9 +81,11 @@ def bang_gia(db: Session, hang_hoa_ids=None) -> dict:
         if bg and (gan is None or bg["ngay"] >= gan["ngay"]):
             o["gia_de_xuat"] = bg["don_gia"]
             o["nguon"] = f"báo giá {bg['ncc'] or ''} ({bg['ngay']})".strip()
+            o["ncc_de_xuat"], o["ncc_id_de_xuat"] = bg.get("ncc"), bg.get("ncc_id")     # NCC của chính nguồn giá đề xuất
         elif gan:
             o["gia_de_xuat"] = gan["don_gia"]
             o["nguon"] = f"mua {gan['ngay']} · {gan['so_po']} · {gan['ncc'] or ''}".strip(" ·")
+            o["ncc_de_xuat"], o["ncc_id_de_xuat"] = gan.get("ncc"), gan.get("ncc_id")
         elif o.get("gia_von"):
             o["gia_de_xuat"] = o["gia_von"]
             o["nguon"] = "giá vốn đã học khi nhận hàng"
@@ -94,6 +96,8 @@ def bang_gia(db: Session, hang_hoa_ids=None) -> dict:
             o["gia_de_xuat"], o["nguon"] = None, None
         o.setdefault("gia_ban", None)
         o.setdefault("bao_gia", None)
+        o.setdefault("ncc_de_xuat", None)
+        o.setdefault("ncc_id_de_xuat", None)
     return out
 
 
@@ -266,6 +270,7 @@ def tim_theo_ten(db: Session, q: str, gioi_han: int = 40) -> list:
         o = bg.get(hid) or {}
         out.append({"hang_hoa_id": hid, "ten": ten, "don_vi": dv,
                     "gia_de_xuat": o.get("gia_de_xuat"), "nguon": o.get("nguon"),
+                    "ncc_de_xuat": o.get("ncc_de_xuat"), "ncc_id_de_xuat": o.get("ncc_id_de_xuat"),
                     "gia_gan_nhat": o.get("gia_gan_nhat"), "ngay_gan_nhat": o.get("ngay_gan_nhat"),
                     "so_po_gan_nhat": o.get("so_po_gan_nhat"), "ncc_gan_nhat": o.get("ncc_gan_nhat"),
                     "so_lan_mua": o.get("so_lan_mua", 0),
@@ -332,7 +337,8 @@ def goi_y_mua_cu(db: Session, dong, n: int = 3) -> dict:
                          "gia": g["gia_de_xuat"], "nguon": g.get("nguon"),
                          "da_mua": (g.get("so_lan_mua") or 0) > 0, "so_lan_mua": g.get("so_lan_mua") or 0,
                          "ngay": g.get("ngay_gan_nhat"), "so_po": g.get("so_po_gan_nhat"),
-                         "ncc": g.get("ncc_gan_nhat")})
+                         "ncc": g.get("ncc_gan_nhat"),
+                         "ncc_id": g.get("ncc_id_de_xuat"), "ncc_gia": g.get("ncc_de_xuat")})
         # hàng ĐÃ MUA THẬT trước, rồi độ giống tên, rồi lần mua mới nhất
         rows.sort(key=lambda r: str(r["ngay"] or ""), reverse=True)          # sắp ổn định 2 bước
         rows.sort(key=lambda r: (0 if r["da_mua"] else 1, -r["diem"]))

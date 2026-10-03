@@ -5315,6 +5315,7 @@ class DtbMucVao(_NccCnBase):
     spec: str | None = None
     nha_san_xuat: str | None = None
     san_pham_ncc_id: int | None = None      # chọn từ danh mục → máy chủ điền cả dòng từ danh mục
+    ncc_goi_y_id: int | None = None         # NCC của PO / báo giá nguồn giá gợi ý — chỉ điền khi dòng CHƯA có NCC
 
 
 def _dtb_ap_san_pham_ncc(db, m, data, tao: bool):
@@ -5777,12 +5778,19 @@ def dtb_sua_muc(muc_id: int, data: DtbMucVao, db: Session = Depends(get_db),
     if data.hang_hoa_id is not None and db.get(HangHoa, data.hang_hoa_id) is not None:
         m.hang_hoa_id = data.hang_hoa_id          # 🔎 liên kết mặt hàng khi chọn từ Tìm giá / khớp kho
     _dtb_ap_san_pham_ncc(db, m, data, tao=False)   # mig 139: NCC · mã SP · spec · NSX · liên kết danh mục
+    # 💲 chọn giá gợi ý / Áp giá mua cũ / 🔎 tìm giá: dòng CHƯA có NCC → nhận NCC của PO / báo giá nguồn giá (đã có thì giữ)
+    ncc_dien = None
+    if data.ncc_goi_y_id and not m.nha_cung_cap_id and not (m.ncc_ten or "").strip() and not m.san_pham_ncc_id:
+        _ncc = db.get(NhaCungCap, data.ncc_goi_y_id)
+        if _ncc is not None:
+            m.nha_cung_cap_id, m.ncc_ten = _ncc.id, _ncc.ten
+            ncc_dien = _ncc.ten
     # 🔁 ghi ngược có kiểm soát vào danh mục Sản phẩm NCC (tạo mới / nối; đổi giá danh mục chỉ khi người dùng xác nhận)
     _d = db.get(DuToanBan, m.du_toan_id)
     dm = _dtb_ghi_danh_muc(db, m, nd, _d.ma if _d else None,
                            doi_gia=(data.don_gia is not None and Decimal(str(data.don_gia)) != gia_truoc))
     db.commit()
-    return {"ok": True, "danh_muc": dm}
+    return {"ok": True, "danh_muc": dm, "ncc_dien": ncc_dien}
 
 
 @router.delete("/du-toan-ban/muc/{muc_id}")
@@ -5860,6 +5868,8 @@ def dtb_chi_tiet(dt_id: int, db: Session = Depends(get_db), _=Depends(yeu_cau_ba
                       # 💲 giá gợi ý theo mua thật / báo giá + giá mua thật dưới mã này
                       "gia_goi_y": g["gia_de_xuat"] if g else None,
                       "nguon_goi_y": g["nguon"] if g else None,
+                      "ncc_goi_y": g.get("ncc_de_xuat") if g else None,
+                      "ncc_goi_y_id": g.get("ncc_id_de_xuat") if g else None,
                       "gia_thuc": t["don_gia"] if t else None,
                       "po_thuc": t["so_po"] if t else None,
                       "po_thuc_tt": t["trang_thai"] if t else None,
