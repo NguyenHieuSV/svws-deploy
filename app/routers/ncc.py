@@ -5553,6 +5553,187 @@ def dtb_nhap_file(dt_id: int, file: UploadFile = File(...), db: Session = Depend
     return {"ok": True, "id": dt.id, "ma": dt.ma, "dang_chay": True, "ten_file": ten_file, **kq}
 
 
+# ---- 🔁 GHI NGƯỢC dự toán → danh mục Sản phẩm NCC (03/10/2026 — anh Hiếu chọn «có kiểm soát») ----
+DTB_GIA_NGHI = 1000        # đ — đơn giá dưới mức này coi là nghi nhập sai → không tự đưa vào danh mục
+
+
+def _dtb_ncc_theo_ten(db, ten):
+    """NCC trong hồ sơ TRÙNG TÊN (không phân biệt hoa/thường, khoảng trắng thừa) → id | None."""
+    t = " ".join(str(ten or "").split()).lower()
+    if not t:
+        return None
+    for n in db.query(NhaCungCap).all():
+        if " ".join(str(n.ten or "").split()).lower() == t:
+            return n.id
+    return None
+
+
+def _dtb_ghi_chu_gia(ghi_chu, cu, moi, ma_dt) -> str:
+    from ..nhac_viec_service import gio_hien_tai
+    dong = f"💲 {cu:,.0f}→{moi:,.0f} theo dự toán {ma_dt or ''} {gio_hien_tai():%d/%m/%Y}".replace(",", ".")
+    return (dong + (" · " + ghi_chu if ghi_chu else ""))[:300]
+
+
+def _dtb_xet_danh_muc(db, m) -> dict:
+    """Xét một dòng dự toán với danh mục Sản phẩm NCC (CHỈ ĐỌC). trang_thai:
+    DA_LIEN_KET · TAO_MOI · LIEN_KET (danh mục của NCC đã có sản phẩm khớp mã / tên) · THIEU_NCC · THIEU_GIA · GIA_NGHI."""
+    gia = float(m.don_gia or 0)
+    if m.san_pham_ncc_id:
+        sp = db.get(SanPhamNcc, m.san_pham_ncc_id)
+        if sp is not None:
+            return {"trang_thai": "DA_LIEN_KET", "sp_id": sp.id, "gia_danh_muc": float(sp.don_gia or 0), "ncc_id": sp.nha_cung_cap_id}
+    ncc_id = m.nha_cung_cap_id or _dtb_ncc_theo_ten(db, m.ncc_ten)
+    if not ncc_id:
+        return {"trang_thai": "THIEU_NCC", "sp_id": None, "gia_danh_muc": None, "ncc_id": None}
+    sp = _spn_khop(db, ncc_id, m.ten, m.ma_sp)
+    if sp is not None:
+        return {"trang_thai": "LIEN_KET", "sp_id": sp.id, "gia_danh_muc": float(sp.don_gia or 0), "ncc_id": ncc_id}
+    if gia <= 0:
+        return {"trang_thai": "THIEU_GIA", "sp_id": None, "gia_danh_muc": None, "ncc_id": ncc_id}
+    if gia < DTB_GIA_NGHI:
+        return {"trang_thai": "GIA_NGHI", "sp_id": None, "gia_danh_muc": None, "ncc_id": ncc_id}
+    return {"trang_thai": "TAO_MOI", "sp_id": None, "gia_danh_muc": None, "ncc_id": ncc_id}
+
+
+def _dtb_ghi_danh_muc(db, m, nd, ma_dt=None, ep_gia_nghi: bool = False, doi_gia: bool = False) -> dict:
+    """GHI NGƯỢC một dòng dự toán vào danh mục Sản phẩm NCC — có kiểm soát:
+      · dòng chưa liên kết, đủ NCC (hồ sơ) + tên + đơn giá ≥ 1.000đ, danh mục NCC chưa có → TẠO MỚI (ghi chú «Từ dự toán <mã>»)
+      · danh mục NCC đã có sản phẩm khớp mã / tên → LIÊN KẾT; danh mục chưa có giá thì nhận giá dự toán, đã có giá khác
+        thì KHÔNG ghi đè — trả `gia_lech` để giao diện hỏi
+      · dòng đã liên kết: chỉ trả `gia_lech` khi lần lưu này đổi giá (doi_gia) — đổi giá danh mục phải qua xác nhận
+      · thiếu NCC / thiếu giá / giá nghi nhập sai (< 1.000đ, trừ khi ep_gia_nghi) → không làm gì.
+    Trả {hanh_dong: TAO_MOI | LIEN_KET | LIEN_KET_DIEN_GIA | None, trang_thai, sp_id, gia_lech}."""
+    from ..nhac_viec_service import gio_hien_tai
+    x = _dtb_xet_danh_muc(db, m)
+    tt, gia = x["trang_thai"], float(m.don_gia or 0)
+    kq = {"hanh_dong": None, "trang_thai": tt, "sp_id": x.get("sp_id"), "gia_lech": None}
+
+    def lech(sp_id, gia_dm):
+        return {"sp_id": sp_id, "ten": m.ten, "gia_danh_muc": float(gia_dm or 0), "gia_du_toan": gia}
+
+    if tt == "DA_LIEN_KET":
+        if doi_gia and gia >= DTB_GIA_NGHI and abs(gia - float(x["gia_danh_muc"] or 0)) > 1:
+            kq["gia_lech"] = lech(x["sp_id"], x["gia_danh_muc"])
+        return kq
+    if tt == "LIEN_KET":
+        sp = db.get(SanPhamNcc, x["sp_id"])
+        m.san_pham_ncc_id, m.nha_cung_cap_id = sp.id, sp.nha_cung_cap_id
+        if not (m.ncc_ten or "").strip():
+            ncc = db.get(NhaCungCap, sp.nha_cung_cap_id)
+            m.ncc_ten = ncc.ten if ncc else None
+        kq["hanh_dong"] = "LIEN_KET"
+        if gia >= DTB_GIA_NGHI and abs(gia - float(sp.don_gia or 0)) > 1:
+            if float(sp.don_gia or 0) <= 0:              # danh mục CHƯA có giá → nhận giá dự toán (không phải ghi đè)
+                sp.ghi_chu = _dtb_ghi_chu_gia(sp.ghi_chu, 0, gia, ma_dt)
+                sp.don_gia = Decimal(str(round(gia)))
+                kq["hanh_dong"] = "LIEN_KET_DIEN_GIA"
+                ghi_audit(db, nd.id, "SUA", "san_pham_ncc", sp.id, cu={"don_gia": 0}, moi={"don_gia": gia, "tu_du_toan": ma_dt})
+            else:
+                kq["gia_lech"] = lech(sp.id, sp.don_gia)
+        return kq
+    if tt == "TAO_MOI" or (tt == "GIA_NGHI" and ep_gia_nghi):
+        ncc = db.get(NhaCungCap, x["ncc_id"])
+        if ncc is None:
+            return kq
+        sp = SanPhamNcc(nha_cung_cap_id=ncc.id, ten=str(m.ten or "").strip()[:250], ma_sp=((m.ma_sp or "").strip()[:60] or None),
+                        mo_ta=m.quy_cach, nha_san_xuat=((m.nha_san_xuat or "").strip()[:150] or None),
+                        don_vi=((m.don_vi or "").strip()[:30] or None), don_gia=Decimal(str(round(gia))),
+                        ghi_chu=f"📐 Từ dự toán {ma_dt or ''} · {gio_hien_tai():%d/%m/%Y}"[:300])
+        if (m.spec or "").strip():
+            sp.spec, sp.spec_nguon, sp.spec_luc = m.spec.strip()[:2000], "TAY", gio_hien_tai()
+        db.add(sp)
+        db.flush()
+        m.san_pham_ncc_id, m.nha_cung_cap_id = sp.id, ncc.id
+        if not (m.ncc_ten or "").strip():
+            m.ncc_ten = ncc.ten
+        ghi_audit(db, nd.id, "TAO", "san_pham_ncc", sp.id, moi={"ten": sp.ten, "ncc": ncc.ten, "don_gia": gia, "tu_du_toan": ma_dt})
+        kq.update(hanh_dong="TAO_MOI", sp_id=sp.id)
+    return kq
+
+
+class DtbDanhMucVao(_NccCnBase):
+    ap_dung: bool = False
+    dt_id: int | None = None               # None = mọi dự toán
+    chon: list[dict] | None = None         # [{id, nha_cung_cap_id?, ep?}] — dòng áp dụng
+
+
+@router.post("/du-toan-ban/dua-vao-danh-muc")
+def dtb_dua_vao_danh_muc(data: DtbDanhMucVao, db: Session = Depends(get_db),
+                         nd: NguoiDung = Depends(yeu_cau_bat_ky(("ncc", "THAO_TAC"), ("ban_hang", "THAO_TAC")))):
+    """🏷 Đưa HÀNG LOẠT dòng dự toán (chưa liên kết) vào danh mục Sản phẩm NCC. ap_dung=False → bảng xem trước theo trạng thái;
+    ap_dung=True → áp cho các dòng trong `chon` (dòng thiếu NCC gửi kèm nha_cung_cap_id; giá nghi sai phải gửi ep)."""
+    q = db.query(DuToanBanMuc)
+    if data.dt_id:
+        q = q.filter(DuToanBanMuc.du_toan_id == data.dt_id)
+    mucs = q.order_by(DuToanBanMuc.du_toan_id, DuToanBanMuc.id).all()
+    ma_dt = {d.id: d.ma for d in db.query(DuToanBan).all()}
+    if data.ap_dung:
+        chon = {}
+        for c in data.chon or []:
+            try:
+                chon[int(c.get("id"))] = c
+            except (TypeError, ValueError):
+                continue
+        kq = {"tao_moi": 0, "lien_ket": 0, "bo_qua": 0, "gia_lech": 0}
+        for m in mucs:
+            c = chon.get(m.id)
+            if c is None or m.san_pham_ncc_id:
+                continue
+            if c.get("nha_cung_cap_id") and not m.nha_cung_cap_id:
+                ncc = db.get(NhaCungCap, int(c["nha_cung_cap_id"]))
+                if ncc is not None:
+                    m.nha_cung_cap_id, m.ncc_ten = ncc.id, ncc.ten
+            r = _dtb_ghi_danh_muc(db, m, nd, ma_dt.get(m.du_toan_id), ep_gia_nghi=bool(c.get("ep")))
+            if r["hanh_dong"] == "TAO_MOI":
+                kq["tao_moi"] += 1
+            elif r["hanh_dong"]:
+                kq["lien_ket"] += 1
+            else:
+                kq["bo_qua"] += 1
+            if r.get("gia_lech"):
+                kq["gia_lech"] += 1
+        ghi_audit(db, nd.id, "DUA_DANH_MUC", "du_toan_ban", data.dt_id, moi=kq)
+        db.commit()
+        return {"ok": True, **kq}
+    ten_ncc = {n.id: n.ten for n in db.query(NhaCungCap).all()}
+    rows, dem = [], {}
+    for m in mucs:
+        x = _dtb_xet_danh_muc(db, m)
+        dem[x["trang_thai"]] = dem.get(x["trang_thai"], 0) + 1
+        if x["trang_thai"] == "DA_LIEN_KET":
+            continue
+        rows.append({"id": m.id, "du_toan_id": m.du_toan_id, "du_toan_ma": ma_dt.get(m.du_toan_id), "ten": m.ten, "ma_sp": m.ma_sp,
+                     "ncc_ten": ten_ncc.get(x.get("ncc_id")) or m.ncc_ten, "nha_cung_cap_id": x.get("ncc_id"),
+                     "don_vi": m.don_vi, "don_gia": float(m.don_gia or 0), "trang_thai": x["trang_thai"],
+                     "sp_id": x.get("sp_id"), "gia_danh_muc": x.get("gia_danh_muc")})
+    thu_tu = {"TAO_MOI": 0, "LIEN_KET": 1, "GIA_NGHI": 2, "THIEU_NCC": 3, "THIEU_GIA": 4}
+    rows.sort(key=lambda r: (thu_tu.get(r["trang_thai"], 9), r["du_toan_ma"] or "", r["id"]))
+    return {"rows": rows, "dem": dem, "tong_dong": len(mucs), "nguong_gia_nghi": DTB_GIA_NGHI}
+
+
+@router.post("/du-toan-ban/muc/{muc_id}/cap-nhat-gia-danh-muc")
+def dtb_cap_nhat_gia_danh_muc(muc_id: int, db: Session = Depends(get_db),
+                              nd: NguoiDung = Depends(yeu_cau_bat_ky(("ncc", "THAO_TAC"), ("ban_hang", "THAO_TAC")))):
+    """💲 Người dùng ĐÃ XÁC NHẬN: lấy đơn giá của dòng dự toán ghi đè giá sản phẩm liên kết trong danh mục Sản phẩm NCC."""
+    m = db.get(DuToanBanMuc, muc_id)
+    if m is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy sản phẩm trong dự toán")
+    sp = db.get(SanPhamNcc, m.san_pham_ncc_id) if m.san_pham_ncc_id else None
+    if sp is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Dòng này chưa liên kết sản phẩm trong danh mục NCC")
+    gia = float(m.don_gia or 0)
+    if gia <= 0:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Dòng dự toán chưa có đơn giá")
+    cu = float(sp.don_gia or 0)
+    d = db.get(DuToanBan, m.du_toan_id)
+    sp.ghi_chu = _dtb_ghi_chu_gia(sp.ghi_chu, cu, gia, d.ma if d else None)
+    sp.don_gia = Decimal(str(round(gia)))
+    ghi_audit(db, nd.id, "SUA", "san_pham_ncc", sp.id, cu={"don_gia": cu},
+              moi={"don_gia": gia, "tu_du_toan": d.ma if d else None})
+    db.commit()
+    return {"ok": True, "sp_id": sp.id, "gia_cu": cu, "gia_moi": gia}
+
+
 # LƯU Ý thứ tự route: các đường /du-toan-ban/muc/{...} phải khai TRƯỚC /du-toan-ban/{dt_id}
 # để "muc" không bị bắt nhầm vào tham số số nguyên dt_id.
 @router.put("/du-toan-ban/muc/{muc_id}")
@@ -5562,6 +5743,7 @@ def dtb_sua_muc(muc_id: int, data: DtbMucVao, db: Session = Depends(get_db),
     if m is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy sản phẩm trong dự toán")
     _dtb_khoa_muc(db, m)
+    gia_truoc = Decimal(m.don_gia or 0)
     if data.ten is not None and data.ten.strip():
         m.ten = data.ten.strip()
     if data.quy_cach is not None:
@@ -5577,8 +5759,12 @@ def dtb_sua_muc(muc_id: int, data: DtbMucVao, db: Session = Depends(get_db),
     if data.hang_hoa_id is not None and db.get(HangHoa, data.hang_hoa_id) is not None:
         m.hang_hoa_id = data.hang_hoa_id          # 🔎 liên kết mặt hàng khi chọn từ Tìm giá / khớp kho
     _dtb_ap_san_pham_ncc(db, m, data, tao=False)   # mig 139: NCC · mã SP · spec · NSX · liên kết danh mục
+    # 🔁 ghi ngược có kiểm soát vào danh mục Sản phẩm NCC (tạo mới / nối; đổi giá danh mục chỉ khi người dùng xác nhận)
+    _d = db.get(DuToanBan, m.du_toan_id)
+    dm = _dtb_ghi_danh_muc(db, m, nd, _d.ma if _d else None,
+                           doi_gia=(data.don_gia is not None and Decimal(str(data.don_gia)) != gia_truoc))
     db.commit()
-    return {"ok": True}
+    return {"ok": True, "danh_muc": dm}
 
 
 @router.delete("/du-toan-ban/muc/{muc_id}")
@@ -5614,8 +5800,10 @@ def dtb_them_muc(dt_id: int, data: DtbMucVao, db: Session = Depends(get_db),
     _dtb_ap_san_pham_ncc(db, m, data, tao=True)    # mig 139: NCC · mã SP · spec · NSX · liên kết danh mục
     db.add(m); db.flush()
     muc_id = m.id
+    _d = db.get(DuToanBan, dt_id)
+    dm = _dtb_ghi_danh_muc(db, m, nd, _d.ma if _d else None, doi_gia=True)   # 🔁 ghi ngược có kiểm soát vào danh mục NCC
     db.commit()
-    return {"id": muc_id}
+    return {"id": muc_id, "danh_muc": dm}
 
 
 @router.get("/du-toan-ban/{dt_id}")
