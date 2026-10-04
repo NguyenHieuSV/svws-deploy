@@ -1776,6 +1776,8 @@ goHome();
    +('share_company' in d?'<label class="trnChk"><input type="checkbox" id="acS"'+(d.share_company?' checked':'')+'> <span>Chia sẻ kết quả học với công ty tôi</span></label>':'')
    +'<p style="margin:0 0 8px">Đã đồng ý '+TERMS_LINKS+' (phiên bản '+(d.policy_version||'')+').</p>'
    +'<div class="trnOk" id="acOk"></div><button class="trnGo" id="acSave">Lưu lựa chọn</button></div>'
+   +(d.ref_code?'<div class="trnSec"><b>Mã giới thiệu của tôi: <span style="letter-spacing:2px">'+esc(d.ref_code)+'</span></b><p style="margin:0 0 8px">Gửi link này cho bạn bè, đồng nghiệp — người đăng ký qua link sẽ được ghi nhận là do bạn giới thiệu.</p>'
+   +'<input id="acRef" readonly value="'+esc(location.origin+d.ref_link)+'"><div class="trnOk" id="acRefOk"></div><button class="trnGo" id="acCopy">📋 Sao chép link</button></div>':'')
    +'<div class="trnSec"><b>Dữ liệu của tôi</b><button class="trnOff" id="acDl" style="margin-top:0">⬇ Tải dữ liệu của tôi (JSON)</button></div>'
    +'<div class="trnSec"><b>Xóa tài khoản</b><p style="margin:0 0 8px">Xóa thông tin tài khoản và lịch sử đồng ý; điểm đã làm chỉ còn trong thống kê ẩn danh. Không thể hoàn tác.</p>'
    +'<input id="acPw" type="password" placeholder="Nhập mật khẩu để xác nhận" maxlength="60"><div class="trnErr" id="acE"></div><button class="trnDel" id="acDel">Xóa tài khoản</button></div>'
@@ -1787,6 +1789,12 @@ goHome();
      ok.textContent='Đang lưu…';
      try{const r=await fetch(API+'/me/consent',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(consentBody(ov,a.token,'#acM','#acS'))});
        ok.textContent=r.ok?'✅ Đã lưu.':'Không lưu được.';}catch(e){ok.textContent='Không kết nối được máy chủ.';}
+   };
+   const cp=ov.querySelector('#acCopy');
+   if(cp)cp.onclick=async function(){
+     const inp=ov.querySelector('#acRef'),okR=ov.querySelector('#acRefOk');
+     try{await navigator.clipboard.writeText(inp.value);okR.textContent='✅ Đã sao chép link.';}
+     catch(e){inp.select();try{document.execCommand('copy');okR.textContent='✅ Đã sao chép link.';}catch(x){okR.textContent='Hãy bôi đen và sao chép link ở trên.';}}
    };
    ov.querySelector('#acDl').onclick=async function(){
      try{const r=await fetch(API+'/me/export?token='+encodeURIComponent(a.token));if(!r.ok){alert('Không tải được dữ liệu.');return;}
