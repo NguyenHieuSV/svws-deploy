@@ -167,6 +167,24 @@ def test_ma_ky_su_tang_dan(c):
     assert int(codes[1][4:]) == int(codes[0][4:]) + 1
 
 
+def test_xoa_ky_su_moi_nhat_khong_cap_lai_ma(c):
+    """Xóa đúng kỹ sư MỚI NHẤT (tự xóa và admin xóa) -> người kế tiếp không nhận lại mã ENG đó."""
+    def reg():
+        b = _ks(); c.post("/training/api/engineer/register", json=b)
+        x = _id_of(c, b["email"]); return b, x["id"], int(x["eng_code"][4:])
+    _, _, n1 = reg()
+    b2, id2, n2 = reg()
+    assert n2 == n1 + 1
+    c.post("/training/api/engineers/action", json={"key": KEY, "id": id2, "action": "approve"})
+    tok = c.post("/training/api/engineer/login", json={"id": b2["email"], "password": b2["password"]}).json()["token"]
+    c.post("/training/api/me/delete", json={"token": tok, "password": b2["password"]})
+    _, id3, n3 = reg()
+    assert n3 == n2 + 1
+    c.post("/training/api/engineers/action", json={"key": KEY, "id": id3, "action": "delete"})
+    _, _, n4 = reg()
+    assert n4 == n3 + 1
+
+
 def test_trang_dang_ky_co_tab_ky_su_va_34_tinh(c):
     html = c.get("/training/register").text
     assert "id=tK" in html and "id=k_pv" in html and "<!--PROVINCE_OPTIONS-->" not in html
