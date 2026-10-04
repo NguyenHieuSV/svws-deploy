@@ -148,3 +148,12 @@ def test_pg_dump_that_tai_len_va_khoi_phuc_duoc(tmp_path, monkeypatch):
         import subprocess
         toc = subprocess.run(["pg_restore", "--list", str(dich)], capture_output=True, text=True)
         assert toc.returncode == 0 and "TABLE public khach_hang" in toc.stdout
+
+
+def test_dockerfile_pg_dump_cung_ban_postgres_render():
+    """Render chạy Postgres 18 — pg_dump cũ hơn server sẽ từ chối dump."""
+    with open(os.path.join(os.path.dirname(__file__), "..", "Dockerfile"), encoding="utf-8") as f:
+        df = f.read()
+    assert "ARG PG_MAJOR=18" in df
+    assert "postgresql-client-${PG_MAJOR}" in df and "apt.postgresql.org" in df
+    assert 'pg_dump --version | grep -q " ${PG_MAJOR}\\."' in df     # build hỏng nếu cài sai bản

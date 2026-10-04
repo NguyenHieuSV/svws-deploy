@@ -49,5 +49,6 @@ psql postgresql://.../svws_thu -c "select count(*) from trn_results" -c "select 
 | Kết luận | Đạt / Không đạt |
 
 ## Lưu ý
-- `pg_dump` trong image phải cùng hoặc mới hơn phiên bản Postgres của server. Nếu log báo
-  `server version mismatch`, nâng gói `postgresql-client` trong `Dockerfile`.
+- `pg_dump` trong image phải cùng hoặc mới hơn Postgres của server (Render đang chạy **18**).
+  `Dockerfile` cài `postgresql-client-18` từ kho PGDG (`ARG PG_MAJOR=18`) và tự dừng build nếu
+  `pg_dump --version` không đúng bản 18. Khi Render nâng Postgres lên bản mới, đổi `PG_MAJOR` theo.
