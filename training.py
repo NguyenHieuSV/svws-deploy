@@ -131,6 +131,12 @@ class TrnConsent(SQLModel, table=True):
     ip: str = Field(default="", max_length=45)
     subject_ref: str = Field(default="", index=True, max_length=24)   # DEL-… sau khi tài khoản bị xóa
 
+class TrnCodeSeq(SQLModel, table=True):
+    """Số lớn nhất ĐÃ CẤP theo tiền tố mã (SVU-, ENG-…). Không giảm khi xóa tài khoản -> mã không bao giờ bị cấp lại."""
+    __tablename__ = "trn_code_seq"
+    prefix: str = Field(primary_key=True, max_length=10)
+    last: int = 0
+
 SQLModel.metadata.create_all(_engine)
 router = APIRouter(prefix="/training", tags=["training"])
 
@@ -383,10 +389,23 @@ def old_login():
     raise HTTPException(410, "Cách đăng nhập đã đổi — tải lại trang (Ctrl+F5) để dùng bản mới: email + mật khẩu.")
 
 # ---------------- SINH VIÊN ----------------
+def _next_code(s: Session, prefix: str, column) -> str:
+    """Mã tăng dần KHÔNG BAO GIỜ cấp lại (kể cả khi xóa đúng tài khoản mới nhất): số kế tiếp = max(số đã cấp lưu
+    trong trn_code_seq, số lớn nhất còn trong bảng) + 1. Lần đầu chạy, bảng seq tự lấy mốc từ dữ liệu hiện có.
+    Không commit (người gọi commit cùng tài khoản mới)."""
+    seq = s.exec(select(TrnCodeSeq).where(TrnCodeSeq.prefix == prefix).with_for_update()).first()
+    pat = re.compile(re.escape(prefix) + r"\d+")
+    nums = [int(c[len(prefix):]) for c in s.exec(select(column)).all() if pat.fullmatch(c or "")]
+    n = max([seq.last if seq else 0] + nums) + 1
+    if seq is None:
+        seq = TrnCodeSeq(prefix=prefix, last=n)
+    else:
+        seq.last = n
+    s.add(seq)
+    return "%s%04d" % (prefix, n)
+
 def _next_student_code(s: Session) -> str:
-    """SVU-xxxx = số lớn nhất hiện có + 1 (đếm số dòng sẽ trùng mã khi đã có tài khoản bị xóa)."""
-    nums = [int(c[4:]) for c in s.exec(select(TrnStudent.student_code)).all() if re.fullmatch(r"SVU-\d+", c or "")]
-    return "SVU-%04d" % (max(nums, default=0) + 1)
+    return _next_code(s, "SVU-", TrnStudent.student_code)
 
 @router.post("/api/student/register")
 def student_register(body: StudentRegisterIn, request: Request):
