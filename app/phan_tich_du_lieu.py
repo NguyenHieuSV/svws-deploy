@@ -108,16 +108,20 @@ def _thu_thap(db: Session, hom_nay: date) -> dict:
 
     # ---- lãi theo mảng + mã lỗ (cùng công thức Lãi/Lỗ Record) ----
     mang = {k: {"dt": 0.0, "cp": 0.0, "so_ma": 0} for k in MANG_TEN}
-    ma_lo, cho_dt = [], []
+    ma_lo, cho_dt, theo_nhom = [], [], {}
     for x in t.get("theo_ma") or []:
         if x.get("la_dau_tu"):
             continue
         s = mang[_mang_cua(x.get("ma_ban"))]
         s["dt"] += _f(x.get("doanh_thu")); s["cp"] += _f(x.get("tong_chi_phi")); s["so_ma"] += 1
-        if _f(x.get("doanh_thu")) > 0 and _f(x.get("loi_nhuan")) < 0:
-            ma_lo.append((x.get("ma_ban"), _f(x.get("doanh_thu")), _f(x.get("loi_nhuan"))))
-        elif _f(x.get("doanh_thu")) == 0 and _f(x.get("tong_chi_phi")) > 0:
-            cho_dt.append((x.get("ma_ban"), _f(x.get("tong_chi_phi"))))
+        # đọc theo NHÓM gốc + tháng: đuôi -01/-02 sau MMYY là các hóa đơn / đợt của cùng một đơn tháng
+        g = theo_nhom.setdefault(x.get("nhom") or x.get("ma_ban"), {"dt": 0.0, "cp": 0.0})
+        g["dt"] += _f(x.get("doanh_thu")); g["cp"] += _f(x.get("tong_chi_phi"))
+    for k, g in theo_nhom.items():
+        if g["dt"] > 0 and g["dt"] - g["cp"] < 0:
+            ma_lo.append((k, g["dt"], g["dt"] - g["cp"]))
+        elif g["dt"] == 0 and g["cp"] > 0:
+            cho_dt.append((k, g["cp"]))
     D["mang"] = mang
     D["ma_lo"] = sorted(ma_lo, key=lambda x: x[2])
     D["cho_dt"] = sorted(cho_dt, key=lambda x: -x[1])
@@ -225,10 +229,19 @@ def _thu_thap(db: Session, hom_nay: date) -> dict:
     co_dt = {str(m).strip().lower() for (m,) in db.query(DuToanBan.ma).all() if m}
     nhom_dt = {nhom(m) for m in co_dt} | {nhom(m) for (m,) in db.query(DuAn.ma).all() if m}
     nhom_dt.discard(None); nhom_dt.discard("")
+    from .du_toan_ks import NGAY_AP_DUNG
+    D["ngay_dt"] = f"{NGAY_AP_DUNG:%d/%m/%Y}"
+    cu_ma, cu_nhom = set(), set()                  # mã / nhóm đã đặt ra từ ngày áp dụng trở về trước → miễn (CEO chốt 18/09/2026)
+    for (so,) in db.query(DonHang.so).filter(DonHang.so.isnot(None), DonHang.ngay <= NGAY_AP_DUNG).all():
+        cu_ma.add(so.strip().lower())
+        if nhom(so):
+            cu_nhom.add(nhom(so))
     don_xet = don_co = 0
-    for (so, ngay, loai) in db.query(DonHang.so, DonHang.ngay, DonHang.loai_don).filter(DonHang.ngay >= moc90).all():
+    for (so, ngay, loai) in db.query(DonHang.so, DonHang.ngay, DonHang.loai_don).filter(DonHang.ngay > NGAY_AP_DUNG).all():
         so = (so or "").strip()
         if not so or (loai or "THUONG") == "DAU_TU" or (_ptm(so).get("loai") or "") not in ("TM", "DA", "DV"):
+            continue
+        if so.lower() in cu_ma or (nhom(so) and nhom(so) in cu_nhom):
             continue
         don_xet += 1
         if so.lower() in co_dt or (nhom(so) and nhom(so) in nhom_dt):
@@ -328,13 +341,13 @@ def _muc_ban_hang(D) -> dict:
                           f"Tỷ suất lãi {_p(thap['gt'])} dễ bị ăn mòn bởi chi phí vận chuyển, bảo hành và chậm thanh toán."))
     lo = D["ma_lo"]
     if lo:
-        nx.append(_nx("TC", "CANH_BAO", f"Có {len(lo)} mã đơn đang lỗ, tổng lỗ {_g(-sum(x[2] for x in lo))}. Lỗ nhiều nhất: "
+        nx.append(_nx("TC", "CANH_BAO", f"Có {len(lo)} mã (gộp theo nhóm gốc + tháng) đang lỗ, tổng lỗ {_g(-sum(x[2] for x in lo))}. Lỗ nhiều nhất: "
                                          + "; ".join(f"{m} ({_g(l)})" for m, _, l in lo[:3]) + "."))
         dx.append(_dx("QT", "CAO", "Họp rà từng mã lỗ với người phụ trách: xác định lỗ thật hay do ghi thiếu doanh thu, ghi nhầm mã chi phí.",
                       "Mã lỗ thật cần rút kinh nghiệm báo giá; mã lỗ do dữ liệu cần sửa để Lãi/Lỗ phản ánh đúng."))
     cho = D["cho_dt"]
     if cho:
-        nx.append(_nx("DL", "LUU_Y", f"{len(cho)} mã đã có chi phí nhưng chưa có doanh thu, tổng chi {_g(sum(v for _, v in cho))}. "
+        nx.append(_nx("DL", "LUU_Y", f"{len(cho)} mã (gộp theo nhóm gốc + tháng) đã có chi phí nhưng chưa có doanh thu, tổng chi {_g(sum(v for _, v in cho))}. "
                                       "Đây có thể là đơn đang thực hiện, hoặc mã chưa lập đơn bán."))
     # --- phễu bán hàng ---
     bg = D["bao_gia"]
@@ -504,7 +517,9 @@ def _muc_dong_tien(D) -> dict:
         if dth > 0:
             tl = _pt(vao, dth)
             nx.append(_nx("TC", "LUU_Y" if tl < 80 else "TOT",
-                          f"Tiền thu về bằng {_p(tl)} doanh thu hóa đơn cùng kỳ ({_g(dth)})." + (" Doanh thu đang nằm lại ở công nợ phải thu." if tl < 80 else "")))
+                          f"Tiền thu về bằng {_p(tl)} doanh thu hóa đơn cùng kỳ ({_g(dth)})."
+                          + (" Doanh thu đang nằm lại ở công nợ phải thu." if tl < 80
+                             else " Thu nhiều hơn hóa đơn vì có khoản thu của đơn xuất hóa đơn từ trước kỳ, tiền cọc, hoặc hóa đơn chưa nhập lên hệ thống." if tl > 110 else "")))
     quy = D["quy"]
     tq = sum(q["so_du"] for q in quy)
     am_q = [q for q in quy if q["so_du"] < 0]
@@ -547,7 +562,9 @@ def _muc_cong_no(D) -> dict:
     if thu > 0:
         tl = _pt(thu_qh, thu)
         muc = "CANH_BAO" if tl >= 30 else "LUU_Y" if tl >= 10 else "TOT"
-        nx.append(_nx("TC", muc, f"Phải thu quá hạn {_g(thu_qh)}, bằng {_p(tl)} tổng phải thu; riêng quá hạn trên 90 ngày là {_g(tuoi['PHAI_THU']['QH_90P'])}."))
+        nx.append(_nx("TC", muc, f"Phải thu quá hạn {_g(thu_qh)}, bằng {_p(tl)} tổng phải thu"
+                                 + (f"; riêng quá hạn trên 90 ngày là {_g(tuoi['PHAI_THU']['QH_90P'])}." if tuoi["PHAI_THU"]["QH_90P"] > 0
+                                    else "; chưa có khoản nào quá hạn trên 90 ngày.")))
         if muc != "TOT" and top:
             dx.append(_dx("BH", "CAO" if muc == "CANH_BAO" else "TRUNG",
                           f"Phân công người gọi thu nợ theo danh sách khách nợ lớn nhất, bắt đầu từ {top[0][0]} ({_g(top[0][1])}); chốt ngày trả cụ thể và ghi vào hệ thống.",
@@ -605,7 +622,8 @@ def _muc_quan_tri(D) -> dict:
 
     them("PO gắn mã đơn bán", po["co_ma"], po["tong"])
     them("PO đã duyệt có số hóa đơn đầu vào", po["co_hd"], po["da_duyet"])
-    them("Đơn bán 90 ngày gần nhất có dự toán", q["don_co_dt"], q["don_xet_dt"])
+    nhan_dt = f"Đơn bán mới sau {D['ngay_dt']} có dự toán"
+    them(nhan_dt, q["don_co_dt"], q["don_xet_dt"])
     them("Phải thu đã đặt hạn thanh toán", dem["PHAI_THU"]["so"] - dem["PHAI_THU"]["khong_han"], dem["PHAI_THU"]["so"])
     them("Phải trả đã đặt hạn thanh toán", dem["PHAI_TRA"]["so"] - dem["PHAI_TRA"]["khong_han"], dem["PHAI_TRA"]["so"])
     them("Hóa đơn bán đã ghi nhận gửi khách", q["hd_ban_da_gui"], q["hd_ban"])
@@ -624,10 +642,10 @@ def _muc_quan_tri(D) -> dict:
     if tb:
         nx.append(_nx("QT", "LUU_Y", "Ở mức trung bình: " + "; ".join(f"{c['nhan']} {_p(c['gt'])}" for c in tb) + "."))
     ten = {c["nhan"]: c for c in chi_so}
-    c = ten.get("Đơn bán 90 ngày gần nhất có dự toán")
+    c = ten.get(nhan_dt)
     if c and c["gt"] < 80:
-        dx.append(_dx("QT", "CAO", "Yêu cầu mọi đơn TM · DA · DV có dự toán trước khi mua hàng; đơn chưa có dự toán thì chưa duyệt PO.",
-                      f"Mới {_p(c['gt'])} đơn có dự toán: không có dự toán thì không biết đơn lãi hay lỗ cho tới khi làm xong."))
+        dx.append(_dx("QT", "CAO", "Giữ đúng quy định: đơn TM · DA · DV mới phải có dự toán trước khi mua hàng; đơn chưa có dự toán thì chưa duyệt PO.",
+                      f"Mới {_p(c['gt'])} đơn mới có dự toán ({c['phu']}): không có dự toán thì không biết đơn lãi hay lỗ cho tới khi làm xong."))
     c = ten.get("PO đã duyệt có số hóa đơn đầu vào")
     if c and c["gt"] < 80:
         dx.append(_dx("DL", "TRUNG", "Mỗi tuần kế toán rà danh sách PO đã duyệt chưa có hóa đơn đầu vào và đòi nhà cung cấp xuất hóa đơn.",
