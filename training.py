@@ -16,6 +16,7 @@ import os, re, csv, io, time, base64, secrets, hashlib, smtplib, datetime as dt
 from email.mime.text import MIMEText
 from typing import Optional
 from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi.encoders import jsonable_encoder
 from fastapi.responses import FileResponse, HTMLResponse, Response, JSONResponse, StreamingResponse
 from pydantic import BaseModel
 from sqlmodel import SQLModel, Field, Session, create_engine, select, or_
@@ -26,6 +27,11 @@ if DATABASE_URL.startswith("postgres://"):
 ADMIN_KEY = os.getenv("TRN_ADMIN_KEY", "")
 HTML_PATH = os.getenv("TRAINING_HTML", "static/training/index.html")
 EMP_DOMAINS = [d.strip().lower() for d in os.getenv("TRN_EMP_DOMAINS", "").split(",") if d.strip()]
+# Phiên bản Điều khoản + Chính sách dữ liệu (static/training/terms.html, privacy.html).
+# Đổi phiên bản -> mọi tài khoản phải bấm đồng ý lại ở lần đăng nhập/mở app kế tiếp.
+POLICY_VERSION = os.getenv("TRN_POLICY_VERSION", "2026-10-du-thao")
+POLICY_DATE = os.getenv("TRN_POLICY_DATE", "04/10/2026")
+POLICY_DIR = os.path.dirname(HTML_PATH) or "."
 SMTP = {k: os.getenv("SMTP_" + k, "") for k in ("HOST", "PORT", "USER", "PASS", "FROM")}
 OTP_MODE = bool(SMTP["HOST"] and SMTP["USER"] and SMTP["PASS"])
 
@@ -79,6 +85,18 @@ class TrnResult(SQLModel, table=True):
     kq: str = Field(default="", max_length=20)
     d: str = Field(default="", max_length=40)
     ts: dt.datetime = Field(default_factory=dt.datetime.utcnow)
+
+class TrnConsent(SQLModel, table=True):
+    """Nhật ký đồng ý xử lý dữ liệu — CHỈ THÊM dòng, không ghi đè; dòng mới nhất mỗi purpose là hiện hành."""
+    __tablename__ = "trn_consents"
+    id: Optional[int] = Field(default=None, primary_key=True)
+    account_type: str = Field(index=True, max_length=10)       # staff / student (engineer: PR-2)
+    account_id: int = Field(index=True)
+    purpose: str = Field(max_length=20)                        # terms / marketing / share_company
+    granted: bool = False
+    policy_version: str = Field(default="", max_length=30)
+    at: dt.datetime = Field(default_factory=dt.datetime.utcnow)
+    ip: str = Field(default="", max_length=45)
 
 SQLModel.metadata.create_all(_engine)
 router = APIRouter(prefix="/training", tags=["training"])
@@ -171,12 +189,49 @@ def _check_admin(key: str):
     if not ADMIN_KEY or key != ADMIN_KEY:
         raise HTTPException(403, "Sai khóa quản trị.")
 
-def _actor_by_token(s: Session, token: str):
-    st = s.exec(select(TrnStaff).where(TrnStaff.token == token, TrnStaff.status == "active")).first()
-    if st: return st.emp_code, st.full_name
-    sv = s.exec(select(TrnStudent).where(TrnStudent.token == token, TrnStudent.status == "active")).first()
-    if sv: return sv.student_code, sv.full_name
+_ACC = {"staff": (TrnStaff, "emp_code"), "student": (TrnStudent, "student_code")}
+
+def _account_by_token(s: Session, token: str):
+    """(account_type, obj) của tài khoản active đang giữ token; sai -> 401."""
+    if token:
+        for atype, (model, _) in _ACC.items():
+            obj = s.exec(select(model).where(model.token == token, model.status == "active")).first()
+            if obj: return atype, obj
     raise HTTPException(401, "Token không hợp lệ — đăng nhập lại.")
+
+def _actor_by_token(s: Session, token: str):
+    atype, obj = _account_by_token(s, token)
+    return getattr(obj, _ACC[atype][1]), obj.full_name
+
+# ---------------- ĐỒNG Ý XỬ LÝ DỮ LIỆU (H6) ----------------
+def _client_ip(request: Optional[Request]) -> str:
+    if request is None: return ""
+    fwd = request.headers.get("x-forwarded-for", "")
+    return (fwd.split(",")[0].strip() if fwd else (request.client.host if request.client else ""))[:45]
+
+def _consents_now(s: Session, atype: str, aid: int) -> dict:
+    """Dòng đồng ý mới nhất theo từng purpose."""
+    rows = s.exec(select(TrnConsent).where(TrnConsent.account_type == atype, TrnConsent.account_id == aid)
+                  .order_by(TrnConsent.at, TrnConsent.id)).all()
+    return {r.purpose: r for r in rows}
+
+def _add_consent(s: Session, atype: str, aid: int, purpose: str, granted: bool, ip: str):
+    s.add(TrnConsent(account_type=atype, account_id=aid, purpose=purpose, granted=bool(granted),
+                     policy_version=POLICY_VERSION, ip=ip))
+
+def _need_consent(s: Session, atype: str, aid: int) -> bool:
+    t = _consents_now(s, atype, aid).get("terms")
+    return not (t and t.granted and t.policy_version == POLICY_VERSION)
+
+def _consent_state(s: Session, atype: str, aid: int) -> dict:
+    cur = _consents_now(s, atype, aid)
+    m = cur.get("marketing")
+    return {"need_consent": _need_consent(s, atype, aid), "policy_version": POLICY_VERSION,
+            "marketing": bool(m and m.granted)}
+
+def _require_terms(agree: bool):
+    if not agree:
+        raise HTTPException(422, "Bạn cần đồng ý Điều khoản sử dụng và Chính sách xử lý dữ liệu cá nhân để đăng ký.")
 
 def _login(obj, password, label):
     if not obj or obj.pw_hash != hash_pw(password, obj.salt):
@@ -196,10 +251,12 @@ def _verify(s: Session, obj, otp: str):
 class StaffRegisterIn(BaseModel):
     emp_code: str; full_name: str; email: str; password: str
     website: str = ""; ts: float = 0
+    agree_terms: bool = False; marketing: bool = False
 
 class StudentRegisterIn(BaseModel):
     full_name: str; phone: str; email: str; school: str; course: str; password: str
     website: str = ""; ts: float = 0
+    agree_terms: bool = False; marketing: bool = False
 
 class VerifyIn(BaseModel):
     email: str; otp: str
@@ -215,10 +272,17 @@ class ResultIn(BaseModel):
 class ActionIn(BaseModel):
     key: str; id: int; action: str    # approve | block | delete
 
+class ConsentIn(BaseModel):
+    token: str; terms: bool = True; marketing: Optional[bool] = None
+
+class DeleteMeIn(BaseModel):
+    token: str; password: str
+
 # ---------------- NHÂN VIÊN ----------------
 @router.post("/api/staff/register")
 def staff_register(body: StaffRegisterIn, request: Request):
     check_bot(body.website, body.ts, request)
+    _require_terms(body.agree_terms)
     code = body.emp_code.strip().upper(); name = body.full_name.strip()
     if not code or len(code) < 3: raise HTTPException(422, "Nhập mã nhân viên (VD: SV025).")
     if len(name) < 5 or " " not in name: raise HTTPException(422, "Nhập họ và tên đầy đủ.")
@@ -235,7 +299,10 @@ def staff_register(body: StaffRegisterIn, request: Request):
             pass                      # chưa khai domain công ty -> mọi đăng ký chờ admin duyệt
         else:
             arm_otp(st)               # đúng domain: có SMTP thì OTP kích hoạt ngay
-        s.add(st); s.commit(); s.refresh(st)
+        s.add(st); s.flush()
+        ip = _client_ip(request)
+        _add_consent(s, "staff", st.id, "terms", True, ip); _add_consent(s, "staff", st.id, "marketing", body.marketing, ip)
+        s.commit(); s.refresh(st)
         if st.otp_code:
             return {"mode": "otp", "message": "Đã gửi mã xác minh tới " + email + ". Nhập mã trong 15 phút để kích hoạt."}
         return {"mode": "manual", "message": "Đăng ký thành công! Tài khoản chờ quản trị SVWS duyệt — sau đó đăng nhập bằng email và mật khẩu đã đặt."}
@@ -264,16 +331,22 @@ def staff_login(body: LoginEmailIn):
                     st.status = "active"; st.otp_code = ""
         _login(st, body.password, "Tài khoản nhân viên")
         s.add(st); s.commit(); s.refresh(st)
-        return {"token": st.token, "name": st.full_name, "emp_code": st.emp_code}
+        return {"token": st.token, "name": st.full_name, "emp_code": st.emp_code, **_consent_state(s, "staff", st.id)}
 
 @router.post("/api/login")
 def old_login():
     raise HTTPException(410, "Cách đăng nhập đã đổi — tải lại trang (Ctrl+F5) để dùng bản mới: email + mật khẩu.")
 
 # ---------------- SINH VIÊN ----------------
+def _next_student_code(s: Session) -> str:
+    """SVU-xxxx = số lớn nhất hiện có + 1 (đếm số dòng sẽ trùng mã khi đã có tài khoản bị xóa)."""
+    nums = [int(c[4:]) for c in s.exec(select(TrnStudent.student_code)).all() if re.fullmatch(r"SVU-\d+", c or "")]
+    return "SVU-%04d" % (max(nums, default=0) + 1)
+
 @router.post("/api/student/register")
 def student_register(body: StudentRegisterIn, request: Request):
     check_bot(body.website, body.ts, request)
+    _require_terms(body.agree_terms)
     name = body.full_name.strip()
     if len(name) < 5 or " " not in name: raise HTTPException(422, "Nhập họ và tên đầy đủ.")
     phone = norm_phone(body.phone)
@@ -290,9 +363,12 @@ def student_register(body: StudentRegisterIn, request: Request):
         salt = secrets.token_hex(8)
         st = TrnStudent(full_name=name, phone=phone, email=email, school=school, course=course,
                         salt=salt, pw_hash=hash_pw(body.password, salt), edu_email=edu,
-                        student_code="SVU-%04d" % (len(s.exec(select(TrnStudent.id)).all()) + 1))
+                        student_code=_next_student_code(s))
         arm_otp(st)
-        s.add(st); s.commit(); s.refresh(st)
+        s.add(st); s.flush()
+        ip = _client_ip(request)
+        _add_consent(s, "student", st.id, "terms", True, ip); _add_consent(s, "student", st.id, "marketing", body.marketing, ip)
+        s.commit(); s.refresh(st)
         if st.otp_code:
             return {"mode": "otp", "message": "Đã gửi mã xác minh tới " + email + ". Nhập mã trong 15 phút để kích hoạt."}
         return {"mode": "manual", "message": "Đăng ký thành công! Tài khoản sẽ được SVWS duyệt trong 24 giờ làm việc — sau đó bạn đăng nhập bằng email/SĐT và mật khẩu đã đặt."}
@@ -312,7 +388,7 @@ def student_login(body: LoginEmailIn):
         st = s.exec(select(TrnStudent).where(or_(TrnStudent.email == ident, TrnStudent.phone == phone))).first()
         _login(st, body.password, "Tài khoản")
         s.add(st); s.commit(); s.refresh(st)
-        return {"token": st.token, "name": st.full_name, "student_code": st.student_code}
+        return {"token": st.token, "name": st.full_name, "student_code": st.student_code, **_consent_state(s, "student", st.id)}
 
 # ---------------- GHI ĐIỂM ----------------
 @router.post("/api/results")
@@ -323,6 +399,67 @@ def post_result(body: ResultIn):
                       tech=body.tech, score=body.score, pct=int(body.pct), kq=body.kq, d=body.d)
         s.add(r); s.commit()
         return {"ok": True}
+
+# ---------------- TÀI KHOẢN CỦA TÔI (H6) ----------------
+_PRIVATE = {"pw_hash", "salt", "otp_code", "otp_expire", "token"}
+
+@router.get("/api/me")
+def me(token: str = Query("")):
+    with Session(_engine) as s:
+        atype, obj = _account_by_token(s, token)
+        return {"account_type": atype, "code": getattr(obj, _ACC[atype][1]), "name": obj.full_name,
+                "email": obj.email, **_consent_state(s, atype, obj.id)}
+
+@router.post("/api/me/consent")
+def me_consent(body: ConsentIn, request: Request):
+    if not body.terms:
+        raise HTTPException(422, "Không thể dùng app khi không đồng ý Điều khoản — muốn rút lại toàn bộ, hãy xóa tài khoản.")
+    with Session(_engine) as s:
+        atype, obj = _account_by_token(s, body.token)
+        cur = _consents_now(s, atype, obj.id); ip = _client_ip(request)
+        if _need_consent(s, atype, obj.id):
+            _add_consent(s, atype, obj.id, "terms", True, ip)
+        m = cur.get("marketing")
+        if body.marketing is not None and (m is None or m.granted != body.marketing):
+            _add_consent(s, atype, obj.id, "marketing", body.marketing, ip)
+        s.commit()
+        return {"ok": True, **_consent_state(s, atype, obj.id)}
+
+@router.get("/api/me/export")
+def me_export(token: str = Query("")):
+    with Session(_engine) as s:
+        atype, obj = _account_by_token(s, token)
+        code = getattr(obj, _ACC[atype][1])
+        results = s.exec(select(TrnResult).where(TrnResult.emp_code == code).order_by(TrnResult.ts)).all()
+        consents = s.exec(select(TrnConsent).where(TrnConsent.account_type == atype, TrnConsent.account_id == obj.id)
+                          .order_by(TrnConsent.at, TrnConsent.id)).all()
+        data = {"exported_at": dt.datetime.utcnow().isoformat() + "Z", "policy_version": POLICY_VERSION,
+                "account": {"account_type": atype, **obj.model_dump(exclude=_PRIVATE)},
+                "results": [r.model_dump(exclude={"id"}) for r in results],
+                "certificates": [],        # bảng chứng nhận có từ PR-4 (H3)
+                "consents": [c.model_dump(exclude={"id", "account_type", "account_id"}) for c in consents]}
+    return JSONResponse(jsonable_encoder(data), headers={
+        "Content-Disposition": "attachment; filename=svws_training_du_lieu_cua_toi.json"})
+
+def _anon_code(code: str) -> str:
+    """Mã thay thế ổn định cho người đã xóa tài khoản — giữ được thống kê theo người, không truy ngược."""
+    return "DEL-" + hashlib.sha256(("trn-del:" + code).encode()).hexdigest()[:16]
+
+@router.post("/api/me/delete")
+def me_delete(body: DeleteMeIn):
+    with Session(_engine) as s:
+        atype, obj = _account_by_token(s, body.token)
+        if obj.pw_hash != hash_pw(body.password, obj.salt):
+            raise HTTPException(401, "Mật khẩu không đúng.")
+        code = getattr(obj, _ACC[atype][1]); anon = _anon_code(code)
+        for r in s.exec(select(TrnResult).where(TrnResult.emp_code == code)).all():
+            r.name = "Đã xóa"; r.emp_code = anon; s.add(r)
+        for c in s.exec(select(TrnConsent).where(TrnConsent.account_type == atype, TrnConsent.account_id == obj.id)).all():
+            s.delete(c)
+        # trn_signup_meta (PR-3) và trn_certificates (PR-4) được xử lý khi các bảng đó ra đời.
+        s.delete(obj)
+        s.commit()
+    return {"ok": True, "message": "Đã xóa tài khoản và dữ liệu cá nhân. Điểm đã làm chỉ còn trong thống kê ẩn danh."}
 
 # ---------------- QUẢN TRỊ ----------------
 @router.get("/api/summary")
@@ -435,6 +572,8 @@ a{color:#0582ca;font-size:13.5px}.foot{margin-top:12px;text-align:center}
 .feat{margin:0 0 12px;padding-left:18px;color:#33445e;font-size:13px;line-height:1.65}
 .feat li{margin-bottom:3px}.feat b{color:#13315c}
 .how{background:#f7faf3;border:1px solid #e0eccd;border-radius:9px;padding:9px 11px;font-size:12.5px;color:#3a5320;margin-bottom:14px}
+label.chk{display:flex;gap:8px;align-items:flex-start;font-size:13px;color:#33445e;line-height:1.45;margin:0 0 9px;cursor:pointer}
+label.chk input{width:auto;margin:2px 0 0;flex:none}
 </style><div class=card>
 <h1>💧 SVWS Training</h1>
 <p class=sub>Chương trình huấn luyện <b>công nghệ xử lý nước cấp – nước thải – khí thải</b> của Công ty TNHH GPKT Sóng Việt (SVWS), biên soạn theo chuẩn đào tạo kỹ sư nội bộ — mở miễn phí cho sinh viên ngành Môi trường, Cấp thoát nước, Hóa – Kỹ thuật.</p>
@@ -469,6 +608,10 @@ a{color:#0582ca;font-size:13.5px}.foot{margin-top:12px;text-align:center}
 <input id=e_em placeholder="Email công ty *" maxlength=120>
 <input id=e_pw type=password placeholder="Đặt mật khẩu (≥ 6 ký tự) *" maxlength=60>
 </div>
+<div id=fC>
+<label class=chk><input type=checkbox id=c_terms> <span>Tôi đã đọc và đồng ý <a href="/training/terms" target=_blank>Điều khoản sử dụng</a> và <a href="/training/privacy" target=_blank>Chính sách xử lý dữ liệu cá nhân</a>. *</span></label>
+<label class=chk><input type=checkbox id=c_mkt> <span>Nhận thông tin tuyển dụng, thực tập, sự kiện từ SVWS (tùy chọn).</span></label>
+</div>
 <input id=website class=hp tabindex=-1 autocomplete=off>
 <div class=err id=e1></div>
 <button class=go id=b1>Đăng ký</button>
@@ -488,13 +631,15 @@ function sw(m){mode=m;$('tS').classList.toggle('on',m==='stu');$('tE').classList
 $('tS').onclick=()=>sw('stu');$('tE').onclick=()=>sw('emp');sw(mode);
 $('b1').onclick=async()=>{
  let url,b;
+ if(!$('c_terms').checked){$('e1').textContent='Vui lòng tick ô đồng ý Điều khoản sử dụng và Chính sách xử lý dữ liệu cá nhân.';return;}
  if(mode==='stu'){lastEmail=$('s_em').value;b={full_name:$('s_fn').value,phone:$('s_ph').value,email:$('s_em').value,school:$('s_sc').value,course:$('s_co').value,password:$('s_pw').value,website:$('website').value,ts:T0};url='/training/api/student/register';}
  else{lastEmail=$('e_em').value;b={emp_code:$('e_mc').value,full_name:$('e_fn').value,email:$('e_em').value,password:$('e_pw').value,website:$('website').value,ts:T0};url='/training/api/staff/register';}
+ b.agree_terms=$('c_terms').checked;b.marketing=$('c_mkt').checked;
  $('e1').textContent='Đang gửi…';
  try{const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});
  const d=await r.json();
  if(!r.ok){$('e1').textContent=d.detail||'Đăng ký không thành công.';return;}
- $('fS').style.display='none';$('fE').style.display='none';$('b1').style.display='none';$('e1').textContent='';
+ $('fS').style.display='none';$('fE').style.display='none';$('fC').style.display='none';$('b1').style.display='none';$('e1').textContent='';
  if(d.mode==='otp'){$('f2').style.display='';}
  else{$('done').style.display='';$('done').textContent='✅ '+d.message;}
  }catch(e){$('e1').textContent='Không kết nối được máy chủ.';}
@@ -513,6 +658,22 @@ $('b2').onclick=async()=>{
 @router.get("/register", include_in_schema=False)
 def register_page():
     return HTMLResponse(_REG_HTML)
+
+def _policy_page(fname: str):
+    path = os.path.join(POLICY_DIR, fname)
+    if not os.path.exists(path):
+        return HTMLResponse("<h3>Chưa có trang " + fname + "</h3>", status_code=404)
+    with open(path, encoding="utf-8") as f:
+        html = f.read()
+    return HTMLResponse(html.replace("{{POLICY_VERSION}}", POLICY_VERSION).replace("{{POLICY_DATE}}", POLICY_DATE))
+
+@router.get("/privacy", include_in_schema=False)
+def privacy_page():
+    return _policy_page("privacy.html")
+
+@router.get("/terms", include_in_schema=False)
+def terms_page():
+    return _policy_page("terms.html")
 
 _ADMIN_HTML = """<!doctype html><html lang=vi><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
 <title>SVWS Training — Quản trị</title><style>
