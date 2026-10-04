@@ -118,7 +118,7 @@ def _thu_thap(db: Session, hom_nay: date) -> dict:
         g = theo_nhom.setdefault(x.get("nhom") or x.get("ma_ban"), {"dt": 0.0, "cp": 0.0})
         g["dt"] += _f(x.get("doanh_thu")); g["cp"] += _f(x.get("tong_chi_phi"))
     for k, g in theo_nhom.items():
-        if g["dt"] > 0 and g["dt"] - g["cp"] < 0:
+        if g["dt"] > 0 and g["cp"] - g["dt"] >= 1e6:          # lỗ dưới 1 triệu coi như hòa vốn (chênh lệch làm tròn)
             ma_lo.append((k, g["dt"], g["dt"] - g["cp"]))
         elif g["dt"] == 0 and g["cp"] > 0:
             cho_dt.append((k, g["cp"]))
