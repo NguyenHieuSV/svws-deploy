@@ -7,7 +7,7 @@ databases:
   - name: svws-db-iit7
     plan: basic-256mb
     databaseName: svws_gu1s
-    user: projectflow_db_ursq_user
+    user: svws
 
 services:
   - type: web
