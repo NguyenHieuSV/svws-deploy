@@ -187,7 +187,12 @@ def test_xoa_tai_khoan(c):
         assert not s.exec(select(TrnResult).where(TrnResult.emp_code == code)).all()
         anon = s.exec(select(TrnResult).where(TrnResult.emp_code == training._anon_code(code))).all()
         assert [(x.name, x.code, x.pct) for x in anon] == [("Đã xóa", "KT01", 85)]
-    assert _consents(c, "student", sid) == []
+    assert _consents(c, "student", sid) == []          # không còn gắn với id tài khoản
+    with Session(c.engine) as s:                       # lịch sử đồng ý giữ lại, đã ẩn danh
+        kept = s.exec(select(TrnConsent).where(TrnConsent.subject_ref == training._anon_code(code))
+                      .order_by(TrnConsent.id)).all()
+        assert [(x.purpose, x.granted, x.account_id, x.ip) for x in kept] == [
+            ("terms", True, 0, ""), ("marketing", b.get("marketing", False), 0, "")]
     assert c.get(f"/training/api/me?token={tok}").status_code == 401
     assert c.post("/training/api/student/login", json={"id": b["email"], "password": b["password"]}).status_code == 401
 
@@ -207,3 +212,20 @@ def test_trang_chinh_sach_va_form_dang_ky(c):
     reg = c.get("/training/register").text
     assert 'id=c_terms' in reg and 'id=c_mkt' in reg and "/training/privacy" in reg
     assert "c_mkt checked" not in reg                  # ô tùy chọn không tick sẵn
+
+
+def test_admin_xoa_don_du_lieu_giong_nguoi_dung_tu_xoa(c):
+    b, sid, lg = _dang_ky_duyet_dang_nhap(c)
+    tok, code = lg["token"], lg["student_code"]
+    c.post("/training/api/results", json={"token": tok, "code": "NC03", "pct": 95, "kq": "ĐẠT"})
+    assert c.post("/training/api/students/action", json={"key": KEY, "id": sid, "action": "delete"}).status_code == 200
+    sts = c.get(f"/training/api/students?key={KEY}").json()["students"]
+    assert not [x for x in sts if x["email"] == b["email"]]
+    with Session(c.engine) as s:
+        assert s.get(TrnStudent, sid) is None
+        assert not s.exec(select(TrnResult).where(TrnResult.emp_code == code)).all()
+        anon = s.exec(select(TrnResult).where(TrnResult.emp_code == training._anon_code(code))).all()
+        assert [(x.name, x.pct) for x in anon] == [("Đã xóa", 95)]
+        kept = s.exec(select(TrnConsent).where(TrnConsent.subject_ref == training._anon_code(code))).all()
+        assert kept and all(x.account_id == 0 and x.ip == "" for x in kept)
+    assert c.get(f"/training/api/me?token={tok}").status_code == 401

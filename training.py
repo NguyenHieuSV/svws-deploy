@@ -97,6 +97,7 @@ class TrnConsent(SQLModel, table=True):
     policy_version: str = Field(default="", max_length=30)
     at: dt.datetime = Field(default_factory=dt.datetime.utcnow)
     ip: str = Field(default="", max_length=45)
+    subject_ref: str = Field(default="", index=True, max_length=24)   # DEL-… sau khi tài khoản bị xóa
 
 SQLModel.metadata.create_all(_engine)
 router = APIRouter(prefix="/training", tags=["training"])
@@ -437,7 +438,7 @@ def me_export(token: str = Query("")):
                 "account": {"account_type": atype, **obj.model_dump(exclude=_PRIVATE)},
                 "results": [r.model_dump(exclude={"id"}) for r in results],
                 "certificates": [],        # bảng chứng nhận có từ PR-4 (H3)
-                "consents": [c.model_dump(exclude={"id", "account_type", "account_id"}) for c in consents]}
+                "consents": [c.model_dump(exclude={"id", "account_type", "account_id", "subject_ref"}) for c in consents]}
     return JSONResponse(jsonable_encoder(data), headers={
         "Content-Disposition": "attachment; filename=svws_training_du_lieu_cua_toi.json"})
 
@@ -445,21 +446,28 @@ def _anon_code(code: str) -> str:
     """Mã thay thế ổn định cho người đã xóa tài khoản — giữ được thống kê theo người, không truy ngược."""
     return "DEL-" + hashlib.sha256(("trn-del:" + code).encode()).hexdigest()[:16]
 
+def _purge_account(s: Session, atype: str, obj) -> None:
+    """Xóa tài khoản + dọn dữ liệu cá nhân — DÙNG CHUNG cho người dùng tự xóa và admin bấm Xóa.
+    Không commit (người gọi commit)."""
+    code = getattr(obj, _ACC[atype][1]); anon = _anon_code(code)
+    for r in s.exec(select(TrnResult).where(TrnResult.emp_code == code)).all():
+        r.name = "Đã xóa"; r.emp_code = anon; s.add(r)
+    # Lịch sử đồng ý GIỮ LẠI ở dạng ẩn danh — chờ luật sư xác nhận thời hạn lưu (T202 câu 7). Bảng vốn
+    # không có tên/email; bỏ liên kết account_id (SQLite có thể cấp lại id) và IP, gắn mã DEL-… như điểm.
+    for c in s.exec(select(TrnConsent).where(TrnConsent.account_type == atype, TrnConsent.account_id == obj.id)).all():
+        c.account_id = 0; c.ip = ""; c.subject_ref = anon; s.add(c)
+    # trn_signup_meta + trn_ref_codes (PR-3) và trn_certificates (PR-4) được dọn khi các bảng đó ra đời.
+    s.delete(obj)
+
 @router.post("/api/me/delete")
 def me_delete(body: DeleteMeIn):
     with Session(_engine) as s:
         atype, obj = _account_by_token(s, body.token)
         if obj.pw_hash != hash_pw(body.password, obj.salt):
             raise HTTPException(401, "Mật khẩu không đúng.")
-        code = getattr(obj, _ACC[atype][1]); anon = _anon_code(code)
-        for r in s.exec(select(TrnResult).where(TrnResult.emp_code == code)).all():
-            r.name = "Đã xóa"; r.emp_code = anon; s.add(r)
-        for c in s.exec(select(TrnConsent).where(TrnConsent.account_type == atype, TrnConsent.account_id == obj.id)).all():
-            s.delete(c)
-        # trn_signup_meta (PR-3) và trn_certificates (PR-4) được xử lý khi các bảng đó ra đời.
-        s.delete(obj)
+        _purge_account(s, atype, obj)
         s.commit()
-    return {"ok": True, "message": "Đã xóa tài khoản và dữ liệu cá nhân. Điểm đã làm chỉ còn trong thống kê ẩn danh."}
+    return {"ok": True, "message": "Đã xóa tài khoản và dữ liệu cá nhân. Điểm và lịch sử đồng ý chỉ còn ở dạng ẩn danh."}
 
 # ---------------- QUẢN TRỊ ----------------
 @router.get("/api/summary")
@@ -507,11 +515,11 @@ def students(key: str = Query("")):
                           "course": x.course, "status": x.status,
                           "created": x.created.strftime("%d/%m/%Y %H:%M")} for x in rows]}
 
-def _apply_action(s: Session, obj, action: str):
+def _apply_action(s: Session, atype: str, obj, action: str):
     if not obj: raise HTTPException(404, "Không tìm thấy.")
     if action == "approve": obj.status = "active"; obj.otp_code = ""; s.add(obj)
     elif action == "block": obj.status = "blocked"; obj.token = ""; s.add(obj)
-    elif action == "delete": s.delete(obj)
+    elif action == "delete": _purge_account(s, atype, obj)     # dọn giống người dùng tự xóa
     else: raise HTTPException(422, "Hành động không hợp lệ.")
     s.commit()
 
@@ -519,14 +527,14 @@ def _apply_action(s: Session, obj, action: str):
 def staff_action(body: ActionIn):
     _check_admin(body.key)
     with Session(_engine) as s:
-        _apply_action(s, s.get(TrnStaff, body.id), body.action)
+        _apply_action(s, "staff", s.get(TrnStaff, body.id), body.action)
         return {"ok": True}
 
 @router.post("/api/students/action")
 def student_action(body: ActionIn):
     _check_admin(body.key)
     with Session(_engine) as s:
-        _apply_action(s, s.get(TrnStudent, body.id), body.action)
+        _apply_action(s, "student", s.get(TrnStudent, body.id), body.action)
         return {"ok": True}
 
 @router.get("/api/results.csv")
