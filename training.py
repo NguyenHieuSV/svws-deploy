@@ -456,8 +456,7 @@ def student_login(body: LoginEmailIn):
 
 # ---------------- KỸ SƯ / KỸ THUẬT VIÊN NHÀ MÁY (H1) ----------------
 def _next_eng_code(s: Session) -> str:
-    nums = [int(c[4:]) for c in s.exec(select(TrnEngineer.eng_code)).all() if re.fullmatch(r"ENG-\d+", c or "")]
-    return "ENG-%04d" % (max(nums, default=0) + 1)
+    return _next_code(s, "ENG-", TrnEngineer.eng_code)      # không cấp lại mã của tài khoản đã xóa
 
 def _taken(s: Session, email: str, phone: str) -> bool:
     """Trùng email hoặc SĐT với BẤT KỲ bảng tài khoản nào (nhân viên không có SĐT)."""
