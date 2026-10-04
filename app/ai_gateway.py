@@ -1061,6 +1061,57 @@ def tu_van_tai_chinh(payload: dict) -> dict:
     return _tu_van_tai_chinh_fake(payload)
 
 
+# ============ 📊 PHÂN TÍCH DỮ LIỆU — nhận định 4 chuyên gia (Overall Financial › Phân tích dữ liệu, chỉ CEO) ============
+def phan_tich_chuyen_gia(payload: dict) -> dict:
+    """Gửi gói số liệu tổng hợp (không có lương từng người) → nhận định + đề xuất theo 4 vai: tài chính · dữ liệu · quản trị ·
+    bán hàng, kèm kế hoạch 30 ngày. Lỗi / chưa bật AI → ValueError với thông báo tiếng Việt."""
+    if settings.ai_provider.upper() != "ANTHROPIC" or not settings.anthropic_api_key:
+        raise ValueError("Chưa bật AI — cần AI_PROVIDER=ANTHROPIC và ANTHROPIC_API_KEY trên máy chủ.")
+    import re
+    import urllib.request
+    sys = (
+        "Bạn là hội đồng cố vấn gồm 4 chuyên gia cấp cao cho Giám đốc một doanh nghiệp kỹ thuật xử lý nước tại Việt Nam "
+        "(khoảng 20 nhân sự; 3 mảng: thương mại thiết bị, dịch vụ vận hành và cho thuê hệ thống, dự án): "
+        "(1) Giám đốc tài chính, (2) Chuyên gia phân tích dữ liệu, (3) Chuyên gia quản trị vận hành, (4) Giám đốc kinh doanh. "
+        "Dữ liệu là JSON do phần mềm quản trị nội bộ tổng hợp, tiền tính bằng VND. "
+        "QUY TẮC: chỉ dùng số có trong dữ liệu, không bịa số, không suy diễn số không có; mỗi nhận định phải gắn một con số cụ thể "
+        "(viết gọn kiểu 1,2 tỷ / 350 tr); khi dữ liệu thiếu hoặc không đáng tin (ví dụ sổ quỹ âm, chưa khai chi cố định, tháng "
+        "thiếu bảng lương) thì nói rõ và nêu kết luận nào vì thế kém chắc; đề xuất phải làm được trong 30–90 ngày, nêu ai làm "
+        "(chức danh) và đo bằng chỉ số nào; không lặp lại nguyên văn nhận xét tự động, hãy đi sâu hơn: nguyên nhân có thể, "
+        "hệ quả, thứ tự ưu tiên; viết tiếng Việt ngắn gọn, mỗi ý 1–2 câu, không dùng từ tiếng Anh khi có từ Việt. "
+        "CHỈ trả về JSON hợp lệ, không thêm chữ nào khác, đúng dạng: "
+        '{"tom_tat":"<4-6 câu: bức tranh chung và một điều Giám đốc cần quyết ngay>",'
+        '"rui_ro_lon_nhat":"<1-2 câu>",'
+        '"chuyen_gia":[{"vai":"TAI_CHINH","nhan_dinh":["<3-4 ý>"],"de_xuat":["<3 ý>"]},'
+        '{"vai":"DU_LIEU","nhan_dinh":["..."],"de_xuat":["..."]},'
+        '{"vai":"QUAN_TRI","nhan_dinh":["..."],"de_xuat":["..."]},'
+        '{"vai":"BAN_HANG","nhan_dinh":["..."],"de_xuat":["..."]}],'
+        '"ke_hoach_30_ngay":[{"viec":"<việc cụ thể>","nguoi_phu_trach":"<chức danh>","do_bang":"<chỉ số đo kết quả>"}]}'
+        " — ke_hoach_30_ngay gồm đúng 5 việc, xếp theo mức quan trọng.")
+    body = {"model": settings.anthropic_model, "max_tokens": 8000, "system": sys,
+            "messages": [{"role": "user", "content": json.dumps(payload, ensure_ascii=False, default=str)}]}
+    req = urllib.request.Request(
+        "https://api.anthropic.com/v1/messages",
+        data=json.dumps(body).encode("utf-8"),
+        headers={"content-type": "application/json", "x-api-key": settings.anthropic_api_key,
+                 "anthropic-version": "2023-06-01"})
+    try:
+        with urllib.request.urlopen(req, timeout=150) as r:
+            resp = json.loads(r.read().decode("utf-8"))
+    except Exception as e:
+        raise ValueError(_loi_ai_ro_rang(e))
+    txt = "".join(b.get("text", "") for b in resp.get("content", []) if b.get("type") == "text")
+    m = re.search(r"\{[\s\S]*\}", txt)
+    try:
+        out = json.loads(m.group(0) if m else txt)
+    except Exception:
+        raise ValueError("AI trả lời chưa đúng định dạng (có thể bị cắt giữa chừng) — bấm thử lại.")
+    if not isinstance(out, dict) or not isinstance(out.get("chuyen_gia"), list):
+        raise ValueError("AI trả lời thiếu phần nhận định chuyên gia — bấm thử lại.")
+    out.setdefault("tom_tat", ""); out.setdefault("rui_ro_lon_nhat", ""); out.setdefault("ke_hoach_30_ngay", [])
+    return out
+
+
 # ============ AGENT PHÂN TÍCH NGUYÊN LÝ THIẾT KẾ ============
 def _pt_thieu(info):
     thieu = []

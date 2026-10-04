@@ -2044,3 +2044,51 @@ def dau_tu_khau_hao(tu_thang: str = "2026-07", db: Session = Depends(get_db), _=
     return {"tu_thang": tu_thang, "den_thang": nay, "ngay": str(hom_nay), "months": months, "du_an": out, "tong": tong,
             "theo_thang": theo_thang, "don_dau_tu_chua_noi": th.get("don_dau_tu_chua_noi") or [],
             "nghi_dau_tu": th.get("nghi_dau_tu") or []}
+
+
+# ============ 📊 PHÂN TÍCH DỮ LIỆU — Overall Financial (chỉ CEO: có lương, vốn đầu tư) ============
+def _pt_ai_moi_nhat(db):
+    from ..models import PhanTichAi
+    r = db.query(PhanTichAi).order_by(PhanTichAi.id.desc()).first()
+    if r is None:
+        return None
+    return {"id": r.id, "tao_luc": r.tao_luc.strftime("%d/%m/%Y %H:%M") if r.tao_luc else None,
+            "mo_hinh": r.mo_hinh, "ket_qua": r.ket_qua}
+
+
+@router.get("/phan-tich")
+def phan_tich_du_lieu(db: Session = Depends(get_db), _=Depends(chi_vai_tro("CEO"))):
+    """📊 Overall Financial › Phân tích dữ liệu: 6 đề mục (bán hàng · nhân sự · chi phí · dòng tiền · công nợ · quản trị),
+    mỗi đề mục có biểu đồ + nhận xét + đề xuất tính từ số liệu thật; kèm bản nhận định AI gần nhất (nếu đã tạo). Chỉ đọc."""
+    from ..phan_tich_du_lieu import phan_tich
+    from ..nhac_viec_service import gio_hien_tai
+    from ..config import settings
+    out = phan_tich(db, gio_hien_tai().date())
+    try:
+        out["ai"] = _pt_ai_moi_nhat(db)
+    except Exception:                      # bảng mig 144 chưa có → tab vẫn chạy, chỉ thiếu phần AI
+        db.rollback()
+        out["ai"] = None
+    out["ai_bat"] = bool(settings.ai_provider.upper() == "ANTHROPIC" and settings.anthropic_api_key)
+    return out
+
+
+@router.post("/phan-tich/ai")
+def phan_tich_du_lieu_ai(db: Session = Depends(get_db), nd: NguoiDung = Depends(chi_vai_tro("CEO"))):
+    """🤖 Gọi AI nhận định 4 chuyên gia trên gói số liệu tổng hợp hiện tại, lưu lại bản mới nhất."""
+    from ..phan_tich_du_lieu import phan_tich, goi_ai
+    from ..ai_gateway import phan_tich_chuyen_gia
+    from ..models import PhanTichAi
+    from ..nhac_viec_service import gio_hien_tai
+    from ..config import settings
+    pt = phan_tich(db, gio_hien_tai().date())
+    try:
+        kq = phan_tich_chuyen_gia(goi_ai(pt))
+    except ValueError as e:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e))
+    r = PhanTichAi(tao_luc=gio_hien_tai(), nguoi_dung_id=nd.id, mo_hinh=str(settings.anthropic_model)[:60], ket_qua=kq)
+    db.add(r)
+    db.flush()
+    ghi_audit(db, nd.id, "TAO", "phan_tich_ai", r.id, moi={"mo_hinh": r.mo_hinh})
+    db.commit()
+    return _pt_ai_moi_nhat(db)

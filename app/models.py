@@ -932,6 +932,16 @@ class LaiLoRecord(Base):
     chi_nhan_su: Mapped[Decimal] = mapped_column(Numeric(18, 0), default=0)      # mig 142: lương + BH DN + thuê ngoài (lũy kế năm)
 
 
+class PhanTichAi(Base):
+    """mig 144: bản NHẬN ĐỊNH AI của tab Overall Financial › Phân tích dữ liệu (chỉ CEO) — lưu để mở tab không phải gọi lại AI."""
+    __tablename__ = "phan_tich_ai"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    tao_luc: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    nguoi_dung_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    mo_hinh: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    ket_qua: Mapped[dict] = mapped_column(JSONB)
+
+
 class NganSach(Base):
     __tablename__ = "ngan_sach"
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
