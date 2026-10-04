@@ -36,7 +36,8 @@ POLICY_DIR = os.path.dirname(HTML_PATH) or "."
 # Tên miền email MIỄN PHÍ — kỹ sư dùng email này thì chờ admin duyệt (email doanh nghiệp + SMTP -> OTP).
 FREE_EMAIL_DOMAINS = {d.strip().lower() for d in os.getenv("TRN_FREE_EMAIL_DOMAINS",
     "gmail.com,googlemail.com,yahoo.com,yahoo.com.vn,outlook.com,hotmail.com,live.com,msn.com,"
-    "icloud.com,me.com,aol.com,proton.me,protonmail.com,zoho.com,gmx.com,mail.com,yandex.com").split(",") if d.strip()}
+    "icloud.com,me.com,aol.com,proton.me,protonmail.com,zoho.com,gmx.com,mail.com,yandex.com,"
+    "qq.com,163.com,126.com,naver.com,daum.net,hanmail.net").split(",") if d.strip()}
 SMTP = {k: os.getenv("SMTP_" + k, "") for k in ("HOST", "PORT", "USER", "PASS", "FROM")}
 OTP_MODE = bool(SMTP["HOST"] and SMTP["USER"] and SMTP["PASS"])
 
