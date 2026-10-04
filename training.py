@@ -20,6 +20,7 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.responses import FileResponse, HTMLResponse, Response, JSONResponse, StreamingResponse
 from pydantic import BaseModel
 from sqlmodel import SQLModel, Field, Session, create_engine, select, or_
+from training_tinh import PROVINCES, canon_province
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./training.db")
 if DATABASE_URL.startswith("postgres://"):
@@ -32,6 +33,10 @@ EMP_DOMAINS = [d.strip().lower() for d in os.getenv("TRN_EMP_DOMAINS", "").split
 POLICY_VERSION = os.getenv("TRN_POLICY_VERSION", "2026-10-du-thao")
 POLICY_DATE = os.getenv("TRN_POLICY_DATE", "04/10/2026")
 POLICY_DIR = os.path.dirname(HTML_PATH) or "."
+# Tên miền email MIỄN PHÍ — kỹ sư dùng email này thì chờ admin duyệt (email doanh nghiệp + SMTP -> OTP).
+FREE_EMAIL_DOMAINS = {d.strip().lower() for d in os.getenv("TRN_FREE_EMAIL_DOMAINS",
+    "gmail.com,googlemail.com,yahoo.com,yahoo.com.vn,outlook.com,hotmail.com,live.com,msn.com,"
+    "icloud.com,me.com,aol.com,proton.me,protonmail.com,zoho.com,gmx.com,mail.com,yandex.com").split(",") if d.strip()}
 SMTP = {k: os.getenv("SMTP_" + k, "") for k in ("HOST", "PORT", "USER", "PASS", "FROM")}
 OTP_MODE = bool(SMTP["HOST"] and SMTP["USER"] and SMTP["PASS"])
 
@@ -86,11 +91,37 @@ class TrnResult(SQLModel, table=True):
     d: str = Field(default="", max_length=40)
     ts: dt.datetime = Field(default_factory=dt.datetime.utcnow)
 
+class TrnEngineer(SQLModel, table=True):
+    """Kỹ sư / kỹ thuật viên nhà máy (H1) — cùng khuôn trn_students."""
+    __tablename__ = "trn_engineers"
+    id: Optional[int] = Field(default=None, primary_key=True)
+    eng_code: str = Field(index=True, max_length=20, default="")
+    full_name: str = Field(max_length=80)
+    phone: str = Field(index=True, max_length=15)
+    email: str = Field(index=True, max_length=120)
+    company: str = Field(index=True, max_length=150)
+    industrial_zone: str = Field(default="", max_length=120)
+    province: str = Field(default="", max_length=60)
+    job_title: str = Field(default="", max_length=100)
+    role_group: str = Field(default="KHAC", max_length=20)     # khóa trong ROLE_GROUPS
+    work_email: bool = False
+    pw_hash: str = Field(max_length=128)
+    salt: str = Field(max_length=32)
+    status: str = Field(default="pending", max_length=12)
+    otp_code: str = Field(default="", max_length=8)
+    otp_expire: float = 0.0
+    token: str = Field(default="", index=True, max_length=64)
+    created: dt.datetime = Field(default_factory=dt.datetime.utcnow)
+    last_login: Optional[dt.datetime] = None
+
+ROLE_GROUPS = {"VAN_HANH": "Vận hành", "BAO_TRI": "Bảo trì", "EHS": "EHS",
+               "QL_UTILITY": "Quản lý Utility/Facility", "KHAC": "Khác"}
+
 class TrnConsent(SQLModel, table=True):
     """Nhật ký đồng ý xử lý dữ liệu — CHỈ THÊM dòng, không ghi đè; dòng mới nhất mỗi purpose là hiện hành."""
     __tablename__ = "trn_consents"
     id: Optional[int] = Field(default=None, primary_key=True)
-    account_type: str = Field(index=True, max_length=10)       # staff / student (engineer: PR-2)
+    account_type: str = Field(index=True, max_length=10)       # staff / student / engineer
     account_id: int = Field(index=True)
     purpose: str = Field(max_length=20)                        # terms / marketing / share_company
     granted: bool = False
@@ -190,7 +221,8 @@ def _check_admin(key: str):
     if not ADMIN_KEY or key != ADMIN_KEY:
         raise HTTPException(403, "Sai khóa quản trị.")
 
-_ACC = {"staff": (TrnStaff, "emp_code"), "student": (TrnStudent, "student_code")}
+_ACC = {"staff": (TrnStaff, "emp_code"), "student": (TrnStudent, "student_code"),
+        "engineer": (TrnEngineer, "eng_code")}
 
 def _account_by_token(s: Session, token: str):
     """(account_type, obj) của tài khoản active đang giữ token; sai -> 401."""
@@ -227,8 +259,12 @@ def _need_consent(s: Session, atype: str, aid: int) -> bool:
 def _consent_state(s: Session, atype: str, aid: int) -> dict:
     cur = _consents_now(s, atype, aid)
     m = cur.get("marketing")
-    return {"need_consent": _need_consent(s, atype, aid), "policy_version": POLICY_VERSION,
-            "marketing": bool(m and m.granted)}
+    st = {"need_consent": _need_consent(s, atype, aid), "policy_version": POLICY_VERSION,
+          "marketing": bool(m and m.granted)}
+    if atype == "engineer":
+        sc = cur.get("share_company")
+        st["share_company"] = bool(sc and sc.granted)
+    return st
 
 def _require_terms(agree: bool):
     if not agree:
@@ -275,6 +311,13 @@ class ActionIn(BaseModel):
 
 class ConsentIn(BaseModel):
     token: str; terms: bool = True; marketing: Optional[bool] = None
+    share_company: Optional[bool] = None     # chỉ tài khoản kỹ sư
+
+class EngineerRegisterIn(BaseModel):
+    full_name: str; phone: str; email: str; company: str; password: str
+    industrial_zone: str = ""; province: str = ""; job_title: str = ""; role_group: str = "KHAC"
+    website: str = ""; ts: float = 0
+    agree_terms: bool = False; marketing: bool = False; share_company: bool = False
 
 class DeleteMeIn(BaseModel):
     token: str; password: str
@@ -391,6 +434,69 @@ def student_login(body: LoginEmailIn):
         s.add(st); s.commit(); s.refresh(st)
         return {"token": st.token, "name": st.full_name, "student_code": st.student_code, **_consent_state(s, "student", st.id)}
 
+# ---------------- KỸ SƯ / KỸ THUẬT VIÊN NHÀ MÁY (H1) ----------------
+def _next_eng_code(s: Session) -> str:
+    nums = [int(c[4:]) for c in s.exec(select(TrnEngineer.eng_code)).all() if re.fullmatch(r"ENG-\d+", c or "")]
+    return "ENG-%04d" % (max(nums, default=0) + 1)
+
+def _taken(s: Session, email: str, phone: str) -> bool:
+    """Trùng email hoặc SĐT với BẤT KỲ bảng tài khoản nào (nhân viên không có SĐT)."""
+    return bool(s.exec(select(TrnEngineer.id).where(or_(TrnEngineer.email == email, TrnEngineer.phone == phone))).first()
+                or s.exec(select(TrnStudent.id).where(or_(TrnStudent.email == email, TrnStudent.phone == phone))).first()
+                or s.exec(select(TrnStaff.id).where(TrnStaff.email == email)).first())
+
+@router.post("/api/engineer/register")
+def engineer_register(body: EngineerRegisterIn, request: Request):
+    check_bot(body.website, body.ts, request)
+    _require_terms(body.agree_terms)
+    name = body.full_name.strip()
+    if len(name) < 5 or " " not in name: raise HTTPException(422, "Nhập họ và tên đầy đủ.")
+    phone = norm_phone(body.phone)
+    if not valid_phone(phone): raise HTTPException(422, "Số điện thoại không hợp lệ (di động Việt Nam 10 số).")
+    email, dom = check_email(body.email)
+    company = re.sub(r"\s+", " ", body.company).strip()
+    if len(company) < 2: raise HTTPException(422, "Nhập tên công ty / nhà máy.")
+    province = canon_province(body.province)     # nhận cả tên tỉnh cũ -> tự đổi sang tên mới
+    if not province: raise HTTPException(422, "Chọn tỉnh/thành trong danh sách.")
+    role = body.role_group if body.role_group in ROLE_GROUPS else "KHAC"
+    if len(body.password) < 6: raise HTTPException(422, "Mật khẩu tối thiểu 6 ký tự.")
+    work = dom not in FREE_EMAIL_DOMAINS
+    with Session(_engine) as s:
+        if _taken(s, email, phone):
+            raise HTTPException(409, "Email hoặc số điện thoại đã đăng ký. Dùng nút Đăng nhập, hoặc liên hệ SVWS nếu quên mật khẩu.")
+        salt = secrets.token_hex(8)
+        en = TrnEngineer(full_name=name, phone=phone, email=email, company=company[:150],
+                         industrial_zone=re.sub(r"\s+", " ", body.industrial_zone).strip()[:120], province=province,
+                         job_title=body.job_title.strip()[:100], role_group=role, work_email=work,
+                         salt=salt, pw_hash=hash_pw(body.password, salt), eng_code=_next_eng_code(s))
+        if work:
+            arm_otp(en)               # email doanh nghiệp + có SMTP -> OTP kích hoạt ngay
+        s.add(en); s.flush()
+        ip = _client_ip(request)
+        for purpose, val in (("terms", True), ("marketing", body.marketing), ("share_company", body.share_company)):
+            _add_consent(s, "engineer", en.id, purpose, val, ip)
+        s.commit(); s.refresh(en)
+        if en.otp_code:
+            return {"mode": "otp", "message": "Đã gửi mã xác minh tới " + email + ". Nhập mã trong 15 phút để kích hoạt."}
+        return {"mode": "manual", "message": "Đăng ký thành công! Tài khoản sẽ được SVWS duyệt trong 24 giờ làm việc — sau đó bạn đăng nhập bằng email/SĐT và mật khẩu đã đặt."}
+
+@router.post("/api/engineer/verify")
+def engineer_verify(body: VerifyIn):
+    email = (body.email or "").strip().lower()
+    with Session(_engine) as s:
+        _verify(s, s.exec(select(TrnEngineer).where(TrnEngineer.email == email)).first(), body.otp)
+        return {"ok": True, "message": "Xác minh thành công — đăng nhập ngay bằng email/SĐT và mật khẩu."}
+
+@router.post("/api/engineer/login")
+def engineer_login(body: LoginEmailIn):
+    ident = (body.id or "").strip().lower()
+    phone = norm_phone(ident)
+    with Session(_engine) as s:
+        en = s.exec(select(TrnEngineer).where(or_(TrnEngineer.email == ident, TrnEngineer.phone == phone))).first()
+        _login(en, body.password, "Tài khoản")
+        s.add(en); s.commit(); s.refresh(en)
+        return {"token": en.token, "name": en.full_name, "eng_code": en.eng_code, **_consent_state(s, "engineer", en.id)}
+
 # ---------------- GHI ĐIỂM ----------------
 @router.post("/api/results")
 def post_result(body: ResultIn):
@@ -420,9 +526,12 @@ def me_consent(body: ConsentIn, request: Request):
         cur = _consents_now(s, atype, obj.id); ip = _client_ip(request)
         if _need_consent(s, atype, obj.id):
             _add_consent(s, atype, obj.id, "terms", True, ip)
-        m = cur.get("marketing")
-        if body.marketing is not None and (m is None or m.granted != body.marketing):
-            _add_consent(s, atype, obj.id, "marketing", body.marketing, ip)
+        for purpose, val in (("marketing", body.marketing), ("share_company", body.share_company)):
+            if val is None or (purpose == "share_company" and atype != "engineer"):
+                continue
+            old = cur.get(purpose)
+            if old is None or old.granted != val:
+                _add_consent(s, atype, obj.id, purpose, val, ip)
         s.commit()
         return {"ok": True, **_consent_state(s, atype, obj.id)}
 
@@ -477,6 +586,7 @@ def summary(key: str = Query("")):
         rows = s.exec(select(TrnResult)).all()
         staff = s.exec(select(TrnStaff)).all()
         studs = s.exec(select(TrnStudent)).all()
+        engs = s.exec(select(TrnEngineer)).all()
     best = {}
     for r in rows:
         k = (r.emp_code, r.code)
@@ -491,6 +601,8 @@ def summary(key: str = Query("")):
             "staff_pending": sum(1 for x in staff if x.status == "pending"),
             "students_active": sum(1 for x in studs if x.status == "active"),
             "students_pending": sum(1 for x in studs if x.status == "pending"),
+            "engineers_active": sum(1 for x in engs if x.status == "active"),
+            "engineers_pending": sum(1 for x in engs if x.status == "pending"),
             "total_results": len(rows),
             "summary": sorted(best.values(), key=lambda x: (x["emp_code"], x["code"]))}
 
@@ -530,6 +642,26 @@ def staff_action(body: ActionIn):
         _apply_action(s, "staff", s.get(TrnStaff, body.id), body.action)
         return {"ok": True}
 
+@router.get("/api/engineers")
+def engineers(key: str = Query(""), company: str = Query(""), zone: str = Query("")):
+    _check_admin(key)
+    with Session(_engine) as s:
+        rows = _acc_rows(TrnEngineer, s)
+    c, z = company.strip().lower(), zone.strip().lower()
+    rows = [x for x in rows if (not c or c in x.company.lower()) and (not z or z in (x.industrial_zone or "").lower())]
+    return {"engineers": [{"id": x.id, "eng_code": x.eng_code, "full_name": x.full_name, "phone": x.phone,
+                           "email": x.email, "work_email": x.work_email, "company": x.company,
+                           "industrial_zone": x.industrial_zone, "province": x.province, "job_title": x.job_title,
+                           "role_group": ROLE_GROUPS.get(x.role_group, x.role_group), "status": x.status,
+                           "created": x.created.strftime("%d/%m/%Y %H:%M")} for x in rows]}
+
+@router.post("/api/engineers/action")
+def engineer_action(body: ActionIn):
+    _check_admin(body.key)
+    with Session(_engine) as s:
+        _apply_action(s, "engineer", s.get(TrnEngineer, body.id), body.action)
+        return {"ok": True}
+
 @router.post("/api/students/action")
 def student_action(body: ActionIn):
     _check_admin(body.key)
@@ -566,7 +698,7 @@ h1{font-size:20px;color:#13315c;margin:0 0 4px}p.sub{color:#5a6b85;font-size:13p
 .tabs{display:flex;gap:6px;margin-bottom:12px}
 .tab{flex:1;text-align:center;padding:9px 6px;border-radius:9px;border:1.5px solid #d7e3f4;font-size:13.5px;font-weight:700;color:#5a6b85;cursor:pointer}
 .tab.on{background:#13315c;color:#fff;border-color:#13315c}
-input{width:100%;box-sizing:border-box;border:1.5px solid #d7e3f4;border-radius:9px;padding:11px 12px;font-size:15px;margin-bottom:10px}
+input,select{width:100%;box-sizing:border-box;border:1.5px solid #d7e3f4;border-radius:9px;padding:11px 12px;font-size:15px;margin-bottom:10px;background:#fff}
 button.go{width:100%;border:0;border-radius:9px;padding:12px;font-size:15px;font-weight:700;cursor:pointer;background:#0582ca;color:#fff}
 .err{color:#b02020;font-size:13px;min-height:18px;margin:2px 0 8px}.ok{color:#0a7a3d;font-size:14px;font-weight:600;line-height:1.55}
 .hp{position:absolute;left:-5000px;top:-5000px}
@@ -599,7 +731,7 @@ label.chk input{width:auto;margin:2px 0 0;flex:none}
 </ul>
 <div class=how>📌 <b>Sau khi đăng ký:</b> xác minh qua email (hoặc chờ SVWS duyệt) → quay lại trang đăng nhập → bắt đầu học. Hoàn thành tốt là một điểm cộng khi ứng tuyển thực tập/việc làm tại SVWS.</div>
 <h2 style="font-size:16px;color:#13315c;margin:0 0 8px">Đăng ký tài khoản</h2>
-<div class=tabs><div class="tab" id=tS>🎓 Sinh viên</div><div class="tab" id=tE>👷 Nhân viên SVWS</div></div>
+<div class=tabs><div class="tab" id=tS>🎓 Sinh viên</div><div class="tab" id=tK>🏭 Kỹ sư / KTV nhà máy</div><div class="tab" id=tE>👷 Nhân viên SVWS</div></div>
 <div id=fS>
 <div class=note>Dùng thông tin thật (ưu tiên <b>email trường .edu.vn</b>) — tài khoản ảo sẽ không được kích hoạt.</div>
 <input id=s_fn placeholder="Họ và tên *" maxlength=80>
@@ -616,9 +748,22 @@ label.chk input{width:auto;margin:2px 0 0;flex:none}
 <input id=e_em placeholder="Email công ty *" maxlength=120>
 <input id=e_pw type=password placeholder="Đặt mật khẩu (≥ 6 ký tự) *" maxlength=60>
 </div>
+<div id=fK style="display:none">
+<div class=note>Dành cho <b>kỹ sư, kỹ thuật viên đang làm tại nhà máy</b>. Dùng <b>email công ty</b> để kích hoạt ngay; email cá nhân (Gmail…) sẽ chờ SVWS duyệt.</div>
+<input id=k_fn placeholder="Họ và tên *" maxlength=80>
+<input id=k_ph placeholder="Số điện thoại *" maxlength=15>
+<input id=k_em placeholder="Email (ưu tiên email công ty) *" maxlength=120>
+<input id=k_co placeholder="Công ty / nhà máy *" maxlength=150>
+<input id=k_kz placeholder="Khu công nghiệp (VD: KCN Nhơn Trạch 1)" maxlength=120>
+<select id=k_pv><option value="">— Tỉnh/thành * —</option><!--PROVINCE_OPTIONS--></select>
+<input id=k_jt placeholder="Chức danh (VD: Kỹ sư vận hành)" maxlength=100>
+<select id=k_rg><option value="">— Nhóm công việc * —</option><!--ROLE_OPTIONS--></select>
+<input id=k_pw type=password placeholder="Đặt mật khẩu (≥ 6 ký tự) *" maxlength=60>
+</div>
 <div id=fC>
 <label class=chk><input type=checkbox id=c_terms> <span>Tôi đã đọc và đồng ý <a href="/training/terms" target=_blank>Điều khoản sử dụng</a> và <a href="/training/privacy" target=_blank>Chính sách xử lý dữ liệu cá nhân</a>. *</span></label>
 <label class=chk><input type=checkbox id=c_mkt> <span>Nhận thông tin tuyển dụng, thực tập, sự kiện từ SVWS (tùy chọn).</span></label>
+<label class=chk id=c_shL style="display:none"><input type=checkbox id=c_sh> <span>Chia sẻ kết quả học với công ty tôi (tùy chọn) — để SVWS lập báo cáo năng lực cho đội vận hành.</span></label>
 </div>
 <input id=website class=hp tabindex=-1 autocomplete=off>
 <div class=err id=e1></div>
@@ -634,27 +779,33 @@ label.chk input{width:auto;margin:2px 0 0;flex:none}
 </div>
 <script>
 const T0=Date.now();const $=id=>document.getElementById(id);
-let mode=(location.search.indexOf('nv=1')>=0)?'emp':'stu';let lastEmail='';
-function sw(m){mode=m;$('tS').classList.toggle('on',m==='stu');$('tE').classList.toggle('on',m==='emp');$('fS').style.display=m==='stu'?'':'none';$('fE').style.display=m==='emp'?'':'none';$('e1').textContent='';}
-$('tS').onclick=()=>sw('stu');$('tE').onclick=()=>sw('emp');sw(mode);
+let mode=(location.search.indexOf('nv=1')>=0)?'emp':(location.search.indexOf('ks=1')>=0)?'eng':'stu';let lastEmail='';
+const FORMS={stu:['tS','fS'],emp:['tE','fE'],eng:['tK','fK']};
+function sw(m){mode=m;for(const k in FORMS){$(FORMS[k][0]).classList.toggle('on',k===m);$(FORMS[k][1]).style.display=k===m?'':'none';}$('c_shL').style.display=m==='eng'?'':'none';$('e1').textContent='';}
+$('tS').onclick=()=>sw('stu');$('tE').onclick=()=>sw('emp');$('tK').onclick=()=>sw('eng');sw(mode);
+const VERIFY={stu:'/training/api/student/verify',emp:'/training/api/staff/verify',eng:'/training/api/engineer/verify'};
 $('b1').onclick=async()=>{
  let url,b;
  if(!$('c_terms').checked){$('e1').textContent='Vui lòng tick ô đồng ý Điều khoản sử dụng và Chính sách xử lý dữ liệu cá nhân.';return;}
  if(mode==='stu'){lastEmail=$('s_em').value;b={full_name:$('s_fn').value,phone:$('s_ph').value,email:$('s_em').value,school:$('s_sc').value,course:$('s_co').value,password:$('s_pw').value,website:$('website').value,ts:T0};url='/training/api/student/register';}
+ else if(mode==='eng'){
+  if(!$('k_pv').value){$('e1').textContent='Chọn tỉnh/thành.';return;}
+  if(!$('k_rg').value){$('e1').textContent='Chọn nhóm công việc.';return;}
+  lastEmail=$('k_em').value;b={full_name:$('k_fn').value,phone:$('k_ph').value,email:$('k_em').value,company:$('k_co').value,industrial_zone:$('k_kz').value,province:$('k_pv').value,job_title:$('k_jt').value,role_group:$('k_rg').value,password:$('k_pw').value,share_company:$('c_sh').checked,website:$('website').value,ts:T0};url='/training/api/engineer/register';}
  else{lastEmail=$('e_em').value;b={emp_code:$('e_mc').value,full_name:$('e_fn').value,email:$('e_em').value,password:$('e_pw').value,website:$('website').value,ts:T0};url='/training/api/staff/register';}
  b.agree_terms=$('c_terms').checked;b.marketing=$('c_mkt').checked;
  $('e1').textContent='Đang gửi…';
  try{const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});
  const d=await r.json();
  if(!r.ok){$('e1').textContent=d.detail||'Đăng ký không thành công.';return;}
- $('fS').style.display='none';$('fE').style.display='none';$('fC').style.display='none';$('b1').style.display='none';$('e1').textContent='';
+ $('fS').style.display='none';$('fE').style.display='none';$('fK').style.display='none';$('fC').style.display='none';$('b1').style.display='none';$('e1').textContent='';
  if(d.mode==='otp'){$('f2').style.display='';}
  else{$('done').style.display='';$('done').textContent='✅ '+d.message;}
  }catch(e){$('e1').textContent='Không kết nối được máy chủ.';}
 };
 $('b2').onclick=async()=>{
  $('e2').textContent='Đang xác minh…';
- const url=mode==='stu'?'/training/api/student/verify':'/training/api/staff/verify';
+ const url=VERIFY[mode];
  try{const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:lastEmail,otp:$('otp').value})});
  const d=await r.json();
  if(!r.ok){$('e2').textContent=d.detail||'Xác minh không thành công.';return;}
@@ -662,6 +813,13 @@ $('b2').onclick=async()=>{
  }catch(e){$('e2').textContent='Không kết nối được máy chủ.';}
 };
 </script></html>"""
+
+def _esc(t: str) -> str:
+    return t.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
+
+_REG_HTML = _REG_HTML.replace("<!--PROVINCE_OPTIONS-->", "".join(
+    '<option value="%s">%s</option>' % (_esc(p), _esc(p)) for p in PROVINCES)).replace("<!--ROLE_OPTIONS-->", "".join(
+    '<option value="%s">%s</option>' % (k, _esc(v)) for k, v in ROLE_GROUPS.items()))
 
 @router.get("/register", include_in_schema=False)
 def register_page():
@@ -696,13 +854,15 @@ th,td{border:1px solid #e3eaf4;padding:7px 9px;text-align:left}th{background:#ee
 .pass{color:#0a7a3d;font-weight:700}.fail{color:#b02020;font-weight:700}
 .bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.mut{color:#5a6b85;font-size:12.5px}
 .tag{border-radius:999px;padding:1px 9px;font-size:11.5px;font-weight:700}
-.tP{background:#fff3d6;color:#8a6100}.tA{background:#dcf5e7;color:#0a7a3d}.tB{background:#ffe1e1;color:#b02020}.edu{color:#0a7a3d;font-weight:700}
+.tP{background:#fff3d6;color:#8a6100}.tPer{background:#eef0f4;color:#5a6b85}.tA{background:#dcf5e7;color:#0a7a3d}.tB{background:#ffe1e1;color:#b02020}.edu{color:#0a7a3d;font-weight:700}
 </style><div class=wrap>
 <h1>💧 SVWS Training — Quản trị</h1>
 <div class=bar><input id=k type=password placeholder="Khóa quản trị" size=24><button onclick=loadAll()>Tải dữ liệu</button>
 <button style="background:#13315c" onclick="dlcsv()">⬇ CSV điểm</button><span class=mut id=st></span></div>
 <h2>👷 Nhân viên <span class=mut id=empCount></span></h2><div id=emp></div>
 <h2>🎓 Sinh viên <span class=mut id=stuCount></span></h2><div id=stu></div>
+<h2>🏭 Kỹ sư / KTV nhà máy <span class=mut id=engCount></span></h2>
+<div class=bar><input id=fCo placeholder="Lọc theo công ty" size=22><input id=fKz placeholder="Lọc theo KCN" size=18><button class=mini onclick=loadEng()>Lọc</button></div><div id=eng></div>
 <h2>📈 Thống kê học viên <span class=mut>(điểm cao nhất mỗi bài · ĐẠT = ≥80% · chương trình 95 chuyên đề)</span></h2><div id=stats></div>
 <h2>📚 Thống kê theo mục</h2><div id=dstats></div>
 <h2>📊 Bảng điểm chi tiết</h2><div id=out></div></div>
@@ -712,7 +872,14 @@ function tagOf(s){return s==='pending'?'<span class="tag tP">Chờ duyệt</span
 function btns(x,api){return (x.status!=='active'?'<button class=mini onclick=act("'+api+'",'+x.id+',"approve")>Duyệt</button> ':'')
  +(x.status!=='blocked'?'<button class="mini blk" onclick=act("'+api+'",'+x.id+',"block")>Chặn</button> ':'')
  +'<button class="mini del" onclick=act("'+api+'",'+x.id+',"delete")>Xóa</button>';}
-async function loadAll(){$('st').textContent='Đang tải…';await loadEmp();await loadStu();await loadSum();}
+async function loadAll(){$('st').textContent='Đang tải…';await loadEmp();await loadStu();await loadEng();await loadSum();}
+function esc(v){return String(v==null?'':v).replace(/[&<>"']/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
+async function loadEng(){
+ try{const r=await fetch('/training/api/engineers?key='+encodeURIComponent(K())+'&company='+encodeURIComponent($('fCo').value)+'&zone='+encodeURIComponent($('fKz').value));if(!r.ok){$('eng').innerHTML='';return;}
+ const d=await r.json();$('engCount').textContent='('+d.engineers.length+')';
+ let h='<table><tr><th>Mã</th><th>Họ tên</th><th>SĐT</th><th>Email</th><th>Công ty</th><th>KCN</th><th>Tỉnh/thành</th><th>Chức danh</th><th>Nhóm</th><th>Ngày ĐK</th><th>Trạng thái</th><th>Thao tác</th></tr>';
+ for(const x of d.engineers)h+='<tr><td>'+esc(x.eng_code)+'</td><td>'+esc(x.full_name)+'</td><td>'+esc(x.phone)+'</td><td>'+esc(x.email)+(x.work_email?'':' <span class="tag tPer">email cá nhân</span>')+'</td><td>'+esc(x.company)+'</td><td>'+esc(x.industrial_zone)+'</td><td>'+esc(x.province)+'</td><td>'+esc(x.job_title)+'</td><td>'+esc(x.role_group)+'</td><td>'+x.created+'</td><td>'+tagOf(x.status)+'</td><td>'+btns(x,'engineers')+'</td></tr>';
+ $('eng').innerHTML=h+'</table>';}catch(e){}}
 async function loadEmp(){
  try{const r=await fetch('/training/api/staff?key='+encodeURIComponent(K()));if(!r.ok){$('emp').innerHTML='';return;}
  const d=await r.json();$('empCount').textContent='('+d.staff.length+')';
@@ -753,7 +920,7 @@ function renderStats(sum){
 async function loadSum(){
  try{const r=await fetch('/training/api/summary?key='+encodeURIComponent(K()));
  if(!r.ok){$('st').textContent='Sai khóa hoặc lỗi ('+r.status+')';return;}
- const d=await r.json();$('st').textContent=d.staff_active+' NV active ('+d.staff_pending+' chờ) · '+d.students_active+' SV active ('+d.students_pending+' chờ) · '+d.total_results+' lượt test';
+ const d=await r.json();$('st').textContent=d.staff_active+' NV active ('+d.staff_pending+' chờ) · '+d.students_active+' SV active ('+d.students_pending+' chờ) · '+d.engineers_active+' KS active ('+d.engineers_pending+' chờ) · '+d.total_results+' lượt test';
  renderStats(d.summary);
  let h='<table><tr><th>Mã</th><th>Họ tên</th><th>Bài</th><th>Công nghệ</th><th>Cao nhất</th><th>KQ</th><th>Lần</th><th>Cuối</th></tr>';
  for(const x of d.summary){h+='<tr><td>'+x.emp_code+'</td><td>'+x.name+'</td><td>'+x.code+'</td><td>'+x.tech+'</td><td>'+x.best_pct+'%</td><td class='+(x.best_pct>=80?'pass':'fail')+'>'+(x.best_pct>=80?'ĐẠT':x.kq)+'</td><td>'+x.tries+'</td><td>'+x.last+'</td></tr>';}
