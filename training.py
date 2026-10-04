@@ -155,6 +155,7 @@ class TrnSignupMeta(SQLModel, table=True):
     referrer_type: str = Field(default="", max_length=10)       # staff/student/engineer; "deleted" khi người mời đã xóa TK
     referrer_id: int = Field(default=0, index=True)
     created: dt.datetime = Field(default_factory=dt.datetime.utcnow)
+    activated_at: Optional[dt.datetime] = None     # lần ĐẦU tài khoản được kích hoạt (OTP / admin duyệt); không xóa khi bị khóa
 
 SQLModel.metadata.create_all(_engine)
 router = APIRouter(prefix="/training", tags=["training"])
@@ -308,7 +309,7 @@ def _verify(s: Session, obj, otp: str):
     if time.time() > obj.otp_expire: raise HTTPException(410, "Mã đã hết hạn — đăng ký lại để nhận mã mới.")
     if otp.strip() != obj.otp_code: raise HTTPException(422, "Mã xác minh không đúng.")
     obj.status = "active"; obj.otp_code = ""; obj.otp_expire = 0
-    s.add(obj); _ensure_ref_code(s, _atype_of(obj), obj); s.commit()
+    s.add(obj); _on_activated(s, _atype_of(obj), obj); s.commit()
 
 # ---------------- NGUỒN ĐĂNG KÝ + MÃ GIỚI THIỆU (H2) ----------------
 REF_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"     # bỏ 0/O, 1/I dễ nhầm
@@ -329,6 +330,13 @@ def _ensure_ref_code(s: Session, atype: str, obj) -> str:
             break
     s.add(TrnRefCode(account_type=atype, account_id=obj.id, code=code))
     return code
+
+def _on_activated(s: Session, atype: str, obj) -> None:
+    """Gọi ngay khi tài khoản chuyển sang active: ghi mốc kích hoạt (chỉ lần đầu) + sinh mã giới thiệu."""
+    m = s.exec(select(TrnSignupMeta).where(TrnSignupMeta.account_type == atype, TrnSignupMeta.account_id == obj.id)).first()
+    if m and m.activated_at is None:
+        m.activated_at = dt.datetime.utcnow(); s.add(m)
+    _ensure_ref_code(s, atype, obj)
 
 def _clip(v: str, lower: bool = True) -> str:
     v = re.sub(r"\s+", " ", v or "").strip()
@@ -435,7 +443,7 @@ def staff_verify(body: VerifyIn):
 def staff_login(body: LoginEmailIn):
     email = (body.id or "").strip().lower()
     with Session(_engine) as s:
-        st = s.exec(select(TrnStaff).where(TrnStaff.email == email)).first()
+        st = s.exec(select(TrnStaff).where(TrnStaff.email == email)).first(); activated_now = False
         # Nhân viên: tự tạo tài khoản lần đầu — email công ty + mật khẩu = phần trước "@"
         if "@" in email:
             local, dom = email.split("@", 1)
@@ -445,9 +453,11 @@ def staff_login(body: LoginEmailIn):
                     st = TrnStaff(emp_code=local.upper(), full_name=local.replace(".", " ").replace("-", " ").title(),
                                   email=email, salt=salt, pw_hash=hash_pw(body.password, salt), status="active")
                 elif st.status == "pending":
-                    st.status = "active"; st.otp_code = ""
+                    st.status = "active"; st.otp_code = ""; activated_now = True
         _login(st, body.password, "Tài khoản nhân viên")
-        s.add(st); s.flush(); _ensure_ref_code(s, "staff", st); s.commit(); s.refresh(st)
+        s.add(st); s.flush()
+        (_on_activated if activated_now else _ensure_ref_code)(s, "staff", st)
+        s.commit(); s.refresh(st)
         return {"token": st.token, "name": st.full_name, "emp_code": st.emp_code, **_consent_state(s, "staff", st.id)}
 
 @router.post("/api/login")
@@ -713,7 +723,7 @@ def students(key: str = Query("")):
 
 def _apply_action(s: Session, atype: str, obj, action: str):
     if not obj: raise HTTPException(404, "Không tìm thấy.")
-    if action == "approve": obj.status = "active"; obj.otp_code = ""; s.add(obj); _ensure_ref_code(s, atype, obj)
+    if action == "approve": obj.status = "active"; obj.otp_code = ""; s.add(obj); _on_activated(s, atype, obj)
     elif action == "block": obj.status = "blocked"; obj.token = ""; s.add(obj)
     elif action == "delete": _purge_account(s, atype, obj)     # dọn giống người dùng tự xóa
     else: raise HTTPException(422, "Hành động không hợp lệ.")
@@ -769,6 +779,8 @@ def results_csv(key: str = Query("")):
 # ---------------- BÁO CÁO NGUỒN ĐĂNG KÝ (H2) ----------------
 # Chỉ đếm lượt đăng ký của SINH VIÊN + KỸ SƯ (không đếm nhân viên); nhân viên VẪN được tính là người giới thiệu.
 # Hoàn thành = có ít nhất 1 bài đạt >= 80%; KPI 7 ngày = hoàn thành trong 7 ngày kể từ lúc đăng ký.
+# Đã kích hoạt = có MỐC kích hoạt (trn_signup_meta.activated_at, tới hết ngày `to` nếu có lọc) — tài khoản bị khóa
+# sau khi đã kích hoạt vẫn tính. Tài khoản có từ trước khi có bảng nguồn: lấy ngày tạo nếu đang active.
 PASS_PCT = 80
 KPI_DAYS = 7
 _VN = dt.timedelta(hours=7)          # created/ts lưu giờ UTC; ngày/tuần trong báo cáo theo giờ Việt Nam
@@ -794,7 +806,10 @@ def _sources_report(s: Session, d_from: Optional[dt.date], d_to: Optional[dt.dat
             if (d_from and day < d_from) or (d_to and day > d_to):
                 continue
             fp = first_pass.get(getattr(a, code_attr))
-            people.append({"meta": metas.get((atype, a.id)), "day": day, "active": a.status == "active",
+            m = metas.get((atype, a.id))
+            act_at = m.activated_at if m else (a.created if a.status == "active" else None)
+            activated = act_at is not None and (d_to is None or (act_at + _VN).date() <= d_to)
+            people.append({"meta": m, "day": day, "active": activated,
                            "done": fp is not None,
                            "done7": fp is not None and fp <= a.created + dt.timedelta(days=KPI_DAYS)})
 

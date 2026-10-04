@@ -188,3 +188,70 @@ def test_ky_su_xoa_cung_don_nguon(c):
 def test_trang_dang_ky_giu_tham_so_trong_session_storage(c):
     html = c.get("/training/register").text
     assert "sessionStorage" in html and "svws_trn_src" in html and "Object.assign(b,srcGet())" in html
+
+
+# ---------------- "đã kích hoạt" theo mốc kích hoạt ----------------
+def _meta(c, atype, aid):
+    with Session(c.engine) as s:
+        return s.exec(select(TrnSignupMeta).where(TrnSignupMeta.account_type == atype,
+                                                  TrnSignupMeta.account_id == aid)).one()
+
+
+def test_moc_kich_hoat_ghi_khi_otp_va_khi_admin_duyet(c, monkeypatch):
+    # OTP (kỹ sư email doanh nghiệp)
+    sent = {}
+    monkeypatch.setattr(training, "OTP_MODE", True)
+    monkeypatch.setattr(training, "send_otp", lambda e, code: sent.update({e: code}) or True)
+    k = _ks(); c.post("/training/api/engineer/register", json=k)
+    eid = _id_of(c, k["email"])["id"]
+    assert _meta(c, "engineer", eid).activated_at is None
+    c.post("/training/api/engineer/verify", json={"email": k["email"], "otp": sent[k["email"]]})
+    assert _meta(c, "engineer", eid).activated_at is not None
+    # admin duyệt (sinh viên); khóa rồi duyệt lại -> giữ mốc LẦN ĐẦU
+    monkeypatch.setattr(training, "OTP_MODE", False)
+    b = _sv(); c.post("/training/api/student/register", json=b)
+    sid, _ = _approve_login_sv(c, b)
+    first = _meta(c, "student", sid).activated_at
+    assert first is not None
+    for act in ("block", "approve"):
+        c.post("/training/api/students/action", json={"key": KEY, "id": sid, "action": act})
+    assert _meta(c, "student", sid).activated_at == first
+
+
+def test_bi_khoa_sau_khi_kich_hoat_van_tinh_va_loc_theo_moc(c):
+    tag = uuid.uuid4().hex[:8]
+    src = f"youtube{tag}"
+    a, p = _sv(utm_source=src), _sv(utm_source=src)          # a: kích hoạt rồi bị khóa; p: còn chờ duyệt
+    for x in (a, p):
+        c.post("/training/api/student/register", json=x)
+    sid_a, _ = _approve_login_sv(c, a)
+    c.post("/training/api/students/action", json={"key": KEY, "id": sid_a, "action": "block"})
+    rows = [x for x in _src(c)["by_source_week"] if x["utm_source"] == src]
+    assert (sum(x["registered"] for x in rows), sum(x["activated"] for x in rows)) == (2, 1)
+    # đăng ký 10 ngày trước, kích hoạt 2 ngày trước: lọc tới 5 ngày trước -> đã đăng ký nhưng CHƯA kích hoạt
+    now = dt.datetime.utcnow()
+    with Session(c.engine) as s:
+        st = s.get(TrnStudent, sid_a); st.created = now - dt.timedelta(days=10); s.add(st)
+        m = s.exec(select(TrnSignupMeta).where(TrnSignupMeta.account_type == "student",
+                                               TrnSignupMeta.account_id == sid_a)).one()
+        m.activated_at = now - dt.timedelta(days=2); s.add(m); s.commit()
+    to = (now + dt.timedelta(hours=7) - dt.timedelta(days=5)).date().isoformat()
+    rows = [x for x in _src(c, to=to)["by_source_week"] if x["utm_source"] == src]
+    assert (sum(x["registered"] for x in rows), sum(x["activated"] for x in rows)) == (1, 0)
+
+
+def test_tai_khoan_co_truoc_khi_co_bang_nguon_lay_ngay_tao_neu_dang_active(c):
+    def unknown():
+        rows = [x for x in _src(c)["by_source_week"] if x["utm_source"].startswith("(không rõ")]
+        return sum(x["registered"] for x in rows), sum(x["activated"] for x in rows)
+    r0, a0 = unknown()
+    with Session(c.engine) as s:                     # tài khoản cũ: KHÔNG có dòng trn_signup_meta
+        for status in ("active", "pending", "blocked"):
+            salt = "s"
+            s.add(TrnStudent(full_name="Cũ " + status, phone="0913" + str(uuid.uuid4().int)[:6],
+                             email=f"old{status}{uuid.uuid4().hex[:6]}@gmail.com", school="X", course="K", salt=salt,
+                             pw_hash=training.hash_pw("matkhau1", salt), status=status,
+                             student_code=f"SVU-O{uuid.uuid4().hex[:4]}"))
+        s.commit()
+    r1, a1 = unknown()
+    assert (r1 - r0, a1 - a0) == (3, 1)              # chỉ tài khoản đang active được tính là đã kích hoạt
