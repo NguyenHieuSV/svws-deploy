@@ -79,6 +79,13 @@ def test_chua_co_smtp_thi_email_doanh_nghiep_cung_cho_duyet(c):
     assert _id_of(c, b["email"])["work_email"] is True
 
 
+def test_danh_sach_email_mien_phi_mac_dinh():
+    for d in ("gmail.com", "yahoo.com.vn", "outlook.com", "icloud.com",
+              "qq.com", "163.com", "126.com", "naver.com", "daum.net", "hanmail.net"):
+        assert d in training.FREE_EMAIL_DOMAINS, d
+    assert len(training.FREE_EMAIL_DOMAINS) == 23
+
+
 def test_danh_sach_email_mien_phi_doc_tu_bien_moi_truong(c, monkeypatch):
     monkeypatch.setattr(training, "FREE_EMAIL_DOMAINS", {"congty-rieng.vn"})
     b = _ks(email=f"a{uuid.uuid4().hex[:8]}@congty-rieng.vn")
