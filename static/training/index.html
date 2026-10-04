@@ -1759,6 +1759,10 @@ goHome();
      }catch(e){err.textContent='Không kết nối được máy chủ.';}
    };
  }
+ /* ---- H2: vào app qua link có UTM / ?ref= thì giữ lại cho trang đăng ký ---- */
+ try{const q=new URLSearchParams(location.search);let o={};try{o=JSON.parse(sessionStorage.getItem('svws_trn_src')||'{}')}catch(e){}
+   let ch=false;['utm_source','utm_medium','utm_campaign','utm_content','ref'].forEach(function(k){const v=(q.get(k)||'').trim().slice(0,80);if(v){o[k]=v;ch=true;}});
+   if(ch){if(!o.landing_path)o.landing_path=(location.pathname+location.search).slice(0,80);sessionStorage.setItem('svws_trn_src',JSON.stringify(o));}}catch(e){}
  /* ---- H6: Tài khoản của tôi — đổi lựa chọn, tải dữ liệu, xóa tài khoản ---- */
  async function showAccount(){
    if(document.querySelector('.trnOv'))return;
@@ -1771,6 +1775,7 @@ goHome();
    +(d.account_type==='engineer'?'<label class="trnChk"><input type="checkbox" id="acS"'+(d.share_company?' checked':'')+'> <span>Chia sẻ kết quả học với công ty tôi</span></label>':'')
    +'<p style="margin:0 0 8px">Đã đồng ý '+TERMS_LINKS+' (phiên bản '+(d.policy_version||'')+').</p>'
    +'<div class="trnOk" id="acOk"></div><button class="trnGo" id="acSave">Lưu lựa chọn</button></div>'
+   +(d.ref_code?'<div class="trnSec"><b>Mã giới thiệu của tôi: <span style="letter-spacing:2px">'+esc(d.ref_code)+'</span></b><input id="acRl" readonly value="'+esc(location.origin+'/training/r/'+d.ref_code)+'"><button class="trnOff" id="acCp" style="margin-top:0">📋 Sao chép link giới thiệu</button></div>':'')
    +'<div class="trnSec"><b>Dữ liệu của tôi</b><button class="trnOff" id="acDl" style="margin-top:0">⬇ Tải dữ liệu của tôi (JSON)</button></div>'
    +'<div class="trnSec"><b>Xóa tài khoản</b><p style="margin:0 0 8px">Xóa thông tin tài khoản; điểm đã làm và lịch sử đồng ý chỉ còn ở dạng ẩn danh (không tên, email, SĐT). Không thể hoàn tác.</p>'
    +'<input id="acPw" type="password" placeholder="Nhập mật khẩu để xác nhận" maxlength="60"><div class="trnErr" id="acE"></div><button class="trnDel" id="acDel">Xóa tài khoản</button></div>'
@@ -1778,6 +1783,9 @@ goHome();
    document.body.appendChild(ov);
    const ok=ov.querySelector('#acOk'),err=ov.querySelector('#acE');
    ov.querySelector('#acX').onclick=function(){ov.remove();};
+   const cp=ov.querySelector('#acCp');if(cp)cp.onclick=async function(){const i=ov.querySelector('#acRl');
+     try{await navigator.clipboard.writeText(i.value);}catch(e){i.select();try{document.execCommand('copy')}catch(_){}}
+     cp.textContent='✅ Đã sao chép';setTimeout(function(){cp.textContent='📋 Sao chép link giới thiệu'},2000);};
    ov.querySelector('#acSave').onclick=async function(){
      ok.textContent='Đang lưu…';
      try{const r=await fetch(API+'/me/consent',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:a.token,terms:true,marketing:ov.querySelector('#acM').checked,share_company:ov.querySelector('#acS')?ov.querySelector('#acS').checked:null})});

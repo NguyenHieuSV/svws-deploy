@@ -17,7 +17,7 @@ from email.mime.text import MIMEText
 from typing import Optional
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.encoders import jsonable_encoder
-from fastapi.responses import FileResponse, HTMLResponse, Response, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, Response, JSONResponse, StreamingResponse, RedirectResponse
 from pydantic import BaseModel
 from sqlmodel import SQLModel, Field, Session, create_engine, select, or_
 from training_tinh import PROVINCES, canon_province
@@ -130,6 +130,32 @@ class TrnConsent(SQLModel, table=True):
     at: dt.datetime = Field(default_factory=dt.datetime.utcnow)
     ip: str = Field(default="", max_length=45)
     subject_ref: str = Field(default="", index=True, max_length=24)   # DEL-… sau khi tài khoản bị xóa
+
+class TrnRefCode(SQLModel, table=True):
+    """Mã giới thiệu của mỗi tài khoản (H2) — sinh khi tài khoản được kích hoạt."""
+    __tablename__ = "trn_ref_codes"
+    id: Optional[int] = Field(default=None, primary_key=True)
+    account_type: str = Field(index=True, max_length=10)
+    account_id: int = Field(index=True)
+    code: str = Field(index=True, unique=True, max_length=10)
+    created: dt.datetime = Field(default_factory=dt.datetime.utcnow)
+
+class TrnSignupMeta(SQLModel, table=True):
+    """Nguồn đăng ký (UTM) + người giới thiệu của từng tài khoản (H2)."""
+    __tablename__ = "trn_signup_meta"
+    id: Optional[int] = Field(default=None, primary_key=True)
+    account_type: str = Field(index=True, max_length=10)
+    account_id: int = Field(index=True)
+    utm_source: str = Field(default="", max_length=80)
+    utm_medium: str = Field(default="", max_length=80)
+    utm_campaign: str = Field(default="", max_length=80)
+    utm_content: str = Field(default="", max_length=80)
+    landing_path: str = Field(default="", max_length=80)
+    ref_code_used: str = Field(default="", max_length=10)
+    referrer_type: str = Field(default="", max_length=10)       # staff/student/engineer; "deleted" khi người mời đã xóa TK
+    referrer_id: int = Field(default=0, index=True)
+    created: dt.datetime = Field(default_factory=dt.datetime.utcnow)
+    activated_at: Optional[dt.datetime] = None     # lần ĐẦU tài khoản được kích hoạt (OTP / admin duyệt); không xóa khi bị khóa
 
 class TrnCodeSeq(SQLModel, table=True):
     """Số lớn nhất ĐÃ CẤP theo tiền tố mã (SVU-, ENG-…). Không giảm khi xóa tài khoản -> mã không bao giờ bị cấp lại."""
@@ -289,15 +315,68 @@ def _verify(s: Session, obj, otp: str):
     if time.time() > obj.otp_expire: raise HTTPException(410, "Mã đã hết hạn — đăng ký lại để nhận mã mới.")
     if otp.strip() != obj.otp_code: raise HTTPException(422, "Mã xác minh không đúng.")
     obj.status = "active"; obj.otp_code = ""; obj.otp_expire = 0
-    s.add(obj); s.commit()
+    s.add(obj); _on_activated(s, _atype_of(obj), obj); s.commit()
+
+# ---------------- NGUỒN ĐĂNG KÝ + MÃ GIỚI THIỆU (H2) ----------------
+REF_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"     # bỏ 0/O, 1/I dễ nhầm
+UTM_MAX = 80
+
+def _atype_of(obj) -> str:
+    return next(k for k, (m, _) in _ACC.items() if isinstance(obj, m))
+
+def _ensure_ref_code(s: Session, atype: str, obj) -> str:
+    """Mã giới thiệu của tài khoản đang ACTIVE (tạo nếu chưa có); chưa active -> ""."""
+    if obj.id is None or obj.status != "active":
+        return ""
+    rc = s.exec(select(TrnRefCode).where(TrnRefCode.account_type == atype, TrnRefCode.account_id == obj.id)).first()
+    if rc: return rc.code
+    while True:
+        code = "".join(secrets.choice(REF_ALPHABET) for _ in range(6))
+        if not s.exec(select(TrnRefCode.id).where(TrnRefCode.code == code)).first():
+            break
+    s.add(TrnRefCode(account_type=atype, account_id=obj.id, code=code))
+    return code
+
+def _on_activated(s: Session, atype: str, obj) -> None:
+    """Gọi ngay khi tài khoản chuyển sang active: ghi mốc kích hoạt (chỉ lần đầu) + sinh mã giới thiệu."""
+    m = s.exec(select(TrnSignupMeta).where(TrnSignupMeta.account_type == atype, TrnSignupMeta.account_id == obj.id)).first()
+    if m and m.activated_at is None:
+        m.activated_at = dt.datetime.utcnow(); s.add(m)
+    _ensure_ref_code(s, atype, obj)
+
+def _clip(v: str, lower: bool = True) -> str:
+    v = re.sub(r"\s+", " ", v or "").strip()
+    return (v.lower() if lower else v)[:UTM_MAX]
+
+def _save_signup_meta(s: Session, atype: str, aid: int, body: "SignupSourceIn"):
+    """Luôn ghi một dòng (kể cả không có tham số); mã giới thiệu không tồn tại thì bỏ qua, không báo lỗi."""
+    ref = re.sub(r"[^A-Za-z0-9]", "", body.ref or "").upper()[:10]
+    rc = s.exec(select(TrnRefCode).where(TrnRefCode.code == ref)).first() if ref else None
+    s.add(TrnSignupMeta(account_type=atype, account_id=aid,
+                        utm_source=_clip(body.utm_source), utm_medium=_clip(body.utm_medium),
+                        utm_campaign=_clip(body.utm_campaign), utm_content=_clip(body.utm_content, lower=False),
+                        landing_path=_clip(body.landing_path, lower=False),
+                        ref_code_used=rc.code if rc else "",
+                        referrer_type=rc.account_type if rc else "", referrer_id=rc.account_id if rc else 0))
+
+@router.get("/r/{code}", include_in_schema=False)
+def ref_link(code: str):
+    """Link ngắn …/training/r/AB7K2Q -> trang đăng ký kèm ?ref=AB7K2Q."""
+    code = re.sub(r"[^A-Za-z0-9]", "", code).upper()[:10]
+    return RedirectResponse("/training/register" + ("?ref=" + code if code else ""), status_code=302)
 
 # ---------------- MODELS VÀO ----------------
-class StaffRegisterIn(BaseModel):
+class SignupSourceIn(BaseModel):
+    """Trường tùy chọn: nguồn đăng ký (UTM) + mã giới thiệu — trang đăng ký đọc từ URL, giữ trong sessionStorage."""
+    utm_source: str = ""; utm_medium: str = ""; utm_campaign: str = ""; utm_content: str = ""
+    landing_path: str = ""; ref: str = ""
+
+class StaffRegisterIn(SignupSourceIn):
     emp_code: str; full_name: str; email: str; password: str
     website: str = ""; ts: float = 0
     agree_terms: bool = False; marketing: bool = False
 
-class StudentRegisterIn(BaseModel):
+class StudentRegisterIn(SignupSourceIn):
     full_name: str; phone: str; email: str; school: str; course: str; password: str
     website: str = ""; ts: float = 0
     agree_terms: bool = False; marketing: bool = False
@@ -320,7 +399,7 @@ class ConsentIn(BaseModel):
     token: str; terms: bool = True; marketing: Optional[bool] = None
     share_company: Optional[bool] = None     # chỉ tài khoản kỹ sư
 
-class EngineerRegisterIn(BaseModel):
+class EngineerRegisterIn(SignupSourceIn):
     full_name: str; phone: str; email: str; company: str; password: str
     industrial_zone: str = ""; province: str = ""; job_title: str = ""; role_group: str = "KHAC"
     website: str = ""; ts: float = 0
@@ -353,6 +432,7 @@ def staff_register(body: StaffRegisterIn, request: Request):
         s.add(st); s.flush()
         ip = _client_ip(request)
         _add_consent(s, "staff", st.id, "terms", True, ip); _add_consent(s, "staff", st.id, "marketing", body.marketing, ip)
+        _save_signup_meta(s, "staff", st.id, body)
         s.commit(); s.refresh(st)
         if st.otp_code:
             return {"mode": "otp", "message": "Đã gửi mã xác minh tới " + email + ". Nhập mã trong 15 phút để kích hoạt."}
@@ -369,7 +449,7 @@ def staff_verify(body: VerifyIn):
 def staff_login(body: LoginEmailIn):
     email = (body.id or "").strip().lower()
     with Session(_engine) as s:
-        st = s.exec(select(TrnStaff).where(TrnStaff.email == email)).first()
+        st = s.exec(select(TrnStaff).where(TrnStaff.email == email)).first(); activated_now = False
         # Nhân viên: tự tạo tài khoản lần đầu — email công ty + mật khẩu = phần trước "@"
         if "@" in email:
             local, dom = email.split("@", 1)
@@ -379,9 +459,11 @@ def staff_login(body: LoginEmailIn):
                     st = TrnStaff(emp_code=local.upper(), full_name=local.replace(".", " ").replace("-", " ").title(),
                                   email=email, salt=salt, pw_hash=hash_pw(body.password, salt), status="active")
                 elif st.status == "pending":
-                    st.status = "active"; st.otp_code = ""
+                    st.status = "active"; st.otp_code = ""; activated_now = True
         _login(st, body.password, "Tài khoản nhân viên")
-        s.add(st); s.commit(); s.refresh(st)
+        s.add(st); s.flush()
+        (_on_activated if activated_now else _ensure_ref_code)(s, "staff", st)
+        s.commit(); s.refresh(st)
         return {"token": st.token, "name": st.full_name, "emp_code": st.emp_code, **_consent_state(s, "staff", st.id)}
 
 @router.post("/api/login")
@@ -432,6 +514,7 @@ def student_register(body: StudentRegisterIn, request: Request):
         s.add(st); s.flush()
         ip = _client_ip(request)
         _add_consent(s, "student", st.id, "terms", True, ip); _add_consent(s, "student", st.id, "marketing", body.marketing, ip)
+        _save_signup_meta(s, "student", st.id, body)
         s.commit(); s.refresh(st)
         if st.otp_code:
             return {"mode": "otp", "message": "Đã gửi mã xác minh tới " + email + ". Nhập mã trong 15 phút để kích hoạt."}
@@ -451,7 +534,7 @@ def student_login(body: LoginEmailIn):
     with Session(_engine) as s:
         st = s.exec(select(TrnStudent).where(or_(TrnStudent.email == ident, TrnStudent.phone == phone))).first()
         _login(st, body.password, "Tài khoản")
-        s.add(st); s.commit(); s.refresh(st)
+        s.add(st); _ensure_ref_code(s, "student", st); s.commit(); s.refresh(st)
         return {"token": st.token, "name": st.full_name, "student_code": st.student_code, **_consent_state(s, "student", st.id)}
 
 # ---------------- KỸ SƯ / KỸ THUẬT VIÊN NHÀ MÁY (H1) ----------------
@@ -494,6 +577,7 @@ def engineer_register(body: EngineerRegisterIn, request: Request):
         ip = _client_ip(request)
         for purpose, val in (("terms", True), ("marketing", body.marketing), ("share_company", body.share_company)):
             _add_consent(s, "engineer", en.id, purpose, val, ip)
+        _save_signup_meta(s, "engineer", en.id, body)
         s.commit(); s.refresh(en)
         if en.otp_code:
             return {"mode": "otp", "message": "Đã gửi mã xác minh tới " + email + ". Nhập mã trong 15 phút để kích hoạt."}
@@ -513,7 +597,7 @@ def engineer_login(body: LoginEmailIn):
     with Session(_engine) as s:
         en = s.exec(select(TrnEngineer).where(or_(TrnEngineer.email == ident, TrnEngineer.phone == phone))).first()
         _login(en, body.password, "Tài khoản")
-        s.add(en); s.commit(); s.refresh(en)
+        s.add(en); _ensure_ref_code(s, "engineer", en); s.commit(); s.refresh(en)
         return {"token": en.token, "name": en.full_name, "eng_code": en.eng_code, **_consent_state(s, "engineer", en.id)}
 
 # ---------------- GHI ĐIỂM ----------------
@@ -533,8 +617,9 @@ _PRIVATE = {"pw_hash", "salt", "otp_code", "otp_expire", "token"}
 def me(token: str = Query("")):
     with Session(_engine) as s:
         atype, obj = _account_by_token(s, token)
+        ref = _ensure_ref_code(s, atype, obj); s.commit()
         return {"account_type": atype, "code": getattr(obj, _ACC[atype][1]), "name": obj.full_name,
-                "email": obj.email, **_consent_state(s, atype, obj.id)}
+                "email": obj.email, "ref_code": ref, **_consent_state(s, atype, obj.id)}
 
 @router.post("/api/me/consent")
 def me_consent(body: ConsentIn, request: Request):
@@ -584,7 +669,15 @@ def _purge_account(s: Session, atype: str, obj) -> None:
     # không có tên/email; bỏ liên kết account_id (SQLite có thể cấp lại id) và IP, gắn mã DEL-… như điểm.
     for c in s.exec(select(TrnConsent).where(TrnConsent.account_type == atype, TrnConsent.account_id == obj.id)).all():
         c.account_id = 0; c.ip = ""; c.subject_ref = anon; s.add(c)
-    # trn_signup_meta + trn_ref_codes (PR-3) và trn_certificates (PR-4) được dọn khi các bảng đó ra đời.
+    # Nguồn đăng ký + mã giới thiệu của chính tài khoản: xóa. Người khác do tài khoản này mời: giữ dòng của họ,
+    # bỏ liên kết tới người mời (referrer_type="deleted"), vẫn giữ chuỗi mã để báo cáo không gộp nhầm.
+    for m in s.exec(select(TrnSignupMeta).where(TrnSignupMeta.account_type == atype, TrnSignupMeta.account_id == obj.id)).all():
+        s.delete(m)
+    for m in s.exec(select(TrnSignupMeta).where(TrnSignupMeta.referrer_type == atype, TrnSignupMeta.referrer_id == obj.id)).all():
+        m.referrer_type = "deleted"; m.referrer_id = 0; s.add(m)
+    for rc in s.exec(select(TrnRefCode).where(TrnRefCode.account_type == atype, TrnRefCode.account_id == obj.id)).all():
+        s.delete(rc)
+    # trn_certificates (PR-4) được thu hồi khi bảng đó ra đời.
     s.delete(obj)
 
 @router.post("/api/me/delete")
@@ -648,7 +741,7 @@ def students(key: str = Query("")):
 
 def _apply_action(s: Session, atype: str, obj, action: str):
     if not obj: raise HTTPException(404, "Không tìm thấy.")
-    if action == "approve": obj.status = "active"; obj.otp_code = ""; s.add(obj)
+    if action == "approve": obj.status = "active"; obj.otp_code = ""; s.add(obj); _on_activated(s, atype, obj)
     elif action == "block": obj.status = "blocked"; obj.token = ""; s.add(obj)
     elif action == "delete": _purge_account(s, atype, obj)     # dọn giống người dùng tự xóa
     else: raise HTTPException(422, "Hành động không hợp lệ.")
@@ -700,6 +793,107 @@ def results_csv(key: str = Query("")):
     data = "\ufeff" + buf.getvalue()
     return StreamingResponse(io.BytesIO(data.encode("utf-8")), media_type="text/csv",
         headers={"Content-Disposition": "attachment; filename=svws_training_results.csv"})
+
+# ---------------- BÁO CÁO NGUỒN ĐĂNG KÝ (H2) ----------------
+# Chỉ đếm lượt đăng ký của SINH VIÊN + KỸ SƯ (không đếm nhân viên); nhân viên VẪN được tính là người giới thiệu.
+# Hoàn thành = có ít nhất 1 bài đạt >= 80%; KPI 7 ngày = hoàn thành trong 7 ngày kể từ lúc đăng ký.
+# Đã kích hoạt = có MỐC kích hoạt (trn_signup_meta.activated_at, tới hết ngày `to` nếu có lọc) — tài khoản bị khóa
+# sau khi đã kích hoạt vẫn tính. Tài khoản có từ trước khi có bảng nguồn: lấy ngày tạo nếu đang active.
+PASS_PCT = 80
+KPI_DAYS = 7
+_VN = dt.timedelta(hours=7)          # created/ts lưu giờ UTC; ngày/tuần trong báo cáo theo giờ Việt Nam
+_COUNTED = ("student", "engineer")
+
+def _day(v: str, label: str) -> Optional[dt.date]:
+    if not v: return None
+    try: return dt.date.fromisoformat(v)
+    except ValueError: raise HTTPException(422, "Tham số " + label + " phải có dạng YYYY-MM-DD.")
+
+def _sources_report(s: Session, d_from: Optional[dt.date], d_to: Optional[dt.date]) -> dict:
+    # lần đầu đạt >= 80% của mỗi mã người học
+    first_pass = {}
+    for r in s.exec(select(TrnResult).where(TrnResult.pct >= PASS_PCT)).all():
+        if r.emp_code not in first_pass or r.ts < first_pass[r.emp_code]:
+            first_pass[r.emp_code] = r.ts
+    metas = {(m.account_type, m.account_id): m for m in s.exec(select(TrnSignupMeta)).all()}
+    people = []
+    for atype in _COUNTED:
+        model, code_attr = _ACC[atype]
+        for a in s.exec(select(model)).all():
+            day = (a.created + _VN).date()
+            if (d_from and day < d_from) or (d_to and day > d_to):
+                continue
+            fp = first_pass.get(getattr(a, code_attr))
+            m = metas.get((atype, a.id))
+            act_at = m.activated_at if m else (a.created if a.status == "active" else None)
+            activated = act_at is not None and (d_to is None or (act_at + _VN).date() <= d_to)
+            people.append({"meta": m, "day": day, "active": activated,
+                           "done": fp is not None,
+                           "done7": fp is not None and fp <= a.created + dt.timedelta(days=KPI_DAYS)})
+
+    def bump(d, key, p):
+        x = d.setdefault(key, {"registered": 0, "activated": 0, "completed": 0, "completed_7d": 0})
+        x["registered"] += 1; x["activated"] += p["active"]; x["completed"] += p["done"]; x["completed_7d"] += p["done7"]
+
+    by_src, by_camp, by_ref = {}, {}, {}
+    for p in people:
+        m = p["meta"]
+        src = (m.utm_source or "(trực tiếp)") if m else "(không rõ — trước khi có UTM)"
+        y, w, _ = p["day"].isocalendar()
+        bump(by_src, (src, "%d-W%02d" % (y, w)), p)
+        bump(by_camp, (m.utm_campaign if m and m.utm_campaign else "(không có)"), p)
+        if m and m.ref_code_used:
+            key = (m.referrer_type, m.referrer_id) if m.referrer_type != "deleted" else ("deleted", m.ref_code_used)
+            bump(by_ref, key, p)
+    refs = []
+    for (rtype, rid), v in by_ref.items():
+        if rtype == "deleted":
+            who = {"referrer_type": "", "referrer_code": "", "referrer_name": "(tài khoản đã xóa)", "ref_code": rid}
+        else:
+            model, code_attr = _ACC[rtype]
+            a = s.get(model, rid)
+            rc = s.exec(select(TrnRefCode.code).where(TrnRefCode.account_type == rtype, TrnRefCode.account_id == rid)).first()
+            who = {"referrer_type": rtype, "referrer_code": getattr(a, code_attr) if a else "",
+                   "referrer_name": a.full_name if a else "(không tìm thấy)", "ref_code": rc or ""}
+        refs.append({**who, "invited": v["registered"], "activated": v["activated"],
+                     "completed": v["completed"], "completed_7d": v["completed_7d"]})
+    refs.sort(key=lambda x: (-x["invited"], -x["completed"], x["referrer_name"]))
+    tot = {"registered": 0, "activated": 0, "completed": 0, "completed_7d": 0}
+    for p in people:
+        tot["registered"] += 1; tot["activated"] += p["active"]; tot["completed"] += p["done"]; tot["completed_7d"] += p["done7"]
+    return {"from": d_from.isoformat() if d_from else "", "to": d_to.isoformat() if d_to else "",
+            "pass_pct": PASS_PCT, "kpi_days": KPI_DAYS, "totals": tot,
+            "by_source_week": [{"utm_source": k[0], "week": k[1], **v} for k, v in sorted(by_src.items(), key=lambda kv: (kv[0][1], kv[0][0]))],
+            "by_campaign": [{"utm_campaign": k, **v} for k, v in sorted(by_camp.items(), key=lambda kv: -kv[1]["registered"])],
+            "top_referrers": refs[:20]}
+
+@router.get("/api/sources")
+def sources(key: str = Query(""), from_: str = Query("", alias="from"), to: str = Query("")):
+    _check_admin(key)
+    with Session(_engine) as s:
+        return _sources_report(s, _day(from_, "from"), _day(to, "to"))
+
+@router.get("/api/sources.csv")
+def sources_csv(key: str = Query(""), from_: str = Query("", alias="from"), to: str = Query("")):
+    """CSV RIÊNG cho báo cáo nguồn — CSV điểm (/api/results.csv) giữ nguyên."""
+    _check_admin(key)
+    with Session(_engine) as s:
+        rep = _sources_report(s, _day(from_, "from"), _day(to, "to"))
+    buf = io.StringIO(); w = csv.writer(buf)
+    k = ["Số đăng ký", "Đã kích hoạt", "Hoàn thành (≥1 bài ≥%d%%)" % PASS_PCT, "Hoàn thành trong %d ngày" % KPI_DAYS]
+    def nums(x): return [x["registered"], x["activated"], x["completed"], x["completed_7d"]]
+    w.writerow(["Bảng", "Nguồn / chiến dịch / người giới thiệu", "Tuần / mã", "Loại TK người giới thiệu"] + k)
+    for x in rep["by_source_week"]:
+        w.writerow(["Nguồn × tuần", x["utm_source"], x["week"], ""] + nums(x))
+    for x in rep["by_campaign"]:
+        w.writerow(["Chiến dịch", x["utm_campaign"], "", ""] + nums(x))
+    for x in rep["top_referrers"]:
+        w.writerow(["Top người giới thiệu", x["referrer_name"], x["referrer_code"] or x["ref_code"], x["referrer_type"],
+                    x["invited"], x["activated"], x["completed"], x["completed_7d"]])
+    w.writerow(["Tổng", "", "", ""] + nums(rep["totals"]))
+    data = "\ufeff" + buf.getvalue()
+    return StreamingResponse(io.BytesIO(data.encode("utf-8")), media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=svws_training_nguon_dang_ky.csv"})
 
 # ---------------- TRANG GIAO DIỆN ----------------
 @router.get("", include_in_schema=False)
@@ -798,6 +992,13 @@ label.chk input{width:auto;margin:2px 0 0;flex:none}
 </div>
 <script>
 const T0=Date.now();const $=id=>document.getElementById(id);
+/* H2: giữ nguồn đăng ký (UTM) + mã giới thiệu trong sessionStorage để không mất khi chuyển tab/trang */
+const SRC_KEYS=['utm_source','utm_medium','utm_campaign','utm_content','ref'];
+function srcGet(){try{return JSON.parse(sessionStorage.getItem('svws_trn_src')||'{}')}catch(e){return{}}}
+(function(){const q=new URLSearchParams(location.search),o=srcGet();let ch=false;
+ for(const k of SRC_KEYS){const v=(q.get(k)||'').trim().slice(0,80);if(v){o[k]=v;ch=true;}}
+ if(!o.landing_path){o.landing_path=(location.pathname+location.search).slice(0,80);ch=true;}
+ if(ch){try{sessionStorage.setItem('svws_trn_src',JSON.stringify(o))}catch(e){}}})();
 let mode=(location.search.indexOf('nv=1')>=0)?'emp':(location.search.indexOf('ks=1')>=0)?'eng':'stu';let lastEmail='';
 const FORMS={stu:['tS','fS'],emp:['tE','fE'],eng:['tK','fK']};
 function sw(m){mode=m;for(const k in FORMS){$(FORMS[k][0]).classList.toggle('on',k===m);$(FORMS[k][1]).style.display=k===m?'':'none';}$('c_shL').style.display=m==='eng'?'':'none';$('e1').textContent='';}
@@ -812,7 +1013,7 @@ $('b1').onclick=async()=>{
   if(!$('k_rg').value){$('e1').textContent='Chọn nhóm công việc.';return;}
   lastEmail=$('k_em').value;b={full_name:$('k_fn').value,phone:$('k_ph').value,email:$('k_em').value,company:$('k_co').value,industrial_zone:$('k_kz').value,province:$('k_pv').value,job_title:$('k_jt').value,role_group:$('k_rg').value,password:$('k_pw').value,share_company:$('c_sh').checked,website:$('website').value,ts:T0};url='/training/api/engineer/register';}
  else{lastEmail=$('e_em').value;b={emp_code:$('e_mc').value,full_name:$('e_fn').value,email:$('e_em').value,password:$('e_pw').value,website:$('website').value,ts:T0};url='/training/api/staff/register';}
- b.agree_terms=$('c_terms').checked;b.marketing=$('c_mkt').checked;
+ b.agree_terms=$('c_terms').checked;b.marketing=$('c_mkt').checked;Object.assign(b,srcGet());
  $('e1').textContent='Đang gửi…';
  try{const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});
  const d=await r.json();
@@ -882,6 +1083,9 @@ th,td{border:1px solid #e3eaf4;padding:7px 9px;text-align:left}th{background:#ee
 <h2>🎓 Sinh viên <span class=mut id=stuCount></span></h2><div id=stu></div>
 <h2>🏭 Kỹ sư / KTV nhà máy <span class=mut id=engCount></span></h2>
 <div class=bar><input id=fCo placeholder="Lọc theo công ty" size=22><input id=fKz placeholder="Lọc theo KCN" size=18><button class=mini onclick=loadEng()>Lọc</button></div><div id=eng></div>
+<h2>📣 Nguồn đăng ký <span class=mut>(sinh viên + kỹ sư, không đếm nhân viên · hoàn thành = ≥1 bài ≥80% · KPI = hoàn thành trong 7 ngày kể từ đăng ký)</span></h2>
+<div class=bar>Từ <input id=sFrom type=date> đến <input id=sTo type=date><button class=mini onclick=loadSrc()>Xem</button>
+<button class=mini style="background:#13315c" onclick=dlsrc()>⬇ CSV nguồn</button><span class=mut id=srcTot></span></div><div id=src></div>
 <h2>📈 Thống kê học viên <span class=mut>(điểm cao nhất mỗi bài · ĐẠT = ≥80% · chương trình 95 chuyên đề)</span></h2><div id=stats></div>
 <h2>📚 Thống kê theo mục</h2><div id=dstats></div>
 <h2>📊 Bảng điểm chi tiết</h2><div id=out></div></div>
@@ -891,7 +1095,22 @@ function tagOf(s){return s==='pending'?'<span class="tag tP">Chờ duyệt</span
 function btns(x,api){return (x.status!=='active'?'<button class=mini onclick=act("'+api+'",'+x.id+',"approve")>Duyệt</button> ':'')
  +(x.status!=='blocked'?'<button class="mini blk" onclick=act("'+api+'",'+x.id+',"block")>Chặn</button> ':'')
  +'<button class="mini del" onclick=act("'+api+'",'+x.id+',"delete")>Xóa</button>';}
-async function loadAll(){$('st').textContent='Đang tải…';await loadEmp();await loadStu();await loadEng();await loadSum();}
+async function loadAll(){$('st').textContent='Đang tải…';await loadEmp();await loadStu();await loadEng();await loadSrc();await loadSum();}
+function srcQ(){return 'key='+encodeURIComponent(K())+'&from='+encodeURIComponent($('sFrom').value)+'&to='+encodeURIComponent($('sTo').value);}
+function dlsrc(){location.href='/training/api/sources.csv?'+srcQ();}
+function nums(x){return '<td>'+x.registered+'</td><td>'+x.activated+'</td><td>'+x.completed+'</td><td>'+x.completed_7d+'</td>';}
+const NH='<th>Đăng ký</th><th>Kích hoạt</th><th>Hoàn thành</th><th>HT ≤7 ngày</th>';
+async function loadSrc(){
+ try{const r=await fetch('/training/api/sources?'+srcQ());if(!r.ok){$('src').innerHTML='';return;}
+ const d=await r.json();const t=d.totals;
+ $('srcTot').textContent='Tổng: '+t.registered+' đăng ký · '+t.activated+' kích hoạt · '+t.completed+' hoàn thành · '+t.completed_7d+' hoàn thành ≤7 ngày';
+ let h='<p class=mut>Theo nguồn × tuần</p><table><tr><th>utm_source</th><th>Tuần</th>'+NH+'</tr>';
+ for(const x of d.by_source_week)h+='<tr><td>'+esc(x.utm_source)+'</td><td>'+x.week+'</td>'+nums(x)+'</tr>';
+ h+='</table><p class=mut>Theo chiến dịch</p><table><tr><th>utm_campaign</th>'+NH+'</tr>';
+ for(const x of d.by_campaign)h+='<tr><td>'+esc(x.utm_campaign)+'</td>'+nums(x)+'</tr>';
+ h+='</table><p class=mut>Top 20 người giới thiệu (nhân viên SVWS cũng được tính)</p><table><tr><th>Người giới thiệu</th><th>Mã TK</th><th>Mã giới thiệu</th><th>Số người mời</th><th>Kích hoạt</th><th>Hoàn thành</th><th>HT ≤7 ngày</th></tr>';
+ for(const x of d.top_referrers)h+='<tr><td>'+esc(x.referrer_name)+'</td><td>'+esc(x.referrer_code)+'</td><td>'+esc(x.ref_code)+'</td><td>'+x.invited+'</td><td>'+x.activated+'</td><td>'+x.completed+'</td><td>'+x.completed_7d+'</td></tr>';
+ $('src').innerHTML=h+'</table>';}catch(e){}}
 function esc(v){return String(v==null?'':v).replace(/[&<>"']/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
 async function loadEng(){
  try{const r=await fetch('/training/api/engineers?key='+encodeURIComponent(K())+'&company='+encodeURIComponent($('fCo').value)+'&zone='+encodeURIComponent($('fKz').value));if(!r.ok){$('eng').innerHTML='';return;}
