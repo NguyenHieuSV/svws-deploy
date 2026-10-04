@@ -1737,12 +1737,17 @@ goHome();
      const d=await r.json(); if(d.need_consent)showConsent(d);
    }catch(e){}
  }
+ function consentBody(ov,token,m,sc){
+   const b={token:token,terms:true,marketing:ov.querySelector(m).checked},x=ov.querySelector(sc);
+   if(x)b.share_company=x.checked; return b;
+ }
  function showConsent(d){
    if(document.querySelector('.trnOv'))return;
    const ov=document.createElement('div');ov.className='trnOv';
    ov.innerHTML='<div class="trnBox"><h2>📄 Cập nhật điều khoản</h2><p>SVWS Training đã ban hành '+TERMS_LINKS+' (phiên bản '+(d.policy_version||'')+'). Vui lòng đọc và xác nhận để tiếp tục dùng app.</p>'
    +'<label class="trnChk"><input type="checkbox" id="cfT"> <span>Tôi đã đọc và đồng ý '+TERMS_LINKS+'. *</span></label>'
    +'<label class="trnChk"><input type="checkbox" id="cfM"'+(d.marketing?' checked':'')+'> <span>Nhận thông tin tuyển dụng, thực tập, sự kiện từ SVWS (tùy chọn).</span></label>'
+   +('share_company' in d?'<label class="trnChk"><input type="checkbox" id="cfS"'+(d.share_company?' checked':'')+'> <span>Chia sẻ kết quả học với công ty tôi (tùy chọn).</span></label>':'')
    +'<div class="trnErr" id="cfE"></div><button class="trnGo" id="cfGo">Đồng ý và tiếp tục</button>'
    +'<button class="trnOff" id="cfOut">Không đồng ý — đăng xuất</button></div>';
    document.body.appendChild(ov);
@@ -1752,7 +1757,7 @@ goHome();
      if(!ov.querySelector('#cfT').checked){err.textContent='Vui lòng tick ô đồng ý (bắt buộc).';return;}
      err.textContent='Đang lưu…';
      try{
-       const r=await fetch(API+'/me/consent',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:auth().token,terms:true,marketing:ov.querySelector('#cfM').checked})});
+       const r=await fetch(API+'/me/consent',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(consentBody(ov,auth().token,'#cfM','#cfS'))});
        const x=await r.json().catch(function(){return{}});
        if(!r.ok){err.textContent=x.detail||'Không lưu được.';return;}
        ov.remove();
@@ -1768,6 +1773,7 @@ goHome();
    const ov=document.createElement('div');ov.className='trnOv';
    ov.innerHTML='<div class="trnBox"><h2>⚙ Tài khoản của tôi</h2><p>'+esc(d.name)+' · '+esc(d.code)+'<br>'+esc(d.email)+'</p>'
    +'<div class="trnSec"><b>Lựa chọn</b><label class="trnChk"><input type="checkbox" id="acM"'+(d.marketing?' checked':'')+'> <span>Nhận thông tin tuyển dụng, thực tập, sự kiện từ SVWS</span></label>'
+   +('share_company' in d?'<label class="trnChk"><input type="checkbox" id="acS"'+(d.share_company?' checked':'')+'> <span>Chia sẻ kết quả học với công ty tôi</span></label>':'')
    +'<p style="margin:0 0 8px">Đã đồng ý '+TERMS_LINKS+' (phiên bản '+(d.policy_version||'')+').</p>'
    +'<div class="trnOk" id="acOk"></div><button class="trnGo" id="acSave">Lưu lựa chọn</button></div>'
    +'<div class="trnSec"><b>Dữ liệu của tôi</b><button class="trnOff" id="acDl" style="margin-top:0">⬇ Tải dữ liệu của tôi (JSON)</button></div>'
@@ -1779,7 +1785,7 @@ goHome();
    ov.querySelector('#acX').onclick=function(){ov.remove();};
    ov.querySelector('#acSave').onclick=async function(){
      ok.textContent='Đang lưu…';
-     try{const r=await fetch(API+'/me/consent',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:a.token,terms:true,marketing:ov.querySelector('#acM').checked})});
+     try{const r=await fetch(API+'/me/consent',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(consentBody(ov,a.token,'#acM','#acS'))});
        ok.textContent=r.ok?'✅ Đã lưu.':'Không lưu được.';}catch(e){ok.textContent='Không kết nối được máy chủ.';}
    };
    ov.querySelector('#acDl').onclick=async function(){
@@ -1803,7 +1809,7 @@ goHome();
    if(document.querySelector('.trnOv'))return;
    const ov=document.createElement('div');ov.className='trnOv';
    ov.innerHTML='<div class="trnBox"><h2>💧 SVWS Training</h2><p>Đăng nhập để điểm bài test được ghi nhận.</p>'
-   +'<div class="trnTabs"><div class="trnTab on" id="tabE">👷 Nhân viên SVWS</div><div class="trnTab" id="tabS">🎓 Sinh viên</div></div>'
+   +'<div class="trnTabs"><div class="trnTab on" id="tabE">👷 Nhân viên SVWS</div><div class="trnTab" id="tabS">🎓 Sinh viên</div><div class="trnTab" id="tabK">🏭 Kỹ sư</div></div>'
    +'<input id="lgId" placeholder="Email công ty" maxlength="120">'
    +'<input id="lgPw" type="password" placeholder="Mật khẩu" maxlength="60">'
    +'<div class="trnErr" id="trnErr"></div><button class="trnGo" id="trnGo">Đăng nhập</button>'
@@ -1811,21 +1817,21 @@ goHome();
    +'<button class="trnOff" id="trnOffB">Học offline — điểm chỉ lưu trên máy này</button></div>';
    document.body.appendChild(ov);
    let mode='emp';
-   const tE=ov.querySelector('#tabE'),tS=ov.querySelector('#tabS'),idI=ov.querySelector('#lgId'),pwI=ov.querySelector('#lgPw'),err=ov.querySelector('#trnErr');
-   function sw(m){mode=m;tE.classList.toggle('on',m==='emp');tS.classList.toggle('on',m==='stu');idI.placeholder=m==='emp'?'Email công ty':'Email hoặc số điện thoại';pwI.placeholder=m==='emp'?'Mật khẩu = phần trước @ của email':'Mật khẩu';err.textContent='';}
+   const tE=ov.querySelector('#tabE'),tS=ov.querySelector('#tabS'),tK=ov.querySelector('#tabK'),idI=ov.querySelector('#lgId'),pwI=ov.querySelector('#lgPw'),err=ov.querySelector('#trnErr');
+   function sw(m){mode=m;tE.classList.toggle('on',m==='emp');tS.classList.toggle('on',m==='stu');tK.classList.toggle('on',m==='eng');idI.placeholder=m==='emp'?'Email công ty':'Email hoặc số điện thoại';pwI.placeholder=m==='emp'?'Mật khẩu = phần trước @ của email':'Mật khẩu';err.textContent='';}
    sw('emp');
-   tE.onclick=function(){sw('emp')}; tS.onclick=function(){sw('stu')};
-   ov.querySelector('#trnRegB').onclick=function(){location.href='/training/register'+(mode==='emp'?'?nv=1':'');};
+   tE.onclick=function(){sw('emp')}; tS.onclick=function(){sw('stu')}; tK.onclick=function(){sw('eng')};
+   ov.querySelector('#trnRegB').onclick=function(){location.href='/training/register'+(mode==='emp'?'?nv=1':mode==='eng'?'?ks=1':'');};
    ov.querySelector('#trnGo').onclick=async function(){
      const id=idI.value.trim(),pw=ov.querySelector('#lgPw').value;
      if(!id||!pw){err.textContent='Nhập email và mật khẩu.';return;}
      err.textContent='Đang đăng nhập…';
      try{
-       const url=API+(mode==='emp'?'/staff/login':'/student/login');
+       const url=API+(mode==='emp'?'/staff/login':mode==='eng'?'/engineer/login':'/student/login');
        const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:id,password:pw})});
        const d=await r.json().catch(function(){return{}});
        if(!r.ok){err.textContent=d.detail||'Đăng nhập không thành công.';return;}
-       setAuth({code:d.emp_code||d.student_code,name:d.name,token:d.token});ov.remove();updateChip();flush();
+       setAuth({code:d.emp_code||d.student_code||d.eng_code,name:d.name,token:d.token});ov.remove();updateChip();flush();
        if(d.need_consent)showConsent(d);
      }catch(e){err.textContent='Không kết nối được máy chủ — kiểm tra mạng, hoặc chọn Học offline.';}
    };
