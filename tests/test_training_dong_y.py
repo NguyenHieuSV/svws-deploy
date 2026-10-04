@@ -229,3 +229,31 @@ def test_admin_xoa_don_du_lieu_giong_nguoi_dung_tu_xoa(c):
         kept = s.exec(select(TrnConsent).where(TrnConsent.subject_ref == training._anon_code(code))).all()
         assert kept and all(x.account_id == 0 and x.ip == "" for x in kept)
     assert c.get(f"/training/api/me?token={tok}").status_code == 401
+
+
+def test_xoa_tai_khoan_moi_nhat_khong_cap_lai_ma(c):
+    """Xóa đúng tài khoản MỚI NHẤT (mã lớn nhất) -> người đăng ký kế tiếp KHÔNG được nhận lại mã đó."""
+    b1, _, l1 = _dang_ky_duyet_dang_nhap(c)
+    b2, sid2, l2 = _dang_ky_duyet_dang_nhap(c)                   # mới nhất
+    assert int(l2["student_code"][4:]) > int(l1["student_code"][4:])
+    c.post("/training/api/me/delete", json={"token": l2["token"], "password": b2["password"]})
+    b3, _, l3 = _dang_ky_duyet_dang_nhap(c)
+    assert l3["student_code"] != l2["student_code"]
+    assert int(l3["student_code"][4:]) == int(l2["student_code"][4:]) + 1
+    # admin xóa tài khoản mới nhất cũng vậy
+    sid3 = [x for x in c.get(f"/training/api/students?key={KEY}").json()["students"] if x["email"] == b3["email"]][0]["id"]
+    c.post("/training/api/students/action", json={"key": KEY, "id": sid3, "action": "delete"})
+    b4, _, l4 = _dang_ky_duyet_dang_nhap(c)
+    assert int(l4["student_code"][4:]) == int(l3["student_code"][4:]) + 1
+
+
+def test_ma_tiep_noi_du_lieu_cu_khi_bang_seq_chua_co(c):
+    """Triển khai lên DB đang chạy: trn_code_seq trống -> lấy mốc từ mã lớn nhất hiện có, không cấp trùng."""
+    with Session(c.engine) as s:
+        top = max([int(x[4:]) for x in s.exec(select(TrnStudent.student_code)).all()
+                   if x and x.startswith("SVU-") and x[4:].isdigit()] + [0]) + 500
+        s.add(TrnStudent(full_name="Dữ Liệu Cũ", phone=_phone(), email=f"old{uuid.uuid4().hex[:8]}@gmail.com",
+                         school="X", course="K", salt="s", pw_hash="x", status="active", student_code="SVU-%04d" % top))
+        s.commit()
+    b, _, lg = _dang_ky_duyet_dang_nhap(c)
+    assert int(lg["student_code"][4:]) == top + 1
