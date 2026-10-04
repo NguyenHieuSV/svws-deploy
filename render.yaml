@@ -7,7 +7,7 @@ databases:
   - name: svws-db-iit7
     plan: basic-256mb
     databaseName: svws_gu1s
-    user: svws          # TODO kiểm tra: tên user thực tế trên Dashboard (Connections → Username)
+    user: projectflow_db_ursq_user
 
 services:
   - type: web

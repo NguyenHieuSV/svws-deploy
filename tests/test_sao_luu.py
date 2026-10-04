@@ -116,6 +116,7 @@ def test_render_yaml_khop_tai_nguyen_thuc_te():
     db = cfg["databases"][0]
     web = cfg["services"][0]
     assert (db["name"], db["plan"], db["databaseName"]) == ("svws-db-iit7", "basic-256mb", "svws_gu1s")
+    assert db["user"] == "projectflow_db_ursq_user"
     assert (web["name"], web["plan"]) == ("svws-app-iit7", "starter")
     env = {e["key"]: e for e in web["envVars"]}
     assert env["DATABASE_URL"]["fromDatabase"]["name"] == db["name"]
