@@ -1814,12 +1814,15 @@ def _tra_theo_thang_cn(db, cn_ids) -> dict:
 
 def _gan_thuc_chi(db, items):
     """Gắn THỰC CHI cho từng khoản vốn: da_tra (tiền thật đã trả NCC, lũy kế — sổ công nợ), tra_thang ({tháng: tiền}, tổng ≤ da_tra),
-    theo_doi=False khi không theo dõi được (nguyên giá nhập tay, chi phí vận hành, phần chênh VAT)."""
-    from ..models import DonMua
+    theo_doi=False khi không theo dõi được (nguyên giá nhập tay, chi phí vận hành, phần chênh VAT).
+    Phần đã trả CHƯA có dòng ngày trên sổ thanh toán (cọc / đợt ghi thẳng trên PO, không qua Duyệt chi) → lấy NGÀY GHI TRÊN PO:
+    đợt thanh toán của PO (DonMuaDotTt.ngay), còn dư thì ngày thanh toán gần nhất của PO (ngay_tt) — tra_thang_po ({tháng: tiền},
+    đã nằm trong tra_thang) để giao diện gắn nhãn «ngày theo PO» (kém chắc hơn sổ thanh toán)."""
+    from ..models import DonMua, DonMuaDotTt
     from .ncc import _da_tra_that
     for it in items:
-        it["theo_doi"], it["da_tra"], it["tra_thang"] = True, 0.0, {}
-        cn_ids = []
+        it["theo_doi"], it["da_tra"], it["tra_thang"], it["tra_thang_po"] = True, 0.0, {}, {}
+        cn_ids, dm = [], None
         if it.get("_dm"):
             dm = db.get(DonMua, it["_dm"])
             if dm is not None:
@@ -1837,15 +1840,33 @@ def _gan_thuc_chi(db, items):
         else:
             it["theo_doi"] = False
             it["da_tra"] = None
-        if cn_ids and it["da_tra"]:
+        con, tt = float(it["da_tra"] or 0), {}
+        if cn_ids and con > 0:
             tt = _tra_theo_thang_cn(db, cn_ids)
-            con = it["da_tra"]
             for k in sorted(tt):                       # không vượt số đã trả thật (sổ công nợ là nguồn sự thật)
                 v = min(float(tt[k]), con)
                 if v <= 0:
                     break
                 it["tra_thang"][k] = v
                 con -= v
+        if dm is not None and con > 0.5:               # phần đã trả chưa có dòng ngày trên sổ → ngày ghi trên PO
+            dot = {}
+            for (ngay, st) in db.query(DonMuaDotTt.ngay, DonMuaDotTt.so_tien).filter(DonMuaDotTt.don_mua_id == dm.id).all():
+                if ngay:
+                    dot[str(ngay)[:7]] = dot.get(str(ngay)[:7], 0.0) + float(st or 0)
+            for k in sorted(dot):                      # đợt cùng tháng đã có dòng sổ thanh toán → không tính lần 2
+                v = min(max(dot[k] - float(tt.get(k, 0.0)), 0.0), con)
+                if v <= 0:
+                    continue
+                it["tra_thang_po"][k] = it["tra_thang_po"].get(k, 0.0) + v
+                con -= v
+            ngay_tt = dm.ngay_tt or dm.ngay_tt_du
+            if con > 0.5 and ngay_tt:
+                k = str(ngay_tt)[:7]
+                it["tra_thang_po"][k] = it["tra_thang_po"].get(k, 0.0) + con
+                con = 0.0
+            for k, v in it["tra_thang_po"].items():
+                it["tra_thang"][k] = it["tra_thang"].get(k, 0.0) + v
         for k in ("_dm", "_cn", "_hd"):
             it.pop(k, None)
     return items
@@ -1930,7 +1951,8 @@ def _dau_tu_items_du_an(db, ts, du_an_row, po_mm_items):
 @router.get("/dau-tu-khau-hao")
 def dau_tu_khau_hao(tu_thang: str = "2026-07", db: Session = Depends(get_db), _=Depends(chi_vai_tro("CEO"))):
     """🏗 Overall Financial › Đầu tư / Khấu hao: theo MÃ dự án cho thuê, tính từ `tu_thang` (mặc định 07/2026):
-    vốn đầu tư thực tế phát sinh trong kỳ (theo chứng từ) · THỰC CHI (tiền thật đã trả NCC, theo ngày trả) · khấu hao trong kỳ
+    vốn đầu tư thực tế phát sinh trong kỳ (theo chứng từ) · THỰC CHI (tiền thật đã trả NCC, theo ngày trả — sổ thanh toán, thiếu
+    thì ngày ghi trên PO, đánh dấu thuc_chi_po) · khấu hao trong kỳ
     (vốn ÷ số tháng hợp đồng, từng tháng từ tháng bắt đầu HĐ) · doanh thu thực tế các đơn tháng (gồm VAT, cùng Lãi/Lỗ Record) ·
     chi phí vận hành · lãi sau khấu hao; kèm bảng theo tháng. Chỉ CEO — số vốn đầu tư."""
     import re as _re
@@ -1950,10 +1972,10 @@ def dau_tu_khau_hao(tu_thang: str = "2026-07", db: Session = Depends(get_db), _=
     po_mm = po_ma_me_cua_du_an(db, list(ds_ts.values()))
     kh_ten = {k.id: k.ten for k in db.query(KhachHang).all()}
     out = []
-    keys = ("dau_tu_ky", "dau_tu_tong", "thuc_chi_ky", "thuc_chi_tong", "thuc_chi_khong_ngay", "con_no", "khong_theo_doi",
+    keys = ("dau_tu_ky", "dau_tu_tong", "thuc_chi_ky", "thuc_chi_ky_po", "thuc_chi_tong", "thuc_chi_khong_ngay", "con_no", "khong_theo_doi",
             "kh_ky", "kh_luy_ke", "dt_ky", "cp_vh_ky", "lai_ky")
     tong = {k: 0.0 for k in keys}
-    tt_thang = {m: {"dau_tu": 0.0, "thuc_chi": 0.0, "khau_hao": 0.0, "doanh_thu": 0.0, "cp_vh": 0.0} for m in months}
+    tt_thang = {m: {"dau_tu": 0.0, "thuc_chi": 0.0, "thuc_chi_po": 0.0, "khau_hao": 0.0, "doanh_thu": 0.0, "cp_vh": 0.0} for m in months}
     for r in th["du_an"]:
         ts = ds_ts.get(r["tai_san_id"])
         if ts is None:
@@ -1978,7 +2000,7 @@ def dau_tu_khau_hao(tu_thang: str = "2026-07", db: Session = Depends(get_db), _=
                 if m > 12:
                     y, m = y + 1, 1
         cp_thang = chi_phi_du_an_theo_thang(db, ts, months)
-        theo, dau_tu_ky, tc_ky, kh_ky, dt_ky, cp_ky = [], 0.0, 0.0, 0.0, 0.0, 0.0
+        theo, dau_tu_ky, tc_ky, kh_ky, dt_ky, cp_ky, tc_ky_po = [], 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
         for mk in months:
             y, mm = int(mk[:4]), int(mk[5:7])
             dt = 0.0
@@ -1988,12 +2010,14 @@ def dau_tu_khau_hao(tu_thang: str = "2026-07", db: Session = Depends(get_db), _=
                 dt += float(chi_phi_ma(db, dh)["doanh_thu"] or 0)
             dtu = sum(float(x["tong"]) for x in items if (x.get("ngay") or "")[:7] == mk)
             tcm = sum(float((x.get("tra_thang") or {}).get(mk, 0.0)) for x in items)
+            tcm_po = sum(float((x.get("tra_thang_po") or {}).get(mk, 0.0)) for x in items)   # trong đó: ngày theo PO
             khm = float(kh_thang.get(mk, 0.0))
             cpm = float((cp_thang.get(mk) or {}).get("tong", 0.0))
-            theo.append({"thang": mk, "dau_tu": dtu, "thuc_chi": tcm, "khau_hao": khm, "doanh_thu": dt, "cp_vh": cpm, "lai": dt - cpm - khm})
-            dau_tu_ky += dtu; tc_ky += tcm; kh_ky += khm; dt_ky += dt; cp_ky += cpm
+            theo.append({"thang": mk, "dau_tu": dtu, "thuc_chi": tcm, "thuc_chi_po": tcm_po, "khau_hao": khm, "doanh_thu": dt,
+                         "cp_vh": cpm, "lai": dt - cpm - khm})
+            dau_tu_ky += dtu; tc_ky += tcm; tc_ky_po += tcm_po; kh_ky += khm; dt_ky += dt; cp_ky += cpm
             t0 = tt_thang[mk]
-            t0["dau_tu"] += dtu; t0["thuc_chi"] += tcm; t0["khau_hao"] += khm; t0["doanh_thu"] += dt; t0["cp_vh"] += cpm
+            t0["dau_tu"] += dtu; t0["thuc_chi"] += tcm; t0["thuc_chi_po"] += tcm_po; t0["khau_hao"] += khm; t0["doanh_thu"] += dt; t0["cp_vh"] += cpm
         theo_doi = [x for x in items if x.get("theo_doi")]
         tc_tong = sum(float(x["da_tra"] or 0) for x in theo_doi)
         tc_co_ngay = sum(sum(float(v) for v in (x.get("tra_thang") or {}).values()) for x in theo_doi)
@@ -2002,7 +2026,8 @@ def dau_tu_khau_hao(tu_thang: str = "2026-07", db: Session = Depends(get_db), _=
                "ngay_ket_thuc_hd": r.get("ngay_ket_thuc_hd"), "khau_hao_thang": kh, "khau_hao_nhap_tay": bool(r.get("khau_hao_nhap_tay")),
                "dau_tu_ky": dau_tu_ky, "dau_tu_tong": von, "dau_tu_truoc_ky": max(von - dau_tu_ky, 0.0),
                "dau_tu_khong_ngay": sum(float(x["tong"]) for x in items if not x.get("ngay")),
-               "thuc_chi_ky": tc_ky, "thuc_chi_tong": tc_tong, "thuc_chi_khong_ngay": max(tc_tong - tc_co_ngay, 0.0),
+               "thuc_chi_ky": tc_ky, "thuc_chi_ky_po": tc_ky_po, "thuc_chi_tong": tc_tong,
+               "thuc_chi_khong_ngay": max(tc_tong - tc_co_ngay, 0.0),
                "con_no": sum(max(float(x["tong"]) - float(x["da_tra"] or 0), 0.0) for x in theo_doi),
                "khong_theo_doi": sum(float(x["tong"]) for x in items if not x.get("theo_doi")),
                "kh_ky": kh_ky, "kh_luy_ke": float(r.get("khau_hao_luy_ke") or 0), "gia_tri_con_lai": float(r.get("gia_tri_con_lai") or 0),
