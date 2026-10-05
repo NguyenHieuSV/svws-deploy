@@ -43,6 +43,8 @@ def _init_registry():
 _HTML = os.path.join(os.path.dirname(__file__), "..", "svws_app.html")
 _HUONG_DAN = os.path.join(os.path.dirname(__file__), "..", "huong_dan.html")
 _SO_TAY = os.path.join(os.path.dirname(__file__), "..", "so_tay_quy_che.docx")
+_QC_TOAN_VAN = os.path.join(os.path.dirname(__file__), "..", "quy_che_toan_van.json")   # sinh bằng scripts/tach_quy_che.py
+_qc_tv_nho = {"mtime": None, "data": {}}
 _CHUP_ANH = os.path.join(os.path.dirname(__file__), "..", "static", "chup-anh.html")
 
 
@@ -108,6 +110,26 @@ def so_tay_quy_che():
             filename="So tay quy che cong ty - Song Viet.docx",
             headers=_NO_CACHE)
     return {"he_thong": "SVWS", "trang_thai": "chua co so tay quy che"}
+
+
+@app.get("/quy-che/toan-van/{ma_so}")
+def quy_che_toan_van(ma_so: str):
+    """Toàn văn MỘT quy chế (HTML gọn) cho tab Tổng quan › Quy chế công ty — cùng nội dung với Sổ tay Word tải về.
+    Công khai như /so-tay-quy-che (quy chế phổ biến cho mọi người lao động); đọc file JSON sinh sẵn, nhớ theo mtime."""
+    import json
+    from fastapi import HTTPException
+    try:
+        mt = os.path.getmtime(_QC_TOAN_VAN)
+        if _qc_tv_nho["mtime"] != mt:
+            with open(_QC_TOAN_VAN, encoding="utf-8") as f:
+                _qc_tv_nho["data"] = json.load(f)
+            _qc_tv_nho["mtime"] = mt
+    except (OSError, ValueError):
+        raise HTTPException(404, "Chưa có toàn văn quy chế trên máy chủ")
+    vb = (_qc_tv_nho["data"].get("van_ban") or {}).get(ma_so)
+    if vb is None:
+        raise HTTPException(404, "Không có văn bản này")
+    return vb
 
 
 def _luu_chat_dm(d: dict):
