@@ -15,7 +15,7 @@ THU = ["Thứ Hai", "Thứ Ba", "Thứ Tư", "Thứ Năm", "Thứ Sáu", "Thứ 
 _khoa = threading.Lock()                       # một lần chạy tại một thời điểm (trong tiến trình này)
 # cộng dồn qua các vòng lặp = việc MỚI làm ở từng vòng (hóa đơn trả da_them/ai; báo giá trả them/khong_doc; spec xu_ly/so_spec).
 # Khóa khác (thu_moi/so_thu, trung, khong_khop, con_lai) là trạng thái lặp lại mỗi vòng → lấy giá trị cuối.
-_TONG = ("them", "da_them", "ai", "dung_ai", "khong_doc", "xu_ly", "so_spec")
+_TONG = ("them", "da_them", "ai", "dung_ai", "khong_doc", "xu_ly", "so_spec", "hd_ban")
 
 
 def cau_hinh(db):
@@ -160,6 +160,7 @@ def gui_ban_tin(kq: dict) -> dict:
             + f" · thư từ {kq.get('tu_ngay')}\n"
             f"• 🧾 Hóa đơn mua: {hd.get('da_them', hd.get('them', 0))} thư mới"
             + (f" (AI đọc {hd.get('ai', 0)})" if hd.get('ai') else "")
+            + (f" · 📤 {hd.get('hd_ban', 0)} thư là hóa đơn BÁN của công ty (cổng HĐĐT) → Hóa đơn gửi khách" if hd.get('hd_ban') else "")
             + f" → Kế toán › Hóa đơn chờ (đang chờ: {cho.get('hoa_don', '?')})\n"
             f"• 💰 Báo giá / datasheet: {bg.get('them', 0)} thư mới"
             + (f" ({bg.get('khong_doc', 0)} thư AI chưa đọc được)" if bg.get('khong_doc') else "")

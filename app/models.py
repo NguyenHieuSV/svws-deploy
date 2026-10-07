@@ -1153,6 +1153,13 @@ class KtHdGuiKhach(Base):
     nguoi_xu_ly: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     xu_ly_luc: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     tao_luc: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # mig 145: thư cổng HĐĐT (MISA meInvoice…) báo hóa đơn BÁN của công ty
+    nguon: Mapped[str | None] = mapped_column(String(12), nullable=True)                 # BCC | HDDT
+    tien_truoc_thue: Mapped[Decimal | None] = mapped_column(Numeric(18, 0), nullable=True)
+    tien_thue: Mapped[Decimal | None] = mapped_column(Numeric(18, 0), nullable=True)
+    link_tra_cuu: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    ma_tra_cuu: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    noi_dung: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class NghiTrungBoQua(Base):

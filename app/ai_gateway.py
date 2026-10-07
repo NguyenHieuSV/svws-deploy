@@ -1225,9 +1225,11 @@ def doc_hoa_don_email(tieu_de: str, noi_dung: str, goi_y: str | None = None) -> 
     if (settings.ai_provider or "").upper() != "ANTHROPIC" or not settings.anthropic_api_key:
         return None
     khoi = {"type": "text", "text": f"TIÊU ĐỀ: {tieu_de}\n\nNỘI DUNG EMAIL:\n{(noi_dung or '')[:6000]}"}
-    sys_p = ("Bạn là kế toán Việt Nam. Đọc email hóa đơn/đề nghị thanh toán của nhà cung cấp "
+    sys_p = ("Bạn là kế toán Việt Nam. Đọc email hóa đơn/đề nghị thanh toán của nhà cung cấp, hoặc thư của cổng "
+             "hóa đơn điện tử (MISA meInvoice, VNPT, Viettel…) báo một hóa đơn đã phát hành, "
              "và trả về DUY NHẤT một JSON object: "
-             '{"ncc_ten": string|null (tên công ty NCC), "so_hoa_don": string|null, '
+             '{"ncc_ten": string|null (tên công ty BÊN BÁN / đơn vị phát hành hóa đơn), '
+             '"nguoi_mua": string|null (tên đơn vị MUA / nhận hóa đơn, nếu thư ghi), "so_hoa_don": string|null, '
              '"ngay": "YYYY-MM-DD"|null (ngày hóa đơn), '
              '"so_tien": number|null (TỔNG TIỀN gồm VAT, đơn vị VNĐ, chỉ chữ số), '
              '"tien_truoc_thue": number|null (tiền hàng CHƯA VAT), '
