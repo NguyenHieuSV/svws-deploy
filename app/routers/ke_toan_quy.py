@@ -2949,7 +2949,7 @@ def _sao_ke_doi_chieu_lo(db, sk, sk_id):
                 else:
                     dung_dachi.add(u["id"])
                 if u is not None:
-                    r["da_xu_ly"] = {"mo_ta": u["mo_ta"]}
+                    r["da_xu_ly"] = {"mo_ta": u["mo_ta"], "ngay": str(u["ngay"]) if u.get("ngay") else None}
                     r["ma_ban"] = r["ma_ban"] or u.get("ma_ban")
         elif vao > 0:
             best = None
@@ -2969,7 +2969,7 @@ def _sao_ke_doi_chieu_lo(db, sk, sk_id):
                 u = _tim(phieu_vao, vao, dung_pvao, 3)
                 if u is not None:
                     dung_pvao.add(u["id"])
-                    r["da_xu_ly"] = {"mo_ta": u["mo_ta"]}
+                    r["da_xu_ly"] = {"mo_ta": u["mo_ta"], "ngay": str(u["ngay"]) if u.get("ngay") else None}
                     r["ma_ban"] = r["ma_ban"] or u.get("ma_ban")
 
         # ---------- 🎯 CHẤM ĐIỂM 4 YẾU TỐ trên CÔNG NỢ còn lại ----------
@@ -2985,7 +2985,8 @@ def _sao_ke_doi_chieu_lo(db, sk, sk_id):
                         r["goi_y_chi"] = {"ncc_id": ncc_dg, "ncc_ten": nc0.ten if nc0 else "",
                                           "cong_no_ids": [c["cong_no_id"] for c in combo],
                                           "so_hd": ", ".join(str(c["so_ct"] or ("CN" + str(c["cong_no_id"]))) for c in combo)[:80],
-                                          "tong": sum(c["con_lai"] for c in combo)}
+                                          "tong": sum(c["con_lai"] for c in combo),
+                                          "han": (lambda hs: str(min(hs)) if hs else None)([c["han"] for c in combo if c.get("han")])}
                 if not r["goi_y_chi"]:
                     best, so_exact = None, 0
                     for c in cn_tra_flat:
@@ -3012,11 +3013,11 @@ def _sao_ke_doi_chieu_lo(db, sk, sk_id):
                             r["goi_y_chi"] = {"ncc_id": c["ncc_id"], "ncc_ten": c["ncc_ten"] or "",
                                               "cong_no_ids": [c["cong_no_id"]],
                                               "so_hd": str(c["so_ct"] or ("CN" + str(c["cong_no_id"]))),
-                                              "tong": c["con_lai"]}
+                                              "tong": c["con_lai"], "han": str(c["han"]) if c.get("han") else None}
                         elif du_diem:
                             r["goi_y_chi_phan"] = {"cong_no_id": c["cong_no_id"], "con_lai": c["con_lai"],
                                                    "ncc_ten": c["ncc_ten"] or "", "so_ct": c["so_ct"],
-                                                   "diem": diem}
+                                                   "diem": diem, "han": str(c["han"]) if c.get("han") else None}
                         if du_diem:
                             r["ma_ban"] = r["ma_ban"] or c["ma_ban"]
             else:
@@ -3044,10 +3045,12 @@ def _sao_ke_doi_chieu_lo(db, sk, sk_id):
                     du_diem = diem >= 55 or (exact and so_exact == 1 and diem >= 45)
                     if du_diem and exact:
                         r["goi_y_thu"] = {"cong_no_id": c["cong_no_id"], "con_lai": c["con_lai"],
-                                          "khach": c["khach"], "ma_ban": c["ma_ban"]}
+                                          "khach": c["khach"], "ma_ban": c["ma_ban"],
+                                          "han": str(c["han"]) if c.get("han") else None}
                     elif du_diem:
                         r["goi_y_thu_phan"] = {"cong_no_id": c["cong_no_id"], "con_lai": c["con_lai"],
-                                               "khach": c["khach"], "diem": diem}
+                                               "khach": c["khach"], "diem": diem,
+                                               "han": str(c["han"]) if c.get("han") else None}
                     if du_diem:
                         r["ma_ban"] = r["ma_ban"] or c["ma_ban"]
             # fallback hiển thị SO SÁNH THEO MÃ khi vẫn chưa có gợi ý
