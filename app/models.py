@@ -1599,6 +1599,14 @@ class BgEmailCho(Base):
     nguoi_xac_nhan: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
 
 
+class NhacSaoKeThang(Base):
+    """mig 146: đã nhắc nhóm Duyệt chi NH tải sao kê tháng nào (khóa = tháng, không nhắc trùng)."""
+    __tablename__ = "nhac_sao_ke_thang"
+    thang: Mapped[str] = mapped_column(String(7), primary_key=True)      # YYYY-MM (tháng cần sao kê)
+    gui_luc: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    ket_qua: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+
+
 class CauHinhQuetMail(Base):
     """📬 Cấu hình TỰ QUÉT THƯ HÀNG TUẦN (mig 134) — một dòng id=1."""
     __tablename__ = "cau_hinh_quet_mail"

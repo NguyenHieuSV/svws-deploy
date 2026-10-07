@@ -15,6 +15,7 @@ _CHU_KY = 300          # 5 phút quét một lần
 _luong: threading.Thread | None = None
 _GIO_LAI_LO = ""       # mốc giờ đã chốt Lãi/Lỗ Record gần nhất
 _TUAN_BCVH = ""        # tuần đã gửi nhắc Báo cáo vận hành (thứ Bảy 14h)
+_THANG_SAO_KE = ""     # tháng đã kiểm tra nhắc tải sao kê (ngày 7 hàng tháng)
 
 
 def _vong_lap():
@@ -55,6 +56,20 @@ def _vong_lap():
                     from .routers.cho_thue_ops import gui_nhac_bcvh_tuan
                     kq2 = gui_nhac_bcvh_tuan(db)
                     print(f"[SCHEDULER] Nhắc BCVH tuần: {kq2}")
+                finally:
+                    db.close()
+            # 🧾 Nhắc tải SAO KÊ tháng trước: từ ngày 7 hàng tháng (8h VN) chưa thấy sao kê → nhắc nhóm Duyệt chi NH
+            #    (1 lần/tháng — mốc đã nhắc nằm trong CSDL; app ngủ qua ngày 7 thì lần thức đầu tiên sau đó nhắc bù)
+            global _THANG_SAO_KE
+            g3 = gio_hien_tai()
+            thang3 = g3.strftime("%Y-%m")
+            if g3.day >= 7 and g3.hour >= 8 and _THANG_SAO_KE != thang3:
+                _THANG_SAO_KE = thang3
+                db = SessionLocal()
+                try:
+                    from .routers.tai_chinh import nhac_sao_ke_thang
+                    kq3 = nhac_sao_ke_thang(db)
+                    print(f"[SCHEDULER] Nhắc sao kê tháng: {kq3.get('thang')} → {kq3.get('da_gui')} {kq3.get('ly_do') or kq3.get('loi') or ''}")
                 finally:
                     db.close()
             # 📬 Tự quét thư hàng tuần — «đến hạn thì chạy»: mốc thứ+giờ (VN) lưu trong CSDL; app ngủ qua giờ hẹn
