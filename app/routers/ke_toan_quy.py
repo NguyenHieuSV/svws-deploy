@@ -1951,6 +1951,31 @@ def bo_qua_hoa_don_cho(h_id: int, db: Session = Depends(get_db),
     return {"ok": True}
 
 
+class HdcBoQuaNhieuVao(_BM_hdc):
+    ids: list[int]
+
+
+@router.post("/hoa-don-cho/bo-qua-hang-loat")
+def bo_qua_hoa_don_cho_hang_loat(data: HdcBoQuaNhieuVao, db: Session = Depends(get_db),
+                                 nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    """☑ Bỏ qua NHIỀU dòng chờ một lần (dọn hàng chờ): chỉ dòng đang CHỜ XÁC NHẬN; đã ghi / đã bỏ qua thì giữ nguyên."""
+    from ..models import KtHoaDonCho
+    ids = sorted({int(i) for i in (data.ids or []) if i})[:500]
+    if not ids:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Chưa chọn dòng nào")
+    n, dong = 0, []
+    for r in db.query(KtHoaDonCho).filter(KtHoaDonCho.id.in_(ids)).order_by(KtHoaDonCho.id).all():
+        if r.trang_thai != "CHO_XAC_NHAN":
+            continue
+        r.trang_thai = "BO_QUA"
+        n += 1
+        if len(dong) < 100:
+            dong.append({"id": r.id, "so_hoa_don": r.so_hoa_don, "tong": float(r.tong_tien or 0), "tu_email": r.tu_email})
+    ghi_audit(db, nd.id, "BO_QUA_HD_CHO_LOAT", "kt_hoa_don_cho", None, cu={"so_dong": n, "dong": dong})
+    db.commit()
+    return {"ok": True, "da_bo_qua": n, "khong_hop_le": len(ids) - n}
+
+
 @router.delete("/hoa-don-cho/{h_id}")
 def xoa_hoa_don_cho(h_id: int, db: Session = Depends(get_db),
                     nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
