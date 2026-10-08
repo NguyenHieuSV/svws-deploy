@@ -1325,15 +1325,37 @@ def doc_hoa_don_ban_tep(data: bytes, content_type: str, filename: str) -> dict |
         return None
 
 
-def doc_sao_ke_tep(data: bytes, content_type: str, filename: str) -> list | None:
+def _pdf_tach_phan(data: bytes, so_trang: int = 6) -> list[bytes]:
+    """PDF nhiều trang → các phần ≤ so_trang trang (pypdf). Không tách được thì trả [data]."""
+    import io
+    try:
+        from pypdf import PdfReader, PdfWriter
+        rd = PdfReader(io.BytesIO(data))
+        n = len(rd.pages)
+        if n <= so_trang:
+            return [data]
+        phan = []
+        for a in range(0, n, so_trang):
+            w = PdfWriter()
+            for k in range(a, min(a + so_trang, n)):
+                w.add_page(rd.pages[k])
+            buf = io.BytesIO()
+            w.write(buf)
+            phan.append(buf.getvalue())
+        return phan
+    except Exception:
+        return [data]
+
+
+def doc_sao_ke_tep(data: bytes, content_type: str, filename: str,
+                   tu_ngay=None, den_ngay=None) -> list | None:
     """AI đọc FILE SAO KÊ ngân hàng (PDF / ảnh / Excel / CSV) → list dòng giao dịch
-    [{ngay, dien_giai, tien_vao, tien_ra, so_du}]. None khi AI tắt / không đọc được."""
+    [{ngay, dien_giai, tien_vao, tien_ra, so_du}]. PDF dài được tách từng phần ≤ 6 trang để
+    không bị cắt ở giới hạn trả lời. None khi AI tắt / không đọc được."""
     if (settings.ai_provider or "").upper() != "ANTHROPIC" or not settings.anthropic_api_key:
         return None
-    try:
-        khoi = _khoi_noi_dung_file(data, content_type, filename)
-    except Exception:
-        return None
+    fn = (filename or "").lower()
+    ct = (content_type or "").lower()
     sys_p = ("Bạn là kế toán ngân hàng Việt Nam. Đọc file SAO KÊ tài khoản ngân hàng và trả về "
              "DUY NHẤT một JSON array các dòng giao dịch, mỗi dòng: "
              '{"ngay": "YYYY-MM-DD", "dien_giai": string (nội dung giao dịch, ngắn gọn), '
@@ -1341,13 +1363,26 @@ def doc_sao_ke_tep(data: bytes, content_type: str, filename: str) -> list | None
              '"tien_ra": number (ghi nợ / tiền ra, 0 nếu không), '
              '"so_du": number|null (số dư sau giao dịch nếu sao kê có)}. '
              "CHỈ lấy dòng GIAO DỊCH thật — bỏ tiêu đề, dòng tổng cộng, số dư đầu/cuối kỳ. "
-             "Số tiền chỉ chữ số (VNĐ, bỏ dấu chấm phẩy). Tối đa 300 dòng.")
-    try:
-        txt = _goi_claude_json(khoi, sys_p, "Trích toàn bộ dòng giao dịch từ file sao kê trên.",
-                               max_tokens=8000, timeout=240)
-        return _vot_json_mang(txt)
-    except Exception:
-        return None
+             "Số tiền chỉ chữ số (VNĐ, bỏ dấu chấm phẩy). Lấy ĐỦ mọi dòng theo thứ tự trong file.")
+    cau_hoi = "Trích toàn bộ dòng giao dịch từ file sao kê trên."
+    if tu_ngay and den_ngay:
+        cau_hoi += f" Kỳ sao kê cần lấy: từ {tu_ngay} đến {den_ngay} (bỏ giao dịch ngoài kỳ)."
+    la_pdf = ct == "application/pdf" or fn.endswith(".pdf")
+    phan = _pdf_tach_phan(data) if la_pdf else [data]
+    ra = []
+    for d0 in phan:
+        try:
+            khoi = _khoi_noi_dung_file(d0, content_type, filename)
+        except Exception:
+            return None if not ra else ra
+        try:
+            txt = _goi_claude_json(khoi, sys_p, cau_hoi, max_tokens=8000, timeout=240)
+            ra.extend(_vot_json_mang(txt))
+        except Exception:
+            if not ra:
+                return None
+            break
+    return ra
 
 
 # ================== ĐỌC ẢNH HIỆN TRƯỜNG → BÁO CÁO VẬN HÀNH (Cho thuê) ==================

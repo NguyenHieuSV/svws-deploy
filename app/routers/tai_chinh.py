@@ -1538,14 +1538,20 @@ def _doi_soat_sao_ke(db: Session, sk_id: int) -> dict:
 
 
 @router.post("/sao-ke", status_code=201)
-def tai_sao_ke(ngan_hang: str = "", bo_qua_trung: bool = False, file: UploadFile = File(...),
-               db: Session = Depends(get_db),
+def tai_sao_ke(ngan_hang: str = "", bo_qua_trung: bool = False, tu_ngay: date | None = None, den_ngay: date | None = None,
+               file: UploadFile = File(...), db: Session = Depends(get_db),
                nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN", "KTT"))):
-    """📥 Tải file sao kê (PDF/ảnh/Excel/CSV) — AI đọc từng dòng, lưu lại, đối soát ngay.
+    """📥 Tải file sao kê + KỲ SAO KÊ (từ → đến). Excel / CSV đọc THẲNG bằng máy (đủ dòng, đúng từng đồng);
+    PDF / ảnh nhờ AI đọc theo từng phần. Chỉ giữ dòng trong kỳ, báo rõ khi đọc thiếu, đối soát ngay.
     File CÙNG TÊN đã tải trước đó → hỏi xác nhận (tránh chồng nhiều bản trùng)."""
     from ..models import SaoKeBank, SaoKeDong
     from ..ai_gateway import doc_sao_ke_tep
+    from ..sao_ke_doc import doc_bang
     from ..nhac_viec_service import gio_hien_tai
+    if (tu_ngay is None) != (den_ngay is None):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Nhập đủ kỳ sao kê: từ ngày và đến ngày")
+    if tu_ngay and den_ngay and tu_ngay > den_ngay:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Kỳ sao kê: 'từ ngày' phải trước 'đến ngày'")
     data = file.file.read()
     if not data or len(data) > 15 * 1024 * 1024:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "File trống hoặc lớn hơn 15MB")
@@ -1557,25 +1563,43 @@ def tai_sao_ke(ngan_hang: str = "", bo_qua_trung: bool = False, file: UploadFile
                                 f"⚠TRÙNGSK: file '{cu.ten_file}' đã tải trước đó (kỳ {cu.tu_ngay} → {cu.den_ngay}, "
                                 f"{cu.so_dong} dòng). Tải tiếp sẽ tạo BẢN MỚI trùng lặp — nên xóa bản cũ (nút 🗑) "
                                 "hoặc xác nhận nếu đây là sao kê KHÁC trùng tên file.")
-    dong = doc_sao_ke_tep(data, file.content_type or "", file.filename or "")
-    if not dong:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST,
-                            "AI không đọc được sao kê từ file này — kiểm tra file / cấu hình AI")
+    canh_bao = []
+    cach, meta = "AI", None
+    kq_may = doc_bang(data, file.content_type or "", file.filename or "")
+    fn_l = (file.filename or "").lower()
+    if kq_may and kq_may[0]:
+        dong, meta = kq_may
+        cach = "MAY"
+    else:
+        if fn_l.endswith((".xlsx", ".xlsm", ".csv", ".txt")):
+            canh_bao.append("Không nhận diện được cột Ngày / Ghi nợ / Ghi có trong file bảng — đã nhờ AI đọc, có thể thiếu dòng; "
+                            "nên xuất lại sao kê từ ngân hàng dạng Excel có tiêu đề cột.")
+        dong = doc_sao_ke_tep(data, file.content_type or "", file.filename or "", tu_ngay, den_ngay)
+        if not dong:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                "AI không đọc được sao kê từ file này — kiểm tra file / cấu hình AI")
     sk = SaoKeBank(ten_file=(file.filename or "sao_ke")[:200],
                    ngan_hang=(ngan_hang or "").strip()[:60] or None,
                    nguoi_tao=nd.id, tao_luc=gio_hien_tai())
     db.add(sk); db.flush()
-    n, ngays = 0, []
-    for d in dong[:500]:
+    n, ngays, ngoai_ky, khong_ngay = 0, [], 0, 0
+    for d in dong[:5000]:
         vao, ra = _ske_so(d.get("tien_vao")), _ske_so(d.get("tien_ra"))
         if not vao and not ra:
             continue
-        ng = None
-        try:
-            if d.get("ngay"):
-                ng = date.fromisoformat(str(d["ngay"])[:10])
-        except Exception:
-            pass
+        ng = d.get("ngay")
+        if isinstance(ng, str):
+            try:
+                ng = date.fromisoformat(ng[:10])
+            except Exception:
+                ng = None
+        elif ng is not None and not isinstance(ng, date):
+            ng = None
+        if ng is None:
+            khong_ngay += 1
+        if tu_ngay and den_ngay and ng is not None and not (tu_ngay <= ng <= den_ngay):
+            ngoai_ky += 1
+            continue
         sd = _ske_so(d.get("so_du")) if d.get("so_du") is not None else None
         db.add(SaoKeDong(sao_ke_id=sk.id, ngay=ng,
                          dien_giai=(str(d.get("dien_giai") or "")[:400]) or None,
@@ -1584,16 +1608,64 @@ def tai_sao_ke(ngan_hang: str = "", bo_qua_trung: bool = False, file: UploadFile
             ngays.append(ng)
         n += 1
     if not n:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Không thấy dòng giao dịch hợp lệ nào trong file")
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Không thấy dòng giao dịch hợp lệ nào trong file" + (" thuộc kỳ đã nhập" if tu_ngay else ""))
     sk.so_dong = n
-    sk.tu_ngay = min(ngays) if ngays else None
-    sk.den_ngay = max(ngays) if ngays else None
+    if tu_ngay and den_ngay:
+        sk.tu_ngay, sk.den_ngay = tu_ngay, den_ngay
+        if ngays and (min(ngays) > tu_ngay + timedelta(days=3) or max(ngays) < den_ngay - timedelta(days=3)):
+            canh_bao.append(f"Dòng đọc được chỉ từ {min(ngays)} đến {max(ngays)} trong khi kỳ nhập là {tu_ngay} → {den_ngay} — "
+                            "có thể file thiếu dữ liệu đầu / cuối kỳ (hoặc AI đọc thiếu); kiểm tra lại file.")
+    else:
+        sk.tu_ngay = min(ngays) if ngays else None
+        sk.den_ngay = max(ngays) if ngays else None
+        canh_bao.append("Chưa nhập kỳ sao kê — kỳ đang lấy theo ngày nhỏ nhất / lớn nhất của các dòng đọc được.")
+    if ngoai_ky:
+        canh_bao.append(f"Bỏ {ngoai_ky} dòng ngoài kỳ.")
+    if khong_ngay:
+        canh_bao.append(f"{khong_ngay} dòng không đọc được ngày.")
+    if cach == "AI" and len(dong) >= 280 and not fn_l.endswith(".pdf"):
+        canh_bao.append("AI đọc gần giới hạn — file dài có thể bị thiếu dòng; dùng Excel / CSV để máy đọc thẳng.")
     ghi_audit(db, nd.id, "TAI_SAO_KE", "sao_ke_bank", sk.id,
-              moi={"file": sk.ten_file, "ngan_hang": sk.ngan_hang, "so_dong": n})
+              moi={"file": sk.ten_file, "ngan_hang": sk.ngan_hang, "so_dong": n, "cach": cach,
+                   "ky": [str(sk.tu_ngay), str(sk.den_ngay)], "ngoai_ky": ngoai_ky})
     db.flush()
     kq = _doi_soat_sao_ke(db, sk.id)
     db.commit()
-    return {"ok": True, "id": sk.id, "so_dong": n, "doi_soat": kq}
+    return {"ok": True, "id": sk.id, "so_dong": n, "cach": cach, "canh_bao": canh_bao,
+            "tu_ngay": str(sk.tu_ngay) if sk.tu_ngay else None, "den_ngay": str(sk.den_ngay) if sk.den_ngay else None,
+            "doi_soat": kq}
+
+
+class SaoKeSuaVao(_BRBase):
+    tu_ngay: date | None = None
+    den_ngay: date | None = None
+    ngan_hang: str | None = None
+
+
+@router.put("/sao-ke/{sk_id}")
+def sua_sao_ke(sk_id: int, data: SaoKeSuaVao, db: Session = Depends(get_db),
+               nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN", "KTT"))):
+    """✏️ Sửa KỲ SAO KÊ / ngân hàng của bản đã tải rồi đối soát lại theo kỳ mới."""
+    from ..models import SaoKeBank
+    sk = db.get(SaoKeBank, sk_id)
+    if sk is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy sao kê")
+    cu = {"tu_ngay": str(sk.tu_ngay), "den_ngay": str(sk.den_ngay), "ngan_hang": sk.ngan_hang}
+    if data.tu_ngay is not None:
+        sk.tu_ngay = data.tu_ngay
+    if data.den_ngay is not None:
+        sk.den_ngay = data.den_ngay
+    if sk.tu_ngay and sk.den_ngay and sk.tu_ngay > sk.den_ngay:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Kỳ sao kê: 'từ ngày' phải trước 'đến ngày'")
+    if data.ngan_hang is not None:
+        sk.ngan_hang = data.ngan_hang.strip()[:60] or None
+    kq = _doi_soat_sao_ke(db, sk.id)
+    ghi_audit(db, nd.id, "SUA_SAO_KE", "sao_ke_bank", sk.id, cu=cu,
+              moi={"tu_ngay": str(sk.tu_ngay), "den_ngay": str(sk.den_ngay), "ngan_hang": sk.ngan_hang})
+    db.commit()
+    return {"ok": True, "id": sk.id, "tu_ngay": str(sk.tu_ngay) if sk.tu_ngay else None,
+            "den_ngay": str(sk.den_ngay) if sk.den_ngay else None, "doi_soat": kq}
 
 
 @router.get("/sao-ke")
