@@ -83,6 +83,13 @@ def _vong_lap():
             if ok_qm:
                 print("[SCHEDULER] 📬 Quét thư tuần: đến hạn → chạy")
                 chay_nen("LICH")
+            # 💾 Sao lưu CSDL lên Backblaze B2 mỗi ngày (chỉ khi đã đặt BACKUP_B2_*). Mốc "hôm nay
+            # đã sao lưu" là tên tệp trên B2 → khởi động lại không chạy trùng. Chạy ở luồng riêng.
+            from .sao_luu import den_han as sl_den_han, chay_nen as sl_chay_nen
+            g3 = gio_hien_tai()
+            if sl_den_han(g3):
+                print("[SCHEDULER] 💾 Sao lưu CSDL lên B2: đến hạn → chạy")
+                sl_chay_nen(g3)
         except Exception as e:                     # không bao giờ để luồng nền chết
             print(f"[SCHEDULER] Lỗi bỏ qua: {type(e).__name__}: {e}")
         time.sleep(_CHU_KY)
