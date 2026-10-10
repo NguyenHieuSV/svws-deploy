@@ -2252,7 +2252,8 @@ def _lcb_trung_hoa_don(db, r):
         if (l.don_mua_id and l.don_mua_id in po_ids) or (getattr(l, "cong_no_id", None) and l.cong_no_id in cn_ids):
             d0 = db.get(DonMua, l.don_mua_id) if l.don_mua_id else None
             so_l = (d0.so if d0 else None) or (f"CN-{l.cong_no_id}" if getattr(l, "cong_no_id", None) else f"#{l.id}")
-            dot = float(l.so_tien_dot if getattr(l, "so_tien_dot", None) is not None else (l.so_tien or 0))
+            _dot = getattr(l, "so_tien_dot", None)
+            dot = float(_dot) if (_dot is not None and float(_dot) > 0) else float(l.so_tien or 0)   # đợt trống → lấy số tiền lệnh
             out.append((l, so_l, dot))
     return out
 
