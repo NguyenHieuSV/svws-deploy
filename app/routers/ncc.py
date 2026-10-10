@@ -5493,6 +5493,54 @@ def _dtb_nen_chay(viec_id: int, dt_id: int, nd_id, data: bytes, content_type, te
         db.close()
 
 
+def _dtb_them_muc_boq(db, nd, dt, items: list, ten_file: str) -> dict:
+    """Thêm các dòng đọc từ file MẪU BOQ vào dự toán (trùng TÊN bỏ qua; tên khớp hàng kho → gắn hang_hoa_id;
+    có cột Nhà cung cấp trùng hồ sơ → gắn NCC và ghi ngược danh mục có kiểm soát)."""
+    from ..boq_mau import ghi_chu_boq
+    da_co = {(m.ten or "").strip().lower() for m in db.query(DuToanBanMuc).filter_by(du_toan_id=dt.id).all()}
+    them, bo_qua = [], []
+    for it in items[:400]:
+        ten = str(it.get("ten") or "").strip()
+        if not ten or ten.lower() in da_co:
+            if ten:
+                bo_qua.append(ten)
+            continue
+        hh = db.query(HangHoa).filter(func.lower(func.trim(HangHoa.ten)) == ten.lower()).first()
+        ncc_id = _dtb_ncc_theo_ten(db, it.get("ncc_ten")) if it.get("ncc_ten") else None
+        m = DuToanBanMuc(du_toan_id=dt.id, ten=ten[:250], hang_hoa_id=(hh.id if hh is not None else None),
+                         quy_cach=(it.get("quy_cach") or None), don_vi=((it.get("don_vi") or "")[:40] or (getattr(hh, "don_vi", None) if hh is not None else None)),
+                         so_luong=Decimal(str(it.get("so_luong") or 0)), don_gia=Decimal(str(round(float(it.get("don_gia") or 0)))),
+                         nha_san_xuat=((it.get("nha_san_xuat") or "")[:150] or None), ma_sp=((it.get("ma_sp") or "")[:60] or None),
+                         nha_cung_cap_id=ncc_id, ncc_ten=((it.get("ncc_ten") or "")[:200] or None),
+                         ghi_chu=(ghi_chu_boq(it) or f"Nạp từ mẫu BOQ {ten_file}")[:300])
+        db.add(m)
+        db.flush()
+        if ncc_id:
+            _dtb_ghi_danh_muc(db, m, nd, dt.ma, doi_gia=True)
+        da_co.add(ten.lower())
+        them.append(ten)
+    return {"so_doc": len(items), "them": len(them), "bo_qua": len(bo_qua), "ds_them": them[:15], "ds_bo_qua": bo_qua[:15]}
+
+
+def _dtb_nap_file(db, nd, dt, data: bytes, content_type, ten_file: str) -> dict:
+    """📎 Nạp file vào dự toán: file ĐÚNG MẪU BOQ (Excel / CSV) → máy đọc thẳng, thêm mục ngay, trả kết quả;
+    file khác (PDF · ảnh · Excel tự do) → lưu kho tệp + AI đọc ở nền như cũ."""
+    from ..boq_mau import doc_boq
+    kq_mau = doc_boq(data, ten_file)
+    if kq_mau:
+        nhom, items = kq_mau
+        ref = luu_tep_chung(data, "du_toan_ban", dt.id, ten_file, content_type)
+        db.add(TepDinhKem(doi_tuong="DU_TOAN_BAN_FILE", doi_tuong_id=dt.id, loai="KHAC", ten_file=ten_file[:255],
+                          duong_dan=ref, kich_thuoc=len(data), content_type=content_type,
+                          nguoi_tai_len=nhan_vien_id_cua(db, nd.id)))
+        kq = _dtb_them_muc_boq(db, nd, dt, items, ten_file)
+        ghi_audit(db, nd.id, "NAP_MAU_BOQ", "du_toan_ban", dt.id,
+                  moi={"file": ten_file, "so_doc": kq["so_doc"], "them": kq["them"], "bo_qua": kq["bo_qua"], "nhom": len(nhom)})
+        db.commit()
+        return {"dang_chay": False, "cach": "MAU_BOQ", "so_nhom": len(nhom), **kq}
+    return {"dang_chay": True, "cach": "AI", **_dtb_nap_file_nen(db, nd, dt, data, content_type, ten_file)}
+
+
 def _dtb_nap_file_nen(db, nd, dt, data: bytes, content_type, ten_file: str) -> dict:
     """📎 Nạp file: LƯU file vào Kho tệp + tạo việc nền ngay, AI đọc ở luồng riêng → trả lời tức thì (không giữ HTTP,
     không bị Render ngắt khi file dài). Trả {viec_id, tep_id}."""
@@ -5549,8 +5597,8 @@ def dtb_tao_tu_file(ma: str = Form(...), khach_hang: str | None = Form(None), mo
     db.flush()
     ghi_audit(db, nd.id, "TAO", "du_toan_ban", d.id, moi={"ma": ma, "tu_file": ten_file})
     db.commit()
-    kq = _dtb_nap_file_nen(db, nd, d, data, file.content_type, ten_file)
-    return {"ok": True, "id": d.id, "ma": d.ma, "dang_chay": True, "ten_file": ten_file, **kq}
+    kq = _dtb_nap_file(db, nd, d, data, file.content_type, ten_file)
+    return {"ok": True, "id": d.id, "ma": d.ma, "ten_file": ten_file, **kq}
 
 
 @router.post("/du-toan-ban/{dt_id}/nhap-file")
@@ -5564,8 +5612,8 @@ def dtb_nhap_file(dt_id: int, file: UploadFile = File(...), db: Session = Depend
     data = file.file.read()
     if len(data) > 15 * 1024 * 1024:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "File quá lớn (tối đa 15MB)")
-    kq = _dtb_nap_file_nen(db, nd, dt, data, file.content_type, ten_file)
-    return {"ok": True, "id": dt.id, "ma": dt.ma, "dang_chay": True, "ten_file": ten_file, **kq}
+    kq = _dtb_nap_file(db, nd, dt, data, file.content_type, ten_file)
+    return {"ok": True, "id": dt.id, "ma": dt.ma, "ten_file": ten_file, **kq}
 
 
 # ---- 🔁 GHI NGƯỢC dự toán → danh mục Sản phẩm NCC (03/10/2026 — anh Hiếu chọn «có kiểm soát») ----
@@ -5891,6 +5939,32 @@ def dtb_them_muc(dt_id: int, data: DtbMucVao, db: Session = Depends(get_db),
     dm = _dtb_ghi_danh_muc(db, m, nd, _d.ma if _d else None, doi_gia=True)   # 🔁 ghi ngược có kiểm soát vào danh mục NCC
     db.commit()
     return {"id": muc_id, "danh_muc": dm}
+
+
+@router.get("/du-toan-ban/mau-boq")
+def dtb_mau_boq(dt_id: int | None = None, db: Session = Depends(get_db),
+                _=Depends(yeu_cau_bat_ky(("ncc", "XEM"), ("ban_hang", "XEM")))):
+    """📥 File Excel MẪU BOQ (theo Tab 12 - BOQ-MTO): dt_id trống → mẫu trống có ví dụ; có dt_id → điền sẵn các dòng của
+    dự toán đó (xuất ra sửa trong Excel rồi 📎 nạp lại — máy đọc thẳng)."""
+    from fastapi.responses import Response
+    from urllib.parse import quote
+    from ..boq_mau import tao_mau
+    cong_ty = "CÔNG TY TNHH GIẢI PHÁP KỸ THUẬT SÓNG VIỆT"
+    d = db.get(DuToanBan, dt_id) if dt_id else None
+    if dt_id and d is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy dự toán")
+    items = None
+    if d is not None:
+        items = [{"ten": m.ten, "quy_cach": m.quy_cach, "don_vi": m.don_vi, "so_luong": float(m.so_luong or 0),
+                  "nha_san_xuat": m.nha_san_xuat, "don_gia": float(m.don_gia or 0), "ghi_chu": m.ghi_chu}
+                 for m in db.query(DuToanBanMuc).filter_by(du_toan_id=d.id).order_by(DuToanBanMuc.id).all()]
+        tieu_de = " — ".join(x for x in (d.ma, d.khach_hang, d.mo_ta) if x)
+    else:
+        tieu_de = "<Tên dự toán / dự án> — <Khách hàng>"
+    data = tao_mau(cong_ty, tieu_de, d.ma if d else None, items)
+    ten = f"Mau-BOQ-{(d.ma if d else 'du-toan')}.xlsx"
+    return Response(content=data, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(ten)}"})
 
 
 @router.get("/du-toan-ban/{dt_id}")
