@@ -325,6 +325,7 @@ class BaoGiaFormRa(BaseModel):
     noi_dung: dict
     trang_thai: str
     ly_do_tu_choi: str | None = None
+    gui_luc: datetime | None = None        # lần gửi khách gần nhất (từ nhật ký GUI) — xếp bảng «Báo giá đã gửi khách hàng»
 
 
 class BaoGiaCtVao(BaseModel):

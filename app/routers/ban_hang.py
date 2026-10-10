@@ -1332,7 +1332,16 @@ def op_don_dep(thuc_hien: bool = False, db: Session = Depends(get_db),
 # ----- Báo giá soạn theo mẫu (lưu tạm & xuất PDF) -----
 @router.get("/bao-gia-form", response_model=list[BaoGiaFormRa])
 def ds_bao_gia_form(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
-    return db.query(BaoGiaForm).order_by(BaoGiaForm.id.desc()).limit(200).all()
+    """Danh sách báo giá mẫu + gui_luc (lần ✉️ gửi khách gần nhất, lấy từ nhật ký audit nên có cả bản gửi trước đây)."""
+    from sqlalchemy import func as _fn
+    from ..models import AuditLog as _AL
+    rows = db.query(BaoGiaForm).order_by(BaoGiaForm.id.desc()).limit(200).all()
+    gui = {bid: tg for bid, tg in (db.query(_AL.ban_ghi_id, _fn.max(_AL.thoi_gian))
+                                   .filter(_AL.bang == "bao_gia_form", _AL.hanh_dong == "GUI")
+                                   .group_by(_AL.ban_ghi_id).all())}
+    for b in rows:
+        b.gui_luc = gui.get(b.id)          # thuộc tính tạm, không phải cột — pydantic đọc qua from_attributes
+    return rows
 
 
 @router.post("/bao-gia-form", response_model=BaoGiaFormRa, status_code=201)
