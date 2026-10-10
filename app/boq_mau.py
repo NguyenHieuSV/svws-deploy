@@ -259,7 +259,9 @@ def tao_mau(cong_ty: str, tieu_de: str, ma: str | None = None, items: list | Non
             ws.cell(row=r, column=9, value=f"=E{r}*H{r}").number_format = "#,##0"
             r += 1
     cuoi_hang = r - 1
-    for nhan, ct in (("CỘNG TRƯỚC THUẾ", f"=SUM(I{dau_hang}:I{cuoi_hang})"), ("VAT 8%", f"=I{r}*0.08"), ("TỔNG CỘNG", f"=I{r - 2}+I{r - 1}")):
+    for nhan in ("CỘNG TRƯỚC THUẾ", "VAT 8%", "TỔNG CỘNG"):
+        ct = (f"=SUM(I{dau_hang}:I{cuoi_hang})" if nhan.startswith("CỘNG") else
+              (f"=I{r - 1}*0.08" if nhan.startswith("VAT") else f"=I{r - 2}+I{r - 1}"))   # công thức theo đúng hàng hiện tại
         ws.cell(row=r, column=2, value=nhan).font = Font(bold=True)
         ws.merge_cells(start_row=r, start_column=2, end_row=r, end_column=8)
         c = ws.cell(row=r, column=9, value=ct)
