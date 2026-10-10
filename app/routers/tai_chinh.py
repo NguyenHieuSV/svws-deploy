@@ -2522,6 +2522,164 @@ def so_sanh_sao_ke(sk_id: int, db: Session = Depends(get_db), _=Depends(yeu_cau(
             "den_ngay": str(sk.den_ngay) if sk.den_ngay else None, **kq}
 
 
+# ---- 📥 XUẤT EXCEL bảng đối soát (kế toán kiểm tra lại) — mỗi khoản một dòng, lọc theo kết quả; sheet tổng hợp + phân tích ----
+_SK_KQ_TEN = {"KHOP": "✓ Khớp", "KHOP_GOP": "✓ Trả gộp", "KHOP_NHIEU_DOT": "✓ Nhiều đợt", "MOT_PHAN": "◐ Một phần",
+              "THEO_HD_THIEU": "◐ Theo số HĐ, còn chênh", "NGHI_GOP": "? Nghi gộp — cần xác nhận",
+              "COC_KH": "💰 Cọc / trả trước", "COC_NCC": "💰 Cọc NCC", "BO_KHOP": "✕ Không khớp (đã xem)",
+              "CHI_SK": "⚠ Chỉ có trên sao kê", "CHI_APP": "⚠ Chỉ có trong app"}
+
+
+def _sk_xuat_excel_bytes(sk_info: dict, kq: dict) -> bytes:
+    """Dựng file Excel từ kết quả _sk_so_sanh: sheet «Đối soát» (mỗi khoản app / dòng sao kê một dòng, STT nhóm để lọc),
+    sheet «Tổng hợp» (thẻ tổng + phân tích). Không công thức — số liệu để kế toán đối chiếu lại."""
+    import io as _io
+    from openpyxl import Workbook
+    from openpyxl.styles import Alignment, Font, PatternFill, Border, Side
+    from openpyxl.utils import get_column_letter
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Đối soát"
+    ten = f"ĐỐI SOÁT SAO KÊ ↔ APP — {sk_info.get('ten_file') or ''}"
+    if sk_info.get("ngan_hang"):
+        ten += f" · {sk_info['ngan_hang']}"
+    ten += f" · kỳ {sk_info.get('tu_ngay') or '—'} → {sk_info.get('den_ngay') or '—'}"
+    ws["A1"] = ten
+    ws["A1"].font = Font(bold=True, size=13)
+    ws["A2"] = ("Tiền ra so với lệnh Duyệt chi Ngân hàng (Nhà cung cấp) · tiền vào so với thu công nợ bán hàng (Bán hàng) và phiếu thu "
+                "tạm ứng · ghép theo số hóa đơn / mã / cọc đọc từ nội dung chuyển khoản. Mỗi khoản một dòng; cột A là số nhóm — "
+                "các dòng cùng nhóm là một cặp đối chiếu. Lọc cột D để xem từng loại kết quả.")
+    ws["A2"].alignment = Alignment(wrap_text=True, vertical="top")
+    ws.merge_cells("A2:Q2")
+    ws.row_dimensions[2].height = 42
+    cot = ["Nhóm", "Ngày", "Thu / Chi", "Kết quả", "Nhãn", "Khoản ở APP", "Ngày app", "Trạng thái app", "Tiền app (đ)",
+           "Dòng SAO KÊ (diễn giải)", "Ngày sao kê", "Đối tác (đọc từ diễn giải)", "Số HĐ / mã đọc được", "Tiền sao kê (đ)",
+           "Chênh lệch nhóm (sao kê − app)", "Phân tích", "Nhóm chi phí"]
+    rong = [7, 11, 9, 24, 18, 44, 11, 30, 16, 48, 11, 30, 22, 16, 18, 70, 14]
+    hdr_row = 4
+    fill = PatternFill("solid", fgColor="E3EDF6")
+    thin = Side(style="thin", color="C9D3DD")
+    bd = Border(left=thin, right=thin, top=thin, bottom=thin)
+    for i, (c, w) in enumerate(zip(cot, rong), 1):
+        cell = ws.cell(row=hdr_row, column=i, value=c)
+        cell.font = Font(bold=True)
+        cell.fill = fill
+        cell.alignment = Alignment(wrap_text=True, vertical="center", horizontal="center")
+        cell.border = bd
+        ws.column_dimensions[get_column_letter(i)].width = w
+    ws.row_dimensions[hdr_row].height = 30
+    mau_nen = {"CHI_SK": "FFF7ED", "CHI_APP": "FEF2F2", "MOT_PHAN": "FFFBEB", "THEO_HD_THIEU": "FFFBEB", "NGHI_GOP": "FFFBEB",
+               "COC_KH": "EEF6FF", "COC_NCC": "EEF6FF", "BO_KHOP": "F8FAFC"}
+    r_i = hdr_row + 1
+    for stt, r in enumerate(kq.get("rows") or [], 1):
+        apps = r.get("app") or []
+        sks = r.get("sk_list") or ([r["sk"]] if r.get("sk") else [])
+        n = max(len(apps), len(sks), 1)
+        tong_app = sum(float(a.get("so_tien") or 0) for a in apps)
+        tong_sk = sum(float(x.get("so_tien") or 0) for x in sks)
+        nhan = []
+        if r.get("theo_hd"):
+            nhan.append("theo số HĐ")
+        if r.get("gan_tay"):
+            nhan.append("ghi tay")
+        if r.get("khac_doi_tac"):
+            nhan.append("khác đối tác")
+        if r.get("coc"):
+            nhan.append("cọc")
+        chieu = "Thu (vào)" if r.get("chieu") == "VAO" else "Chi (ra)"
+        nen = mau_nen.get(r.get("ket_qua"))
+        for i in range(n):
+            a = apps[i] if i < len(apps) else None
+            x = sks[i] if i < len(sks) else None
+            vals = [stt if i == 0 else None, r.get("ngay") if i == 0 else None, chieu if i == 0 else None,
+                    _SK_KQ_TEN.get(r.get("ket_qua"), r.get("ket_qua")) if i == 0 else None,
+                    ", ".join(nhan) if (i == 0 and nhan) else None,
+                    (a or {}).get("mo_ta"), (a or {}).get("ngay"), (a or {}).get("trang_thai"),
+                    float(a.get("so_tien") or 0) if a else None,
+                    (x or {}).get("dien_giai"), (x or {}).get("ngay"), (x or {}).get("doi_tac"),
+                    (" · ".join(filter(None, [("HĐ " + ", ".join(x.get("so_hd") or [])) if x.get("so_hd") else None,
+                                              " ".join(x.get("ma") or []) or None])) or None) if x else None,
+                    float(x.get("so_tien") or 0) if x else None,
+                    (tong_sk - tong_app) if (i == 0 and apps and sks) else None,
+                    r.get("phan_tich") if i == 0 else None,
+                    (_SK_NHOM_TEN.get(r.get("nhom")) if r.get("nhom") in _SK_NHOM_TEN else ("cọc" if r.get("nhom") == "COC" else None)) if i == 0 else None]
+            for j, v in enumerate(vals, 1):
+                cell = ws.cell(row=r_i, column=j, value=v)
+                cell.border = bd
+                cell.alignment = Alignment(wrap_text=True, vertical="top")
+                if j in (9, 14, 15):
+                    cell.number_format = "#,##0;[Red]-#,##0"
+                if nen:
+                    cell.fill = PatternFill("solid", fgColor=nen)
+            r_i += 1
+    ws.freeze_panes = ws.cell(row=hdr_row + 1, column=1)
+    if r_i > hdr_row + 1:
+        ws.auto_filter.ref = f"A{hdr_row}:{get_column_letter(len(cot))}{r_i - 1}"
+    # ---- sheet tổng hợp ----
+    w2 = wb.create_sheet("Tổng hợp")
+    t = kq.get("tong") or {}
+    w2["A1"] = ten
+    w2["A1"].font = Font(bold=True, size=13)
+    dong2 = [("Dòng sao kê", t.get("dong")), ("Tiền vào theo sao kê (đ)", t.get("sk_vao")), ("Tiền vào app thu công nợ (đ)", t.get("app_vao")),
+             ("Tiền ra theo sao kê (đ)", t.get("sk_ra")), ("Tiền ra app Duyệt chi NH (đ)", t.get("app_ra")),
+             ("Khớp app ↔ sao kê (khoản)", t.get("khop")), ("Tiền khớp (đ)", t.get("khop_tien")),
+             ("Trong đó khớp theo số hóa đơn", t.get("theo_hd")), ("Trong đó nhiều đợt", t.get("nhieu_dot")), ("Trong đó ghi tay", t.get("gan_tay")),
+             ("Một phần / còn chênh (khoản)", t.get("mot_phan")), ("Còn chênh (đ)", t.get("con_thieu")),
+             ("Nghi gộp — cần xác nhận (khoản)", t.get("nghi_gop")), ("Cọc / trả trước đi riêng (khoản)", t.get("coc")), ("Tiền cọc (đ)", t.get("coc_tien")),
+             ("Chỉ có trên sao kê (khoản)", t.get("chi_sk")), ("Tiền chỉ sao kê (đ)", t.get("chi_sk_tien")),
+             ("Chỉ có trong app (khoản)", t.get("chi_app")), ("Tiền chỉ app (đ)", t.get("chi_app_tien")),
+             ("Không khớp đã xem (khoản)", t.get("bo_khop")), ("Khớp tiền nhưng khác đối tác (khoản)", t.get("khac_doi_tac"))]
+    for i, (k, v) in enumerate(dong2, 3):
+        w2.cell(row=i, column=1, value=k)
+        c = w2.cell(row=i, column=2, value=v)
+        c.number_format = "#,##0"
+    w2.column_dimensions["A"].width = 42
+    w2.column_dimensions["B"].width = 20
+    r2 = len(dong2) + 5
+    w2.cell(row=r2, column=1, value="PHÂN TÍCH SAU KHI SO SÁNH").font = Font(bold=True)
+    for i, p in enumerate(kq.get("phan_tich") or [], r2 + 1):
+        c = w2.cell(row=i, column=1, value=p)
+        c.alignment = Alignment(wrap_text=True, vertical="top")
+        w2.merge_cells(start_row=i, start_column=1, end_row=i, end_column=6)
+        w2.row_dimensions[i].height = 32
+    r3 = r2 + len(kq.get("phan_tich") or []) + 3
+    w2.cell(row=r3, column=1, value="CHÚ GIẢI KẾT QUẢ").font = Font(bold=True)
+    for i, (k, v) in enumerate(_SK_KQ_TEN.items(), r3 + 1):
+        w2.cell(row=i, column=1, value=v)
+        w2.cell(row=i, column=2, value={
+            "KHOP": "một dòng sao kê = một khoản app (cùng tiền ± phí, gần ngày, ưu tiên cùng đối tác / số HĐ / mã)",
+            "KHOP_GOP": "một dòng sao kê trả cho nhiều khoản app (theo số HĐ, hoặc cùng đối tác)",
+            "KHOP_NHIEU_DOT": "một khoản app nhận nhiều dòng sao kê",
+            "MOT_PHAN": "đã thấy một phần tiền trên sao kê, còn thiếu phần ghi ở cột chênh lệch",
+            "THEO_HD_THIEU": "nội dung CK ghi nhiều số HĐ, app chỉ có một phần — HĐ thiếu nêu ở phân tích",
+            "NGHI_GOP": "tổng 2–3 khoản trùng tiền nhưng nội dung không nêu đối tác / HĐ — chưa tự ghi",
+            "COC_KH": "tiền vào ghi cọc / tạm ứng / trả trước — không ghép hóa đơn, nối phiếu thu tạm ứng",
+            "COC_NCC": "tiền ra ghi cọc / tạm ứng cho NCC — ghi đợt cọc trên PO",
+            "BO_KHOP": "kế toán xác nhận dòng không khớp khoản app nào",
+            "CHI_SK": "ngân hàng có, app chưa có (phân tích nêu nhóm chi phí hoặc HĐ cần nhập)",
+            "CHI_APP": "app ghi có, sao kê không thấy"}.get(k, ""))
+    bio = _io.BytesIO()
+    wb.save(bio)
+    return bio.getvalue()
+
+
+@router.get("/sao-ke/{sk_id}/xuat-excel")
+def xuat_excel_sao_ke(sk_id: int, db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
+    """📥 Xuất bảng đối soát sao kê ↔ app ra Excel để kế toán kiểm tra lại."""
+    from fastapi.responses import Response
+    from ..models import SaoKeBank, SaoKeDong
+    sk = db.get(SaoKeBank, sk_id)
+    if sk is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy sao kê")
+    dongs = (db.query(SaoKeDong).filter_by(sao_ke_id=sk_id).order_by(SaoKeDong.ngay, SaoKeDong.id).all())
+    kq = _sk_so_sanh(db, sk, dongs)
+    info = {"ten_file": sk.ten_file, "ngan_hang": sk.ngan_hang,
+            "tu_ngay": str(sk.tu_ngay) if sk.tu_ngay else None, "den_ngay": str(sk.den_ngay) if sk.den_ngay else None}
+    data = _sk_xuat_excel_bytes(info, kq)
+    ten = f"Doi-soat-sao-ke-{sk.id}_{info['tu_ngay'] or ''}_{info['den_ngay'] or ''}.xlsx".replace("__", "_")
+    return Response(content=data, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={"Content-Disposition": f'attachment; filename="{ten}"', "Cache-Control": "no-store"})
+
+
 # ---- 📅 Mỗi tháng 1 sao kê: từ NGÀY 7 hàng tháng chưa thấy sao kê tháng trước → nhắc nhóm Duyệt chi NH ----
 NGAY_NHAC_SAO_KE = 7
 
