@@ -2290,11 +2290,12 @@ def duyet_lenh_chi_bank(lcb_id: int, ep: bool = False, db: Session = Depends(get
         da = sum(t[2] for t in trung)
         dot = float(r.so_tien_dot if getattr(r, "so_tien_dot", None) is not None else (r.so_tien or 0))
         ds = "; ".join(f"{t[1]} ({'đã chi' if t[0].trang_thai == 'DA_CHI' else 'đã duyệt'} {t[2]:,.0f})" for t in trung[:4]).replace(",", ".")
-        raise HTTPException(status.HTTP_400_BAD_REQUEST,
-                            f"TRÙNG: hóa đơn {so_hd} của nhà cung cấp này đã có lệnh {ds}. Tổng đã duyệt/chi {da:,.0f} + lệnh này "
-                            f"{dot:,.0f} so với giá trị chứng từ {gia_tri:,.0f}. Kiểm tra PO / công nợ nhập trùng trước khi duyệt"
-                            + (" — CEO có thể xác nhận vẫn duyệt nếu là trả nhiều đợt cho cùng hóa đơn." if nd.vai_tro.ma == "CEO"
-                               else " — chỉ CEO mới được duyệt đè.")).replace(",", ".")
+        # (sửa 10/10/2026) .replace phải áp lên CHUỖI thông báo — trước đây áp nhầm lên HTTPException → 500 khi lệnh nghi trùng
+        msg = (f"TRÙNG: hóa đơn {so_hd} của nhà cung cấp này đã có lệnh {ds}. Tổng đã duyệt/chi {da:,.0f} + lệnh này "
+               f"{dot:,.0f} so với giá trị chứng từ {gia_tri:,.0f}. Kiểm tra PO / công nợ nhập trùng trước khi duyệt"
+               + (" — CEO có thể xác nhận vẫn duyệt nếu là trả nhiều đợt cho cùng hóa đơn." if nd.vai_tro.ma == "CEO"
+                  else " — chỉ CEO mới được duyệt đè.")).replace(",", ".")
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, msg)
     # TRẦN TIỀN NHIỀU CẤP: KTT duyệt theo hạn mức 'thu_chi' (bảng han_muc_duyet); CEO/ADMIN không trần
     if nd.vai_tro.ma not in ("CEO", "ADMIN"):      # (sửa 30/09: vai_tro là đối tượng → phải so sánh .ma)
         kiem_han_muc(db, nd, "thu_chi", Decimal(r.so_tien or 0))
