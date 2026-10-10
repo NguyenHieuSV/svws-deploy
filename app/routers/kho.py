@@ -7,6 +7,7 @@ from datetime import date
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from sqlalchemy import func
+from pydantic import BaseModel
 from ..database import get_db
 from ..rbac import yeu_cau, chi_vai_tro, yeu_cau_bat_ky
 from ..deps import nhan_vien_id_cua
@@ -348,16 +349,16 @@ def lap_phieu(
     if not phieu.so:
         phieu.so = f"{data.loai}-{date.today():%Y%m%d}-{phieu.id}"
 
-    sinh_yeu_cau = []
+    duoi_min = []
     for ct in data.chi_tiet:
         db.add(PhieuKhoCt(phieu_kho_id=phieu.id, hang_hoa_id=ct.hang_hoa_id, so_luong=ct.so_luong))
         if data.loai == "NHAP":
             nhap_ton(db, ct.hang_hoa_id, ct.so_luong)
-        elif xuat_ton(db, ct.hang_hoa_id, ct.so_luong):  # tự sinh yêu cầu mua nếu < min
-            sinh_yeu_cau.append(ct.hang_hoa_id)
+        elif xuat_ton(db, ct.hang_hoa_id, ct.so_luong):  # tồn tụt dưới min → hiện ở Cảnh báo tồn (🛒 Tạo PO)
+            duoi_min.append(ct.hang_hoa_id)
 
     ghi_audit(db, nd.id, "TAO", "phieu_kho", phieu.id,
-              moi={"loai": data.loai, "so_dong": len(data.chi_tiet), "yeu_cau_mua": sinh_yeu_cau})
+              moi={"loai": data.loai, "so_dong": len(data.chi_tiet), "duoi_min": duoi_min})
     db.commit()
     db.refresh(phieu)
     return phieu
@@ -458,7 +459,39 @@ def tong_quan(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
         if sl < tm:
             duoi_min += 1
     so_phieu = db.query(func.count(PhieuKho.id)).scalar()
-    yeu_cau_moi = db.query(func.count(YeuCauMua.id)).filter(YeuCauMua.trang_thai == "MOI").scalar()
     return {"so_mat_hang": so_mat_hang, "duoi_min": duoi_min,
-            "gia_tri_ton": float(gia_tri), "so_phieu": so_phieu or 0,
-            "yeu_cau_mua_moi": yeu_cau_moi or 0}
+            "gia_tri_ton": float(gia_tri), "so_phieu": so_phieu or 0}
+
+
+# ----- 🛒 Mua bù tồn kho từ Cảnh báo tồn → PO chờ duyệt mang mã KHO (bỏ bước đề xuất mua 10/10/2026) -----
+class KhoTaoPoVao(BaseModel):
+    hang_hoa_id: int
+    so_luong: Decimal
+    don_gia: Decimal | None = None
+    nha_cung_cap_id: int
+    ngay_hen_giao: date | None = None
+    xac_nhan_trung: bool = False
+    xac_nhan_lap: bool = False
+    xac_nhan_du_toan: bool = False
+
+
+@router.post("/tao-po", status_code=201)
+def kho_tao_po(data: KhoTaoPoVao, db: Session = Depends(get_db),
+               nd: NguoiDung = Depends(yeu_cau_bat_ky((MODULE, "THAO_TAC"), ("ncc", "THAO_TAC")))):
+    """Hàng dưới tồn min → lập PO chờ duyệt (mã KHO — gán mã thật khi xuất dùng), duyệt theo hạn mức ở NCC → Đơn mua."""
+    from .ncc import tao_po_tu_dong, _po_ra_gon
+    hh = db.get(HangHoa, data.hang_hoa_id)
+    if hh is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy hàng hóa")
+    if data.so_luong is None or data.so_luong <= 0:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Số lượng mua phải > 0")
+    pos = tao_po_tu_dong(db, nd, [{"hang_hoa_id": hh.id, "so_luong": data.so_luong, "don_gia": data.don_gia,
+                                   "nha_cung_cap_id": data.nha_cung_cap_id, "ten": hh.ten}],
+                         ma_ban="KHO", ngay_hen_giao=data.ngay_hen_giao,
+                         xac_nhan_trung=data.xac_nhan_trung, xac_nhan_lap=data.xac_nhan_lap,
+                         xac_nhan_du_toan=data.xac_nhan_du_toan, nguon="KHO_TON_MIN",
+                         audit_them={"ly_do": "TON_DUOI_MIN"})
+    db.commit()
+    for p in pos:
+        db.refresh(p)
+    return _po_ra_gon(pos)

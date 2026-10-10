@@ -120,8 +120,8 @@ curl -i -X POST localhost:8000/ncc/don-mua/2/duyet -H "Authorization: Bearer $T_
 ```
 
 ### Nối với module Kho
-`GET /ncc/yeu-cau-mua` liệt kê các yêu cầu mua mà module Kho **tự sinh** khi tồn < min
-(`ly_do='TON_DUOI_MIN'`) — khép vòng "tồn thấp → đề xuất mua → đơn mua → duyệt".
+(10/10/2026) Bỏ bước đề xuất mua: tồn < min hiện ở Kho → Cảnh báo tồn với nút 🛒 Tạo PO
+(`POST /kho/tao-po`, mã `KHO`) — khép vòng "tồn thấp → PO chờ duyệt → duyệt".
 
 ---
 
@@ -536,7 +536,13 @@ Duyệt PO thêm **tầng 3**: chặn nếu (dư nợ NCC + giá trị PO) vư�
 | `POST /ncc/cong-no/{id}/thanh-toan` | **ke_toan THAO_TAC** | ghi nhận thanh toán NCC (giảm nợ); chặn vượt còn lại |
 UI NCC thêm tab **Kiểm soát** (trễ hạn giao + hạn mức công nợ) và tab Công nợ thêm **thẻ tuổi nợ** + nút **Thanh toán** (kế toán).
 
-## MUA HÀNG — Đề xuất mua hàng (1 đầu mối xét duyệt)
+## MUA HÀNG — Đề xuất mua hàng (ĐÃ BỎ 10/10/2026 — mục dưới đây là LỊCH SỬ)
+PO nay lập thẳng: `POST /ncc/du-toan-ban/{id}/tao-po` (dự toán hàng bán) · `POST /du-an/du-toan/{id}/tao-po` (BOQ dự án)
+· `POST /cho-thue/vat-tu-po` (cho thuê) · `POST /kho/tao-po` (kho dưới min) — đều qua `ncc.tao_po_tu_dong`
+(mỗi NCC một PO CHO_DUYET, chặn mua trùng, kiểm soát dự toán, mã chi phí). AI Sourcing theo mặt hàng:
+`POST /ncc/goi-y-ncc-ai?hang_hoa_id=` · `POST /ncc/tim-ncc-web?hang_hoa_id=`. Bảng yeu_cau_mua giữ làm lịch sử.
+
+### (lịch sử) Đề xuất mua hàng (1 đầu mối xét duyệt)
 `yeu_cau_mua` mở rộng thành quy trình: trang_thai (MOI/DA_DUYET/TU_CHOI/DA_TAO_PO), nha_cung_cap_id, **don_hang_id (Mã bán hàng)**, don_gia, ngay_can, nguoi_duyet, don_mua_id.
 | Endpoint | Quyền | Việc |
 |---|---|---|

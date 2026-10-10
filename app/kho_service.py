@@ -4,7 +4,7 @@ Dịch vụ tồn kho DÙNG CHUNG — module Kho và Bán hàng cùng gọi.
 """
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
-from .models import TonKho, YeuCauMua
+from .models import TonKho
 
 
 def _lay_ton(db: Session, hang_hoa_id: int) -> TonKho:
@@ -20,15 +20,11 @@ def nhap_ton(db: Session, hang_hoa_id: int, so_luong) -> None:
 
 
 def xuat_ton(db: Session, hang_hoa_id: int, so_luong) -> bool:
-    """Trừ tồn (khóa dòng), kiểm đủ. Nếu xuống dưới min -> tự sinh yêu cầu mua.
-    Trả True nếu đã sinh yêu cầu mua."""
+    """Trừ tồn (khóa dòng), kiểm đủ. Trả True nếu tồn xuống dưới mức tối thiểu — mặt hàng hiện ở
+    Kho → Cảnh báo tồn với nút 🛒 Tạo PO (mua bù đến tồn max, mã KHO). Bỏ bước tự sinh đề xuất mua 10/10/2026."""
     ton = _lay_ton(db, hang_hoa_id)
     if so_luong > ton.so_luong:
         raise HTTPException(status.HTTP_400_BAD_REQUEST,
                             f"Tồn không đủ cho hàng hóa {hang_hoa_id} (còn {ton.so_luong})")
     ton.so_luong = ton.so_luong - so_luong
-    if ton.so_luong < ton.ton_min:
-        muc_tieu = ton.ton_max if ton.ton_max is not None else ton.ton_min
-        db.add(YeuCauMua(hang_hoa_id=hang_hoa_id, so_luong=muc_tieu - ton.so_luong, ly_do="TON_DUOI_MIN"))
-        return True
-    return False
+    return ton.so_luong < ton.ton_min

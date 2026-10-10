@@ -753,13 +753,24 @@ def nap_mau_chi_tieu(da_id: int, data: NapChiTieuVao, db: Session = Depends(get_
 _DT_LOAI = ("THIET_BI", "VAT_TU", "NHAN_SU", "CHI_PHI_KHAC")
 
 
+def _boq_khoa(db, x) -> bool:
+    """Dòng BOQ đã lập PO còn hiệu lực (PO bị từ chối / đã xóa → dòng mở lại). Bỏ bước đề xuất mua 10/10/2026."""
+    dm_id = getattr(x, "don_mua_id", None)
+    if not dm_id:
+        return False
+    from ..models import DonMua as _KhoaDm
+    dm = db.get(_KhoaDm, dm_id)
+    return dm is not None and dm.trang_thai != "TU_CHOI"
+
+
 def _dt_ra(x):
     sl = _f(x.so_luong) if x.so_luong is not None else 0
     dg = _f(x.don_gia) if x.don_gia is not None else 0
     return {"id": x.id, "loai": x.loai, "ten": x.ten, "quy_cach": x.quy_cach,
             "don_vi": x.don_vi, "so_luong": sl, "don_gia": dg,
             "thanh_tien": round(sl * dg), "ghi_chu": x.ghi_chu, "thu_tu": x.thu_tu,
-            "hang_hoa_id": getattr(x, "hang_hoa_id", None)}
+            "hang_hoa_id": getattr(x, "hang_hoa_id", None),
+            "don_mua_id": getattr(x, "don_mua_id", None)}
 
 
 @router.get("/{da_id}/du-toan")
@@ -812,11 +823,11 @@ class BoqCapNhatGiaVao(BaseModel):
 def boq_cap_nhat_gia(da_id: int, data: BoqCapNhatGiaVao, db: Session = Depends(get_db),
                      nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
     """⟳ Cập nhật đơn giá BOQ dự án theo MUA THỰC TẾ (khớp tên với danh mục kho).
-    Dòng đã đề xuất mua bị khóa. ap_dung=False chỉ trả bảng so sánh."""
+    Dòng đã lập PO bị khóa. ap_dung=False chỉ trả bảng so sánh."""
     from ..gia_dau_vao import goi_y_cap_nhat
     _da_404(db, da_id)
     rs = db.query(DuAnDuToan).filter_by(du_an_id=da_id).order_by(DuAnDuToan.thu_tu, DuAnDuToan.id).all()
-    dong = [(x.id, x.ten, x.hang_hoa_id, x.don_gia, "Đã đề xuất mua #" in (x.ghi_chu or "")) for x in rs]
+    dong = [(x.id, x.ten, x.hang_hoa_id, x.don_gia, _boq_khoa(db, x)) for x in rs]
     goi_y = goi_y_cap_nhat(db, dong)
     da_ap = 0
     if data.ap_dung:
@@ -895,7 +906,7 @@ def boq_khop_kho(da_id: int, data: BoqKhopKhoVao, db: Session = Depends(get_db),
     _da_404(db, da_id)
     rs = db.query(DuAnDuToan).filter_by(du_an_id=da_id).order_by(DuAnDuToan.thu_tu, DuAnDuToan.id).all()
     if not data.ap_dung:
-        dong = [(x.id, x.ten, x.hang_hoa_id, x.don_gia, "Đã đề xuất mua #" in (x.ghi_chu or "")) for x in rs]
+        dong = [(x.id, x.ten, x.hang_hoa_id, x.don_gia, _boq_khoa(db, x)) for x in rs]
         gy = goi_y_khop_kho(db, dong)
         return {"goi_y": gy, "so_chua_khop": sum(1 for r in gy if not r["da_khop"]),
                 "so_co_ung_vien": sum(1 for r in gy if not r["da_khop"] and r["ung_vien"])}
@@ -1078,53 +1089,48 @@ def ai_nhap_du_toan(da_id: int, file: UploadFile = File(...), loai: str = Form("
     return {"them": them, "bo_qua": bo_qua}
 
 
-@router.post("/du-toan/{dt_id}/de-xuat-mua", status_code=201)
-def de_xuat_mua_tu_du_toan(dt_id: int, db: Session = Depends(get_db),
-                           nd: NguoiDung = Depends(yeu_cau("ncc", "THAO_TAC"))):
-    """Chuyển 1 dòng dự toán thành đề xuất mua hàng (hiện ở mục Đề xuất mua hàng).
-    Hàng chưa có trong kho → tự thêm (VAT_TU). Dòng đã đề xuất rồi → chặn tạo trùng."""
-    from ..models import HangHoa, TonKho, YeuCauMua, YeuCauMuaCt
+class BoqTaoPoVao(BaseModel):
+    nha_cung_cap_id: int
+    so_luong: Decimal | None = None
+    don_gia: Decimal | None = None
+    ngay_hen_giao: date | None = None
+    xac_nhan_trung: bool = False
+    xac_nhan_lap: bool = False
+    xac_nhan_du_toan: bool = False
+
+
+@router.post("/du-toan/{dt_id}/tao-po", status_code=201)
+def tao_po_tu_boq(dt_id: int, data: BoqTaoPoVao, db: Session = Depends(get_db),
+                  nd: NguoiDung = Depends(yeu_cau("ncc", "THAO_TAC"))):
+    """🛒 Lập PO CHỜ DUYỆT thẳng từ 1 dòng BOQ dự án (bỏ bước đề xuất mua 10/10/2026): mã PO = mã dự án,
+    tự gắn đơn bán cùng số nếu có; hàng chưa có trong kho → tự thêm (VAT_TU). Dòng đã có PO còn hiệu lực → chặn."""
+    from .ncc import tao_po_tu_dong, _hh_theo_ten_hoac_tao, _po_ra_gon
+    from ..models import DonHang as _DxDh
     x = db.get(DuAnDuToan, dt_id)
     if x is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy dòng dự toán")
-    if "Đã đề xuất mua #" in (x.ghi_chu or ""):
+    if _boq_khoa(db, x):
         raise HTTPException(status.HTTP_400_BAD_REQUEST,
-                            f"Dòng này đã được đề xuất mua rồi ({x.ghi_chu.split('Đã đề xuất mua ')[-1]}) "
-                            "— xem ở mục Đề xuất mua hàng.")
+                            "Dòng này đã lập PO rồi — xem ở Nhà cung cấp → Đơn mua (từ chối/xóa PO đó thì dòng mở lại).")
     da = db.get(DuAn, x.du_an_id)
-    hh = db.get(HangHoa, x.hang_hoa_id) if getattr(x, "hang_hoa_id", None) else None
-    if hh is None:
-        hh = db.query(HangHoa).filter(HangHoa.ten.ilike(x.ten)).first()
-    hh_moi = False
-    if hh is None:
-        hh = HangHoa(ma=None, ten=x.ten, loai="VAT_TU", don_vi=x.don_vi, gia_ban=x.don_gia or 0)
-        db.add(hh); db.flush()
-        if db.query(TonKho).filter_by(hang_hoa_id=hh.id).first() is None:
-            db.add(TonKho(hang_hoa_id=hh.id, so_luong=0)); db.flush()
-        hh_moi = True
+    hh, hh_moi = _hh_theo_ten_hoac_tao(db, nd, x.ten, x.don_vi, getattr(x, "hang_hoa_id", None))
     x.hang_hoa_id = hh.id
-    sl = x.so_luong or 1
-    ly_do = f"Dự toán dự án {(da.ma or da.ten) if da else ('#' + str(x.du_an_id))}"[:200]
-    # Mã dự án lấy theo số báo giá nên thường trùng SỐ ĐƠN HÀNG bán — tự gắn để
-    # hàng đợi Đề xuất mua hiện đúng Mã đơn hàng và PO tạo ra nối liền tới giá vốn.
-    dh_id = None
-    if da and da.ma:
-        from ..models import DonHang as _DxDh
-        _dh = db.query(_DxDh).filter(func.lower(func.trim(_DxDh.so)) == da.ma.strip().lower()).first()
-        if _dh:
-            dh_id = _dh.id
-    ycm = YeuCauMua(hang_hoa_id=hh.id, so_luong=sl, ly_do=ly_do, don_hang_id=dh_id,
-                    ma_ban=(((da.ma or "").strip()[:40] or None) if da else None),
-                    don_gia=x.don_gia or None, ghi_chu=(x.quy_cach or None),
-                    nguoi_tao=nhan_vien_id_cua(db, nd.id), trang_thai="MOI")
-    db.add(ycm); db.flush()
-    db.add(YeuCauMuaCt(yeu_cau_mua_id=ycm.id, hang_hoa_id=hh.id, so_luong=sl,
-                       don_gia=x.don_gia or None, ghi_chu=x.quy_cach))
-    x.ghi_chu = (((x.ghi_chu + " · ") if x.ghi_chu else "") + f"Đã đề xuất mua #{ycm.id}")[:300]
-    ghi_audit(db, nd.id, "TAO", "yeu_cau_mua", ycm.id,
-              moi={"tu_du_toan": dt_id, "du_an": x.du_an_id, "hang_hoa_moi": hh_moi})
+    sl = data.so_luong if (data.so_luong is not None and data.so_luong > 0) else (x.so_luong or 1)
+    gia = data.don_gia if data.don_gia is not None else (x.don_gia or None)
+    ma = (((da.ma or "").strip()[:40]) or None) if da else None
+    dh = db.query(_DxDh).filter(func.lower(func.trim(_DxDh.so)) == ma.strip().lower()).first() if ma else None
+    pos = tao_po_tu_dong(db, nd, [{"hang_hoa_id": hh.id, "so_luong": sl, "don_gia": gia,
+                                   "nha_cung_cap_id": data.nha_cung_cap_id, "ten": x.ten}],
+                         ma_ban=ma, don_hang_id=dh.id if dh else None, ngay_hen_giao=data.ngay_hen_giao,
+                         xac_nhan_trung=data.xac_nhan_trung, xac_nhan_lap=data.xac_nhan_lap,
+                         xac_nhan_du_toan=data.xac_nhan_du_toan, nguon="BOQ_DU_AN",
+                         audit_them={"tu_boq": dt_id, "du_an": x.du_an_id, "hang_hoa_moi": hh_moi})
+    x.don_mua_id = pos[0].id
+    x.ghi_chu = (((x.ghi_chu + " · ") if x.ghi_chu else "") + f"Đã tạo PO {pos[0].so}")[:300]
     db.commit()
-    return {"ok": True, "yeu_cau_mua_id": ycm.id, "hang_hoa_moi": hh_moi}
+    for p in pos:
+        db.refresh(p)
+    return {**_po_ra_gon(pos), "hang_hoa_moi": hh_moi, "gan_don_hang": bool(dh)}
 
 
 @router.post("/{da_id}/phan-tich-ai")

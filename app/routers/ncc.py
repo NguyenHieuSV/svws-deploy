@@ -14,15 +14,14 @@ from ..database import get_db
 from ..rbac import yeu_cau, kiem_han_muc, chi_vai_tro, yeu_cau_bat_ky
 from ..deps import nhan_vien_id_cua
 from ..audit import ghi_audit
-from ..models import (NguoiDung, NhaCungCap, DonMua, DonMuaCt, DanhGiaNcc, YeuCauMua, YeuCauMuaCt,
+from ..models import (NguoiDung, NhaCungCap, DonMua, DonMuaCt, DanhGiaNcc, YeuCauMua,
                       TonKho, PhieuKho, PhieuKhoCt, CongNo, ThanhToan, HangHoa, BaoGiaNcc, Rfq, RfqLog,
                       TepDinhKem)
 from ..luu_tru import luu as luu_tep_chung, xoa as xoa_tep_chung, phan_hoi_tai, doc as doc_tep_chung
-from ..schemas import (NccVao, NccRa, DanhGiaVao, DonMuaVao, DonMuaRa, YeuCauMuaRa,
-                       NhanHangVao, DonMuaChiTietRa, ThuTienVao,
-                       YeuCauMuaVao, YeuCauMuaItemVao, TaoPoTuDeXuatVao, LyDoVao,
+from ..schemas import (NccVao, NccRa, DanhGiaVao, DonMuaVao, DonMuaRa,
+                       NhanHangVao, DonMuaChiTietRa, ThuTienVao, LyDoVao,
                        BaoGiaNccVao as BaoGiaVao, BaoGiaNccRa as BaoGiaRa,
-                       RfqVao, GuiRfqVao, RfqRa, RfqLogRa, RfqNoiDungVao,
+                       RfqVao, RfqRa, RfqLogRa,
                        PoNoiDungVao, GuiPoVao, PoPdfVao)
 from ..kho_service import nhap_ton
 from ..ai_gateway import goi_y_ncc_ai, tim_ncc_web, doc_bao_gia_file, doc_thong_tin_ncc
@@ -30,6 +29,7 @@ from ..config import settings
 from ..email_gateway import lay_email_provider
 from ..po_pdf import tao_po_pdf
 import os
+from types import SimpleNamespace as _NS
 from fastapi.responses import FileResponse
 
 router = APIRouter(prefix="/ncc", tags=["ncc"])
@@ -447,316 +447,110 @@ def danh_gia(ncc_id: int, data: DanhGiaVao, db: Session = Depends(get_db),
     return ncc
 
 
-# ----- XEM: yêu cầu mua đang chờ (do module Kho tự sinh khi tồn < min) -----
-def _ycm_dict(db, y):
-    def _name(hid):
-        hh = db.get(HangHoa, hid)
-        return hh.ten if hh else f"HH #{hid}"
-    lines = db.query(YeuCauMuaCt).filter(YeuCauMuaCt.yeu_cau_mua_id == y.id).all()
-    def _ncc_name(nid):
-        if not nid:
-            return None
-        nc = db.get(NhaCungCap, nid)
-        return nc.ten if nc else f"NCC #{nid}"
-    items = [{"id": l.id, "hang_hoa_id": l.hang_hoa_id, "ten_hh": _name(l.hang_hoa_id),
-              "so_luong": float(l.so_luong),
-              "don_gia": float(l.don_gia) if l.don_gia is not None else None,
-              "thue_suat": float(l.thue_suat or 0),
-              "ghi_chu": l.ghi_chu,
-              "nha_cung_cap_id": l.nha_cung_cap_id, "ten_ncc": _ncc_name(l.nha_cung_cap_id)}
-             for l in lines]
-    # Thành tiền / VAT / Tổng cộng của cả đề xuất (fallback dòng chính khi chưa có chi tiết)
-    if lines:
-        tong_tt = sum(float(l.so_luong or 0) * float(l.don_gia or 0) for l in lines)
-        tien_vat = sum(float(l.so_luong or 0) * float(l.don_gia or 0) * float(l.thue_suat or 0) / 100
-                       for l in lines)
-    else:
-        tong_tt = float(y.so_luong or 0) * float(y.don_gia or 0)
-        tien_vat = 0.0
-    # NCC hiển thị: cấp đề xuất; trống thì lấy NCC của dòng sản phẩm đầu tiên có NCC
-    ncc_hien = y.nha_cung_cap_id or next((l.nha_cung_cap_id for l in lines if l.nha_cung_cap_id), None)
-    return {"thanh_tien": tong_tt, "tien_vat": tien_vat, "tong_cong": tong_tt + tien_vat,
-            "id": y.id, "hang_hoa_id": y.hang_hoa_id, "ten_hh": _name(y.hang_hoa_id),
-            "ngay": str(y.ngay) if y.ngay else None,
-            "ngay_duyet": str(y.ngay_duyet) if y.ngay_duyet else None,
-            "so_luong": float(y.so_luong), "ly_do": y.ly_do, "trang_thai": y.trang_thai,
-            "nha_cung_cap_id": ncc_hien, "don_hang_id": y.don_hang_id,
-            "don_gia": float(y.don_gia) if y.don_gia is not None else None,
-            "ngay_can": str(y.ngay_can) if y.ngay_can else None, "don_mua_id": y.don_mua_id,
-            "ai_ncc_id": y.ai_ncc_id, "ai_goi_y": y.ai_goi_y,
-            "dinh_kem_url": y.dinh_kem_url, "dinh_kem_file": y.dinh_kem_file,
-            "so_dong": len(items) or 1, "items": items, "ma_ban": getattr(y, "ma_ban", None),
-            "vuot_du_toan": getattr(y, "vuot_du_toan", None)}
+# ============ 🛒 TẠO PO TRỰC TIẾP — bỏ bước "Đề xuất mua hàng" (CEO chốt 10/10/2026) ============
+# PO lập thẳng từ: Dự toán hàng bán (tick dòng) · BOQ dự án · Cho thuê (vật tư / hóa chất) · Kho (dưới tồn min)
+# · lập tay / AI đọc báo giá. Mọi kiểm soát dồn vào PO: mã chi phí bắt buộc (không mã → KHO) · chặn mua trùng
+# theo mã · vượt / ngoài / chưa có dự toán → xác nhận có chủ đích → cờ ⛔ chỉ CEO/ADMIN duyệt · hạn mức duyệt
+# theo vai trò · hạn mức công nợ NCC (lúc duyệt). Bảng yeu_cau_mua giữ làm LỊCH SỬ (hồ sơ PO vẫn tra được).
+def _hh_theo_ten_hoac_tao(db, nd, ten, don_vi=None, hang_hoa_id=None):
+    """Mặt hàng kho cho một dòng dự toán / BOQ: theo id → theo tên (không phân biệt hoa thường) → tạo mới VAT_TU.
+    Trả (hang_hoa, tao_moi)."""
+    hh = db.get(HangHoa, hang_hoa_id) if hang_hoa_id else None
+    ten = str(ten or "").strip()
+    if hh is None and ten:
+        hh = db.query(HangHoa).filter(func.lower(func.trim(HangHoa.ten)) == ten.lower()).first()
+    if hh is not None:
+        return hh, False
+    hh = HangHoa(ma=None, ten=(ten or "Hàng hóa")[:200], loai="VAT_TU", don_vi=don_vi)
+    db.add(hh); db.flush()
+    if db.query(TonKho).filter_by(hang_hoa_id=hh.id).first() is None:
+        db.add(TonKho(hang_hoa_id=hh.id, so_luong=0, ton_min=0))
+    ghi_audit(db, nd.id, "TAO", "hang_hoa", hh.id, moi={"ten": hh.ten, "tu": "tao_po_truc_tiep"})
+    return hh, True
 
 
-@router.get("/yeu-cau-mua")
-def ds_yeu_cau_mua(trang_thai: str | None = None, db: Session = Depends(get_db),
-                   _=Depends(yeu_cau(MODULE, "XEM"))):
-    """ĐẦU MỐI ĐỀ XUẤT MUA: mọi đề xuất (thủ công + tự sinh khi tồn thấp) đổ về đây để xét duyệt."""
-    q = db.query(YeuCauMua)
-    if trang_thai:
-        q = q.filter(YeuCauMua.trang_thai == trang_thai)
-    return [_ycm_dict(db, y) for y in q.order_by(YeuCauMua.id.desc()).all()]
+def _po_ra_gon(pos):
+    return {"so_po": len(pos),
+            "po": [{"id": p.id, "so": p.so, "nha_cung_cap_id": p.nha_cung_cap_id,
+                    "tong_tien": float(p.tong_tien or 0), "vuot_du_toan": p.vuot_du_toan} for p in pos]}
 
 
-@router.get("/yeu-cau-mua/{ycm_id}")
-def chi_tiet_yeu_cau_mua(ycm_id: int, db: Session = Depends(get_db),
-                         _=Depends(yeu_cau(MODULE, "XEM"))):
-    y = db.get(YeuCauMua, ycm_id)
-    if y is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đề xuất")
-    return _ycm_dict(db, y)
-
-
-@router.post("/yeu-cau-mua/{ycm_id}/dinh-kem")
-async def dinh_kem_de_xuat(ycm_id: int, file: UploadFile = File(...),
-                           db: Session = Depends(get_db),
-                           nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
-    """Đính kèm file dự toán (xlsx/csv/pdf...) cho đề xuất mua hàng."""
-    y = db.get(YeuCauMua, ycm_id)
-    if y is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đề xuất")
-    ten = file.filename or "dutoan"
-    data = await file.read()
-    # Lưu vào KHO TỆP DÙNG CHUNG (R2/đĩa) — thay bản cũ nếu đính kèm lại
-    for t in db.query(TepDinhKem).filter_by(doi_tuong="YEU_CAU_MUA", doi_tuong_id=ycm_id).all():
-        xoa_tep_chung(t.duong_dan)
-        db.delete(t)
-    ref = luu_tep_chung(data, "de_xuat", ycm_id, ten, file.content_type)
-    db.add(TepDinhKem(doi_tuong="YEU_CAU_MUA", doi_tuong_id=ycm_id, loai="KHAC",
-                      ten_file=ten, duong_dan=ref, kich_thuoc=len(data),
-                      content_type=file.content_type, nguoi_tai_len=nhan_vien_id_cua(db, nd.id)))
-    y.dinh_kem_file = ten
-    ghi_audit(db, nd.id, "DINH_KEM", "yeu_cau_mua", y.id, moi={"file": ten})
-    db.commit()
-    return {"dinh_kem_file": ten, "ten": ten}
-
-
-@router.get("/yeu-cau-mua/{ycm_id}/dinh-kem")
-def tai_dinh_kem(ycm_id: int, db: Session = Depends(get_db),
-                 _=Depends(yeu_cau(MODULE, "XEM"))):
-    y = db.get(YeuCauMua, ycm_id)
-    if y is None or not y.dinh_kem_file:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không có tệp đính kèm")
-    # Ưu tiên kho tệp dùng chung; tệp cũ (trước khi hợp nhất kho) vẫn đọc từ đĩa
-    t = db.query(TepDinhKem).filter_by(doi_tuong="YEU_CAU_MUA", doi_tuong_id=ycm_id) \
-          .order_by(TepDinhKem.id.desc()).first()
-    if t is not None:
-        return phan_hoi_tai(t.duong_dan, t.ten_file, t.content_type)
-    base = (getattr(settings, "storage_dir", None) or os.environ.get("STORAGE_DIR") or "/tmp")
-    path = os.path.join(base, "de_xuat", y.dinh_kem_file)
-    if not os.path.exists(path):
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Tệp không tồn tại")
-    return FileResponse(path, filename=y.dinh_kem_file)
-
-
-@router.post("/yeu-cau-mua", response_model=YeuCauMuaRa, status_code=201)
-def tao_de_xuat(data: YeuCauMuaVao, db: Session = Depends(get_db),
-                nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
-    """Tạo đề xuất mua (gắn Mã bán hàng + NCC đề xuất để dữ liệu liên tục)."""
-    items = list(data.items or [])
-    if not items and data.hang_hoa_id:
-        items = [YeuCauMuaItemVao(hang_hoa_id=data.hang_hoa_id, so_luong=data.so_luong or 1,
-                                  don_gia=data.don_gia, ghi_chu=data.ghi_chu)]
-    if not items:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Cần ít nhất 1 sản phẩm trong đề xuất")
-    # Dòng chọn SẢN PHẨM NCC (chưa có trong kho): tự khớp/tạo hàng hóa kho tương ứng
-    for it in items:
-        if it.hang_hoa_id:
+def tao_po_tu_dong(db, nd, dong, *, ma_ban=None, don_hang_id=None, cho_thue_ma=None, ngay_hen_giao=None,
+                   xac_nhan_trung=False, xac_nhan_lap=False, xac_nhan_du_toan=False, nguon="TRUC_TIEP",
+                   audit_them=None):
+    """Lập PO CHỜ DUYỆT thẳng từ các dòng — gom theo nhà cung cấp (mỗi NCC một PO). KHÔNG commit (nơi gọi commit).
+    dong: list dict/obj có hang_hoa_id · so_luong · don_gia · nha_cung_cap_id · thue_suat (· ten để báo lỗi).
+    Dòng thiếu NCC hoặc giá → 400 kể rõ dòng nào. Cùng kiểm soát với PO lập tay (chặn trùng · dự toán · mã)."""
+    def _g(o, k, mac=None):
+        v = o.get(k, mac) if isinstance(o, dict) else getattr(o, k, mac)
+        return mac if v is None else v
+    rows, thieu_ncc, thieu_gia = [], [], []
+    for o in dong or []:
+        hid = int(_g(o, "hang_hoa_id", 0) or 0)
+        sl = Decimal(str(_g(o, "so_luong", 0) or 0))
+        if not hid or sl <= 0:
             continue
-        if not it.san_pham_ncc_id:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST,
-                                "Mỗi dòng cần chọn hàng hóa kho hoặc sản phẩm NCC")
-        sp = db.get(SanPhamNcc, it.san_pham_ncc_id)
-        if sp is None:
-            raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy sản phẩm NCC")
-        hh = None
-        if (sp.ma_sp or "").strip():
-            hh = db.query(HangHoa).filter(func.lower(HangHoa.ma) == sp.ma_sp.strip().lower()).first()
-        if hh is None:
-            hh = db.query(HangHoa).filter(func.lower(HangHoa.ten) == sp.ten.strip().lower()).first()
-        if hh is None:
-            hh = HangHoa(ma=(sp.ma_sp or "").strip() or None, ten=sp.ten.strip()[:200],
-                         loai="VAT_TU", don_vi=sp.don_vi)
-            db.add(hh); db.flush()
-            db.add(TonKho(hang_hoa_id=hh.id, so_luong=0, ton_min=0))
-            ghi_audit(db, nd.id, "TAO", "hang_hoa", hh.id,
-                      moi={"ten": hh.ten, "tu_san_pham_ncc": sp.id})
-        it.hang_hoa_id = hh.id
-        if it.don_gia is None and sp.don_gia:
-            it.don_gia = sp.don_gia
-        if not it.nha_cung_cap_id:
-            it.nha_cung_cap_id = sp.nha_cung_cap_id
-    primary = items[0]
-    ncc_chung = data.nha_cung_cap_id or next((it.nha_cung_cap_id for it in items if it.nha_cung_cap_id), None)
-    # 📋 KIỂM SOÁT THEO DỰ TOÁN của mã đơn bán (nếu mã có dự toán): chặn & chờ CEO duyệt
-    _ma_dt = _ma_hieu_luc(db, don_hang_id=data.don_hang_id)
-    _vuot = _chan_vuot_du_toan(db, _ma_dt, [(it.hang_hoa_id, it.so_luong, it.don_gia) for it in items],
-                               xac_nhan=getattr(data, "xac_nhan_du_toan", False))
-    ycm = YeuCauMua(hang_hoa_id=primary.hang_hoa_id, so_luong=primary.so_luong, ly_do=data.ly_do,
-                    nha_cung_cap_id=ncc_chung, don_hang_id=data.don_hang_id,
-                    don_gia=primary.don_gia, ngay_can=data.ngay_can, ghi_chu=data.ghi_chu,
-                    dinh_kem_url=data.dinh_kem_url, vuot_du_toan=_vuot,
-                    nguoi_tao=nhan_vien_id_cua(db, nd.id), trang_thai="MOI")
-    db.add(ycm); db.flush()
-    for it in items:
-        db.add(YeuCauMuaCt(yeu_cau_mua_id=ycm.id, hang_hoa_id=it.hang_hoa_id,
-                           so_luong=it.so_luong, don_gia=it.don_gia, thue_suat=it.thue_suat,
-                           ghi_chu=it.ghi_chu, nha_cung_cap_id=it.nha_cung_cap_id))
-    ghi_audit(db, nd.id, "TAO", "yeu_cau_mua", ycm.id, moi={"so_dong": len(items), "vuot_du_toan": _vuot})
-    db.commit(); db.refresh(ycm)
-    return ycm
-
-
-# ----- THAO_TAC: gắn / đổi Mã đơn hàng cho từng đề xuất mua -----
-class DxDonHangVao(_NccCnBase):
-    don_hang_id: int | None = None
-
-
-@router.put("/yeu-cau-mua/{ycm_id}/don-hang")
-def gan_don_hang_de_xuat(ycm_id: int, data: DxDonHangVao, db: Session = Depends(get_db),
-                         nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
-    """Gắn/đổi Mã đơn hàng bán cho một đề xuất mua (kể cả đề xuất tự sinh khi tồn thấp).
-    Đề xuất đã tạo PO thì không đổi được — mã đã chuyển sang PO (giữ vết giá vốn)."""
-    y = db.get(YeuCauMua, ycm_id)
-    if y is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đề xuất")
-    if y.trang_thai == "DA_TAO_PO":
-        raise HTTPException(status.HTTP_400_BAD_REQUEST,
-                            "Đề xuất đã tạo PO — mã đơn hàng đã chuyển sang PO, không đổi ở đây.")
-    if data.don_hang_id:
-        from ..models import DonHang
-        if db.get(DonHang, data.don_hang_id) is None:
-            raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đơn hàng")
-    cu = y.don_hang_id
-    y.don_hang_id = data.don_hang_id
-    ghi_audit(db, nd.id, "SUA", "yeu_cau_mua", y.id,
-              cu={"don_hang_id": cu}, moi={"don_hang_id": data.don_hang_id})
-    db.commit()
-    return {"ok": True, "don_hang_id": y.don_hang_id}
-
-
-@router.post("/yeu-cau-mua/{ycm_id}/duyet", response_model=YeuCauMuaRa)
-def duyet_de_xuat(ycm_id: int, db: Session = Depends(get_db),
-                  nd: NguoiDung = Depends(yeu_cau(MODULE, "DUYET"))):
-    """Xét duyệt đề xuất — 1 đầu mối (TP Cung ứng / CEO)."""
-    ycm = db.get(YeuCauMua, ycm_id)
-    if ycm is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đề xuất")
-    if ycm.trang_thai != "MOI":
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Đề xuất đang ở trạng thái {ycm.trang_thai}")
-    _chi_ceo_duyet_vuot(nd, getattr(ycm, "vuot_du_toan", None), "Đề xuất")
-    ycm.trang_thai = "DA_DUYET"; ycm.nguoi_duyet = nhan_vien_id_cua(db, nd.id)
-    from ..nhac_viec_service import gio_hien_tai
-    ycm.ngay_duyet = gio_hien_tai().date()          # ngày duyệt thực tế (giờ VN)
-    # Tự động chạy AI Sourcing ngay khi duyệt (nếu bật cấu hình)
-    if settings.auto_tim_ncc:
-        try:
-            import json as _json
-            hh = db.get(HangHoa, ycm.hang_hoa_id)
-            ten = hh.ten if hh else f"HH #{ycm.hang_hoa_id}"
-            xep = _xep_hang_ncc(db, ycm.hang_hoa_id, ycm.so_luong)
-            ai = goi_y_ncc_ai(ten, float(ycm.so_luong), xep["danh_sach"])
-            ycm.ai_ncc_id = ai.get("khuyen_nghi_ncc_id")
-            ycm.ai_goi_y = _json.dumps({"ai": ai, "goi_y": xep}, ensure_ascii=False)
-        except Exception:
-            pass
-    ghi_audit(db, nd.id, "DUYET", "yeu_cau_mua", ycm.id, moi={"trang_thai": "DA_DUYET"})
-    db.commit(); db.refresh(ycm)
-    return ycm
-
-
-@router.post("/yeu-cau-mua/{ycm_id}/tu-choi", response_model=YeuCauMuaRa)
-def tu_choi_de_xuat(ycm_id: int, data: LyDoVao, db: Session = Depends(get_db),
-                    nd: NguoiDung = Depends(yeu_cau(MODULE, "DUYET"))):
-    ycm = db.get(YeuCauMua, ycm_id)
-    if ycm is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đề xuất")
-    if ycm.trang_thai != "MOI":
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Đề xuất đang ở trạng thái {ycm.trang_thai}")
-    ycm.trang_thai = "TU_CHOI"; ycm.nguoi_duyet = nhan_vien_id_cua(db, nd.id)
-    if data.ly_do:
-        ycm.ghi_chu = (ycm.ghi_chu or "") + f" | Từ chối: {data.ly_do}"
-    ghi_audit(db, nd.id, "TU_CHOI", "yeu_cau_mua", ycm.id, moi={"ly_do": data.ly_do})
-    db.commit(); db.refresh(ycm)
-    return ycm
-
-
-@router.post("/yeu-cau-mua/{ycm_id}/tao-po", status_code=201)
-def tao_po_tu_de_xuat(ycm_id: int, data: TaoPoTuDeXuatVao, db: Session = Depends(get_db),
-                      nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
-    """Chuyển đề xuất ĐÃ DUYỆT thành PO tới NCC (giữ nguyên Mã bán hàng để tính giá vốn)."""
-    ycm = db.get(YeuCauMua, ycm_id)
-    if ycm is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đề xuất")
-    if ycm.trang_thai != "DA_DUYET":
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Đề xuất phải ở trạng thái ĐÃ DUYỆT mới tạo PO")
-    override_ncc = data.nha_cung_cap_id or ycm.nha_cung_cap_id
-    override_gia = data.don_gia
-    lines = db.query(YeuCauMuaCt).filter(YeuCauMuaCt.yeu_cau_mua_id == ycm.id).all()
-    if not lines:
-        lines = [YeuCauMuaCt(hang_hoa_id=ycm.hang_hoa_id, so_luong=ycm.so_luong,
-                             don_gia=ycm.don_gia, nha_cung_cap_id=ycm.nha_cung_cap_id)]
-    # CHẶN mua trùng theo mã bán hàng (CEO/ADMIN xác nhận mới mua bổ sung được)
-    da_xac_nhan_trung = False
-    # mã chuỗi hiệu lực: mã dự toán/dự án của đề xuất, hoặc số đơn bán đã gắn
-    _ma_eff = (getattr(ycm, "ma_ban", None) or "").strip() or None
-    if ycm.don_hang_id and not _ma_eff:
-        from ..models import DonHang as _TpDh
-        _dh0 = db.get(_TpDh, ycm.don_hang_id)
-        _ma_eff = ((_dh0.so or "").strip() or None) if _dh0 else None
-    if ycm.don_hang_id or getattr(ycm, "cho_thue_ma", None) or _ma_eff:
-        da_xac_nhan_trung = _chan_mua_trung(
-            db, nd, [l.hang_hoa_id for l in lines], don_hang_id=ycm.don_hang_id,
-            cho_thue_ma=getattr(ycm, "cho_thue_ma", None), ma_ban=_ma_eff,
-            xac_nhan=getattr(data, "xac_nhan_trung", False),
-            xac_nhan_lap=getattr(data, "xac_nhan_lap", False), so_luong_moi=_sl_theo_hh(lines))
-    # MÃ CHI PHÍ của PO sinh từ đề xuất: mã chuỗi của đề xuất; không có (đề xuất tồn kho
-    # tự sinh) → KHO để không khoản nào ra khỏi hệ thống mã, gán lại ở panel 🧩.
-    _ma_po = _chuan_ma(getattr(ycm, "ma_ban", None)) or None
-    if not ycm.don_hang_id and not _ma_po:
-        _ma_po = MA_KHO
-    # gom dòng theo NCC (mỗi NCC -> 1 PO)
-    nhom = {}
-    for i, l in enumerate(lines):
-        ncc = l.nha_cung_cap_id or override_ncc
+        hh = db.get(HangHoa, hid)
+        ten = str(_g(o, "ten", "") or (hh.ten if hh else f"HH #{hid}"))
+        g = _g(o, "don_gia", None)
+        ncc = int(_g(o, "nha_cung_cap_id", 0) or 0)
         if not ncc:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST,
-                                f"Thiếu nhà cung cấp cho mặt hàng #{l.hang_hoa_id}")
-        g = l.don_gia
-        if i == 0 and override_gia is not None:    # giá chọn ở panel áp cho dòng đầu
-            g = override_gia
-        if g is None:
-            g = override_gia if override_gia is not None else ycm.don_gia
-        if g is None:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST,
-                                f"Thiếu đơn giá cho mặt hàng #{l.hang_hoa_id}")
-        nhom.setdefault(ncc, []).append((l.hang_hoa_id, l.so_luong, g))
-    # 📋 PO theo giá thật vs DỰ TOÁN (bỏ chính đề xuất này khỏi phần đã dùng): chặn & chờ CEO duyệt
-    _vuot_po = _chan_vuot_du_toan(db, _ma_eff, [(hh, sl, g) for its in nhom.values() for (hh, sl, g) in its],
-                                  xac_nhan=getattr(data, "xac_nhan_du_toan", False), bo_qua_ycm=ycm.id)
+            thieu_ncc.append(ten)
+        if g is None or Decimal(str(g)) <= 0:
+            thieu_gia.append(ten)
+        rows.append((hid, sl, Decimal(str(g or 0)), ncc, Decimal(str(_g(o, "thue_suat", 0) or 0)), ten))
+    if not rows:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Không có dòng hợp lệ (cần mặt hàng kho và số lượng > 0)")
+    if thieu_ncc or thieu_gia:
+        def _ke(ds):
+            return ", ".join(ds[:6]) + (f" … (+{len(ds) - 6})" if len(ds) > 6 else "")
+        phan = []
+        if thieu_ncc:
+            phan.append("thiếu nhà cung cấp: " + _ke(thieu_ncc))
+        if thieu_gia:
+            phan.append("thiếu đơn giá: " + _ke(thieu_gia))
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Chưa lập được PO — " + "; ".join(phan) + ". Chọn NCC / nhập giá cho các dòng này rồi gửi lại.")
+    for _hid, _sl, _g2, ncc, _ts, _ten in rows:
+        n = db.get(NhaCungCap, ncc)
+        if n is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, f"Không tìm thấy nhà cung cấp #{ncc}")
+        if n.blacklist:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, f"NCC {n.ten} đang trong blacklist")
+    # mã chi phí: mã chuỗi (dự toán / dự án / cho thuê) · đơn bán · không có → KHO (mua dự trữ)
+    _ma_eff = _ma_hieu_luc(db, don_hang_id=don_hang_id, cho_thue_ma=cho_thue_ma, ma_ban=ma_ban)
+    _ma_po = _chuan_ma(ma_ban or cho_thue_ma) or None
+    if not don_hang_id and not _ma_po:
+        _ma_po = MA_KHO
+    # chặn mua trùng theo mã (CEO/ADMIN xác nhận mới mua bổ sung; DV-/OP- hóa chất, vật tư được mua lặp theo tháng)
+    da_xac_nhan_trung = False
+    if don_hang_id or cho_thue_ma or (_ma_eff and _ma_po != MA_KHO):
+        da_xac_nhan_trung = _chan_mua_trung(
+            db, nd, [r[0] for r in rows], don_hang_id=don_hang_id, cho_thue_ma=cho_thue_ma, ma_ban=_ma_eff,
+            xac_nhan=xac_nhan_trung, xac_nhan_lap=xac_nhan_lap,
+            so_luong_moi=_sl_theo_hh([_NS(hang_hoa_id=r[0], so_luong=r[1]) for r in rows]))
+    # kiểm soát theo dự toán của mã: vượt / ngoài / chưa có dự toán → 409 nếu chưa xác nhận; xác nhận → cờ ⛔
+    _vuot = _chan_vuot_du_toan(db, _ma_eff if _ma_po != MA_KHO else None,
+                               [(r[0], r[1], r[2]) for r in rows], xac_nhan=xac_nhan_du_toan)
+    nhom = {}
+    for hid, sl, g, ncc, ts, _ten in rows:
+        nhom.setdefault(ncc, []).append((hid, sl, g, ts))
     pos = []
-    for ncc, items_g in nhom.items():
-        tong = Decimal(0)
-        for _, sl, g in items_g:
-            tong += Decimal(sl) * Decimal(g)
-        dm = DonMua(so=None, nha_cung_cap_id=ncc, don_hang_id=ycm.don_hang_id, ma_ban=_ma_po, dinh_ky=bool(getattr(data, "xac_nhan_lap", False)),
-                    vuot_du_toan=_vuot_po,
-                    ngay=date.today(), ngay_hen_giao=data.ngay_hen_giao or ycm.ngay_can,
-                    tong_tien=tong, trang_thai="CHO_DUYET")
-        db.add(dm); db.flush(); dm.so = f"PO-{date.today():%Y%m%d}-{dm.id}"
-        for hh, sl, g in items_g:
-            db.add(DonMuaCt(don_mua_id=dm.id, hang_hoa_id=hh, so_luong=sl, don_gia=g))
+    for ncc, its in nhom.items():
+        th, tt, tong = _tinh_tien_po([_NS(so_luong=sl, don_gia=g, thue_suat=ts) for (_h, sl, g, ts) in its])
+        dm = DonMua(so=None, nha_cung_cap_id=ncc, don_hang_id=don_hang_id, ma_ban=_ma_po,
+                    dinh_ky=bool(xac_nhan_lap), vuot_du_toan=_vuot, ngay=date.today(),
+                    ngay_hen_giao=ngay_hen_giao, tien_hang=th, tien_thue=tt, tong_tien=tong, trang_thai="CHO_DUYET")
+        db.add(dm); db.flush()
+        dm.so = f"PO-{date.today():%Y%m%d}-{dm.id}"
+        for hid, sl, g, ts in its:
+            db.add(DonMuaCt(don_mua_id=dm.id, hang_hoa_id=hid, so_luong=sl, don_gia=g, thue_suat=ts))
+        ghi_audit(db, nd.id, "TAO", "don_mua", dm.id,
+                  moi={"tong_tien": float(tong), "tien_thue": float(tt), "trang_thai": "CHO_DUYET",
+                       "nguon": nguon, "ma_ban": _ma_po, "mua_bo_sung_xac_nhan": da_xac_nhan_trung,
+                       **(audit_them or {})})
         pos.append(dm)
-    ycm.trang_thai = "DA_TAO_PO"; ycm.don_mua_id = pos[0].id
-    ghi_audit(db, nd.id, "TAO_PO", "yeu_cau_mua", ycm.id,
-              moi={"so_po": len(pos), "po": [p.so for p in pos],
-                   "mua_bo_sung_xac_nhan": da_xac_nhan_trung})
-    db.commit()
-    for p in pos:
-        db.refresh(p)
-    return {"so_po": len(pos), "po": [{"id": p.id, "so": p.so,
-            "nha_cung_cap_id": p.nha_cung_cap_id, "tong_tien": float(p.tong_tien)} for p in pos]}
+    return pos
 
 
 # ----- XEM: danh sách đơn mua -----
@@ -1680,37 +1474,6 @@ def xoa_ncc(ncc_id: int, db: Session = Depends(get_db),
     ghi_audit(db, nd.id, "XOA", "nha_cung_cap", ncc_id, cu={"ten": ten_cu})
     db.commit()
     return {"ok": True, "ten": ten_cu}
-
-
-# ----- DUYET: xóa đề xuất mua (chặn khi đã tạo PO) -----
-@router.delete("/yeu-cau-mua/{ycm_id}")
-def xoa_de_xuat(ycm_id: int, db: Session = Depends(get_db),
-                nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
-    y = db.get(YeuCauMua, ycm_id)
-    if y is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đề xuất")
-    # Chỉ chặn khi PO liên quan CÒN TỒN TẠI. (Trước đây chặn cả theo trang_thai
-    # 'DA_TAO_PO' — PO xóa rồi thì cờ vẫn kẹt khiến đề xuất không bao giờ xóa được.)
-    dm_lk = db.get(DonMua, y.don_mua_id) if y.don_mua_id else None
-    if dm_lk is not None:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST,
-                            f"Đề xuất đã được tạo PO '{dm_lk.so or dm_lk.id}' — không thể xóa. "
-                            "Hãy xóa PO đó ở Nhà cung cấp → Đơn mua trước.")
-    for t in db.query(TepDinhKem).filter_by(doi_tuong="YEU_CAU_MUA", doi_tuong_id=ycm_id).all():
-        xoa_tep_chung(t.duong_dan)
-        db.delete(t)
-    if y.dinh_kem_file:
-        base = (getattr(settings, "storage_dir", None) or os.environ.get("STORAGE_DIR") or "/tmp")
-        try:
-            os.remove(os.path.join(base, "de_xuat", y.dinh_kem_file))
-        except OSError:
-            pass
-    db.query(YeuCauMuaCt).filter_by(yeu_cau_mua_id=ycm_id).delete()
-    ghi_audit(db, nd.id, "XOA", "yeu_cau_mua", ycm_id,
-              cu={"trang_thai": y.trang_thai, "ly_do": (y.ly_do or "")[:200]})
-    db.delete(y)
-    db.commit()
-    return {"ok": True}
 
 
 # ----- Thanh toán mua hàng: theo dõi đề nghị thanh toán từng PO -----
@@ -4858,32 +4621,6 @@ def tao_rfq(data: RfqVao, db: Session = Depends(get_db),
                     data.nha_cung_cap_ids, tieu_de, than, data.yeu_cau_mua_id)
 
 
-@router.post("/yeu-cau-mua/{ycm_id}/rfq-preview")
-def rfq_preview(ycm_id: int, data: RfqNoiDungVao, db: Session = Depends(get_db),
-                _=Depends(yeu_cau(MODULE, "XEM"))):
-    """Xem trước email hỏi giá (không gửi) để biên tập trước khi gửi."""
-    ycm = db.get(YeuCauMua, ycm_id)
-    if ycm is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đề xuất")
-    hh = db.get(HangHoa, ycm.hang_hoa_id)
-    tieu_de, than = _noi_dung_rfq(db, ycm.hang_hoa_id, ycm.so_luong, data)
-    return {"tieu_de": tieu_de, "noi_dung": than,
-            "ten_hang": hh.ten if hh else None, "don_vi": (hh.don_vi if hh else None),
-            "so_luong": float(ycm.so_luong)}
-
-
-@router.post("/yeu-cau-mua/{ycm_id}/gui-rfq")
-def gui_rfq_tu_de_xuat(ycm_id: int, data: GuiRfqVao, db: Session = Depends(get_db),
-                       nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
-    """Gửi RFQ cho đúng mặt hàng/số lượng của 1 đề xuất tới các NCC được chọn."""
-    ycm = db.get(YeuCauMua, ycm_id)
-    if ycm is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đề xuất")
-    tieu_de, than = _tieu_de_than(db, ycm.hang_hoa_id, ycm.so_luong, data)
-    return _gui_rfq(db, nd, ycm.hang_hoa_id, ycm.so_luong, data.han_bao_gia,
-                    data.nha_cung_cap_ids, tieu_de, than, ycm_id)
-
-
 @router.get("/rfq", response_model=list[RfqRa])
 def ds_rfq(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
     return db.query(Rfq).order_by(Rfq.id.desc()).limit(100).all()
@@ -5211,31 +4948,27 @@ def goi_y_ncc(hang_hoa_id: int, so_luong: Decimal = Decimal(1),
     return _xep_hang_ncc(db, hang_hoa_id, so_luong)
 
 
-@router.post("/yeu-cau-mua/{ycm_id}/tim-ncc-ai")
-def tim_ncc_ai(ycm_id: int, db: Session = Depends(get_db),
-               _=Depends(yeu_cau(MODULE, "XEM"))):
-    """AI Sourcing Agent: từ 1 đề xuất, xếp hạng NCC nội bộ + AI khuyến nghị/cảnh báo/gợi ý nguồn mới."""
-    ycm = db.get(YeuCauMua, ycm_id)
-    if ycm is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đề xuất")
-    hh = db.get(HangHoa, ycm.hang_hoa_id)
-    ten_hang = hh.ten if hh else f"HH #{ycm.hang_hoa_id}"
-    xep = _xep_hang_ncc(db, ycm.hang_hoa_id, ycm.so_luong)
-    ai = goi_y_ncc_ai(ten_hang, float(ycm.so_luong), xep["danh_sach"])
-    return {"yeu_cau_mua_id": ycm.id, "ten_hang": ten_hang, "goi_y": xep,
-            "ai": ai, "provider": ai.get("nguon")}
+@router.post("/goi-y-ncc-ai")
+def tim_ncc_ai(hang_hoa_id: int, so_luong: Decimal = Decimal(1), db: Session = Depends(get_db),
+               _=Depends(yeu_cau_bat_ky((MODULE, "XEM"), ("ban_hang", "XEM"), ("kho", "XEM"), ("cho_thue", "XEM")))):
+    """AI Sourcing Agent theo MẶT HÀNG (dùng trong hộp 🛒 Tạo PO): xếp hạng NCC nội bộ + AI khuyến nghị / cảnh báo /
+    gợi ý nguồn mới. Trước đây chạy theo đề xuất mua — bỏ bước đề xuất 10/10/2026."""
+    hh = db.get(HangHoa, hang_hoa_id)
+    if hh is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy hàng hóa")
+    xep = _xep_hang_ncc(db, hang_hoa_id, so_luong)
+    ai = goi_y_ncc_ai(hh.ten, float(so_luong), xep["danh_sach"])
+    return {"hang_hoa_id": hh.id, "ten_hang": hh.ten, "goi_y": xep, "ai": ai, "provider": ai.get("nguon")}
 
 
-@router.post("/yeu-cau-mua/{ycm_id}/tim-ncc-web")
-def tim_ncc_web_ep(ycm_id: int, khu_vuc: str = "Việt Nam", db: Session = Depends(get_db),
+@router.post("/tim-ncc-web")
+def tim_ncc_web_ep(hang_hoa_id: int, khu_vuc: str = "Việt Nam", db: Session = Depends(get_db),
                    _=Depends(yeu_cau(MODULE, "XEM"))):
-    """Dò NCC mới trên web cho 1 đề xuất (kết quả CẦN KIỂM CHỨNG trước khi thêm vào hồ sơ)."""
-    ycm = db.get(YeuCauMua, ycm_id)
-    if ycm is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đề xuất")
-    hh = db.get(HangHoa, ycm.hang_hoa_id)
-    ten = hh.ten if hh else f"HH #{ycm.hang_hoa_id}"
-    return {"yeu_cau_mua_id": ycm.id, "ten_hang": ten, **tim_ncc_web(ten, khu_vuc)}
+    """Dò NCC mới trên web cho 1 mặt hàng (kết quả CẦN KIỂM CHỨNG trước khi thêm vào hồ sơ)."""
+    hh = db.get(HangHoa, hang_hoa_id)
+    if hh is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy hàng hóa")
+    return {"hang_hoa_id": hh.id, "ten_hang": hh.ten, **tim_ncc_web(hh.ten, khu_vuc)}
 
 
 class NccTraVao(_NccCnBase):
@@ -5378,22 +5111,23 @@ def _dtb_ten_nguoi(db: Session, nd: NguoiDung) -> str:
     return nd.email
 
 
-def _dtb_dx_hieu_luc(db, m):
-    """Đề xuất CÒN HIỆU LỰC của 1 dòng dự toán — bị từ chối / đã xóa thì coi như chưa đề xuất."""
-    if not getattr(m, "yeu_cau_mua_id", None):
+def _dtb_po_hieu_luc(db, m):
+    """PO CÒN HIỆU LỰC của 1 dòng dự toán — PO bị từ chối / đã xóa thì coi như chưa mua (dòng mở lại).
+    (Trước 10/10/2026 khóa theo đề xuất mua — đã bỏ bước đề xuất.)"""
+    if not getattr(m, "don_mua_id", None):
         return None
-    y = db.get(YeuCauMua, m.yeu_cau_mua_id)
-    if y is None or y.trang_thai == "TU_CHOI":
+    dm = db.get(DonMua, m.don_mua_id)
+    if dm is None or dm.trang_thai == "TU_CHOI":
         return None
-    return y
+    return dm
 
 
 def _dtb_khoa_muc(db, m):
-    y = _dtb_dx_hieu_luc(db, m)
-    if y is not None:
+    dm = _dtb_po_hieu_luc(db, m)
+    if dm is not None:
         raise HTTPException(status.HTTP_400_BAD_REQUEST,
-                            f"Dòng '{m.ten}' đã chuyển sang đề xuất mua #{y.id} — muốn sửa/xóa thì "
-                            "từ chối hoặc xóa đề xuất đó để mở lại dòng.")
+                            f"Dòng '{m.ten}' đã lập PO {dm.so or dm.id} — muốn sửa/xóa thì từ chối hoặc xóa PO đó "
+                            "(Nhà cung cấp → Đơn mua) để mở lại dòng.")
 
 
 @router.get("/du-toan-ban")
@@ -5997,7 +5731,7 @@ def dtb_chi_tiet(dt_id: int, db: Session = Depends(get_db), _=Depends(yeu_cau_ba
     _doi_tep = False
     items = []
     for r in mucs:
-        y = _dtb_dx_hieu_luc(db, r)
+        po = _dtb_po_hieu_luc(db, r)
         h = hh_cua.get(r.id)
         _tep = None
         _sp = db.get(SanPhamNcc, r.san_pham_ncc_id) if r.san_pham_ncc_id else None
@@ -6022,7 +5756,8 @@ def dtb_chi_tiet(dt_id: int, db: Session = Depends(get_db), _=Depends(yeu_cau_ba
                       "nha_cung_cap_id": r.nha_cung_cap_id, "ncc_ten": r.ncc_ten, "ma_sp": r.ma_sp, "spec": r.spec,
                       "nha_san_xuat": r.nha_san_xuat, "san_pham_ncc_id": r.san_pham_ncc_id,
                       "tep": _tep,
-                      "dx_id": y.id if y else None, "dx_trang_thai": y.trang_thai if y else None,
+                      "po_id": po.id if po else None, "po_so": po.so if po else None,
+                      "po_trang_thai": po.trang_thai if po else None,
                       # 💲 giá gợi ý theo mua thật / báo giá + giá mua thật dưới mã này
                       "gia_goi_y": g["gia_de_xuat"] if g else None,
                       "nguon_goi_y": g["nguon"] if g else None,
@@ -6063,7 +5798,7 @@ def dtb_khop_kho(dt_id: int, data: DtbKhopKhoVao, db: Session = Depends(get_db),
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy dự toán")
     mucs = db.query(DuToanBanMuc).filter_by(du_toan_id=dt_id).order_by(DuToanBanMuc.id).all()
     if not data.ap_dung:
-        dong = [(m.id, m.ten, m.hang_hoa_id, m.don_gia, _dtb_dx_hieu_luc(db, m) is not None) for m in mucs]
+        dong = [(m.id, m.ten, m.hang_hoa_id, m.don_gia, _dtb_po_hieu_luc(db, m) is not None) for m in mucs]
         gy = goi_y_khop_kho(db, dong)
         return {"ma": d.ma, "goi_y": gy, "so_chua_khop": sum(1 for r in gy if not r["da_khop"]),
                 "so_co_ung_vien": sum(1 for r in gy if not r["da_khop"] and r["ung_vien"])}
@@ -6074,7 +5809,7 @@ def dtb_khop_kho(dt_id: int, data: DtbKhopKhoVao, db: Session = Depends(get_db),
     for c in (data.chon or []):
         m = by_id.get(int(c.get("id") or 0))
         hh = db.get(HangHoa, int(c.get("hang_hoa_id") or 0)) if c.get("hang_hoa_id") else None
-        if m is None or hh is None or _dtb_dx_hieu_luc(db, m) is not None:
+        if m is None or hh is None or _dtb_po_hieu_luc(db, m) is not None:
             continue
         cu = {"ten": m.ten, "hang_hoa_id": m.hang_hoa_id, "don_gia": float(m.don_gia or 0)}
         m.hang_hoa_id = hh.id
@@ -6109,7 +5844,7 @@ def dtb_cap_nhat_gia(dt_id: int, data: DtbCapNhatGiaVao, db: Session = Depends(g
     if d is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy dự toán")
     mucs = db.query(DuToanBanMuc).filter_by(du_toan_id=dt_id).order_by(DuToanBanMuc.id).all()
-    dong = [(m.id, m.ten, m.hang_hoa_id, m.don_gia, _dtb_dx_hieu_luc(db, m) is not None) for m in mucs]
+    dong = [(m.id, m.ten, m.hang_hoa_id, m.don_gia, _dtb_po_hieu_luc(db, m) is not None) for m in mucs]
     goi_y = goi_y_cap_nhat(db, dong)
     da_ap = 0
     if data.ap_dung:
@@ -6148,10 +5883,10 @@ def dtb_sua(dt_id: int, data: DuToanBanVao, ep_ma: bool = False, db: Session = D
         if ma.lower() != (d.ma or "").strip().lower():
             from ..ma_code import bat_buoc as _bb_ma
             ma = _bb_ma(ma, nd, ep_ma, nhan="Mã dự toán")
-            _dang = [x for x in db.query(DuToanBanMuc).filter_by(du_toan_id=dt_id).all() if _dtb_dx_hieu_luc(db, x)]
+            _dang = [x for x in db.query(DuToanBanMuc).filter_by(du_toan_id=dt_id).all() if _dtb_po_hieu_luc(db, x)]
             if _dang:
                 raise HTTPException(status.HTTP_400_BAD_REQUEST,
-                                    f"Không đổi mã được: đã có {len(_dang)} dòng chuyển sang đề xuất mua mang mã '{d.ma}'.")
+                                    f"Không đổi mã được: đã có {len(_dang)} dòng lập PO mang mã '{d.ma}'.")
         trung = db.query(DuToanBan).filter(func.lower(DuToanBan.ma) == ma.lower(),
                                            DuToanBan.id != dt_id).first()
         if trung:
@@ -6174,10 +5909,10 @@ def dtb_xoa(dt_id: int, db: Session = Depends(get_db),
     d = db.get(DuToanBan, dt_id)
     if d is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy dự toán")
-    _dang = [x for x in db.query(DuToanBanMuc).filter_by(du_toan_id=dt_id).all() if _dtb_dx_hieu_luc(db, x)]
+    _dang = [x for x in db.query(DuToanBanMuc).filter_by(du_toan_id=dt_id).all() if _dtb_po_hieu_luc(db, x)]
     if _dang:
         raise HTTPException(status.HTTP_409_CONFLICT,
-                            f"Dự toán có {len(_dang)} dòng đang ở đề xuất mua — từ chối/xóa các đề xuất đó trước khi xóa dự toán.")
+                            f"Dự toán có {len(_dang)} dòng đã lập PO — từ chối/xóa các PO đó (Nhà cung cấp → Đơn mua) trước khi xóa dự toán.")
     db.query(DuToanBanMuc).filter_by(du_toan_id=dt_id).delete()
     # 📎 file dự toán đã nạp (Kho tệp) xóa theo — tránh tệp mồ côi
     for t in db.query(TepDinhKem).filter_by(doi_tuong="DU_TOAN_BAN_FILE", doi_tuong_id=dt_id).all():
@@ -6193,19 +5928,29 @@ def dtb_xoa(dt_id: int, db: Session = Depends(get_db),
 
 
 # ---------------------------------------------------------------------------
-#  🛒 DỰ TOÁN → ĐỀ XUẤT MUA: gộp các dòng đã chọn thành 1 đề xuất nhiều mặt hàng mang MÃ
-#  CHUỖI của dự toán (ma_ban) — vào hàng đợi duyệt theo hạn mức như mọi đề xuất khác.
-#  Chặn mua trùng + giá vốn nhận theo mã chuỗi; đơn bán cùng số tạo sau vẫn gom đủ PO.
+#  🛒 DỰ TOÁN → PO TRỰC TIẾP (bỏ bước đề xuất mua 10/10/2026): tick dòng → mỗi NCC một PO CHỌN DUYỆT, mang
+#  MÃ CHUỖI của dự toán (ma_ban) · dòng dự toán khóa theo PO · chặn mua trùng + kiểm soát dự toán như PO lập tay.
 #  Mã OP- = chi phí vận hành doanh nghiệp (không có đơn bán) → dòng riêng ở Lãi/lỗ tổng.
 # ---------------------------------------------------------------------------
-class DtbDeXuatVao(_NccCnBase):
-    muc_ids: list[int]
-    ngay_can: str | None = None
+class DtbTaoPoDong(_NccCnBase):
+    muc_id: int
+    nha_cung_cap_id: int | None = None      # chọn lại trong hộp Tạo PO (ưu tiên hơn NCC của dòng dự toán)
+    don_gia: Decimal | None = None          # giá chốt với NCC (ưu tiên hơn đơn giá dự toán)
+    so_luong: Decimal | None = None
 
 
-@router.post("/du-toan-ban/{dt_id}/de-xuat", status_code=201)
-def dtb_tao_de_xuat(dt_id: int, data: DtbDeXuatVao, db: Session = Depends(get_db),
-                    nd: NguoiDung = Depends(yeu_cau_bat_ky(("ncc", "THAO_TAC"), ("ban_hang", "THAO_TAC")))):
+class DtbTaoPoVao(_NccCnBase):
+    muc_ids: list[int] | None = None
+    dong: list[DtbTaoPoDong] | None = None
+    ngay_hen_giao: str | None = None
+    xac_nhan_trung: bool = False     # CEO/ADMIN xác nhận mua bổ sung dù trùng mã bán hàng
+    xac_nhan_lap: bool = False       # người lập xác nhận MUA LẶP (mã DV-/OP-) dù còn PO cùng hàng chờ về
+    xac_nhan_du_toan: bool = False   # người lập xác nhận PO VƯỢT/NGOÀI dự toán → chỉ CEO duyệt
+
+
+@router.post("/du-toan-ban/{dt_id}/tao-po", status_code=201)
+def dtb_tao_po(dt_id: int, data: DtbTaoPoVao, db: Session = Depends(get_db),
+               nd: NguoiDung = Depends(yeu_cau_bat_ky(("ncc", "THAO_TAC"), ("ban_hang", "THAO_TAC")))):
     from ..models import DonHang as _DxDh
     d = db.get(DuToanBan, dt_id)
     if d is None:
@@ -6213,59 +5958,61 @@ def dtb_tao_de_xuat(dt_id: int, data: DtbDeXuatVao, db: Session = Depends(get_db
     ma = (d.ma or "").strip()
     if not ma or len(ma) > 30:
         raise HTTPException(status.HTTP_400_BAD_REQUEST,
-                            "Mã dự toán phải có và tối đa 30 ký tự — bấm ✏️ sửa mã trước khi đề xuất.")
-    ngay_can = None
-    if data.ngay_can:
+                            "Mã dự toán phải có và tối đa 30 ký tự — bấm ✏️ sửa mã trước khi lập PO.")
+    hen = None
+    if data.ngay_hen_giao:
         try:
-            ngay_can = date.fromisoformat(data.ngay_can)
+            hen = date.fromisoformat(data.ngay_hen_giao)
         except ValueError:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Ngày cần hàng không hợp lệ")
-    chon = set(data.muc_ids or [])
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Ngày hẹn giao không hợp lệ")
+    ghi_de = {x.muc_id: x for x in (data.dong or [])}
+    chon = set(data.muc_ids or []) | set(ghi_de.keys())
     mucs = [m for m in db.query(DuToanBanMuc).filter_by(du_toan_id=dt_id).order_by(DuToanBanMuc.id).all()
             if m.id in chon]
     if not mucs:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Chưa chọn dòng dự toán nào")
-    bo_qua, dong = [], []
+    bo_qua, dong, hang_moi = [], [], 0
     for m in mucs:
-        y0 = _dtb_dx_hieu_luc(db, m)
-        if y0 is not None:
-            bo_qua.append(f"{m.ten} (đã ở đề xuất #{y0.id})")
+        po0 = _dtb_po_hieu_luc(db, m)
+        if po0 is not None:
+            bo_qua.append(f"{m.ten} (đã ở PO {po0.so or po0.id})")
             continue
-        if not m.so_luong or Decimal(m.so_luong) <= 0:
+        o = ghi_de.get(m.id)
+        sl = Decimal(str(o.so_luong)) if (o is not None and o.so_luong is not None) else Decimal(m.so_luong or 0)
+        if sl <= 0:
             bo_qua.append(f"{m.ten} (SL = 0)")
             continue
-        dong.append(m)
-    if not dong:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Không còn dòng hợp lệ để đề xuất: " + "; ".join(bo_qua))
-    hang_moi, cap = 0, []
-    for m in dong:
-        hh = db.get(HangHoa, m.hang_hoa_id) if m.hang_hoa_id else None
-        if hh is None:
-            hh = db.query(HangHoa).filter(func.lower(func.trim(HangHoa.ten)) == m.ten.strip().lower()).first()
-        if hh is None:
-            hh = HangHoa(ma=None, ten=m.ten.strip()[:200], loai="VAT_TU", don_vi=m.don_vi)
-            db.add(hh); db.flush()
-            db.add(TonKho(hang_hoa_id=hh.id, so_luong=0, ton_min=0))
-            hang_moi += 1
+        hh, moi = _hh_theo_ten_hoac_tao(db, nd, m.ten, m.don_vi, m.hang_hoa_id)
+        hang_moi += int(moi)
         m.hang_hoa_id = hh.id
-        cap.append((m, hh))
+        ncc = (o.nha_cung_cap_id if (o is not None and o.nha_cung_cap_id) else None) or m.nha_cung_cap_id
+        if not ncc and m.san_pham_ncc_id:
+            sp = db.get(SanPhamNcc, m.san_pham_ncc_id)
+            ncc = sp.nha_cung_cap_id if sp else None
+        gia = o.don_gia if (o is not None and o.don_gia is not None) else None
+        if gia is None:
+            gia = m.don_gia if m.don_gia and Decimal(m.don_gia) > 0 else None
+        dong.append({"hang_hoa_id": hh.id, "so_luong": sl, "don_gia": gia, "nha_cung_cap_id": ncc,
+                     "ten": m.ten, "_muc": m})
+    if not dong:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Không còn dòng hợp lệ để lập PO: " + "; ".join(bo_qua))
     dh = db.query(_DxDh).filter(func.lower(func.trim(_DxDh.so)) == ma.lower()).first()
-    m0, hh0 = cap[0]
-    ycm = YeuCauMua(hang_hoa_id=hh0.id, so_luong=m0.so_luong, ly_do=f"Dự toán {ma}"[:200],
-                    don_hang_id=dh.id if dh else None, ma_ban=ma[:40],
-                    don_gia=(m0.don_gia or None), ngay_can=ngay_can, ghi_chu=(d.mo_ta or None),
-                    nguoi_tao=nhan_vien_id_cua(db, nd.id), trang_thai="MOI")
-    db.add(ycm); db.flush()
-    for m, hh in cap:
-        gc = " · ".join(x for x in ((m.quy_cach or "").strip(), (m.ghi_chu or "").strip()) if x) or None
-        db.add(YeuCauMuaCt(yeu_cau_mua_id=ycm.id, hang_hoa_id=hh.id, so_luong=m.so_luong,
-                           don_gia=(m.don_gia or None), ghi_chu=gc))
-        m.yeu_cau_mua_id = ycm.id
-    ghi_audit(db, nd.id, "TAO", "yeu_cau_mua", ycm.id,
-              moi={"tu_du_toan_ban": d.id, "ma": ma, "so_dong": len(cap), "hang_moi": hang_moi})
+    pos = tao_po_tu_dong(db, nd, dong, ma_ban=ma[:40], don_hang_id=dh.id if dh else None, ngay_hen_giao=hen,
+                         xac_nhan_trung=data.xac_nhan_trung, xac_nhan_lap=data.xac_nhan_lap,
+                         xac_nhan_du_toan=data.xac_nhan_du_toan, nguon="DU_TOAN_BAN",
+                         audit_them={"tu_du_toan_ban": d.id, "ma": ma})
+    po_theo_ncc = {p.nha_cung_cap_id: p for p in pos}
+    for o in dong:
+        p = po_theo_ncc.get(int(o["nha_cung_cap_id"] or 0))
+        if p is not None:
+            o["_muc"].don_mua_id = p.id
+    ghi_audit(db, nd.id, "TAO_PO", "du_toan_ban", d.id,
+              moi={"so_po": len(pos), "po": [p.so for p in pos], "so_dong": len(dong), "hang_moi": hang_moi})
     db.commit()
-    return {"yeu_cau_mua_id": ycm.id, "so_dong": len(cap), "hang_moi": hang_moi,
-            "bo_qua": bo_qua, "gan_don_hang": bool(dh)}
+    for p in pos:
+        db.refresh(p)
+    return {**_po_ra_gon(pos), "so_dong": len(dong), "hang_moi": hang_moi, "bo_qua": bo_qua,
+            "gan_don_hang": bool(dh)}
 
 
 # =====================================================================================

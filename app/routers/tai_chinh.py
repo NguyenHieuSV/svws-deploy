@@ -916,7 +916,7 @@ def daily_remind(db: Session = Depends(get_db), _=Depends(yeu_cau("dashboard", "
     """Nhắc việc trong ngày: báo giá mới · mua hàng mới · phiếu chi chờ duyệt ·
     phiếu thu hôm nay · nhắc thu công nợ đến hạn/quá hạn."""
     from ..models import (AuditLog, DonMua, DonHang, PhieuThuChi, BaoGiaForm, KhachHang, NhaCungCap,
-                          YeuCauMua, HangHoa, NgayNghiOt, NhanVien, ChienDichEmail, CoHoi, BaoGia)
+                          HangHoa, NgayNghiOt, NhanVien, ChienDichEmail, CoHoi, BaoGia)
     hom_nay = date.today()
 
     def ten_kh(kid):
@@ -995,12 +995,6 @@ def daily_remind(db: Session = Depends(get_db), _=Depends(yeu_cau("dashboard", "
     wr.sort(key=lambda x: (x["han"], x["huong"]))
 
     # 6) VIỆC ĐANG CHỜ XỬ LÝ — nhắc tới khi xong, không giới hạn hôm nay
-    dx_cho = []
-    for y in db.query(YeuCauMua).filter(YeuCauMua.trang_thai == "MOI").order_by(YeuCauMua.id.desc()).limit(30).all():
-        hh = db.get(HangHoa, y.hang_hoa_id)
-        dx_cho.append({"id": y.id, "ten_hh": hh.ten if hh else f"HH #{y.hang_hoa_id}",
-                       "ngay": str(y.ngay) if y.ngay else None, "ly_do": y.ly_do})
-
     po_cho = []
     for dm in (db.query(DonMua).filter(DonMua.trang_thai == "CHO_DUYET")
                .order_by(DonMua.id.desc()).limit(30).all()):
@@ -1044,8 +1038,6 @@ def daily_remind(db: Session = Depends(get_db), _=Depends(yeu_cau("dashboard", "
 
     muc = [
         # --- Việc đang chờ xử lý (nhắc tới khi xong) ---
-        {"key": "dx_cho", "ten": "Đề xuất mua chờ duyệt", "icon": "🛍", "di_toi": "de_xuat",
-         "so": len(dx_cho), "items": dx_cho[:30], "cho": True},
         {"key": "po_cho", "ten": "PO chờ duyệt", "icon": "📦", "di_toi": "ncc",
          "so": len(po_cho), "items": po_cho[:30], "cho": True},
         {"key": "bg_cho", "ten": "Báo giá đang xử lý", "icon": "🧮", "di_toi": "ban_hang",

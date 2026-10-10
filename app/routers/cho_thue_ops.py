@@ -1,5 +1,5 @@
 """
-Cho thuê — vận hành: quản lý tài sản, chi phí vận hành (gắn đề xuất mua qua mã bán hàng),
+Cho thuê — vận hành: quản lý tài sản, chi phí vận hành (PO vật tư mang mã bán hàng cho thuê),
 kế hoạch bảo trì, báo cáo vận hành, vật tư/thiết bị. Module RBAC 'cho_thue'.
 """
 from decimal import Decimal
@@ -16,7 +16,7 @@ from ..luu_tru import luu, xoa, ton_tai, phan_hoi_tai
 from ..rbac import yeu_cau, chi_vai_tro
 from ..deps import nhan_vien_id_cua
 from ..audit import ghi_audit
-from ..models import (NguoiDung, KhachHang, YeuCauMua, HangHoa, HoaDon,
+from ..models import (NguoiDung, KhachHang, HangHoa, HoaDon,
                       TaiSanChoThue, ChiPhiVanHanh, KeHoachBaoTri,
                       DinhMucTieuHao, TieuHaoThucTe, TepDinhKem, CtThietBi, CtBaoCaoVh,
                       CtBcvhChiTieu, NhanVien)
@@ -1014,104 +1014,131 @@ def xoa_chi_phi(cp_id: int, db: Session = Depends(get_db),
 @router.post("/dong-bo-chi-phi")
 def dong_bo_chi_phi(db: Session = Depends(get_db),
                     nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC")), _ql: NguoiDung = Depends(quan_ly_ct)):
-    """Sinh chi phí vận hành từ các đề xuất mua đã gắn mã cho thuê (chưa đồng bộ)."""
-    da_co = {c.yeu_cau_mua_id for c in db.query(ChiPhiVanHanh)
-             .filter(ChiPhiVanHanh.yeu_cau_mua_id.isnot(None)).all()}
-    ycs = db.query(YeuCauMua).filter(YeuCauMua.cho_thue_ma.isnot(None)).all()
+    """Ghi dòng tham chiếu Chi phí vận hành từ các PO ĐÃ DUYỆT mang mã cho thuê (chưa có dòng nối PO).
+    Dòng nối PO không cộng lần 2 ở Lãi/Lỗ (chi phí tính qua PO). Trước 10/10/2026 đồng bộ từ đề xuất mua."""
+    from ..models import DonMua, DonMuaCt, NhaCungCap
+    da_co = {c.don_mua_id for c in db.query(ChiPhiVanHanh).filter(ChiPhiVanHanh.don_mua_id.isnot(None)).all()}
     ts_theo_ma = {}
     for t in db.query(TaiSanChoThue).all():
-        ts_theo_ma[t.ten_du_an or t.ma] = t
-        ts_theo_ma[t.ma] = t
-    them = 0
-    tong = Decimal(0)
-    for yc in ycs:
-        if yc.id in da_co:
+        for k in (t.ten_du_an, t.ma):
+            if k:
+                ts_theo_ma[str(k).strip().lower()] = t
+    them, tong = 0, Decimal(0)
+    for dm in db.query(DonMua).filter(DonMua.trang_thai == "DA_DUYET", DonMua.ma_ban.isnot(None)).all():
+        if dm.id in da_co:
             continue
-        hh = db.get(HangHoa, yc.hang_hoa_id)
-        don_gia = yc.don_gia if yc.don_gia is not None else (hh.gia_ban if hh else Decimal(0))
-        so_tien = (yc.so_luong or Decimal(0)) * (don_gia or Decimal(0))
-        code = yc.cho_thue_ma or ""
-        prefix = code[:-4] if len(code) > 4 else code
-        ts = ts_theo_ma.get(prefix) or ts_theo_ma.get(code)
-        ngay = yc.ngay or date.today()
-        suf = code[-4:]
-        if suf.isdigit() and len(suf) == 4:
-            mm, yy = int(suf[:2]), 2000 + int(suf[2:])
-            if 1 <= mm <= 12:
-                ngay = date(yy, mm, 1)
-        db.add(ChiPhiVanHanh(tai_san_id=ts.id if ts else None, ma_ban_hang=code,
-                             loai_chi_phi="VAT_TU", so_tien=so_tien, ngay=ngay,
-                             yeu_cau_mua_id=yc.id, nguon="DE_XUAT_MUA",
-                             mo_ta=f"Mua {hh.ten if hh else 'vật tư'} ×{float(yc.so_luong or 0):g}"))
+        code = (dm.ma_ban or "").strip()
+        ts = _ts_theo_ma_cho_thue(ts_theo_ma, code)
+        if ts is None:
+            continue
+        ncc = db.get(NhaCungCap, dm.nha_cung_cap_id)
+        ten_hh = ", ".join(h.ten for h in (db.get(HangHoa, ct.hang_hoa_id) for ct in
+                                            db.query(DonMuaCt).filter_by(don_mua_id=dm.id).all()) if h)[:200]
+        db.add(ChiPhiVanHanh(tai_san_id=ts.id, ma_ban_hang=code, loai_chi_phi="VAT_TU",
+                             so_tien=dm.tong_tien or Decimal(0), ngay=_ngay_theo_ma(code, dm.ngay),
+                             don_mua_id=dm.id, nguon="PO", ncc_ten=ncc.ten if ncc else None,
+                             so_hoa_don=(dm.so_hoa_don or None),
+                             mo_ta=f"PO {dm.so}: {ten_hh or 'vật tư / hóa chất'}"[:300]))
         them += 1
-        tong += so_tien
-    ghi_audit(db, nd.id, "TAO", "chi_phi_van_hanh", None, moi={"dong_bo": them})
+        tong += Decimal(dm.tong_tien or 0)
+    ghi_audit(db, nd.id, "TAO", "chi_phi_van_hanh", None, moi={"dong_bo_tu_po": them})
     db.commit()
     return {"so_chi_phi_them": them, "tong_tien": float(tong)}
 
 
-# ===================== VẬT TƯ & THIẾT BỊ (đề xuất mua gắn mã cho thuê) =====================
-class DeXuatMuaCT(BaseModel):
+def _ts_theo_ma_cho_thue(ts_theo_ma: dict, code: str):
+    """Tài sản cho thuê của một mã PO: khớp mã tài sản / tên dự án (bỏ đuôi -MMYY và số thứ tự)."""
+    from ..ma_code import phan_tich
+    k = (code or "").strip().lower()
+    if not k:
+        return None
+    if k in ts_theo_ma:
+        return ts_theo_ma[k]
+    goc = (phan_tich(code).get("goc_khong_thang") or "").strip().lower()
+    if goc and goc in ts_theo_ma:
+        return ts_theo_ma[goc]
+    for key, ts in ts_theo_ma.items():
+        if len(key) >= 4 and (k.startswith(key) or (goc and goc.startswith(key))):
+            return ts
+    return None
+
+
+def _ngay_theo_ma(code: str, mac):
+    """Mã có đuôi -MMYY → ngày 01 của tháng đó; không có → ngày PO."""
+    from ..ma_code import phan_tich
+    th = phan_tich(code).get("thang") if code else None
+    if th and len(th) == 4 and th.isdigit():
+        mm, yy = int(th[:2]), 2000 + int(th[2:])
+        if 1 <= mm <= 12:
+            return date(yy, mm, 1)
+    return mac or date.today()
+
+
+# ===================== VẬT TƯ & THIẾT BỊ — PO mang mã cho thuê (bỏ bước đề xuất mua 10/10/2026) =====================
+class VatTuPoVao(BaseModel):
     hang_hoa_id: int
     so_luong: Decimal = Field(gt=0)
     don_gia: Decimal | None = None
+    nha_cung_cap_id: int
     cho_thue_ma: str
     ly_do: str | None = None
+    ngay_hen_giao: date | None = None
+    xac_nhan_trung: bool = False
+    xac_nhan_lap: bool = False
+    xac_nhan_du_toan: bool = False
 
 
-@router.get("/de-xuat-mua")
-def ds_de_xuat(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM")), _ql: NguoiDung = Depends(quan_ly_ct)):
-    yc_id_da_dong_bo = {c.yeu_cau_mua_id for c in db.query(ChiPhiVanHanh)
-                        .filter(ChiPhiVanHanh.yeu_cau_mua_id.isnot(None)).all()}
-    rows = db.query(YeuCauMua).filter(YeuCauMua.cho_thue_ma.isnot(None)) \
-             .order_by(YeuCauMua.id.desc()).all()
+@router.get("/vat-tu-po")
+def ds_vat_tu_po(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM")), _ql: NguoiDung = Depends(quan_ly_ct)):
+    """PO vật tư / thiết bị / hóa chất mang mã cho thuê (mã tài sản + MMYY hoặc DV-…) — mỗi dòng hàng một dòng."""
+    from ..models import DonMua, DonMuaCt, NhaCungCap
+    ts_theo_ma = {}
+    for t in db.query(TaiSanChoThue).all():
+        for k in (t.ten_du_an, t.ma):
+            if k:
+                ts_theo_ma[str(k).strip().lower()] = t
+    cp_po = {c.don_mua_id for c in db.query(ChiPhiVanHanh).filter(ChiPhiVanHanh.don_mua_id.isnot(None)).all()}
     out = []
-    for yc in rows:
-        hh = db.get(HangHoa, yc.hang_hoa_id)
-        dg = yc.don_gia if yc.don_gia is not None else (hh.gia_ban if hh else 0)
-        out.append({"id": yc.id, "hang_hoa": hh.ten if hh else None, "ma_hh": hh.ma if hh else None,
-                    "loai": hh.loai if hh else None,
-                    "so_luong": float(yc.so_luong or 0), "don_gia": float(dg or 0),
-                    "thanh_tien": float((yc.so_luong or 0) * (dg or 0)),
-                    "cho_thue_ma": yc.cho_thue_ma, "trang_thai": yc.trang_thai,
-                    "ngay": str(yc.ngay) if yc.ngay else None,
-                    "da_dong_bo": yc.id in yc_id_da_dong_bo, "ly_do": yc.ly_do})
+    for dm in db.query(DonMua).filter(DonMua.ma_ban.isnot(None)).order_by(DonMua.id.desc()).all():
+        code = (dm.ma_ban or "").strip()
+        if not (code.lower().startswith("dv-") or _ts_theo_ma_cho_thue(ts_theo_ma, code) is not None):
+            continue
+        ncc = db.get(NhaCungCap, dm.nha_cung_cap_id)
+        for ct in db.query(DonMuaCt).filter_by(don_mua_id=dm.id).order_by(DonMuaCt.id).all():
+            hh = db.get(HangHoa, ct.hang_hoa_id)
+            out.append({"id": ct.id, "don_mua_id": dm.id, "po_so": dm.so or f"PO-{dm.id}",
+                        "hang_hoa": hh.ten if hh else None, "ma_hh": hh.ma if hh else None,
+                        "loai": hh.loai if hh else None,
+                        "so_luong": float(ct.so_luong or 0), "don_gia": float(ct.don_gia or 0),
+                        "thanh_tien": float((ct.so_luong or 0) * (ct.don_gia or 0)),
+                        "cho_thue_ma": code, "trang_thai": dm.trang_thai, "trang_thai_nhan": dm.trang_thai_nhan,
+                        "ngay": str(dm.ngay) if dm.ngay else None, "ncc": ncc.ten if ncc else None,
+                        "da_dong_bo": dm.id in cp_po})
     return out
 
 
-@router.post("/de-xuat-mua", status_code=201)
-def tao_de_xuat(data: DeXuatMuaCT, db: Session = Depends(get_db),
-                nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC")), _ql: NguoiDung = Depends(quan_ly_ct)):
-    if db.get(HangHoa, data.hang_hoa_id) is None:
+@router.post("/vat-tu-po", status_code=201)
+def tao_vat_tu_po(data: VatTuPoVao, db: Session = Depends(get_db),
+                  nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC")), _ql: NguoiDung = Depends(quan_ly_ct)):
+    """🛒 Lập PO CHỜ DUYỆT mang mã cho thuê (mã dự án + tháng) — chi phí vào Lãi/Lỗ của mã khi PO được duyệt.
+    Cùng kiểm soát với PO lập tay (mua lặp DV-/OP- xác nhận · định mức tháng · dự toán)."""
+    from .ncc import tao_po_tu_dong, _po_ra_gon
+    hh = db.get(HangHoa, data.hang_hoa_id)
+    if hh is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy hàng hóa")
-    yc = YeuCauMua(hang_hoa_id=data.hang_hoa_id, so_luong=data.so_luong, don_gia=data.don_gia,
-                   cho_thue_ma=data.cho_thue_ma, ly_do=data.ly_do or "Vật tư/thiết bị cho thuê",
-                   trang_thai="MOI", nguoi_tao=nhan_vien_id_cua(db, nd.id))
-    db.add(yc); db.flush()
-    ghi_audit(db, nd.id, "TAO", "yeu_cau_mua", yc.id, moi={"cho_thue_ma": data.cho_thue_ma})
+    code = (data.cho_thue_ma or "").strip()[:40]
+    if not code:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Thiếu mã cho thuê")
+    pos = tao_po_tu_dong(db, nd, [{"hang_hoa_id": hh.id, "so_luong": data.so_luong, "don_gia": data.don_gia,
+                                   "nha_cung_cap_id": data.nha_cung_cap_id, "ten": hh.ten}],
+                         cho_thue_ma=code, ngay_hen_giao=data.ngay_hen_giao,
+                         xac_nhan_trung=data.xac_nhan_trung, xac_nhan_lap=data.xac_nhan_lap,
+                         xac_nhan_du_toan=data.xac_nhan_du_toan, nguon="CHO_THUE",
+                         audit_them={"cho_thue_ma": code, "ly_do": data.ly_do})
     db.commit()
-    return {"id": yc.id, "trang_thai": yc.trang_thai}
-
-
-# ----- DUYET: xóa đề xuất mua cho thuê -----
-@router.delete("/de-xuat-mua/{ycm_id}")
-def xoa_de_xuat_ct(ycm_id: int, db: Session = Depends(get_db),
-                   nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
-    yc = db.get(YeuCauMua, ycm_id)
-    if yc is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đề xuất")
-    if yc.don_mua_id or yc.trang_thai == "DA_TAO_PO":
-        raise HTTPException(status.HTTP_400_BAD_REQUEST,
-                            "Đề xuất đã được tạo PO — không thể xóa. Hãy xóa PO liên quan trước.")
-    so_cp = db.query(func.count(ChiPhiVanHanh.id)).filter_by(yeu_cau_mua_id=ycm_id).scalar() or 0
-    if so_cp:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST,
-                            f"Đề xuất đã đồng bộ thành {so_cp} chi phí vận hành — xóa chi phí đó trước.")
-    ghi_audit(db, nd.id, "XOA", "yeu_cau_mua", ycm_id,
-              cu={"cho_thue_ma": yc.cho_thue_ma, "trang_thai": yc.trang_thai})
-    db.delete(yc)
-    db.commit()
-    return {"ok": True}
+    for p in pos:
+        db.refresh(p)
+    return _po_ra_gon(pos)
 
 
 # ===================== KẾ HOẠCH BẢO TRÌ =====================

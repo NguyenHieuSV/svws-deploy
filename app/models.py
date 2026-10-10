@@ -1358,6 +1358,7 @@ class DuAnDuToan(Base):
     ghi_chu: Mapped[str | None] = mapped_column(String(300), nullable=True)
     thu_tu: Mapped[int] = mapped_column(Integer, default=0)
     hang_hoa_id: Mapped[int | None] = mapped_column(ForeignKey("hang_hoa.id", ondelete="SET NULL"), nullable=True)  # mig 118
+    don_mua_id: Mapped[int | None] = mapped_column(ForeignKey("don_mua.id", ondelete="SET NULL"), nullable=True)   # mig 147: PO lập từ dòng BOQ
 
 
 # ---------- Mô tả công việc (JD) & KPI theo vị trí + đánh giá theo kỳ ----------
@@ -1765,3 +1766,5 @@ class DuToanBanMuc(Base):
     spec: Mapped[str | None] = mapped_column(Text, nullable=True)
     nha_san_xuat: Mapped[str | None] = mapped_column(String(150), nullable=True)
     san_pham_ncc_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    # mig 147: bỏ bước đề xuất mua — dòng khóa theo PO đã lập thẳng từ dự toán
+    don_mua_id: Mapped[int | None] = mapped_column(ForeignKey("don_mua.id", ondelete="SET NULL"), nullable=True)

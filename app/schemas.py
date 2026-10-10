@@ -147,62 +147,8 @@ class DonMuaRa(BaseModel):
     vuot_du_toan: str | None = None     # ⛔ lý do vượt/ngoài dự toán (chỉ CEO/ADMIN duyệt)
 
 
-class YeuCauMuaItemVao(BaseModel):
-    hang_hoa_id: int | None = None          # hàng hóa kho
-    san_pham_ncc_id: int | None = None      # HOẶC sản phẩm NCC — hệ thống tự tạo/khớp hàng hóa kho
-    so_luong: Decimal = Field(gt=0)
-    thue_suat: Decimal = Field(default=0, ge=0, le=100)   # VAT % của dòng
-    don_gia: Decimal | None = None
-    ghi_chu: str | None = None
-    nha_cung_cap_id: int | None = None
-
-
-class YeuCauMuaVao(BaseModel):
-    # Tương thích cũ: 1 sản phẩm
-    hang_hoa_id: int | None = None
-    so_luong: Decimal | None = None
-    don_gia: Decimal | None = None
-    ghi_chu: str | None = None
-    # Nhiều sản phẩm
-    items: list[YeuCauMuaItemVao] | None = None
-    ly_do: str | None = None
-    nha_cung_cap_id: int | None = None
-    don_hang_id: int | None = None
-    ngay_can: date | None = None
-    dinh_kem_url: str | None = None
-    xac_nhan_du_toan: bool = False   # người lập xác nhận đề xuất VƯỢT/NGOÀI dự toán → hàng chờ CEO duyệt
-
-
-class TaoPoTuDeXuatVao(BaseModel):
-    nha_cung_cap_id: int | None = None
-    don_gia: Decimal | None = None
-    ngay_hen_giao: date | None = None
-    xac_nhan_trung: bool = False   # CEO/ADMIN xác nhận mua bổ sung dù trùng mã bán hàng
-    xac_nhan_lap: bool = False     # người lập xác nhận MUA LẶP (mã DV-/OP-) dù còn PO cùng hàng chờ về
-    xac_nhan_du_toan: bool = False # người lập xác nhận PO VƯỢT/NGOÀI dự toán → chỉ CEO duyệt
-
-
 class LyDoVao(BaseModel):
     ly_do: str | None = None
-
-
-class YeuCauMuaRa(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-    id: int
-    hang_hoa_id: int
-    so_luong: Decimal
-    ly_do: str | None
-    trang_thai: str = "MOI"
-    nha_cung_cap_id: int | None = None
-    don_hang_id: int | None = None
-    don_gia: Decimal | None = None
-    ngay_can: date | None = None
-    don_mua_id: int | None = None
-    ai_ncc_id: int | None = None
-    ai_goi_y: str | None = None
-    dinh_kem_url: str | None = None
-    dinh_kem_file: str | None = None
-    vuot_du_toan: str | None = None
 
 
 # ---------- Dự án ----------

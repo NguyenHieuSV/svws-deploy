@@ -32,6 +32,16 @@ def _bat_scheduler():
 
 
 @app.on_event("startup")
+def _bo_de_xuat_mua():
+    """Chuyển đổi dữ liệu MỘT LẦN khi bỏ mục Đề xuất mua hàng (10/10/2026). Lỗi KHÔNG chặn app khởi động."""
+    try:
+        from .bo_de_xuat_mua import chay_mot_lan
+        chay_mot_lan()
+    except Exception as e:
+        print(f"[BO_DE_XUAT] Không chạy được: {type(e).__name__}: {e}")
+
+
+@app.on_event("startup")
 def _init_registry():
     """Tạo bảng + nạp seed Rev.E cho Design Registry. Lỗi KHÔNG chặn app khởi động."""
     try:

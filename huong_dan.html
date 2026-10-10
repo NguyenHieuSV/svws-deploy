@@ -95,7 +95,6 @@
   <a class="sub" href="#m-banhang">Bán hàng</a>
   <a class="sub" href="#m-crm">Khách hàng (CRM)</a>
   <a class="sub" href="#m-kho">Kho hàng</a>
-  <a class="sub" href="#m-dexuat">Đề xuất mua hàng</a>
   <a class="sub" href="#m-ncc">Nhà cung cấp</a>
   <a class="sub" href="#m-duan">Dự án</a>
   <a class="sub" href="#m-chothue">Cho thuê</a>
@@ -122,7 +121,7 @@
   <ol>
     <li><b>Mã bán hàng là xương sống.</b> Mỗi thương vụ / dự án / tháng dịch vụ có một mã theo quy tắc
       <code>LOẠI-KHÁCH-MMYY[-SỐ][-HẠNG MỤC]</code> (xem <a href="#quy-tac-ma">Quy tắc đặt mã</a>). Mã được tạo <b>đầu tiên ở Dự toán hàng bán</b>,
-      các khâu sau (báo giá, đơn bán, đề xuất mua, PO, công nợ, hóa đơn) dùng lại đúng mã đó — hệ thống chặn mã sai quy luật ngay khi lưu.</li>
+      các khâu sau (báo giá, đơn bán, PO, công nợ, hóa đơn) dùng lại đúng mã đó — hệ thống chặn mã sai quy luật ngay khi lưu.</li>
     <li><b>Mọi khoản chi phải mang mã.</b> PO không gắn đơn bán thì phải có mã chuỗi (TM-/DA-/DV-…), mã vận hành <code>OP-…</code> hoặc từ khóa <code>KHO</code> (mua dự trữ);
       công nợ nhập ngoài cũng vậy. Khoản nào lọt mã sẽ hiện ở <b>Nhà cung cấp → Kiểm soát → 🧩 Chi phí chưa vào mã</b> kèm gợi ý để gán một lần.</li>
     <li><b>Chi phí ghi theo nghĩa vụ, không theo tiền trả.</b> PO vừa được duyệt là toàn bộ giá trị vào chi phí của mã; trả tiền chỉ đổi dòng tiền (đã trả / còn phải trả).
@@ -130,7 +129,7 @@
     <li><b>Giá mua thật tự học.</b> Mỗi PO đã duyệt cập nhật bảng <b>💲 Giá đầu vào</b>; dự toán và BOQ dự án tự điền giá theo lần mua gần nhất / báo giá còn hiệu lực, và so được với giá mua thật dưới chính mã đó.</li>
   </ol>
   <ul>
-    <li>Dữ liệu <b>liên thông</b>: dự toán → đề xuất mua → PO → nhận hàng → công nợ → thanh toán; báo giá → đơn hàng → xuất kho → hóa đơn → thu tiền — không nhập lại.</li>
+    <li>Dữ liệu <b>liên thông</b>: dự toán → PO → nhận hàng → công nợ → thanh toán; báo giá → đơn hàng → xuất kho → hóa đơn → thu tiền — không nhập lại.</li>
     <li><b>Phân quyền theo vai trò</b>; <b>duyệt theo hạn mức</b> (báo giá, PO, phiếu chi vượt hạn mức tự chuyển lên cấp cao hơn); mọi thay đổi có <b>nhật ký</b>.</li>
     <li><b>Chặn sai từ gốc</b>: mua trùng phân tầng (TM-/DA- chặn cứng, DV-/OP- theo định mức tháng), hóa đơn nhập ngoài nghi trùng PO, mã sai quy luật.</li>
     <li>Có <b>trợ lý AI</b>: đọc file báo giá / hóa đơn / sao kê / PO khách, phân tích thiết kế dự án, “CFO ảo”.</li>
@@ -254,23 +253,22 @@
     <ul>
       <li><b>Tồn kho</b>: danh mục vật tư / thiết bị / hóa chất với tồn hiện tại, min – max, giá bán, <b>giá mua gần nhất</b> (tự học khi nhận hàng PO) và giá trị tồn. Bảng “Tồn kho theo mã đơn hàng” gom theo từng mã bán.</li>
       <li><b>Nhập / Xuất</b>: lập phiếu nhiều dòng, tồn cập nhật ngay; nhận hàng PO tự nhập kho. <b>Kiểm kê</b>: điều chỉnh tồn có ghi vết.</li>
-      <li><b>Cảnh báo tồn</b>: hàng xuống dưới min → hệ thống tự sinh đề xuất mua bù về max (PO sinh ra mang mã <code>KHO</code>).</li>
+      <li><b>Cảnh báo tồn</b>: hàng xuống dưới min hiện ở bảng cảnh báo kèm nút <b>🛒 Tạo PO</b> mua bù đến tồn max (PO mang mã <code>KHO</code>, chờ duyệt ở Nhà cung cấp → Đơn mua).</li>
       <li><b>💲 Giá đầu vào</b>: bảng giá tự học từ mua thật — giá mua gần nhất (ngày · số PO · NCC), bình quân 3 lần, số lần mua (chỉ tính PO đã duyệt),
         báo giá còn hiệu lực, giá vốn đã học và <b>giá đề xuất cho dự toán</b> kèm nguồn. Dự toán hàng bán và BOQ dự án tự điền theo bảng này. Dòng gõ <b>tên chung</b> chưa trùng mặt hàng nào vẫn có khối <b>💡 Giá từ mua hàng cũ</b> (mặt hàng đã mua thật có tên gần giống — bấm <b>Áp giá</b>) và nút <b>🔎 tìm giá theo tên</b> ở cả hai bảng.</li>
     </ul>
   </div></details>
 
-  <details class="mod" id="m-dexuat"><summary>Đề xuất mua hàng <span class="grp chip green">Cung ứng</span></summary><div class="body">
-    <p>Hai tab: <b>Dự toán &amp; Đề xuất</b> · <b>📖 Hướng dẫn sử dụng</b> (hướng dẫn chi tiết từng bước nằm ngay trong mục). Thứ tự trên trang đúng trình tự nghiệp vụ:</p>
+  <details class="mod" id="m-dexuat"><summary>Mua hàng không qua đề xuất <span class="grp chip green">Cung ứng</span> <span class="chip">từ 10/10/2026</span></summary><div class="body">
+    <p>Mục <b>Đề xuất mua hàng</b> đã bỏ. PO lập <b>thẳng</b> từ nơi phát sinh nhu cầu, vào <b>Nhà cung cấp → Đơn mua</b> ở trạng thái chờ duyệt (duyệt theo hạn mức vai trò; vượt / ngoài / chưa có dự toán → chỉ CEO duyệt):</p>
     <ol>
-      <li><b>🧾 Dự toán hàng bán — nơi tạo mã</b> (panel này cũng có ở <b>Bán hàng → Báo giá</b>, cùng một nguồn). Nhập mã theo quy tắc (dưới ô hiện cách hệ thống hiểu mã hoặc lỗi kèm gợi ý sửa), khách hàng, mô tả → tạo dự toán.
-        Thêm dòng bằng cách <b>chọn hàng từ danh mục kho</b>: ĐVT và <b>đơn giá tự điền theo giá mua thật / báo giá</b> (nguồn ghi ngay dưới ô).
-        Bảng có cột <b>💲 Giá gợi ý</b> (bấm để điền) và <b>🛒 Giá mua thật</b> (giá PO đã lập dưới chính mã này, chênh %). Nút <b>⟳ Cập nhật giá theo mua thực tế</b> (xem trước rồi áp) và <b>🔗 Khớp tên với kho</b> (dòng gõ tay chọn mặt hàng kho gần giống để nhận giá).</li>
-      <li><b>🛒 Tạo đề xuất mua từ dự toán</b>: tick dòng → thanh nổi → một đề xuất nhiều mặt hàng mang mã dự toán; dòng đã đề xuất bị khóa (từ chối/xóa đề xuất thì mở lại). Mã <code>OP-…</code> là dự toán chi phí vận hành doanh nghiệp.</li>
-      <li><b>Tạo đề xuất mua thủ công</b> cho mua bổ sung / tồn kho / vật tư nhỏ — gắn mã ngay trên dòng.</li>
-      <li><b>Hàng đợi đề xuất</b>: mọi đề xuất (tay · từ dự toán · từ BOQ dự án · từ Cho thuê · kho tự sinh) về một bảng; gắn/đổi mã trên dòng; người có quyền <b>Duyệt / Từ chối</b> theo hạn mức. Đề xuất đã duyệt tự sang <b>Nhà cung cấp → Đơn mua (PO)</b>.</li>
+      <li><b>🧾 Dự toán hàng bán</b> (Bán hàng → Báo giá): tick dòng → <b>🛒 Tạo PO</b> → hộp chọn nhà cung cấp (⭐ gợi ý theo giá · đánh giá · hạn mức), sửa SL / giá → mỗi nhà cung cấp một PO mang mã dự toán. Dòng đã có PO bị khóa (PO bị từ chối thì mở lại).</li>
+      <li><b>BOQ dự án</b> (Dự án → Danh mục thiết bị, vật tư): nút 🛒 Tạo PO trên từng dòng, mã PO = mã dự án.</li>
+      <li><b>Cho thuê → Vật tư &amp; Thiết bị / Hóa chất</b>: lập PO mang mã cho thuê theo tháng; tab Chi phí vận hành có nút ⟳ Đồng bộ từ PO vật tư để ghi dòng tham chiếu (không cộng lần 2).</li>
+      <li><b>Kho → Cảnh báo tồn</b>: hàng dưới mức tối thiểu có nút 🛒 Tạo PO mua bù đến tồn max, mã <code>KHO</code>.</li>
+      <li><b>Tạo PO tay</b> hoặc <b>AI đọc file báo giá</b> ở Nhà cung cấp → Đơn mua như trước.</li>
     </ol>
-    <div class="note"><b>Kiểm soát theo dự toán — “chặn và chờ duyệt”</b>: mã đã có dự toán thì mỗi mặt hàng chỉ được đề xuất / lập PO tối đa dự toán dòng + 10% (lũy kế); vượt mức hoặc hàng ngoài dự toán → chặn, người lập xác nhận có chủ đích thì đề xuất mang nhãn ⛔ và chỉ CEO/ADMIN duyệt được.</div>
+    <div class="note"><b>Kiểm soát không đổi, dồn hết vào PO</b>: mã chi phí bắt buộc · chặn mua trùng theo mã · vượt / ngoài dự toán (dung sai 10%, lũy kế PO kể cả chờ duyệt) → xác nhận có chủ đích → nhãn ⛔ chỉ CEO/ADMIN duyệt · hạn mức công nợ nhà cung cấp. Đề xuất cũ (29 bản ghi) giữ làm lịch sử: hồ sơ PO vẫn hiện “Đề xuất mua gốc”.</div>
   </div></details>
 
   <details class="mod" id="m-ncc"><summary>Nhà cung cấp <span class="grp chip green">Cung ứng</span></summary><div class="body">
@@ -476,7 +474,7 @@
   <ul>
     <li><b>Dự án</b>: nút 🤖 phân tích nước thải đầu vào và gợi ý nguyên lý công nghệ xử lý — dùng làm tham khảo, kỹ sư vẫn là người quyết định.</li>
     <li><b>Tài chính</b>: nút 🤖 “CFO ảo” đánh giá sức khỏe tài chính và đề xuất thứ tự ưu tiên hành động.</li>
-    <li><b>Kho → Mua hàng</b>: tồn xuống dưới mức tối thiểu tự sinh đề xuất mua.</li>
+    <li><b>Kho → Mua hàng</b>: tồn xuống dưới mức tối thiểu → cảnh báo kèm nút 🛒 Tạo PO mua bù.</li>
     <li><b>Nhà cung cấp</b>: gợi ý NCC tốt nhất theo giá, điểm đánh giá và hạn mức công nợ.</li>
     <li><b>CRM</b>: tự nhắc lịch chăm sóc sau bán (+7 / +30 ngày) và cảnh báo khiếu nại quá 24 giờ.</li>
     <li><b>Lương</b>: tự tính bảo hiểm và thuế TNCN theo quy định.</li>
@@ -487,7 +485,8 @@
   <h2>10. Những thay đổi lớn tháng 09/2026</h2>
   <table>
     <tr><th style="width:230px">Thay đổi</th><th>Ý nghĩa với người dùng</th></tr>
-    <tr><td><b>Dự toán hàng bán → Đề xuất</b></td><td>Mã bán hàng tạo ở Dự toán; tick dòng dự toán là ra đề xuất mua; panel Dự toán đứng trên hàng đợi đề xuất; có tab 📖 Hướng dẫn trong mục.</td></tr>
+    <tr><td><b>Bỏ bước Đề xuất mua (10/10/2026)</b></td><td>Mục Đề xuất mua hàng gỡ khỏi app. Tick dòng dự toán / BOQ, vật tư cho thuê, hàng dưới tồn min → <b>🛒 Tạo PO</b> thẳng, chờ duyệt theo hạn mức ở Nhà cung cấp → Đơn mua. Kiểm soát trùng mua / dự toán / mã chi phí giữ nguyên trên PO.</td></tr>
+    <tr><td><b>Dự toán hàng bán — nơi tạo mã</b></td><td>Mã bán hàng tạo ở Dự toán (Bán hàng → Báo giá); các khâu sau dùng lại đúng mã.</td></tr>
     <tr><td><b>Mã chi phí bắt buộc</b></td><td>PO / công nợ nhập ngoài không có mã (mã bán · OP- · KHO) thì không lưu / không duyệt được. Chi phí không còn “rơi” khỏi lãi/lỗ.</td></tr>
     <tr><td><b>🧩 Chi phí chưa vào mã</b></td><td>Panel ở Kiểm soát gom 8 nhóm khoản chưa đúng mã, có gợi ý theo lịch sử; gán / nối về PO / đổi mã một lần lan mọi bảng.</td></tr>
     <tr><td><b>Chống “đi 2 cửa”</b></td><td>Hóa đơn nhập ngoài trùng PO (cùng NCC, số tiền, ≤30 ngày) được cảnh báo và nối về PO — hết đếm chi phí 2 lần.</td></tr>

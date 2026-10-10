@@ -17,7 +17,7 @@ from decimal import Decimal
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
-from .models import (HangHoa, DonHang, DonMua, DonMuaCt, YeuCauMua, YeuCauMuaCt,
+from .models import (HangHoa, DonHang, DonMua, DonMuaCt, YeuCauMua,
                      DuToanBan, DuToanBanMuc, DuAn, DuAnDuToan)
 
 DUNG_SAI = 0.10          # 10% — cùng mức với định mức tiêu hao tháng (CEO chốt)
@@ -182,8 +182,8 @@ def thieu_du_toan(db: Session, ma: str, lines, mien_hh=None, bo_qua_ycm=None, bo
 
 
 def da_dung_theo_ma(db: Session, ma: str, bo_qua_ycm=None, bo_qua_dm=None):
-    """{hang_hoa_id: {"sl","tien"}} đã CAM KẾT dưới mã: dòng PO (không từ chối) + dòng đề xuất
-    còn hiệu lực chưa thành PO. Bỏ qua chính đề xuất / PO đang xét."""
+    """{hang_hoa_id: {"sl","tien"}} đã CAM KẾT dưới mã: dòng PO không bị từ chối (kể cả PO chờ duyệt).
+    Bỏ qua chính PO đang xét (bo_qua_dm); bo_qua_ycm giữ cho tương thích — bước đề xuất đã bỏ 10/10/2026."""
     ma = str(ma or "").strip().lower()
     dh_ids = [i for (i,) in db.query(DonHang.id).filter(func.lower(func.trim(DonHang.so)) == ma).all()]
     out = {}
@@ -202,21 +202,7 @@ def da_dung_theo_ma(db: Session, ma: str, bo_qua_ycm=None, bo_qua_dm=None):
         q = q.filter(DonMua.id != bo_qua_dm)
     for ct, dm in q.all():
         cong(ct.hang_hoa_id, _f(ct.so_luong), _f(ct.so_luong) * _f(ct.don_gia))
-    dk_y = or_(func.lower(func.trim(YeuCauMua.ma_ban)) == ma,
-               func.lower(func.trim(YeuCauMua.cho_thue_ma)) == ma)
-    if dh_ids:
-        dk_y = or_(dk_y, YeuCauMua.don_hang_id.in_(dh_ids))
-    qy = (db.query(YeuCauMua).filter(dk_y, YeuCauMua.don_mua_id.is_(None),
-                                     YeuCauMua.trang_thai.in_(["MOI", "CHO_DUYET", "DA_DUYET"])))
-    if bo_qua_ycm:
-        qy = qy.filter(YeuCauMua.id != bo_qua_ycm)
-    for y in qy.all():
-        cts = db.query(YeuCauMuaCt).filter_by(yeu_cau_mua_id=y.id).all()
-        if cts:
-            for c in cts:
-                cong(c.hang_hoa_id, _f(c.so_luong), _f(c.so_luong) * _f(c.don_gia))
-        else:
-            cong(y.hang_hoa_id, _f(y.so_luong), _f(y.so_luong) * _f(y.don_gia))
+    # (10/10/2026) bỏ bước đề xuất mua — "đã cam kết" = PO không bị từ chối, kể cả PO đang chờ duyệt.
     return out
 
 
