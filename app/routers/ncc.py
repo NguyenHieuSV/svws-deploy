@@ -5526,7 +5526,11 @@ def _dtb_nap_file(db, nd, dt, data: bytes, content_type, ten_file: str) -> dict:
     """📎 Nạp file vào dự toán: file ĐÚNG MẪU BOQ (Excel / CSV) → máy đọc thẳng, thêm mục ngay, trả kết quả;
     file khác (PDF · ảnh · Excel tự do) → lưu kho tệp + AI đọc ở nền như cũ."""
     from ..boq_mau import doc_boq
-    kq_mau = doc_boq(data, ten_file)
+    mau_loi = None
+    try:
+        kq_mau = doc_boq(data, ten_file)
+    except Exception as e:                       # file hỏng / thư viện lỗi → vẫn đi đường AI, nhưng báo rõ lý do
+        kq_mau, mau_loi = None, f"{type(e).__name__}: {str(e)[:160]}"
     if kq_mau:
         nhom, items = kq_mau
         ref = luu_tep_chung(data, "du_toan_ban", dt.id, ten_file, content_type)
@@ -5538,7 +5542,7 @@ def _dtb_nap_file(db, nd, dt, data: bytes, content_type, ten_file: str) -> dict:
                   moi={"file": ten_file, "so_doc": kq["so_doc"], "them": kq["them"], "bo_qua": kq["bo_qua"], "nhom": len(nhom)})
         db.commit()
         return {"dang_chay": False, "cach": "MAU_BOQ", "so_nhom": len(nhom), **kq}
-    return {"dang_chay": True, "cach": "AI", **_dtb_nap_file_nen(db, nd, dt, data, content_type, ten_file)}
+    return {"dang_chay": True, "cach": "AI", "mau_loi": mau_loi, **_dtb_nap_file_nen(db, nd, dt, data, content_type, ten_file)}
 
 
 def _dtb_nap_file_nen(db, nd, dt, data: bytes, content_type, ten_file: str) -> dict:

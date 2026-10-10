@@ -73,40 +73,41 @@ def doc_boq(data: bytes, filename: str):
     """File Excel / CSV theo mẫu → (nhom: [{ma, ten}], items: [{ma, ten, quy_cach, don_vi, so_luong, nha_san_xuat, nguon,
     don_gia, can_cu, ncc_ten, ma_sp, nhom_ma, nhom_ten}]) hoặc None nếu không nhận diện được tiêu đề cột."""
     fn = (filename or "").lower()
-    cac = []
-    try:
-        if fn.endswith((".xlsx", ".xlsm")):
-            from openpyxl import load_workbook
-            wb = load_workbook(io.BytesIO(data), read_only=True, data_only=True)
+    la_xlsx = fn.endswith((".xlsx", ".xlsm")) or (not fn.endswith((".csv", ".txt", ".pdf")) and data[:2] == b"PK")
+    if la_xlsx:
+        from openpyxl import load_workbook
+        wb = load_workbook(io.BytesIO(data), read_only=True, data_only=True)
+        try:
+            tot = None
+            for ws in wb.worksheets:
+                rows = []
+                for r in ws.iter_rows(values_only=True):
+                    rows.append(list(r))
+                    if len(rows) >= 5000:
+                        break
+                kq = _doc_bang(rows)
+                if kq and (tot is None or len(kq[1]) > len(tot[1])):
+                    tot = kq
+            return tot
+        finally:
+            wb.close()
+    if fn.endswith((".csv", ".txt")):
+        import csv
+        txt = None
+        for enc in ("utf-8-sig", "utf-16", "cp1258", "cp1252"):
             try:
-                tot = None
-                for ws in wb.worksheets:
-                    rows = [list(r) for _, r in zip(range(5000), ws.iter_rows(values_only=True))]
-                    kq = _doc_bang(rows)
-                    if kq and (tot is None or len(kq[1]) > len(tot[1])):
-                        tot = kq
-                return tot
-            finally:
-                wb.close()
-        if fn.endswith((".csv", ".txt")):
-            import csv
-            txt = None
-            for enc in ("utf-8-sig", "utf-16", "cp1258", "cp1252"):
-                try:
-                    txt = data.decode(enc)
-                    break
-                except Exception:
-                    continue
-            if txt is None:
-                return None
-            try:
-                dialect = csv.Sniffer().sniff(txt[:4000], delimiters=",;\t|")
+                txt = data.decode(enc)
+                break
             except Exception:
-                dialect = csv.excel
-            cac = [list(r) for r in csv.reader(io.StringIO(txt), dialect)]
-            return _doc_bang(cac)
-    except Exception:
-        return None
+                continue
+        if txt is None:
+            return None
+        try:
+            dialect = csv.Sniffer().sniff(txt[:4000], delimiters=",;\t|")
+        except Exception:
+            dialect = csv.excel
+        cac = [list(r) for r in csv.reader(io.StringIO(txt), dialect)]
+        return _doc_bang(cac)
     return None
 
 
