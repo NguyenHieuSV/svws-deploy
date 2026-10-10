@@ -1736,6 +1736,19 @@ class SaoKeDong(Base):
     ghi_chu: Mapped[str | None] = mapped_column(String(300), nullable=True)
 
 
+class SaoKeKhop(Base):
+    """mig 148: kế toán GẮN TAY một dòng sao kê với NHIỀU khoản app (hoặc ngược lại) — giữ qua các lần đối soát."""
+    __tablename__ = "sao_ke_khop"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    dong_id: Mapped[int] = mapped_column(ForeignKey("sao_ke_dong.id", ondelete="CASCADE"))
+    loai: Mapped[str] = mapped_column(String(20))            # LENH_CHI | THU_CN_BAN | CN_HOAN_THANH | TAM_UNG_THU
+    khoan_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    so_tien: Mapped[Decimal] = mapped_column(Numeric(18, 0), default=0)
+    ghi_chu: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    nguoi_dung_id: Mapped[int | None] = mapped_column(ForeignKey("nguoi_dung.id"), nullable=True)
+    tao_luc: Mapped[datetime | None] = mapped_column(DateTime, server_default=func.now(), nullable=True)
+
+
 class DuToanBan(Base):
     """Dự toán hàng bán — nơi MÃ HÀNG BÁN được tạo đầu tiên (mig 114)."""
     __tablename__ = "du_toan_ban"

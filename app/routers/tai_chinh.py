@@ -1680,7 +1680,7 @@ def ds_sao_ke(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
 #   tiền RA  ↔ lệnh DUYỆT CHI NGÂN HÀNG (mục Nhà cung cấp) đã duyệt / đã chi
 #   tiền VÀO ↔ THU CÔNG NỢ BÁN HÀNG (mục Bán hàng), ưu tiên công nợ ĐÃ HOÀN THÀNH
 # Bảng hợp nhất sắp ngày mới lên trên, mỗi dòng có phân tích; dòng kế toán đã ghi tay từ sao kê giữ nguyên.
-_SK_MANUAL = ("DA_CHI_SK", "GHI_THU_SK", "PHIEU_SK")
+_SK_MANUAL = ("DA_CHI_SK", "GHI_THU_SK", "PHIEU_SK", "GAN_TAY", "BO_KHOP", "COC_SK")   # GAN_TAY/BO_KHOP/COC_SK: mig 148
 _SK_NHOM_TEN = {"NOI_BO": "chuyển nội bộ", "NOP_RUT": "nộp / rút tiền mặt", "LUONG": "chi lương", "BHXH": "bảo hiểm xã hội",
                 "THUE": "nộp thuế", "PHI_NH": "phí ngân hàng / bảo lãnh / trả nợ vay",
                 "CHI_CHUNG": "điện nước, thuê văn phòng, viễn thông"}
@@ -1733,10 +1733,54 @@ def _sk_ma_cn(db, cn):
     return cn.ma_ban_ngoai
 
 
+# ---- 📖 ĐỌC NỘI DUNG CHUYỂN KHOẢN (10/10/2026): số hóa đơn · mã bán hàng · cọc / tạm ứng — chìa khóa ghép chính ----
+import re as _sk_re
+_SK_RE_COC = _sk_re.compile(r"\b(dat coc|tien coc|thu coc|tt coc|coc|tam ung|tra truoc|ung truoc)\b")
+_SK_RE_HD = _sk_re.compile(r"(?:\bhd\b|\bhoa don\b|\binv(?:oice)?\b|\bhdbh\b)\s*(?:so\b)?\s*[:#.]?\s*([0-9][0-9 ,\-/&+]*)")
+_SK_RE_MA = _sk_re.compile(r"\b(?:TM|DA|DV|OP)-[A-Z0-9]+(?:-[A-Z0-9]+)*\b")
+
+
+def _sk_so_hd(v) -> str:
+    from ..lai_lo_ma import so_hd_chuan
+    return so_hd_chuan(v)
+
+
+def _sk_so_hd_set(v) -> set:
+    """Các dạng số của một số hóa đơn trong app: «C26TAP-00004260» → {c26tap4260, 4260} — sao kê thường chỉ ghi số đuôi."""
+    k = _sk_so_hd(v)
+    out = set()
+    if k:
+        out.add(k)
+        m = _sk_re.search(r"(\d+)$", k)
+        if m and m.group(1).lstrip("0"):
+            out.add(m.group(1).lstrip("0"))
+    return out
+
+
+def _sk_doc_dien_giai(dg) -> dict:
+    """Nội dung chuyển khoản → {coc, so_hd[], ma[]}: «Thu từ HD 139-140-141 - COATS» → so_hd 139 140 141;
+    «TT HD 17 DA-VEDAN-0825-02» → so_hd 17 · ma DA-VEDAN-0825-02; «Thu cọc COAT» → coc. Bỏ số kèm % (30%, 50%)."""
+    kd = " " + _sk_kd(dg) + " "
+    kd = _sk_re.sub(r"\d+\s*%", " ", kd)
+    coc = bool(_SK_RE_COC.search(kd))
+    so_hd = []
+    for m in _SK_RE_HD.finditer(kd):
+        for t in _sk_re.split(r"[ ,\-/&+]+", m.group(1)):
+            t = t.strip()
+            if t.isdigit() and 1 <= len(t) <= 8 and t not in so_hd:
+                so_hd.append(t)
+    ma = []
+    for m in _SK_RE_MA.finditer(str(dg or "").upper()):
+        if m.group(0) not in ma:
+            ma.append(m.group(0))
+    return {"coc": coc, "so_hd": so_hd, "ma": ma}
+
+
 def _sk_ung_vien(db: Session, tu: date, den: date):
-    """(tiền RA: lệnh Duyệt chi NH, tiền VÀO: thu công nợ bán hàng) trong [tu, den] — kèm đối tác (NCC / khách)."""
-    from ..models import LenhChiBank, DonMua, NhaCungCap, KhachHang
-    ra, vao = [], []
+    """(tiền RA: lệnh Duyệt chi NH · tiền VÀO: thu công nợ bán hàng · cọc VÀO: phiếu thu tạm ứng đã duyệt) trong [tu, den]
+    — kèm đối tác, SỐ HÓA ĐƠN và MÃ bán hàng của từng khoản để ghép theo nội dung chuyển khoản."""
+    from ..models import LenhChiBank, DonMua, NhaCungCap, KhachHang, PhieuThuChi, DonHang as _DHs
+    ra, vao, coc_vao = [], [], []
     for r in db.query(LenhChiBank).filter(LenhChiBank.trang_thai.in_(["DA_DUYET", "DA_CHI"])).all():
         ng = r.ngay_tt or (r.chi_luc.date() if r.chi_luc else None) or (r.duyet_luc.date() if r.duyet_luc else None)
         if ng is None or ng < tu or ng > den:
@@ -1747,22 +1791,35 @@ def _sk_ung_vien(db: Session, tu: date, den: date):
         cac = {c for c in cac if c > 0}
         if not cac:
             continue
-        nc = None
+        nc, so_hd, ma, la_cn_hd = None, set(), None, False
         if r.don_mua_id:
             dm = db.get(DonMua, r.don_mua_id)
             nc = db.get(NhaCungCap, dm.nha_cung_cap_id) if (dm and dm.nha_cung_cap_id) else None
             mo_ta = f"Lệnh chi PO {dm.so if (dm and dm.so) else r.don_mua_id}" + (f" — {nc.ten[:40]}" if nc else "")
+            if dm is not None:
+                if dm.so_hoa_don and not str(dm.so_hoa_don).upper().startswith("HDM-"):
+                    so_hd |= _sk_so_hd_set(dm.so_hoa_don)
+                ma = (dm.ma_ban or "").strip() or None
+                if not ma and dm.don_hang_id:
+                    dh = db.get(_DHs, dm.don_hang_id)
+                    ma = (dh.so or "").strip() if dh else None
         elif r.cong_no_id:
             cn = db.get(CongNo, r.cong_no_id)
             nc = db.get(NhaCungCap, cn.nha_cung_cap_id) if (cn and cn.nha_cung_cap_id) else None
             mo_ta = (f"Lệnh chi công nợ CN{r.cong_no_id}" + (f" — {nc.ten[:40]}" if nc else "")
                      + (f" · HĐ {cn.so_ct}" if (cn and cn.so_ct) else ""))
+            if cn is not None:
+                la_cn_hd = bool(cn.so_ct)
+                if cn.so_ct:
+                    so_hd |= _sk_so_hd_set(cn.so_ct)
+                ma = _sk_ma_cn(db, cn)
         else:
             mo_ta = "Lệnh chi tạm ứng / cọc NCC" + (f" (phiếu #{r.phieu_id})" if r.phieu_id else "")
         ra.append({"loai": "LENH_CHI", "id": r.id, "ngay": ng, "so_tien": max(cac), "cac": cac, "chieu": "RA",
                    "trang_thai": "ĐÃ CHI" if r.trang_thai == "DA_CHI" else "ĐÃ DUYỆT · chờ ngân hàng chi",
                    "uu_tien": 0 if r.trang_thai == "DA_CHI" else 1, "mo_ta": mo_ta,
-                   "doi_tac": nc.id if nc else None, "doi_tac_ten": nc.ten if nc else None})
+                   "doi_tac": nc.id if nc else None, "doi_tac_ten": nc.ten if nc else None,
+                   "so_hd": {x for x in so_hd if x}, "ma": (ma or "").upper() or None, "la_cn_hd": la_cn_hd})
     co_tt = {x[0] for x in db.query(ThanhToan.cong_no_id).distinct().all()}
     for tt, cn in (db.query(ThanhToan, CongNo).join(CongNo, ThanhToan.cong_no_id == CongNo.id)
                    .filter(CongNo.loai == "PHAI_THU", ThanhToan.ngay >= tu, ThanhToan.ngay <= den).all()):
@@ -1775,7 +1832,9 @@ def _sk_ung_vien(db: Session, tu: date, den: date):
                     "uu_tien": 0 if xong else 1,
                     "mo_ta": (f"Thu công nợ {kh.ten[:40] if kh else ('CN' + str(cn.id))}"
                               + (f" · HĐ {cn.so_ct}" if cn.so_ct else "") + (f" · {ma}" if ma else "")),
-                    "doi_tac": kh.id if kh else None, "doi_tac_ten": kh.ten if kh else None})
+                    "doi_tac": kh.id if kh else None, "doi_tac_ten": kh.ten if kh else None,
+                    "so_hd": _sk_so_hd_set(cn.so_ct), "ma": (ma or "").upper() or None,
+                    "cong_no_id": cn.id})
     # công nợ ĐÃ HOÀN THÀNH (đánh dấu ở Bán hàng) mà app không có lần thu nào → đối chiếu theo tổng công nợ
     for cn in db.query(CongNo).filter(CongNo.loai == "PHAI_THU").all():
         if cn.id in co_tt or not _sk_cn_hoan_thanh(cn):
@@ -1790,8 +1849,27 @@ def _sk_ung_vien(db: Session, tu: date, den: date):
                     "uu_tien": 0,
                     "mo_ta": (f"Công nợ hoàn thành {kh.ten[:40] if kh else ('CN' + str(cn.id))}"
                               + (f" · HĐ {cn.so_ct}" if cn.so_ct else "") + (f" · {ma}" if ma else "")),
-                    "doi_tac": kh.id if kh else None, "doi_tac_ten": kh.ten if kh else None})
-    return ra, vao
+                    "doi_tac": kh.id if kh else None, "doi_tac_ten": kh.ten if kh else None,
+                    "so_hd": _sk_so_hd_set(cn.so_ct), "ma": (ma or "").upper() or None,
+                    "cong_no_id": cn.id})
+    # 💰 cọc / trả trước của khách: phiếu thu TẠM ỨNG đã duyệt — chỉ ghép với dòng sao kê có chữ cọc / tạm ứng
+    for p in (db.query(PhieuThuChi).filter(PhieuThuChi.loai == "THU", PhieuThuChi.la_tam_ung.is_(True),
+                                           PhieuThuChi.trang_thai == "DA_DUYET",
+                                           PhieuThuChi.ngay >= tu, PhieuThuChi.ngay <= den).all()):
+        if float(p.so_tien or 0) <= 0:
+            continue
+        kh = db.get(KhachHang, p.khach_hang_id) if p.khach_hang_id else None
+        dh = db.get(_DHs, p.don_hang_id) if p.don_hang_id else None
+        con = float(p.so_tien or 0) - float(p.da_can_tru or 0)
+        coc_vao.append({"loai": "TAM_UNG_THU", "id": p.id, "ngay": p.ngay, "so_tien": float(p.so_tien or 0),
+                        "cac": {float(p.so_tien or 0)}, "chieu": "VAO",
+                        "trang_thai": "phiếu thu tạm ứng ĐÃ DUYỆT" + (f" · còn {con:,.0f} đ chưa cấn trừ" if con > 0 else " · đã cấn trừ hết"),
+                        "uu_tien": 0,
+                        "mo_ta": (f"Phiếu thu tạm ứng {p.so or ('#' + str(p.id))} · {kh.ten[:40] if kh else 'khách lẻ'}"
+                                  + (f" · {dh.so}" if (dh and dh.so) else "")),
+                        "doi_tac": kh.id if kh else None, "doi_tac_ten": kh.ten if kh else None,
+                        "so_hd": set(), "ma": ((dh.so or "").upper() if dh else None) or None})
+    return ra, vao, coc_vao
 
 
 def _sk_u_out(u):
@@ -1804,20 +1882,55 @@ def _sk_loai_luu(u):
     return "THU_CN_BAN" if u["loai"] == "CN_HOAN_THANH" else u["loai"]
 
 
+def _sk_hd_thieu_text(so_list, chieu, cn_theo_so, hd_theo_so) -> str:
+    """Số hóa đơn ghi trong nội dung CK mà không ghép được: chưa có trong app / có nhưng chưa ghi thu-chi."""
+    chua_co, chua_ghi, co_hd = [], [], []
+    for so in so_list:
+        cns = cn_theo_so.get(chieu, {}).get(so)
+        if cns:
+            cn = cns[0]
+            da = float(cn.da_thanh_toan or 0)
+            chua_ghi.append(so + (" (đã thu một phần)" if (chieu == "VAO" and da > 0) else ""))
+        elif so in hd_theo_so.get(chieu, set()):
+            co_hd.append(so)
+        else:
+            chua_co.append(so)
+    phan = []
+    if chua_co:
+        phan.append("HĐ CHƯA CÓ trong app: " + ", ".join(chua_co) + " — kế toán nhập hóa đơn / công nợ")
+    if chua_ghi:
+        phan.append(("HĐ có trong app nhưng chưa ghi thu / công nợ chưa hoàn thành: " if chieu == "VAO"
+                     else "HĐ có trong app nhưng chưa có lệnh Duyệt chi NH: ") + ", ".join(chua_ghi))
+    if co_hd:
+        phan.append("HĐ có trong sổ hóa đơn nhưng chưa có dòng công nợ: " + ", ".join(co_hd))
+    return " · ".join(phan)
+
+
 def _sk_so_sanh(db: Session, sk, dongs) -> dict:
-    """Bảng hợp nhất sao kê ↔ app, 5 bước: ① 1 đối 1 (ưu tiên cùng đối tác, dung sai phí tiền vào) · ② 1 dòng sao kê
-    trả gộp 2–3 khoản app · ③ 1 khoản app nhận NHIỀU ĐỢT 2–4 dòng sao kê · ④ TRẢ MỘT PHẦN cùng đối tác (cộng dồn, hiện
-    phần còn thiếu) · ⑤ còn lại: chỉ sao kê (phân nhóm) / chỉ app. Trả {tong, phan_tich[], rows[] (ngày mới lên trên),
-    _auto{dong_id: (loai, id, mo_ta)} để lưu khop_loai}."""
+    """Bảng hợp nhất sao kê ↔ app — ⓪ dòng kế toán đã ghi tay (phiếu · 🔗 gắn tay · ✕ bỏ khớp · 💰 cọc) giữ nguyên ·
+    ①a THEO SỐ HÓA ĐƠN ghi trong nội dung chuyển khoản (không giới hạn số HĐ; thiếu thì nêu HĐ nào chưa có trong app) ·
+    ① 1 đối 1 (ưu tiên cùng đối tác, cùng mã) · ② 1 dòng sao kê trả gộp 2–3 khoản — chỉ ✓ khi nội dung nêu đúng đối tác,
+    không thì «? nghi gộp» (không tự ghi) · ③ 1 khoản app nhận NHIỀU ĐỢT · ④ TRẢ MỘT PHẦN cùng đối tác · ⑤ còn lại:
+    💰 cọc / trả trước đi riêng (ghép phiếu thu tạm ứng, không ghép hóa đơn) · chỉ sao kê (kèm HĐ ghi trong nội dung có hay
+    không có trong app) · chỉ app. Trả {tong, phan_tich[], rows[] (ngày mới lên trên), _auto{dong_id: (loai, id, mo_ta)}}."""
     import itertools
-    from ..models import NhaCungCap, KhachHang
+    from ..models import NhaCungCap, KhachHang, SaoKeKhop, HoaDon
     from .ke_toan_quy import _khop_ncc
     tu = (sk.tu_ngay or date.today()) - timedelta(days=7)
     den = (sk.den_ngay or date.today()) + timedelta(days=7)
-    ra, vao = _sk_ung_vien(db, tu, den)
+    ra, vao, coc_vao = _sk_ung_vien(db, tu, den)
+    pool_idx = {(u["loai"], u["id"]): u for u in ra + vao + coc_vao}
     ds_ncc = db.query(NhaCungCap).all()
     ds_kh = db.query(KhachHang).all()
     ten_cua = {"RA": {n.id: n.ten for n in ds_ncc}, "VAO": {k.id: k.ten for k in ds_kh}}
+    # tra cứu công nợ / hóa đơn theo SỐ (mọi trạng thái) — để báo «HĐ … chưa có trong app» / «có nhưng chưa ghi thu»
+    cn_theo_so = {"VAO": {}, "RA": {}}
+    for cn in db.query(CongNo).filter(CongNo.so_ct.isnot(None)).all():
+        for k0 in _sk_so_hd_set(cn.so_ct):
+            cn_theo_so["VAO" if cn.loai == "PHAI_THU" else "RA"].setdefault(k0, []).append(cn)
+    hd_theo_so = {"VAO": set(), "RA": set()}
+    for (lo, so0) in db.query(HoaDon.loai, HoaDon.so).filter(HoaDon.so.isnot(None)).all():
+        hd_theo_so["RA" if lo == "MUA" else "VAO"] |= _sk_so_hd_set(so0)
 
     def lech(a, b):
         return abs((a - b).days) if (a and b) else 99
@@ -1843,6 +1956,10 @@ def _sk_so_sanh(db: Session, sk, dongs) -> dict:
             return 0
         return 1 if (x["dt"] is None or u.get("doi_tac") is None) else 2
 
+    def ma_uu(x, u):
+        m = u.get("ma")
+        return 0 if (m and any(m == a or a.startswith(m) or m.startswith(a) for a in x["ma"])) else 1
+
     def pt_dt(x, u):
         if x["dt"] and u.get("doi_tac") and x["dt"] != u["doi_tac"]:
             return f" ⚠ diễn giải ghi «{ten_dt(x['chieu'], x['dt'])}» còn app là «{u.get('doi_tac_ten') or ''}» — kiểm tra"
@@ -1856,15 +1973,23 @@ def _sk_so_sanh(db: Session, sk, dongs) -> dict:
             continue
         chieu = "RA" if ra_d > 0 else "VAO"
         dt = _khop_ncc(ds_ncc if chieu == "RA" else ds_kh, d.dien_giai or "") if (d.dien_giai or "").strip() else None
+        nd = _sk_doc_dien_giai(d.dien_giai)
         D.append({"d": d, "id": d.id, "so": so, "chieu": chieu, "dt": dt, "ngay": d.ngay,
-                  "manual": d.khop_loai in _SK_MANUAL})
+                  "manual": d.khop_loai in _SK_MANUAL, "coc": nd["coc"],
+                  "so_hd": {_sk_so_hd(t) for t in nd["so_hd"] if _sk_so_hd(t)}, "ma": nd["ma"]})
+    khop_tay = {}
+    if D:
+        for k in db.query(SaoKeKhop).filter(SaoKeKhop.dong_id.in_([x["id"] for x in D])).order_by(SaoKeKhop.id).all():
+            khop_tay.setdefault(k.dong_id, []).append(k)
 
     def skd(x):
         return {"id": x["id"], "dien_giai": x["d"].dien_giai, "so_tien": x["so"],
-                "ngay": str(x["ngay"]) if x["ngay"] else None, "doi_tac": ten_dt(x["chieu"], x["dt"])}
+                "ngay": str(x["ngay"]) if x["ngay"] else None, "doi_tac": ten_dt(x["chieu"], x["dt"]),
+                "so_hd": sorted(x["so_hd"]), "ma": x["ma"], "coc": x["coc"], "khop_loai": x["d"].khop_loai}
 
     dung, dung_sk, rows, auto = set(), set(), [], {}
     ngay_s = lambda x: str(x["ngay"]) if x["ngay"] else None
+    hd_txt = lambda x: ", ".join(sorted(x["so_hd"]))
 
     # ---------- ⓪ kế toán đã ghi tay ----------
     for x in D:
@@ -1872,25 +1997,110 @@ def _sk_so_sanh(db: Session, sk, dongs) -> dict:
             continue
         d = x["d"]
         dung_sk.add(x["id"])
-        rows.append({"ngay": ngay_s(x), "chieu": x["chieu"], "sk": skd(x), "ket_qua": "KHOP", "lech_ngay": 0, "nhom": None,
-                     "app": [{"loai": "DA_GHI", "id": d.khop_id, "mo_ta": d.khop_mo_ta or "Kế toán đã ghi từ dòng sao kê",
-                              "so_tien": x["so"], "ngay": ngay_s(x), "trang_thai": "đã ghi tay"}],
-                     "phan_tich": "✓ Kế toán đã ghi phiếu / lệnh từ dòng sao kê này (Kế toán › Thống kê thu–chi)"})
-    # ---------- ① 1 đối 1 — ưu tiên cùng đối tác, dung sai phí với tiền vào ----------
+        if d.khop_loai == "GAN_TAY":
+            apps = []
+            for k in khop_tay.get(d.id, []):
+                u = pool_idx.get((k.loai, k.khoan_id))
+                if u is not None:
+                    dung.add((u["loai"], u["id"]))
+                    o = _sk_u_out(u)
+                    if k.so_tien is not None and float(k.so_tien) > 0:
+                        o["so_tien"] = float(k.so_tien)
+                    o["trang_thai"] = ((o.get("trang_thai") or "") + " · ✍ gắn tay").strip(" ·")
+                else:
+                    o = {"loai": k.loai, "id": k.khoan_id, "mo_ta": k.ghi_chu or f"{k.loai} #{k.khoan_id}",
+                         "so_tien": float(k.so_tien or 0), "ngay": None, "trang_thai": "✍ gắn tay (khoản ngoài kỳ đối soát)"}
+                apps.append(o)
+            tong_g = sum(a["so_tien"] for a in apps)
+            lech_t = tong_g - x["so"]
+            pt = f"✓ Kế toán gắn tay {len(apps)} khoản app cho dòng sao kê này"
+            if abs(lech_t) > eps_cua(x["chieu"], x["so"]):
+                pt += f" · tổng gắn {_sk_vnd(tong_g)} {'lớn' if lech_t > 0 else 'nhỏ'} hơn sao kê {_sk_vnd(abs(lech_t))}"
+            if d.khop_mo_ta and not str(d.khop_mo_ta).startswith("gắn tay:"):
+                pt += f" · {d.khop_mo_ta}"
+            rows.append({"ngay": ngay_s(x), "chieu": x["chieu"], "sk": skd(x), "app": apps, "ket_qua": "KHOP",
+                         "lech_ngay": 0, "nhom": None, "gan_tay": True, "phan_tich": pt})
+        elif d.khop_loai == "BO_KHOP":
+            rows.append({"ngay": ngay_s(x), "chieu": x["chieu"], "sk": skd(x), "app": [], "ket_qua": "BO_KHOP",
+                         "lech_ngay": None, "nhom": None, "gan_tay": True,
+                         "phan_tich": "✕ Kế toán xác nhận dòng này KHÔNG khớp khoản nào trong app"
+                                      + (f" — {d.khop_mo_ta}" if d.khop_mo_ta else "")})
+        elif d.khop_loai == "COC_SK":
+            u = pool_idx.get(("TAM_UNG_THU", d.khop_id)) if d.khop_id else None
+            if u is not None:
+                dung.add((u["loai"], u["id"]))
+            rows.append({"ngay": ngay_s(x), "chieu": x["chieu"], "sk": skd(x), "app": [_sk_u_out(u)] if u else [],
+                         "ket_qua": "COC_KH" if x["chieu"] == "VAO" else "COC_NCC", "lech_ngay": None, "nhom": "COC",
+                         "gan_tay": True,
+                         "phan_tich": "💰 Kế toán ghi nhận là tiền cọc / trả trước — không ghép với hóa đơn"
+                                      + (" · đã nối phiếu thu tạm ứng" if u else "")
+                                      + (f" · {d.khop_mo_ta}" if d.khop_mo_ta else "")})
+        else:
+            rows.append({"ngay": ngay_s(x), "chieu": x["chieu"], "sk": skd(x), "ket_qua": "KHOP", "lech_ngay": 0, "nhom": None,
+                         "app": [{"loai": "DA_GHI", "id": d.khop_id, "mo_ta": d.khop_mo_ta or "Kế toán đã ghi từ dòng sao kê",
+                                  "so_tien": x["so"], "ngay": ngay_s(x), "trang_thai": "đã ghi tay"}],
+                         "phan_tich": "✓ Kế toán đã ghi phiếu / lệnh từ dòng sao kê này (Kế toán › Thống kê thu–chi)"})
+    # ---------- ①a THEO SỐ HÓA ĐƠN ghi trong nội dung chuyển khoản ----------
     for x in D:
-        if x["id"] in dung_sk:
+        if x["id"] in dung_sk or x["coc"] or not x["so_hd"]:
+            continue
+        cands = [u for u in pool_cua(x["chieu"]) if (u["loai"], u["id"]) not in dung and (u["so_hd"] & x["so_hd"])]
+        if not cands:
+            continue
+        eps = eps_cua(x["chieu"], x["so"])
+        tong_c = sum(u["so_tien"] for u in cands)
+        combo, thieu = None, None
+        if abs(tong_c - x["so"]) <= eps:
+            combo = cands
+        elif tong_c > x["so"] + eps and len(cands) <= 12:
+            for n in range(1, min(5, len(cands)) + 1):
+                for c in itertools.combinations(cands, n):
+                    if abs(sum(u["so_tien"] for u in c) - x["so"]) <= eps:
+                        combo = list(c)
+                        break
+                if combo:
+                    break
+        elif tong_c < x["so"] - eps:
+            combo, thieu = cands, x["so"] - tong_c
+        if combo is None:
+            continue
+        for u in combo:
+            dung.add((u["loai"], u["id"]))
+        dung_sk.add(x["id"])
+        so_co = set().union(*(u["so_hd"] for u in combo))
+        so_thieu = [t for t in sorted(x["so_hd"]) if t not in so_co]
+        ds_hd = ", ".join(sorted(so_co))
+        le = max(lech(u["ngay"], x["ngay"]) for u in combo)
+        if thieu:
+            pt = (f"◐ Nội dung CK ghi HĐ {hd_txt(x)}; app có {len(combo)} khoản (HĐ {ds_hd}) = {_sk_vnd(tong_c)}, "
+                  f"sao kê {_sk_vnd(x['so'])} → còn chênh {_sk_vnd(thieu)}")
+        else:
+            pt = (f"✓ Khớp theo SỐ HÓA ĐƠN ghi trong nội dung chuyển khoản (HĐ {ds_hd}) — {len(combo)} khoản app"
+                  + (f" · lệch {le} ngày" if le > 3 else ""))
+        if so_thieu:
+            pt += " · " + _sk_hd_thieu_text(so_thieu, x["chieu"], cn_theo_so, hd_theo_so)
+        rows.append({"ngay": ngay_s(x), "chieu": x["chieu"], "sk": skd(x), "app": [_sk_u_out(u) for u in combo],
+                     "ket_qua": ("THEO_HD_THIEU" if thieu else ("KHOP" if len(combo) == 1 else "KHOP_GOP")),
+                     "theo_hd": True, "lech_ngay": le, "nhom": None, "con_thieu": float(thieu or 0), "phan_tich": pt})
+        auto[x["id"]] = (_sk_loai_luu(combo[0]), combo[0]["id"],
+                         f"theo số HĐ {ds_hd}: " + "; ".join(u["mo_ta"] for u in combo))
+    # ---------- ① 1 đối 1 — ưu tiên cùng đối tác / cùng mã; tiền vào cho lệch phí; dòng CỌC tiền vào không ghép hóa đơn ----------
+    for x in D:
+        if x["id"] in dung_sk or (x["coc"] and x["chieu"] == "VAO"):
             continue
         best = None
         for u in pool_cua(x["chieu"]):
             if (u["loai"], u["id"]) in dung:
                 continue
+            if x["coc"] and u.get("la_cn_hd"):
+                continue                                   # cọc NCC không ghép lệnh chi trả hóa đơn công nợ
             diff = min(abs(c - x["so"]) for c in u["cac"])
             if diff > eps_cua(x["chieu"], x["so"]):
                 continue
             le = lech(u["ngay"], x["ngay"])
             if le > gh_cua(x["chieu"]):
                 continue
-            key = (dt_uu(x, u), le, u["uu_tien"], diff)
+            key = (dt_uu(x, u), ma_uu(x, u), le, u["uu_tien"], diff)
             if best is None or key < best[0]:
                 best = (key, u, diff, le)
         if best is None:
@@ -1902,14 +2112,16 @@ def _sk_so_sanh(db: Session, sk, dongs) -> dict:
             pt += f" · lệch phí ngân hàng {diff:,.0f} đ"
         if le > 3:
             pt += f" · lệch {le} ngày so với app"
+        if x["coc"]:
+            pt += " · nội dung ghi cọc / tạm ứng"
         khac_dt = bool(x["dt"] and u.get("doi_tac") and x["dt"] != u["doi_tac"])
         pt += pt_dt(x, u)
         rows.append({"ngay": ngay_s(x), "chieu": x["chieu"], "sk": skd(x), "app": [_sk_u_out(u)], "ket_qua": "KHOP",
                      "lech_ngay": le, "nhom": None, "khac_doi_tac": khac_dt, "phan_tich": pt})
         auto[x["id"]] = (_sk_loai_luu(u), u["id"], u["mo_ta"] + (" (khác đối tác?)" if khac_dt else ""))
-    # ---------- ② 1 dòng sao kê trả gộp 2–3 khoản app ----------
+    # ---------- ② 1 dòng sao kê trả gộp 2–3 khoản app — chỉ ✓ khi nội dung CK nêu đúng đối tác ----------
     for x in D:
-        if x["id"] in dung_sk:
+        if x["id"] in dung_sk or x["coc"]:
             continue
         gh = gh_cua(x["chieu"])
         cands = [u for u in pool_cua(x["chieu"]) if (u["loai"], u["id"]) not in dung
@@ -1927,19 +2139,28 @@ def _sk_so_sanh(db: Session, sk, dongs) -> dict:
                 break
         if not combo:
             continue
+        tin = bool(x["dt"]) and all(u.get("doi_tac") == x["dt"] for u in combo)
+        dung_sk.add(x["id"])
+        if not tin:
+            rows.append({"ngay": ngay_s(x), "chieu": x["chieu"], "sk": skd(x), "app": [_sk_u_out(u) for u in combo],
+                         "ket_qua": "NGHI_GOP", "lech_ngay": None, "nhom": None,
+                         "phan_tich": (f"? Tổng {len(combo)} khoản trong app bằng số tiền này nhưng nội dung chuyển khoản "
+                                       "KHÔNG nêu đối tác / số hóa đơn tương ứng — chưa tự ghi; kế toán kiểm tra rồi 🔗 Gắn "
+                                       "hoặc ✕ Bỏ khớp")})
+            continue
         for u in combo:
             dung.add((u["loai"], u["id"]))
-        dung_sk.add(x["id"])
         le = max(lech(u["ngay"], x["ngay"]) for u in combo)
         rows.append({"ngay": ngay_s(x), "chieu": x["chieu"], "sk": skd(x), "app": [_sk_u_out(u) for u in combo], "ket_qua": "KHOP_GOP",
                      "lech_ngay": le, "nhom": None,
-                     "phan_tich": f"✓ Một lần chuyển trả gộp {len(combo)} khoản trong app" + (f" · lệch tới {le} ngày" if le > 3 else "")})
+                     "phan_tich": f"✓ Một lần chuyển trả gộp {len(combo)} khoản trong app (cùng đối tác «{ten_dt(x['chieu'], x['dt'])}»)"
+                                  + (f" · lệch tới {le} ngày" if le > 3 else "")})
         auto[x["id"]] = (_sk_loai_luu(combo[0]), combo[0]["id"], "; ".join(u["mo_ta"] for u in combo))
     # ---------- ③ 1 khoản app nhận NHIỀU ĐỢT (2–4 dòng sao kê) ----------
     for u in ra + vao:
         if (u["loai"], u["id"]) in dung or u["ngay"] is None:
             continue
-        cands = [x for x in D if x["id"] not in dung_sk and x["chieu"] == u["chieu"]
+        cands = [x for x in D if x["id"] not in dung_sk and x["chieu"] == u["chieu"] and not x["coc"]
                  and lech(u["ngay"], x["ngay"]) <= 15 and dt_ok(x, u)]
         cands.sort(key=lambda x: (dt_uu(x, u), lech(u["ngay"], x["ngay"])))
         cands = cands[:10]
@@ -1966,7 +2187,7 @@ def _sk_so_sanh(db: Session, sk, dongs) -> dict:
     # ---------- ④ TRẢ MỘT PHẦN — cùng đối tác, dòng sao kê nhỏ hơn khoản app ----------
     phan = {}      # key app → {"u": u, "sk": [x...]}
     for x in D:
-        if x["id"] in dung_sk or not x["dt"]:
+        if x["id"] in dung_sk or not x["dt"] or x["coc"]:
             continue
         best = None
         for u in pool_cua(x["chieu"]):
@@ -2004,12 +2225,50 @@ def _sk_so_sanh(db: Session, sk, dongs) -> dict:
                                    f"còn thiếu {_sk_vnd(con)} chưa thấy trong kỳ")})
         if not du:
             dung.add(k)       # không liệt kê lại ở «chỉ app» — đã có dòng một phần
-    # ---------- ⑤ còn lại ----------
+    # ---------- ⑤ còn lại: 💰 cọc / trả trước đi riêng · chỉ sao kê · chỉ app ----------
     for x in D:
         if x["id"] in dung_sk:
             continue
-        nhom = _sk_phan_loai(x["d"].dien_giai)
         dt_ten = ten_dt(x["chieu"], x["dt"])
+        ma_txt = x["ma"][0] if x["ma"] else None
+        if x["coc"]:
+            if x["chieu"] == "VAO":
+                best = None
+                for u in coc_vao:
+                    if (u["loai"], u["id"]) in dung:
+                        continue
+                    diff = min(abs(c - x["so"]) for c in u["cac"])
+                    if diff > eps_cua("VAO", x["so"]):
+                        continue
+                    le = lech(u["ngay"], x["ngay"])
+                    if le > 7:
+                        continue
+                    key = (dt_uu(x, u), ma_uu(x, u), le, diff)
+                    if best is None or key < best[0]:
+                        best = (key, u, le)
+                if best is not None:
+                    _, u, le = best
+                    dung.add((u["loai"], u["id"])); dung_sk.add(x["id"])
+                    rows.append({"ngay": ngay_s(x), "chieu": "VAO", "sk": skd(x), "app": [_sk_u_out(u)], "ket_qua": "KHOP",
+                                 "lech_ngay": le, "nhom": "COC", "coc": True,
+                                 "phan_tich": f"✓ Tiền cọc / trả trước — khớp {u['mo_ta']} · {u['trang_thai']}" + pt_dt(x, u)})
+                    auto[x["id"]] = ("TAM_UNG_THU", u["id"], u["mo_ta"])
+                    continue
+                rows.append({"ngay": ngay_s(x), "chieu": "VAO", "sk": skd(x), "app": [], "ket_qua": "COC_KH", "lech_ngay": None,
+                             "nhom": "COC",
+                             "phan_tich": ("💰 Tiền cọc / trả trước" + (f" từ {dt_ten}" if dt_ten else "")
+                                           + " — KHÔNG ghép với hóa đơn. Lập PHIẾU THU TẠM ỨNG (Kế toán › Phiếu thu, tick tạm ứng"
+                                           + (f", gắn mã {ma_txt}" if ma_txt else ", gắn mã đơn") + ") để cấn trừ khi xuất hóa đơn, "
+                                           "hoặc bấm 💰 Cọc để ghi nhận trên dòng này")})
+            else:
+                rows.append({"ngay": ngay_s(x), "chieu": "RA", "sk": skd(x), "app": [], "ket_qua": "COC_NCC", "lech_ngay": None,
+                             "nhom": "COC",
+                             "phan_tich": ("💰 Tiền cọc / tạm ứng trả nhà cung cấp" + (f" {dt_ten}" if dt_ten else "")
+                                           + " — app chưa có lệnh Duyệt chi NH tương ứng: ghi đợt cọc trên PO"
+                                           + (f" mã {ma_txt}" if ma_txt else "") + " (Thanh toán mua hàng) hoặc lệnh chi tạm ứng NCC"
+                                           + (" · nội dung ghi HĐ " + hd_txt(x) if x["so_hd"] else ""))})
+            continue
+        nhom = _sk_phan_loai(x["d"].dien_giai)
         if x["chieu"] == "RA":
             pt = (f"Ngân hàng chi {_SK_NHOM_TEN[nhom]} — không đi qua Duyệt chi NH; ghi phiếu chi ở Kế toán › Thống kê thu–chi"
                   if nhom else ("⚠ Ngân hàng đã chi" + (f" cho {dt_ten}" if dt_ten else "") +
@@ -2018,6 +2277,8 @@ def _sk_so_sanh(db: Session, sk, dongs) -> dict:
             pt = (f"Tiền vào {_SK_NHOM_TEN[nhom]} — không phải thu công nợ bán hàng"
                   if nhom else ("⚠ Tiền vào" + (f" từ {dt_ten}" if dt_ten else "") +
                                 " nhưng app chưa ghi thu công nợ bán hàng (hoặc công nợ chưa đánh dấu hoàn thành) — ghi thu ở Bán hàng › Công nợ hoặc Kế toán › Thống kê thu–chi"))
+        if x["so_hd"] and not nhom:
+            pt += " · " + _sk_hd_thieu_text(sorted(x["so_hd"]), x["chieu"], cn_theo_so, hd_theo_so)
         rows.append({"ngay": ngay_s(x), "chieu": x["chieu"], "sk": skd(x), "app": [], "ket_qua": "CHI_SK", "lech_ngay": None,
                      "nhom": nhom, "phan_tich": pt})
     for u in ra + vao:
@@ -2044,9 +2305,12 @@ def _sk_so_sanh(db: Session, sk, dongs) -> dict:
     app_vao = sum(u["so_tien"] for u in vao if trong_ky(u))
     KHOPS = ("KHOP", "KHOP_GOP", "KHOP_NHIEU_DOT")
     kh = [r for r in rows if r["ket_qua"] in KHOPS]
-    mp = [r for r in rows if r["ket_qua"] == "MOT_PHAN"]
+    mp = [r for r in rows if r["ket_qua"] in ("MOT_PHAN", "THEO_HD_THIEU")]
     csk = [r for r in rows if r["ket_qua"] == "CHI_SK"]
     capp = [r for r in rows if r["ket_qua"] == "CHI_APP"]
+    nghi = [r for r in rows if r["ket_qua"] == "NGHI_GOP"]
+    coc_rows = [r for r in rows if r["ket_qua"] in ("COC_KH", "COC_NCC") or r.get("coc")]
+    bo = [r for r in rows if r["ket_qua"] == "BO_KHOP"]
     khac_dt = [r for r in rows if r.get("khac_doi_tac")]
 
     def tien_sk(r):
@@ -2057,9 +2321,11 @@ def _sk_so_sanh(db: Session, sk, dongs) -> dict:
     tien = lambda rs, chieu=None: sum(tien_sk(r) for r in rs if chieu is None or r["chieu"] == chieu)
     tong = {"dong": len(dongs), "sk_vao": sk_vao, "sk_ra": sk_ra, "app_vao": app_vao, "app_ra": app_ra,
             "khop": len(kh), "khop_tien": tien(kh), "nhieu_dot": sum(1 for r in kh if r["ket_qua"] == "KHOP_NHIEU_DOT"),
+            "theo_hd": sum(1 for r in rows if r.get("theo_hd")), "gan_tay": sum(1 for r in rows if r.get("gan_tay")),
             "mot_phan": len(mp), "mot_phan_tien": tien(mp), "con_thieu": sum(r.get("con_thieu") or 0 for r in mp),
             "chi_sk": len(csk), "chi_sk_tien": tien(csk), "chi_app": len(capp), "chi_app_tien": tien(capp),
-            "khac_doi_tac": len(khac_dt)}
+            "nghi_gop": len(nghi), "nghi_gop_tien": tien(nghi), "coc": len(coc_rows), "coc_tien": tien(coc_rows),
+            "bo_khop": len(bo), "khac_doi_tac": len(khac_dt)}
     pt = []
     for chieu, nhan, sk_t, app_t, dong_tu in (("RA", "Tiền RA", sk_ra, app_ra, "lệnh Duyệt chi NH"),
                                                ("VAO", "Tiền VÀO", sk_vao, app_vao, "thu công nợ bán hàng")):
@@ -2075,11 +2341,12 @@ def _sk_so_sanh(db: Session, sk, dongs) -> dict:
         ro = nhom_cnt.get(None, [0, 0.0])
         n_gop = sum(1 for r in k2 if r["ket_qua"] == "KHOP_GOP")
         n_dot = sum(1 for r in k2 if r["ket_qua"] == "KHOP_NHIEU_DOT")
+        n_hd = sum(1 for r in k2 if r.get("theo_hd"))
         cau = (f"{nhan}: sao kê {_sk_vnd(sk_t)} · {dong_tu} trong kỳ {_sk_vnd(app_t)} → khớp {len(k2)} khoản ({_sk_vnd(tien(k2))})")
-        if n_gop or n_dot:
-            cau += f" [trả gộp {n_gop}, nhiều đợt {n_dot}]"
+        if n_gop or n_dot or n_hd:
+            cau += f" [theo số HĐ {n_hd}, trả gộp {n_gop}, nhiều đợt {n_dot}]"
         if m2:
-            cau += f"; trả một phần {len(m2)} khoản, còn thiếu {_sk_vnd(sum(r.get('con_thieu') or 0 for r in m2))}"
+            cau += f"; trả một phần / thiếu {len(m2)} khoản, còn chênh {_sk_vnd(sum(r.get('con_thieu') or 0 for r in m2))}"
         if c2:
             cau += f"; {len(c2)} khoản ({_sk_vnd(tien(c2))}) ngân hàng có mà app không có"
             if phan_s:
@@ -2089,6 +2356,17 @@ def _sk_so_sanh(db: Session, sk, dongs) -> dict:
         else:
             cau += "; không có khoản nào chỉ có trên sao kê"
         pt.append(cau + ".")
+    if nghi:
+        pt.append(f"? {len(nghi)} khoản ({_sk_vnd(tien(nghi))}) trùng tổng tiền với 2–3 khoản app nhưng nội dung chuyển khoản không nêu "
+                  "đối tác / số hóa đơn — chưa tự ghi, kế toán xác nhận bằng 🔗 Gắn hoặc ✕ Bỏ khớp.")
+    if coc_rows:
+        n_coc_ok = sum(1 for r in coc_rows if r["ket_qua"] == "KHOP")
+        pt.append(f"💰 {len(coc_rows)} khoản cọc / trả trước ({_sk_vnd(tien(coc_rows))}) đi riêng, không ghép với hóa đơn"
+                  + (f" — {n_coc_ok} đã nối phiếu thu tạm ứng" if n_coc_ok else "")
+                  + "; tiền vào: lập phiếu thu tạm ứng để cấn trừ khi xuất hóa đơn · tiền ra: ghi đợt cọc trên PO.")
+    n_hd_thieu = sum(1 for r in rows if r["ket_qua"] in ("CHI_SK", "THEO_HD_THIEU") and "CHƯA CÓ trong app" in (r.get("phan_tich") or ""))
+    if n_hd_thieu:
+        pt.append(f"📄 {n_hd_thieu} dòng sao kê ghi số hóa đơn mà app chưa có hóa đơn / công nợ tương ứng — kế toán nhập trước rồi 🔁 Đối soát lại.")
     if capp:
         n_duyet = sum(1 for r in capp if any("DUYỆT" in (a.get("trang_thai") or "") for a in r["app"]))
         pt.append(f"App có nhưng sao kê không có: {len(capp)} khoản ({_sk_vnd(tien(capp))}) — {n_duyet} lệnh đã duyệt chưa chi, "
@@ -2097,11 +2375,136 @@ def _sk_so_sanh(db: Session, sk, dongs) -> dict:
         pt.append("Mọi khoản app ghi trong kỳ đều thấy trên sao kê.")
     if khac_dt:
         pt.append(f"⚠ {len(khac_dt)} khoản khớp số tiền nhưng tên đối tác trên sao kê KHÁC đối tác trong app — kiểm tra trước khi tin.")
-    if not csk and not capp and not mp:
-        pt.append("✅ Sao kê và app khớp hoàn toàn trong kỳ này.")
+    if not csk and not capp and not mp and not nghi:
+        pt.append("✅ Sao kê và app khớp hoàn toàn trong kỳ này" + (" (ngoài các khoản cọc đi riêng)." if coc_rows else "."))
     else:
         pt.append(f"Chênh lệch: tiền ra sao kê − app = {_sk_vnd(sk_ra - app_ra)} · tiền vào sao kê − app = {_sk_vnd(sk_vao - app_vao)}.")
     return {"tong": tong, "phan_tich": pt, "rows": rows, "_auto": auto}
+
+
+# ============ ✍ GẮN TAY / BỎ KHỚP / CỌC trên từng dòng sao kê (mig 148) — CEO · ADMIN · KTT ============
+_SK_LOAI_GAN = ("LENH_CHI", "THU_CN_BAN", "CN_HOAN_THANH", "TAM_UNG_THU")
+
+
+class SkKhoanVao(_BRBase):
+    loai: str
+    id: int
+    so_tien: float | None = None
+
+
+class SkGanVao(_BRBase):
+    khoan: list[SkKhoanVao]
+    ghi_chu: str | None = None
+
+
+class SkLyDoVao(_BRBase):
+    ly_do: str | None = None
+    phieu_id: int | None = None
+
+
+def _sk_dong_404(db, dong_id):
+    from ..models import SaoKeDong
+    d = db.get(SaoKeDong, dong_id)
+    if d is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy dòng sao kê")
+    return d
+
+
+@router.get("/sao-ke/{sk_id}/ung-vien")
+def sk_ung_vien(sk_id: int, chieu: str | None = None, db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
+    """Khoản app trong kỳ (± 7 ngày) để kế toán 🔗 gắn tay: lệnh Duyệt chi NH · thu công nợ bán hàng · công nợ hoàn thành ·
+    phiếu thu tạm ứng — kèm số HĐ, mã, đối tác."""
+    from ..models import SaoKeBank
+    sk = db.get(SaoKeBank, sk_id)
+    if sk is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy sao kê")
+    tu = (sk.tu_ngay or date.today()) - timedelta(days=7)
+    den = (sk.den_ngay or date.today()) + timedelta(days=7)
+    ra, vao, coc_vao = _sk_ung_vien(db, tu, den)
+
+    def _o(u):
+        return {**_sk_u_out(u), "chieu": u["chieu"], "so_hd": sorted(u.get("so_hd") or []), "ma": u.get("ma")}
+    out = {"ra": [_o(u) for u in ra], "vao": [_o(u) for u in vao + coc_vao]}
+    if chieu in ("RA", "VAO"):
+        return {chieu.lower(): out[chieu.lower()]}
+    return out
+
+
+@router.post("/sao-ke/dong/{dong_id}/gan")
+def sk_gan_tay(dong_id: int, data: SkGanVao, db: Session = Depends(get_db),
+               nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN", "KTT"))):
+    """🔗 Gắn tay một dòng sao kê với một hoặc nhiều khoản app (số tiền từng khoản) — giữ qua các lần 🔁 Đối soát."""
+    from decimal import Decimal as _Dec
+    from ..models import SaoKeKhop
+    d = _sk_dong_404(db, dong_id)
+    if not data.khoan:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Chọn ít nhất một khoản app")
+    for k in data.khoan:
+        if k.loai not in _SK_LOAI_GAN:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Loại khoản không hợp lệ: {k.loai}")
+    db.query(SaoKeKhop).filter_by(dong_id=d.id).delete()
+    for k in data.khoan:
+        db.add(SaoKeKhop(dong_id=d.id, loai=k.loai, khoan_id=k.id, so_tien=_Dec(str(round(k.so_tien or 0))),
+                         ghi_chu=(data.ghi_chu or "").strip()[:300] or None, nguoi_dung_id=nd.id))
+    d.khop_loai = "GAN_TAY"
+    d.khop_id = data.khoan[0].id
+    d.khop_mo_ta = ("gắn tay: " + ", ".join(f"{k.loai}#{k.id}" for k in data.khoan))[:300]
+    ghi_audit(db, nd.id, "GAN_SAO_KE", "sao_ke_dong", d.id,
+              moi={"khoan": [{"loai": k.loai, "id": k.id, "so_tien": k.so_tien} for k in data.khoan], "ghi_chu": data.ghi_chu})
+    kq = _doi_soat_sao_ke(db, d.sao_ke_id)
+    db.commit()
+    return {"ok": True, "doi_soat": {"khop": kq["khop"], "chua_khop": kq["chua_khop"], "tong_dong": kq["tong_dong"]}}
+
+
+@router.post("/sao-ke/dong/{dong_id}/bo-khop")
+def sk_bo_khop(dong_id: int, data: SkLyDoVao, db: Session = Depends(get_db),
+               nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN", "KTT"))):
+    """✕ Kế toán xác nhận dòng sao kê KHÔNG khớp khoản app nào (máy ghép sai, VD tổng hóa đơn trùng tiền cọc)."""
+    from ..models import SaoKeKhop
+    d = _sk_dong_404(db, dong_id)
+    db.query(SaoKeKhop).filter_by(dong_id=d.id).delete()
+    d.khop_loai, d.khop_id = "BO_KHOP", None
+    d.khop_mo_ta = (data.ly_do or "").strip()[:300] or None
+    ghi_audit(db, nd.id, "BO_KHOP_SAO_KE", "sao_ke_dong", d.id, moi={"ly_do": data.ly_do})
+    kq = _doi_soat_sao_ke(db, d.sao_ke_id)
+    db.commit()
+    return {"ok": True, "doi_soat": {"khop": kq["khop"], "chua_khop": kq["chua_khop"], "tong_dong": kq["tong_dong"]}}
+
+
+@router.post("/sao-ke/dong/{dong_id}/coc")
+def sk_ghi_coc(dong_id: int, data: SkLyDoVao, db: Session = Depends(get_db),
+               nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN", "KTT"))):
+    """💰 Ghi nhận dòng sao kê là tiền cọc / trả trước (không ghép hóa đơn); tùy chọn nối phiếu thu tạm ứng."""
+    from ..models import SaoKeKhop, PhieuThuChi
+    d = _sk_dong_404(db, dong_id)
+    if data.phieu_id:
+        p = db.get(PhieuThuChi, data.phieu_id)
+        if p is None or not p.la_tam_ung:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy phiếu thu tạm ứng")
+    db.query(SaoKeKhop).filter_by(dong_id=d.id).delete()
+    d.khop_loai, d.khop_id = "COC_SK", (data.phieu_id or None)
+    d.khop_mo_ta = (data.ly_do or "").strip()[:300] or None
+    ghi_audit(db, nd.id, "COC_SAO_KE", "sao_ke_dong", d.id, moi={"phieu_id": data.phieu_id, "ly_do": data.ly_do})
+    kq = _doi_soat_sao_ke(db, d.sao_ke_id)
+    db.commit()
+    return {"ok": True, "doi_soat": {"khop": kq["khop"], "chua_khop": kq["chua_khop"], "tong_dong": kq["tong_dong"]}}
+
+
+@router.post("/sao-ke/dong/{dong_id}/mo-lai")
+def sk_mo_lai(dong_id: int, db: Session = Depends(get_db),
+              nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN", "KTT"))):
+    """↺ Bỏ nhãn ghi tay (gắn tay / bỏ khớp / cọc) để máy ghép lại dòng này."""
+    from ..models import SaoKeKhop
+    d = _sk_dong_404(db, dong_id)
+    if d.khop_loai not in ("GAN_TAY", "BO_KHOP", "COC_SK"):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Dòng này không có nhãn gắn tay / bỏ khớp / cọc")
+    db.query(SaoKeKhop).filter_by(dong_id=d.id).delete()
+    cu = d.khop_loai
+    d.khop_loai, d.khop_id, d.khop_mo_ta = None, None, None
+    ghi_audit(db, nd.id, "MO_LAI_SAO_KE", "sao_ke_dong", d.id, cu={"khop_loai": cu})
+    kq = _doi_soat_sao_ke(db, d.sao_ke_id)
+    db.commit()
+    return {"ok": True, "doi_soat": {"khop": kq["khop"], "chua_khop": kq["chua_khop"], "tong_dong": kq["tong_dong"]}}
 
 
 @router.get("/sao-ke/{sk_id}/so-sanh")
