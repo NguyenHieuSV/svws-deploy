@@ -5,7 +5,8 @@ DBURL=$(echo "${DATABASE_URL:-postgresql://svws:svws@localhost:5432/svws}" \
 
 echo "==> Áp dụng migrations (db/init/*.sql)"
 psql "$DBURL" -c "CREATE TABLE IF NOT EXISTS _migrations(ten text primary key, ap timestamptz default now())" >/dev/null
-for f in $(ls db/init/*.sql | sort); do
+# sort -V: sắp theo số (99_ trước 100_); sort thường sắp theo chữ nên 100_..148_ chạy trước 10_..99_
+for f in $(ls db/init/*.sql | sort -V); do
   name=$(basename "$f")
   applied=$(psql "$DBURL" -tA -c "SELECT 1 FROM _migrations WHERE ten='$name'")
   if [ "$applied" = "1" ]; then
