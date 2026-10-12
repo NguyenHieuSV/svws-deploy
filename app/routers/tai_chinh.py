@@ -1698,6 +1698,9 @@ def ds_sao_ke(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
 #   tiền VÀO ↔ THU CÔNG NỢ BÁN HÀNG (mục Bán hàng), ưu tiên công nợ ĐÃ HOÀN THÀNH
 # Bảng hợp nhất sắp ngày mới lên trên, mỗi dòng có phân tích; dòng kế toán đã ghi tay từ sao kê giữ nguyên.
 _SK_MANUAL = ("DA_CHI_SK", "GHI_THU_SK", "PHIEU_SK", "GAN_TAY", "BO_KHOP", "COC_SK")   # GAN_TAY/BO_KHOP/COC_SK: mig 148
+# Lệnh Duyệt chi NH đầu tiên của app: 14/08/2026 (đề nghị đầu tiên 12/08). Tiền ra TRƯỚC mốc này chưa có nguồn lệnh chi để so —
+# dòng sao kê chi trước mốc không báo «app thiếu» mà gắn nhãn riêng (anh Hiếu chốt 12/10/2026).
+NGAY_BAT_DAU_DUYET_CHI = date(2026, 8, 14)
 _SK_NHOM_TEN = {"NOI_BO": "chuyển nội bộ", "NOP_RUT": "nộp / rút tiền mặt", "LUONG": "chi lương", "BHXH": "bảo hiểm xã hội",
                 "THUE": "nộp thuế", "PHI_NH": "phí ngân hàng / bảo lãnh / trả nợ vay",
                 "CHI_CHUNG": "điện nước, thuê văn phòng, viễn thông"}
@@ -2355,7 +2358,13 @@ def _sk_so_sanh(db: Session, sk, dongs) -> dict:
                                            + (" · nội dung ghi HĐ " + hd_txt(x) if x["so_hd"] else ""))})
             continue
         nhom = _sk_phan_loai(x["d"].dien_giai)
-        if x["chieu"] == "RA":
+        truoc = bool(x["chieu"] == "RA" and not nhom and x["ngay"] and x["ngay"] < NGAY_BAT_DAU_DUYET_CHI)
+        if truoc:
+            pt = (f"◔ Chi trước ngày {NGAY_BAT_DAU_DUYET_CHI:%d/%m/%Y}: giai đoạn app CHƯA dùng Duyệt chi ngân hàng nên không có lệnh chi tương ứng"
+                  + (f" cho {dt_ten}" if dt_ten else "")
+                  + " — không tính là thiếu sót. Chỉ đối chiếu được khi công nợ phải trả đã ghi lần trả; cần chính xác thì 🔗 Gắn tay "
+                  "hoặc nhập bổ sung ở Thanh toán mua hàng")
+        elif x["chieu"] == "RA":
             pt = (f"Ngân hàng chi {_SK_NHOM_TEN[nhom]} — không đi qua Duyệt chi NH; ghi phiếu chi ở Kế toán › Thống kê thu–chi"
                   if nhom else ("⚠ Ngân hàng đã chi" + (f" cho {dt_ten}" if dt_ten else "") +
                                 " nhưng app KHÔNG có lệnh Duyệt chi NH tương ứng — kiểm tra NCC / PO, có thể lệnh chưa lập"))
@@ -2365,7 +2374,8 @@ def _sk_so_sanh(db: Session, sk, dongs) -> dict:
                                 " nhưng app chưa ghi thu công nợ bán hàng (hoặc công nợ chưa đánh dấu hoàn thành) — ghi thu ở Bán hàng › Công nợ hoặc Kế toán › Thống kê thu–chi"))
         if x["so_hd"] and not nhom:
             pt += " · " + _sk_hd_thieu_text(sorted(x["so_hd"]), x["chieu"], cn_theo_so, hd_theo_so)
-        rows.append({"ngay": ngay_s(x), "chieu": x["chieu"], "sk": skd(x), "app": [], "ket_qua": "CHI_SK", "lech_ngay": None,
+        rows.append({"ngay": ngay_s(x), "chieu": x["chieu"], "sk": skd(x), "app": [],
+                     "ket_qua": "CHI_SK_TRUOC" if truoc else "CHI_SK", "lech_ngay": None,
                      "nhom": nhom, "phan_tich": pt})
     for u in ra + vao:
         if (u["loai"], u["id"]) in dung or u["ngay"] is None:
@@ -2396,6 +2406,7 @@ def _sk_so_sanh(db: Session, sk, dongs) -> dict:
     kh = [r for r in rows if r["ket_qua"] in KHOPS]
     mp = [r for r in rows if r["ket_qua"] in ("MOT_PHAN", "THEO_HD_THIEU")]
     csk = [r for r in rows if r["ket_qua"] == "CHI_SK"]
+    truoc_rows = [r for r in rows if r["ket_qua"] == "CHI_SK_TRUOC"]
     capp = [r for r in rows if r["ket_qua"] == "CHI_APP"]
     nghi = [r for r in rows if r["ket_qua"] == "NGHI_GOP"]
     coc_rows = [r for r in rows if r["ket_qua"] in ("COC_KH", "COC_NCC") or r.get("coc")]
@@ -2414,7 +2425,8 @@ def _sk_so_sanh(db: Session, sk, dongs) -> dict:
             "mot_phan": len(mp), "mot_phan_tien": tien(mp), "con_thieu": sum(r.get("con_thieu") or 0 for r in mp),
             "chi_sk": len(csk), "chi_sk_tien": tien(csk), "chi_app": len(capp), "chi_app_tien": tien(capp),
             "nghi_gop": len(nghi), "nghi_gop_tien": tien(nghi), "coc": len(coc_rows), "coc_tien": tien(coc_rows),
-            "bo_khop": len(bo), "khac_doi_tac": len(khac_dt)}
+            "bo_khop": len(bo), "khac_doi_tac": len(khac_dt),
+            "truoc_moc": len(truoc_rows), "truoc_moc_tien": tien(truoc_rows), "moc_duyet_chi": str(NGAY_BAT_DAU_DUYET_CHI)}
     pt = []
     for chieu, nhan, sk_t, app_t, dong_tu in (("RA", "Tiền RA", sk_ra, app_ra, "lệnh Duyệt chi NH + công nợ đã trả"),
                                                ("VAO", "Tiền VÀO", sk_vao, app_vao, "thu công nợ bán hàng")):
@@ -2453,7 +2465,11 @@ def _sk_so_sanh(db: Session, sk, dongs) -> dict:
         pt.append(f"💰 {len(coc_rows)} khoản cọc / trả trước ({_sk_vnd(tien(coc_rows))}) đi riêng, không ghép với hóa đơn"
                   + (f" — {n_coc_ok} đã nối phiếu thu tạm ứng" if n_coc_ok else "")
                   + "; tiền vào: lập phiếu thu tạm ứng để cấn trừ khi xuất hóa đơn · tiền ra: ghi đợt cọc trên PO.")
-    n_hd_thieu = sum(1 for r in rows if r["ket_qua"] in ("CHI_SK", "THEO_HD_THIEU") and "CHƯA CÓ trong app" in (r.get("phan_tich") or ""))
+    if truoc_rows:
+        pt.append(f"◔ Tiền ra trước {NGAY_BAT_DAU_DUYET_CHI:%d/%m/%Y}: {len(truoc_rows)} khoản ({_sk_vnd(tien(truoc_rows))}) thuộc giai đoạn app chưa "
+                  "dùng Duyệt chi ngân hàng — không tính là thiếu sót; chỉ đối chiếu một phần qua công nợ phải trả đã trả, "
+                  "cần chính xác thì nhập bổ sung hoặc 🔗 Gắn tay.")
+    n_hd_thieu = sum(1 for r in rows if r["ket_qua"] in ("CHI_SK", "CHI_SK_TRUOC", "THEO_HD_THIEU") and "CHƯA CÓ trong app" in (r.get("phan_tich") or ""))
     if n_hd_thieu:
         pt.append(f"📄 {n_hd_thieu} dòng sao kê ghi số hóa đơn mà app chưa có hóa đơn / công nợ tương ứng — kế toán nhập trước rồi 🔁 Đối soát lại.")
     if capp:
@@ -2465,7 +2481,9 @@ def _sk_so_sanh(db: Session, sk, dongs) -> dict:
     if khac_dt:
         pt.append(f"⚠ {len(khac_dt)} khoản khớp số tiền nhưng tên đối tác trên sao kê KHÁC đối tác trong app — kiểm tra trước khi tin.")
     if not csk and not capp and not mp and not nghi:
-        pt.append("✅ Sao kê và app khớp hoàn toàn trong kỳ này" + (" (ngoài các khoản cọc đi riêng)." if coc_rows else "."))
+        _ngoai = [t for t, c in (("các khoản cọc đi riêng", coc_rows),
+                                 (f"tiền ra trước mốc Duyệt chi {NGAY_BAT_DAU_DUYET_CHI:%d/%m/%Y}", truoc_rows)) if c]
+        pt.append("✅ Sao kê và app khớp hoàn toàn trong kỳ này" + (f" (ngoài {', '.join(_ngoai)})." if _ngoai else "."))
     else:
         pt.append(f"Chênh lệch: tiền ra sao kê − app = {_sk_vnd(sk_ra - app_ra)} · tiền vào sao kê − app = {_sk_vnd(sk_vao - app_vao)}.")
     return {"tong": tong, "phan_tich": pt, "rows": rows, "_auto": auto}
@@ -2615,7 +2633,7 @@ def so_sanh_sao_ke(sk_id: int, db: Session = Depends(get_db), _=Depends(yeu_cau(
 _SK_KQ_TEN = {"KHOP": "✓ Khớp", "KHOP_GOP": "✓ Trả gộp", "KHOP_NHIEU_DOT": "✓ Nhiều đợt", "MOT_PHAN": "◐ Một phần",
               "THEO_HD_THIEU": "◐ Theo số HĐ, còn chênh", "NGHI_GOP": "? Nghi gộp — cần xác nhận",
               "COC_KH": "💰 Cọc / trả trước", "COC_NCC": "💰 Cọc NCC", "BO_KHOP": "✕ Không khớp (đã xem)",
-              "CHI_SK": "⚠ Chỉ có trên sao kê", "CHI_APP": "⚠ Chỉ có trong app"}
+              "CHI_SK": "⚠ Chỉ có trên sao kê", "CHI_SK_TRUOC": "◔ Chi trước mốc Duyệt chi", "CHI_APP": "⚠ Chỉ có trong app"}
 
 
 def _sk_xuat_excel_bytes(sk_info: dict, kq: dict) -> bytes:
@@ -2657,7 +2675,7 @@ def _sk_xuat_excel_bytes(sk_info: dict, kq: dict) -> bytes:
         ws.column_dimensions[get_column_letter(i)].width = w
     ws.row_dimensions[hdr_row].height = 30
     mau_nen = {"CHI_SK": "FFF7ED", "CHI_APP": "FEF2F2", "MOT_PHAN": "FFFBEB", "THEO_HD_THIEU": "FFFBEB", "NGHI_GOP": "FFFBEB",
-               "COC_KH": "EEF6FF", "COC_NCC": "EEF6FF", "BO_KHOP": "F8FAFC"}
+               "COC_KH": "EEF6FF", "COC_NCC": "EEF6FF", "BO_KHOP": "F8FAFC", "CHI_SK_TRUOC": "F1F5F9"}
     r_i = hdr_row + 1
     for stt, r in enumerate(kq.get("rows") or [], 1):
         apps = r.get("app") or []
@@ -2716,6 +2734,7 @@ def _sk_xuat_excel_bytes(sk_info: dict, kq: dict) -> bytes:
              ("Một phần / còn chênh (khoản)", t.get("mot_phan")), ("Còn chênh (đ)", t.get("con_thieu")),
              ("Nghi gộp — cần xác nhận (khoản)", t.get("nghi_gop")), ("Cọc / trả trước đi riêng (khoản)", t.get("coc")), ("Tiền cọc (đ)", t.get("coc_tien")),
              ("Chỉ có trên sao kê (khoản)", t.get("chi_sk")), ("Tiền chỉ sao kê (đ)", t.get("chi_sk_tien")),
+             ("Chi trước mốc Duyệt chi 14/08/2026 (khoản)", t.get("truoc_moc")), ("Tiền chi trước mốc (đ)", t.get("truoc_moc_tien")),
              ("Chỉ có trong app (khoản)", t.get("chi_app")), ("Tiền chỉ app (đ)", t.get("chi_app_tien")),
              ("Không khớp đã xem (khoản)", t.get("bo_khop")), ("Khớp tiền nhưng khác đối tác (khoản)", t.get("khac_doi_tac"))]
     for i, (k, v) in enumerate(dong2, 3):
@@ -2746,6 +2765,7 @@ def _sk_xuat_excel_bytes(sk_info: dict, kq: dict) -> bytes:
             "COC_NCC": "tiền ra ghi cọc / tạm ứng cho NCC — ghi đợt cọc trên PO",
             "BO_KHOP": "kế toán xác nhận dòng không khớp khoản app nào",
             "CHI_SK": "ngân hàng có, app chưa có (phân tích nêu nhóm chi phí hoặc HĐ cần nhập)",
+            "CHI_SK_TRUOC": "tiền ra trước 14/08/2026 — app chưa dùng Duyệt chi ngân hàng nên chưa có lệnh chi; không tính là thiếu sót",
             "CHI_APP": "app ghi có, sao kê không thấy"}.get(k, ""))
     bio = _io.BytesIO()
     wb.save(bio)
