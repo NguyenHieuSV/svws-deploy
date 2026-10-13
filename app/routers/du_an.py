@@ -1097,6 +1097,7 @@ class BoqTaoPoVao(BaseModel):
     xac_nhan_trung: bool = False
     xac_nhan_lap: bool = False
     xac_nhan_du_toan: bool = False
+    bo_sung_du_toan: bool = False
 
 
 @router.post("/du-toan/{dt_id}/tao-po", status_code=201)
@@ -1124,7 +1125,8 @@ def tao_po_tu_boq(dt_id: int, data: BoqTaoPoVao, db: Session = Depends(get_db),
                          ma_ban=ma, don_hang_id=dh.id if dh else None, ngay_hen_giao=data.ngay_hen_giao,
                          xac_nhan_trung=data.xac_nhan_trung, xac_nhan_lap=data.xac_nhan_lap,
                          xac_nhan_du_toan=data.xac_nhan_du_toan, nguon="BOQ_DU_AN",
-                         audit_them={"tu_boq": dt_id, "du_an": x.du_an_id, "hang_hoa_moi": hh_moi})
+                         audit_them={"tu_boq": dt_id, "du_an": x.du_an_id, "hang_hoa_moi": hh_moi},
+                         bo_sung_du_toan=data.bo_sung_du_toan)
     x.don_mua_id = pos[0].id
     x.ghi_chu = (((x.ghi_chu + " · ") if x.ghi_chu else "") + f"Đã tạo PO {pos[0].so}")[:300]
     db.commit()

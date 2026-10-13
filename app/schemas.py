@@ -126,6 +126,7 @@ class DonMuaVao(BaseModel):
     xac_nhan_trung: bool = False   # CEO/ADMIN xác nhận mua bổ sung dù trùng mã bán hàng
     xac_nhan_lap: bool = False     # người lập xác nhận MUA LẶP (mã DV-/OP-) dù còn PO cùng hàng chờ về
     xac_nhan_du_toan: bool = False # người lập xác nhận PO VƯỢT/NGOÀI dự toán → chỉ CEO duyệt
+    bo_sung_du_toan: bool = False  # CEO/ADMIN: thêm LUÔN các mục phát sinh / vượt vào dự toán của mã (người khác: bỏ qua)
 
 
 class DonMuaRa(BaseModel):

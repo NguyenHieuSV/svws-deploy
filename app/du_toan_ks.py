@@ -12,6 +12,8 @@ MIỄN: mã OP (định mức tháng) · KHO / không mã (mua dự trữ) · m�
 · MÃ ĐẶT RA TỪ NGAY_AP_DUNG TRỞ VỀ TRƯỚC (CEO 18/09/2026: trước mắt chỉ áp dụng cho mã hàng bán đặt ra SAU hôm nay —
   mã cũ đang chạy không phải lập dự toán bù).
 """
+import re
+import unicodedata
 from datetime import date, timedelta, timezone
 from decimal import Decimal
 from sqlalchemy import func, or_
@@ -30,6 +32,88 @@ def _f(v) -> float:
     return float(v or 0)
 
 
+_RE_SO = re.compile(r"\d+(?:[.,]\d+)?")
+
+
+def khoa_ma(ma):
+    """Khóa so khớp mã KHÔNG phụ thuộc thứ tự: DV-COH-NT-0826-EDI và DV-COH-NT-EDI-0826 cùng một dự án → cùng khóa.
+    (Dự toán hàng bán, BOQ dự án và PO thường bị gõ lệch thứ tự phần hạng mục / tháng.)"""
+    s = unicodedata.normalize("NFD", str(ma or "").replace("Đ", "D").replace("đ", "d"))
+    s = "".join(c for c in s if unicodedata.category(c) != "Mn")
+    toks = [t for t in re.split(r"[^A-Za-z0-9]+", s.upper()) if t]
+    return tuple(sorted(toks)) or None
+
+
+def cung_ma(a, b) -> bool:
+    """Hai mã là MỘT: trùng từng ký tự (bỏ hoa thường / khoảng trắng) hoặc cùng bộ thành phần khác thứ tự."""
+    a0, b0 = str(a or "").strip().lower(), str(b or "").strip().lower()
+    if not a0 or not b0:
+        return False
+    if a0 == b0:
+        return True
+    ka, kb = khoa_ma(a), khoa_ma(b)
+    return bool(ka and ka == kb)
+
+
+def tim_dtb_theo_ma(db: Session, ma: str) -> list:
+    """Các Dự toán hàng bán thuộc mã (trùng hẳn trước, rồi mã khác thứ tự)."""
+    ds = [d for d in db.query(DuToanBan).all() if cung_ma(d.ma, ma)]
+    ds.sort(key=lambda d: (0 if str(d.ma or "").strip().lower() == str(ma or "").strip().lower() else 1, d.id))
+    return ds
+
+
+def tim_da_theo_ma(db: Session, ma: str) -> list:
+    """Các dự án (BOQ) thuộc mã (trùng hẳn trước, rồi mã khác thứ tự)."""
+    ds = [d for d in db.query(DuAn).filter(DuAn.ma.isnot(None)).all() if cung_ma(d.ma, ma)]
+    ds.sort(key=lambda d: (0 if str(d.ma or "").strip().lower() == str(ma or "").strip().lower() else 1, d.id))
+    return ds
+
+
+def gan_giong_nhat(ten: str, dt: dict):
+    """Dòng dự toán có tên GIỐNG NHẤT với `ten` (≥ 60 %, chưa đủ để coi là cùng mặt hàng) → (tên dòng, điểm) hoặc None.
+    Chỉ dùng để GỢI Ý cho người lập PO khi mặt hàng vẫn bị coi là ngoài dự toán."""
+    if not ten or not dt:
+        return None
+    from .gia_dau_vao import diem_giong
+    best, bd = None, 0.0
+    for b in dt.values():
+        for t2 in (b.get("ten") or []):
+            d = diem_giong(ten, t2)
+            if d > bd:
+                best, bd = t2, d
+    return (best, round(bd, 2)) if best and bd >= 0.6 else None
+
+
+def quy_map(db: Session, dt: dict, hids) -> dict:
+    """{hang_hoa_id → hang_hoa_id của dòng dự toán GẦN GIỐNG} cho mặt hàng chưa có trong dự toán: cùng bộ số
+    (kích thước · model) và tên giống ≥ 88 % (không phân biệt dấu / hoa thường / khoảng trắng). Chặt có chủ đích:
+    «Cát» ≠ «Cát đen», «Co 90» ≠ «Co 60» — giống chút ít vẫn là hàng ngoài dự toán."""
+    out = {}
+    if not dt:
+        return out
+    cand = [h for h in set(hids or []) if h and h not in dt]
+    if not cand:
+        return out
+    from .gia_dau_vao import diem_giong, _chuan
+    ten = _ten_map(db, cand)
+    for h in cand:
+        t = ten.get(h) or ""
+        if not t:
+            continue
+        nt = sorted(_RE_SO.findall(_chuan(t)))
+        best, bd = None, 0.0
+        for h2, b in dt.items():
+            for t2 in (b.get("ten") or []):
+                if sorted(_RE_SO.findall(_chuan(t2))) != nt:
+                    continue
+                d = diem_giong(t, t2)
+                if d >= 0.88 and d > bd:
+                    best, bd = h2, d
+        if best is not None:
+            out[h] = best
+    return out
+
+
 def _ten_map(db, ids):
     ids = [i for i in set(ids) if i]
     if not ids:
@@ -38,12 +122,13 @@ def _ten_map(db, ids):
 
 
 def du_toan_cua_ma(db: Session, ma: str):
-    """{hang_hoa_id: {"sl", "tien"}} gộp Dự toán hàng bán + BOQ dự án cùng mã; None nếu mã chưa có dự toán."""
+    """{hang_hoa_id: {"sl", "tien", "ten": [tên dòng dự toán / tên kho]}} gộp Dự toán hàng bán + BOQ dự án CÙNG MÃ
+    (kể cả mã viết khác thứ tự); None nếu mã chưa có dự toán."""
     ma = str(ma or "").strip().lower()
     if not ma:
         return None
     out, co = {}, False
-    for d in db.query(DuToanBan).filter(func.lower(func.trim(DuToanBan.ma)) == ma).all():
+    for d in tim_dtb_theo_ma(db, ma):
         co = True
         for m in db.query(DuToanBanMuc).filter_by(du_toan_id=d.id).all():
             hid = m.hang_hoa_id
@@ -52,10 +137,12 @@ def du_toan_cua_ma(db: Session, ma: str):
                 hid = h.id if h else None
             if not hid:
                 continue
-            o = out.setdefault(hid, {"sl": 0.0, "tien": 0.0})
+            o = out.setdefault(hid, {"sl": 0.0, "tien": 0.0, "ten": []})
             o["sl"] += _f(m.so_luong)
             o["tien"] += _f(m.so_luong) * _f(m.don_gia)
-    for da in db.query(DuAn).filter(func.lower(func.trim(DuAn.ma)) == ma).all():
+            if m.ten:
+                o["ten"].append(m.ten)
+    for da in tim_da_theo_ma(db, ma):
         co = True
         for x in db.query(DuAnDuToan).filter_by(du_an_id=da.id).all():
             hid = getattr(x, "hang_hoa_id", None)
@@ -64,9 +151,15 @@ def du_toan_cua_ma(db: Session, ma: str):
                 hid = h.id if h else None
             if not hid:
                 continue
-            o = out.setdefault(hid, {"sl": 0.0, "tien": 0.0})
+            o = out.setdefault(hid, {"sl": 0.0, "tien": 0.0, "ten": []})
             o["sl"] += _f(x.so_luong)
             o["tien"] += _f(x.so_luong) * _f(x.don_gia)
+            if x.ten:
+                o["ten"].append(x.ten)
+    if out:
+        for hid, ten in _ten_map(db, list(out.keys())).items():
+            if ten and ten not in out[hid]["ten"]:
+                out[hid]["ten"].append(ten)
     return out if co else None
 
 
@@ -182,10 +275,10 @@ def thieu_du_toan(db: Session, ma: str, lines, mien_hh=None, bo_qua_ycm=None, bo
 
 
 def da_dung_theo_ma(db: Session, ma: str, bo_qua_ycm=None, bo_qua_dm=None):
-    """{hang_hoa_id: {"sl","tien"}} đã CAM KẾT dưới mã: dòng PO không bị từ chối (kể cả PO chờ duyệt).
-    Bỏ qua chính PO đang xét (bo_qua_dm); bo_qua_ycm giữ cho tương thích — bước đề xuất đã bỏ 10/10/2026."""
+    """{hang_hoa_id: {"sl","tien"}} đã CAM KẾT dưới mã: dòng PO không bị từ chối (kể cả PO chờ duyệt), tính cả PO mang mã
+    viết khác thứ tự. Bỏ qua chính PO đang xét (bo_qua_dm); bo_qua_ycm giữ cho tương thích — bước đề xuất đã bỏ 10/10/2026."""
     ma = str(ma or "").strip().lower()
-    dh_ids = [i for (i,) in db.query(DonHang.id).filter(func.lower(func.trim(DonHang.so)) == ma).all()]
+    dh_ids = [d.id for d in db.query(DonHang).filter(DonHang.so.isnot(None)).all() if cung_ma(d.so, ma)]
     out = {}
 
     def cong(hid, sl, tien):
@@ -193,44 +286,58 @@ def da_dung_theo_ma(db: Session, ma: str, bo_qua_ycm=None, bo_qua_dm=None):
         o["sl"] += sl
         o["tien"] += tien
 
-    dk_po = func.lower(func.trim(DonMua.ma_ban)) == ma
+    dk = DonMua.ma_ban.isnot(None)
     if dh_ids:
-        dk_po = or_(dk_po, DonMua.don_hang_id.in_(dh_ids))
+        dk = or_(dk, DonMua.don_hang_id.in_(dh_ids))
     q = (db.query(DonMuaCt, DonMua).join(DonMua, DonMuaCt.don_mua_id == DonMua.id)
-         .filter(dk_po, DonMua.trang_thai != "TU_CHOI"))
+         .filter(dk, DonMua.trang_thai != "TU_CHOI"))
     if bo_qua_dm:
         q = q.filter(DonMua.id != bo_qua_dm)
     for ct, dm in q.all():
-        cong(ct.hang_hoa_id, _f(ct.so_luong), _f(ct.so_luong) * _f(ct.don_gia))
-    # (10/10/2026) bỏ bước đề xuất mua — "đã cam kết" = PO không bị từ chối, kể cả PO đang chờ duyệt.
+        if (dm.ma_ban and cung_ma(dm.ma_ban, ma)) or (dm.don_hang_id and dm.don_hang_id in dh_ids):
+            cong(ct.hang_hoa_id, _f(ct.so_luong), _f(ct.so_luong) * _f(ct.don_gia))
     return out
 
 
 def kiem_tra(db: Session, ma: str, lines, bo_qua_ycm=None, bo_qua_dm=None):
     """lines = [(hang_hoa_id, so_luong, don_gia)] → (vi_pham: list, mo_ta: str | None).
-    vi_pham: {hang_hoa_id, ten, loai: VUOT | NGOAI, du_toan_tien, du_toan_sl, da_dung_tien, them_tien, vuot_pct}"""
+    vi_pham: {hang_hoa_id, ten, loai: VUOT | NGOAI, du_toan_tien, du_toan_sl, da_dung_tien, them_tien, vuot_pct}
+    Mặt hàng chưa có trong dự toán nhưng TÊN GẦN GIỐNG một dòng dự toán (cùng bộ số) được tính chung vào dòng đó."""
     dt = du_toan_cua_ma(db, ma)
     if dt is None:
         return [], None
-    them = {}
+    them_raw = {}
     for hid, sl, dg in lines:
         if not hid:
             continue
-        o = them.setdefault(hid, {"sl": 0.0, "tien": 0.0})
+        o = them_raw.setdefault(hid, {"sl": 0.0, "tien": 0.0})
         o["sl"] += _f(sl)
         o["tien"] += _f(sl) * _f(dg)
-    if not them:
+    if not them_raw:
         return [], None
-    dung = da_dung_theo_ma(db, ma, bo_qua_ycm, bo_qua_dm)
-    ten = _ten_map(db, list(them.keys()))
+    dung_raw = da_dung_theo_ma(db, ma, bo_qua_ycm, bo_qua_dm)
+    al = quy_map(db, dt, list(them_raw.keys()) + list(dung_raw.keys()))
+    them, dung = {}, {}
+    for hid, o in them_raw.items():
+        t = them.setdefault(al.get(hid, hid), {"sl": 0.0, "tien": 0.0, "hid": hid})
+        t["sl"] += o["sl"]
+        t["tien"] += o["tien"]
+    for hid, o in dung_raw.items():
+        d0 = dung.setdefault(al.get(hid, hid), {"sl": 0.0, "tien": 0.0})
+        d0["sl"] += o["sl"]
+        d0["tien"] += o["tien"]
+    ten = _ten_map(db, [t["hid"] for t in them.values()])
     vp = []
-    for hid, t in them.items():
-        b = dt.get(hid)
-        d = dung.get(hid, {"sl": 0.0, "tien": 0.0})
+    for kk, t in them.items():
+        hid = t["hid"]
+        b = dt.get(kk)
+        d = dung.get(kk, {"sl": 0.0, "tien": 0.0})
         if b is None:
+            gg = gan_giong_nhat(ten.get(hid, ""), dt)
             vp.append({"hang_hoa_id": hid, "ten": ten.get(hid, f"HH#{hid}"), "loai": "NGOAI",
                        "du_toan_tien": 0.0, "du_toan_sl": 0.0, "da_dung_tien": d["tien"],
-                       "them_tien": t["tien"], "vuot_pct": None})
+                       "them_tien": t["tien"], "vuot_pct": None,
+                       "gan_giong": gg[0] if gg else None})
             continue
         if b["tien"] > 0:
             tong, tran = d["tien"] + t["tien"], b["tien"] * (1 + DUNG_SAI)
@@ -249,7 +356,8 @@ def kiem_tra(db: Session, ma: str, lines, bo_qua_ycm=None, bo_qua_dm=None):
     phan = []
     for v in vp[:6]:
         if v["loai"] == "NGOAI":
-            phan.append(f"{v['ten']}: NGOÀI dự toán (+{v['them_tien']:,.0f}đ)")
+            gg = f" · gần giống dòng «{v['gan_giong']}» trong dự toán, nếu cùng mặt hàng thì nối đúng mặt hàng kho" if v.get("gan_giong") else ""
+            phan.append(f"{v['ten']}: NGOÀI dự toán (+{v['them_tien']:,.0f}đ){gg}")
         elif v["du_toan_tien"] > 0:
             phan.append(f"{v['ten']}: dự toán {v['du_toan_tien']:,.0f}đ, đã dùng {v['da_dung_tien']:,.0f}đ, "
                         f"thêm {v['them_tien']:,.0f}đ → vượt {v['vuot_pct']:+.1f}%")

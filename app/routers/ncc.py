@@ -117,8 +117,9 @@ def _chan_vuot_du_toan(db, ma, lines, xac_nhan=False, bo_qua_ycm=None, bo_qua_dm
             return None
     if not xac_nhan:
         raise HTTPException(status.HTTP_409_CONFLICT,
-                            mo_ta + " — Xác nhận có chủ đích thì đề xuất/PO vào HÀNG CHỜ DUYỆT, "
-                                    "chỉ CEO/ADMIN duyệt được.")
+                            mo_ta + " — Xác nhận có chủ đích thì PO vào HÀNG CHỜ DUYỆT, chỉ CEO/ADMIN duyệt được "
+                                    "(dự toán tự bổ sung khi CEO duyệt). Nếu hàng này đã có trong dự toán dưới tên khác, "
+                                    "nối đúng mặt hàng kho ở dòng dự toán rồi lập lại.")
     return mo_ta[:300]
 
 
@@ -477,7 +478,7 @@ def _po_ra_gon(pos):
 
 def tao_po_tu_dong(db, nd, dong, *, ma_ban=None, don_hang_id=None, cho_thue_ma=None, ngay_hen_giao=None,
                    xac_nhan_trung=False, xac_nhan_lap=False, xac_nhan_du_toan=False, nguon="TRUC_TIEP",
-                   audit_them=None):
+                   audit_them=None, bo_sung_du_toan=False):
     """Lập PO CHỜ DUYỆT thẳng từ các dòng — gom theo nhà cung cấp (mỗi NCC một PO). KHÔNG commit (nơi gọi commit).
     dong: list dict/obj có hang_hoa_id · so_luong · don_gia · nha_cung_cap_id · thue_suat (· ten để báo lỗi).
     Dòng thiếu NCC hoặc giá → 400 kể rõ dòng nào. Cùng kiểm soát với PO lập tay (chặn trùng · dự toán · mã)."""
@@ -549,6 +550,8 @@ def tao_po_tu_dong(db, nd, dong, *, ma_ban=None, don_hang_id=None, cho_thue_ma=N
                   moi={"tong_tien": float(tong), "tien_thue": float(tt), "trang_thai": "CHO_DUYET",
                        "nguon": nguon, "ma_ban": _ma_po, "mua_bo_sung_xac_nhan": da_xac_nhan_trung,
                        **(audit_them or {})})
+        if bo_sung_du_toan and _vuot:
+            _bo_sung_khi_lap(db, dm, nd)
         pos.append(dm)
     return pos
 
@@ -3132,6 +3135,8 @@ def tao_don_mua(data: DonMuaVao, bo_qua_trung: bool = False, ep_ma: bool = False
               moi={"tong_tien": float(tong), "tien_thue": float(tien_thue),
                    "trang_thai": "CHO_DUYET", "mua_bo_sung_xac_nhan": da_xac_nhan,
                    "dinh_ky": bool(bo_qua_trung)})
+    if getattr(data, "bo_sung_du_toan", False) and _vuot_po:
+        _bo_sung_khi_lap(db, dm, nd)
     db.commit()
     db.refresh(dm)
     return dm
@@ -3202,6 +3207,21 @@ def sua_don_mua(dm_id: int, data: DonMuaVao, ep_ma: bool = False, db: Session = 
 
 
 # ----- DUYỆT (cần mức ncc=DUYET) + KIỂM HẠN MỨC TIỀN theo vai trò -----
+def _bo_sung_khi_lap(db, dm, nd):
+    """CEO/ADMIN xác nhận mua phát sinh và chọn «thêm luôn vào dự toán» ngay lúc lập PO (13/10/2026): chạy đúng phần bổ sung
+    dự toán như khi CEO duyệt, để lần lập sau không bị chặn lại. Người lập khác → bỏ qua (dự toán vẫn tự bổ sung khi CEO duyệt PO).
+    Lỗi ở bước này không được làm hỏng việc tạo PO: chạy trong savepoint, lỗi thì PO giữ cờ ⛔ và sẽ bổ sung khi duyệt."""
+    if getattr(getattr(nd, "vai_tro", None), "ma", None) not in ("CEO", "ADMIN"):
+        return None
+    try:
+        with db.begin_nested():
+            db.flush()
+            return _bo_sung_du_toan_theo_po(db, dm, nd)
+    except Exception as _e:
+        print(f"[bo_sung_du_toan] bỏ qua khi lập PO {dm.so or dm.id}: {type(_e).__name__}: {str(_e)[:150]}")
+        return None
+
+
 def _bo_sung_du_toan_theo_po(db, dm, nd):
     """CEO duyệt PO mang cờ vuot_du_toan → TỰ BỔ SUNG DỰ TOÁN của mã cho khớp số ĐÃ CAM KẾT (PO không từ chối +
     đề xuất còn hiệu lực, gồm PO này):
@@ -3209,7 +3229,7 @@ def _bo_sung_du_toan_theo_po(db, dm, nd):
       • mặt hàng NGOÀI dự toán → thêm mục; mặt hàng VƯỢT → thêm mục «bổ sung» = phần chênh (dự toán = đã cam kết);
       • mã là mã DỰ ÁN (có BOQ) → bổ sung vào BOQ dự án thay vì Dự toán hàng bán.
     Cờ đổi thành «✅ ĐÃ BỔ SUNG DỰ TOÁN …» (giữ lý do cũ làm vết). Trả tóm tắt hoặc None."""
-    from ..du_toan_ks import du_toan_cua_ma, da_dung_theo_ma
+    from ..du_toan_ks import du_toan_cua_ma, da_dung_theo_ma, tim_da_theo_ma, tim_dtb_theo_ma, quy_map
     from ..models import DuToanBan, DuToanBanMuc, DuAn, DuAnDuToan, HangHoa, DonHang, KhachHang
     ly_do_cu = str(dm.vuot_du_toan or "")
     if not ly_do_cu or ly_do_cu.startswith("✅"):
@@ -3223,14 +3243,22 @@ def _bo_sung_du_toan_theo_po(db, dm, nd):
     hh = {h.id: h for h in db.query(HangHoa).filter(HangHoa.id.in_(list({c.hang_hoa_id for c in cts}))).all()}
     dt = du_toan_cua_ma(db, ma) or {}
     db.flush()
-    dung = da_dung_theo_ma(db, ma)            # đã gồm PO này (trạng thái vừa đặt DA_DUYET)
+    dung_raw = da_dung_theo_ma(db, ma)        # đã gồm PO này (PO không bị từ chối)
+    al = quy_map(db, dt, [c.hang_hoa_id for c in cts] + list(dung_raw.keys()))   # tên gần giống dòng dự toán → tính chung
+    dung = {}
+    for h0, v0 in dung_raw.items():
+        o0 = dung.setdefault(al.get(h0, h0), {"sl": 0.0, "tien": 0.0})
+        o0["sl"] += v0["sl"]
+        o0["tien"] += v0["tien"]
     gia_po = {}
     for c in cts:
         gia_po.setdefault(c.hang_hoa_id, float(c.don_gia or 0))
-    da = db.query(DuAn).filter(func.lower(func.trim(DuAn.ma)) == ma.lower()).first()
+    _da_ds = tim_da_theo_ma(db, ma)
+    da = _da_ds[0] if _da_ds else None
     dtb = None
     if da is None:
-        dtb = db.query(DuToanBan).filter(func.lower(func.trim(DuToanBan.ma)) == ma.lower()).first()
+        _dtb_ds = tim_dtb_theo_ma(db, ma)
+        dtb = _dtb_ds[0] if _dtb_ds else None
     tao_moi = False
     if da is None and dtb is None:
         kh_ten = None
@@ -3239,12 +3267,12 @@ def _bo_sung_du_toan_theo_po(db, dm, nd):
             kh = db.get(KhachHang, dh.khach_hang_id) if (dh is not None and getattr(dh, "khach_hang_id", None)) else None
             kh_ten = kh.ten if kh is not None else None
         dtb = DuToanBan(ma=ma[:60], khach_hang=kh_ten, ngay=date.today(), nguoi_tao=_dtb_ten_nguoi(db, nd),
-                        mo_ta=(f"Tự lập khi CEO duyệt PO {dm.so or dm.id} (mã chưa có dự toán) — "
+                        mo_ta=(f"Tự lập khi CEO xác nhận PO {dm.so or dm.id} (mã chưa có dự toán) — "
                                "các mục = số đã cam kết mua; kiểm tra và bổ sung phần còn lại của dự toán"))
         db.add(dtb)
         db.flush()
         tao_moi = True
-    ghi = f"Bổ sung theo PO {dm.so or dm.id} — CEO duyệt {date.today():%d/%m/%Y}"
+    ghi = f"Bổ sung theo PO {dm.so or dm.id} — CEO/ADMIN xác nhận {date.today():%d/%m/%Y}"
     thu_tu = 0
     if da is not None:
         thu_tu = int(db.query(func.coalesce(func.max(DuAnDuToan.thu_tu), 0)).filter_by(du_an_id=da.id).scalar() or 0)
@@ -3253,8 +3281,9 @@ def _bo_sung_du_toan_theo_po(db, dm, nd):
         h = hh.get(hid)
         ten = (h.ten if h is not None else f"HH#{hid}")
         dvi = getattr(h, "don_vi", None) if h is not None else None
-        b = dt.get(hid)
-        d = dung.get(hid, {"sl": 0.0, "tien": 0.0})
+        kk = al.get(hid, hid)
+        b = dt.get(kk)
+        d = dung.get(kk, {"sl": 0.0, "tien": 0.0})
         gia = gia_po.get(hid) or 0.0
         if b is None:
             sl, tien, loai = float(d["sl"]), float(d["tien"]), "NGOAI"
@@ -5948,6 +5977,7 @@ class DtbTaoPoVao(_NccCnBase):
     xac_nhan_trung: bool = False     # CEO/ADMIN xác nhận mua bổ sung dù trùng mã bán hàng
     xac_nhan_lap: bool = False       # người lập xác nhận MUA LẶP (mã DV-/OP-) dù còn PO cùng hàng chờ về
     xac_nhan_du_toan: bool = False   # người lập xác nhận PO VƯỢT/NGOÀI dự toán → chỉ CEO duyệt
+    bo_sung_du_toan: bool = False    # CEO/ADMIN: thêm luôn mục phát sinh / vượt vào dự toán của mã
 
 
 @router.post("/du-toan-ban/{dt_id}/tao-po", status_code=201)
@@ -6002,7 +6032,7 @@ def dtb_tao_po(dt_id: int, data: DtbTaoPoVao, db: Session = Depends(get_db),
     pos = tao_po_tu_dong(db, nd, dong, ma_ban=ma[:40], don_hang_id=dh.id if dh else None, ngay_hen_giao=hen,
                          xac_nhan_trung=data.xac_nhan_trung, xac_nhan_lap=data.xac_nhan_lap,
                          xac_nhan_du_toan=data.xac_nhan_du_toan, nguon="DU_TOAN_BAN",
-                         audit_them={"tu_du_toan_ban": d.id, "ma": ma})
+                         audit_them={"tu_du_toan_ban": d.id, "ma": ma}, bo_sung_du_toan=data.bo_sung_du_toan)
     po_theo_ncc = {p.nha_cung_cap_id: p for p in pos}
     for o in dong:
         p = po_theo_ncc.get(int(o["nha_cung_cap_id"] or 0))

@@ -1086,6 +1086,7 @@ class VatTuPoVao(BaseModel):
     xac_nhan_trung: bool = False
     xac_nhan_lap: bool = False
     xac_nhan_du_toan: bool = False
+    bo_sung_du_toan: bool = False
 
 
 @router.get("/vat-tu-po")
@@ -1134,7 +1135,7 @@ def tao_vat_tu_po(data: VatTuPoVao, db: Session = Depends(get_db),
                          cho_thue_ma=code, ngay_hen_giao=data.ngay_hen_giao,
                          xac_nhan_trung=data.xac_nhan_trung, xac_nhan_lap=data.xac_nhan_lap,
                          xac_nhan_du_toan=data.xac_nhan_du_toan, nguon="CHO_THUE",
-                         audit_them={"cho_thue_ma": code, "ly_do": data.ly_do})
+                         audit_them={"cho_thue_ma": code, "ly_do": data.ly_do}, bo_sung_du_toan=data.bo_sung_du_toan)
     db.commit()
     for p in pos:
         db.refresh(p)

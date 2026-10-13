@@ -473,6 +473,7 @@ class KhoTaoPoVao(BaseModel):
     xac_nhan_trung: bool = False
     xac_nhan_lap: bool = False
     xac_nhan_du_toan: bool = False
+    bo_sung_du_toan: bool = False
 
 
 @router.post("/tao-po", status_code=201)
@@ -490,7 +491,7 @@ def kho_tao_po(data: KhoTaoPoVao, db: Session = Depends(get_db),
                          ma_ban="KHO", ngay_hen_giao=data.ngay_hen_giao,
                          xac_nhan_trung=data.xac_nhan_trung, xac_nhan_lap=data.xac_nhan_lap,
                          xac_nhan_du_toan=data.xac_nhan_du_toan, nguon="KHO_TON_MIN",
-                         audit_them={"ly_do": "TON_DUOI_MIN"})
+                         audit_them={"ly_do": "TON_DUOI_MIN"}, bo_sung_du_toan=data.bo_sung_du_toan)
     db.commit()
     for p in pos:
         db.refresh(p)
