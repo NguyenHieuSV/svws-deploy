@@ -2338,13 +2338,16 @@ def duyet_lenh_chi_bank(lcb_id: int, ep: bool = False, db: Session = Depends(get
               moi={"don_mua_id": r.don_mua_id, "so_tien": float(r.so_tien or 0)})
     db.commit()
     kq = _lcb_dict(db, r)
-    # 🔔 Báo lên GROUP RIÊNG (webhook Duyệt chi) SAU khi đã lưu xong — lỗi chat không ảnh hưởng nghiệp vụ
+    # 🔔 Báo lên GROUP RIÊNG (webhook Duyệt chi) SAU khi đã lưu xong — lỗi chat không ảnh hưởng nghiệp vụ.
+    # Lệnh duyệt chi 0 ₫ (công nợ 100% — hoặc đợt này không còn gì để chi) CHỈ chuyển nghĩa vụ sang Công nợ phải trả,
+    # không có tiền nào ra ngân hàng nên KHÔNG gửi tin (anh Hiếu chốt 16/10/2026). Việc ghi công nợ ở trên vẫn chạy như cũ.
     try:
         from ..chat_gateway import gui_webhook_rieng
-        if (settings.gchat_webhook_duyet_chi or "").strip():
+        _dot_wh = kq.get("so_tien_chi")
+        _tien_dot_wh = float(_dot_wh if _dot_wh is not None else (r.so_tien or 0))
+        if (settings.gchat_webhook_duyet_chi or "").strip() and _tien_dot_wh > 0:
             ten_nd = getattr(nd, "ho_ten", None) or nd.email
-            _dot_wh = kq.get("so_tien_chi")
-            tien = f"{float(_dot_wh if _dot_wh is not None else (r.so_tien or 0)):,.0f}".replace(",", ".")
+            tien = f"{_tien_dot_wh:,.0f}".replace(",", ".")
             phan_bo = "nghĩa vụ PO ghi ở Công nợ phải trả — trừ dần khi ✔ Đã chi (ngân hàng chi thật)"
             gui_webhook_rieng(settings.gchat_webhook_duyet_chi,
                 "🏦 *DUYỆT CHI NGÂN HÀNG*\n"
