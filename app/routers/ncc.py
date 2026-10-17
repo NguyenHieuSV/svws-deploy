@@ -2176,7 +2176,45 @@ def ds_duyet_chi_bank(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "
     cho_duyet = [_lcb_dict(db, r) for r in rows if r.trang_thai == "CHO_DUYET"]
     da_duyet = [_lcb_dict(db, r) for r in rows if r.trang_thai == "DA_DUYET"]
     _lcb_gan_nghi_trung(cho_duyet + da_duyet, lich_su, bo_qua=_bo_qua_trung(db))     # ⚠ lớp 1: nhãn nghi trùng
+    try:
+        _lcb_gan_san_pham(db, cho_duyet + da_duyet)      # cột «Sản phẩm» — lỗi ở đây không được làm hỏng cả bảng
+    except Exception as _e:
+        print(f"[duyet-chi-bank] không gắn được sản phẩm: {type(_e).__name__}: {str(_e)[:150]}")
     return {"cho_duyet": cho_duyet, "da_duyet": da_duyet, "lich_su": lich_su, "ngoai_lenh": ngoai_lenh}
+
+
+def _lcb_gan_san_pham(db, ds: list):
+    """Gắn vào từng lệnh CHỜ DUYỆT / ĐÃ DUYỆT để người duyệt biết đang duyệt chi cho SẢN PHẨM nào:
+    • lệnh PO → các dòng hàng của PO (tên · SL · đơn vị) trong `san_pham`;
+    • lệnh trả công nợ của một PO → dòng hàng của PO đó; công nợ nhập ngoài → ghi chú / số chứng từ trong `mo_ta_sp`;
+    • lệnh tạm ứng / cọc → diễn giải của phiếu chi trong `mo_ta_sp`.
+    Tải gộp bằng vài truy vấn (không N+1)."""
+    from ..models import DonMuaCt, HangHoa
+    if not ds:
+        return
+    cn_ids = {x["cong_no_id"] for x in ds if x.get("cong_no_id") and not x.get("don_mua_id")}
+    cn_map = {c.id: c for c in db.query(CongNo).filter(CongNo.id.in_(cn_ids)).all()} if cn_ids else {}
+    po_ids = {x["don_mua_id"] for x in ds if x.get("don_mua_id")} | {c.don_mua_id for c in cn_map.values() if c.don_mua_id}
+    items = {}
+    if po_ids:
+        for ct, hh in (db.query(DonMuaCt, HangHoa).join(HangHoa, HangHoa.id == DonMuaCt.hang_hoa_id)
+                       .filter(DonMuaCt.don_mua_id.in_(po_ids)).order_by(DonMuaCt.id).all()):
+            items.setdefault(ct.don_mua_id, []).append(
+                {"ten": hh.ten, "sl": float(ct.so_luong or 0), "dv": hh.don_vi})
+    for x in ds:
+        pid = x.get("don_mua_id")
+        cn = None if pid else cn_map.get(x.get("cong_no_id"))
+        if cn is not None and cn.don_mua_id:
+            pid = cn.don_mua_id
+        sp = items.get(pid, []) if pid else []
+        mo = None
+        if not sp:
+            mo = (x.get("dien_giai") or (cn.ghi_chu if cn is not None else None)
+                  or (f"Hóa đơn / chứng từ {cn.so_ct}" if (cn is not None and cn.so_ct) else None)
+                  or x.get("ghi_chu"))
+        x["san_pham"] = sp[:40]
+        x["san_pham_tong"] = len(sp)
+        x["mo_ta_sp"] = (str(mo).strip()[:300] or None) if mo else None
 
 
 def _bo_qua_trung(db) -> set:
