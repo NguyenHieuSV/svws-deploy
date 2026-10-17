@@ -2177,7 +2177,7 @@ def ds_duyet_chi_bank(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "
     da_duyet = [_lcb_dict(db, r) for r in rows if r.trang_thai == "DA_DUYET"]
     _lcb_gan_nghi_trung(cho_duyet + da_duyet, lich_su, bo_qua=_bo_qua_trung(db))     # ⚠ lớp 1: nhãn nghi trùng
     try:
-        _lcb_gan_san_pham(db, cho_duyet + da_duyet)      # cột «Sản phẩm» — lỗi ở đây không được làm hỏng cả bảng
+        _lcb_gan_san_pham(db, cho_duyet + da_duyet + lich_su)      # cột «Sản phẩm» (cả Lịch sử thực chi) — lỗi ở đây không được làm hỏng cả bảng
     except Exception as _e:
         print(f"[duyet-chi-bank] không gắn được sản phẩm: {type(_e).__name__}: {str(_e)[:150]}")
     return {"cho_duyet": cho_duyet, "da_duyet": da_duyet, "lich_su": lich_su, "ngoai_lenh": ngoai_lenh}
