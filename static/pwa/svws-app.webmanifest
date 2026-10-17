@@ -1,0 +1,17 @@
+{
+  "id": "/",
+  "name": "SVWS — Quản trị hợp nhất",
+  "short_name": "SVWS",
+  "description": "Hệ thống quản trị hợp nhất của Sóng Việt Water Solutions: bán hàng, cung ứng, kho, dự án, kế toán, tài chính, nhân sự.",
+  "lang": "vi",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#0f2c44",
+  "icons": [
+    {"src": "/pwa/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any"},
+    {"src": "/pwa/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any"},
+    {"src": "/pwa/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"}
+  ]
+}

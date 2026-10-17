@@ -103,6 +103,32 @@ def chup_anh_pwa(ten: str):
                         headers={"Cache-Control": "public, max-age=86400"})
 
 
+# --- Ghim app SVWS chính ra màn hình chính (iPad / điện thoại / máy tính): manifest + icon logo SV ---
+_PWA_GOC_ICON = ("icon-192.png", "icon-512.png", "icon-maskable-512.png", "apple-touch-icon.png")
+
+
+@app.get("/manifest.webmanifest")
+def manifest_goc():
+    return FileResponse(os.path.join(_PWA_DIR, "svws-app.webmanifest"), media_type="application/manifest+json",
+                        headers=_NO_CACHE)
+
+
+@app.get("/pwa/{ten}")
+def pwa_icon_goc(ten: str):
+    if ten not in _PWA_GOC_ICON:
+        from fastapi import HTTPException
+        raise HTTPException(404, "Không có tệp này")
+    return FileResponse(os.path.join(_PWA_DIR, ten), media_type="image/png",
+                        headers={"Cache-Control": "public, max-age=86400"})
+
+
+@app.get("/apple-touch-icon.png")
+def apple_touch_icon_goc():
+    """iOS / iPadOS tự hỏi đường dẫn này khi ghim trang ra màn hình chính nếu trang không khai báo icon."""
+    return FileResponse(os.path.join(_PWA_DIR, "apple-touch-icon.png"), media_type="image/png",
+                        headers={"Cache-Control": "public, max-age=86400"})
+
+
 @app.get("/chup-anh-sw.js")
 def chup_anh_sw():
     """Service worker đặt ở gốc site để đăng ký scope '/chup-anh' (trang không có dấu / cuối)."""
