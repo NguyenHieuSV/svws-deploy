@@ -2153,8 +2153,14 @@ def _thuc_chi_ngoai_lenh(db, lich_su):
 @router.get("/duyet-chi-bank")
 def ds_duyet_chi_bank(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
     """Tab Duyệt chi Ngân Hàng: lệnh chờ duyệt · đã duyệt chờ thực chi · lịch sử thực chi."""
+    return _duyet_chi_du_lieu(db)
+
+
+def _duyet_chi_du_lieu(db, gioi_han=600, sp_toi_da=40, co_ngoai_lenh=True):
+    """Dữ liệu 3 bảng của tab Duyệt chi (dùng chung cho API danh sách và xuất Excel).
+    gioi_han = số lệnh mới nhất đọc lên; sp_toi_da = số mặt hàng tối đa gắn cho mỗi lệnh."""
     from ..models import LenhChiBank
-    rows = db.query(LenhChiBank).order_by(LenhChiBank.id.desc()).limit(600).all()
+    rows = db.query(LenhChiBank).order_by(LenhChiBank.id.desc()).limit(gioi_han).all()
     lich_su = [_lcb_dict(db, r) for r in rows if r.trang_thai == "DA_CHI"]
     # 💰 THỰC CHI của từng lệnh = tiền trên PHIẾU CHI sinh từ lệnh (đúng số của đợt khi PO trả nhiều lần);
     # lệnh công nợ / lệnh cũ chưa lưu phiếu → lấy số tiền lệnh.
@@ -2169,21 +2175,23 @@ def ds_duyet_chi_bank(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "
             theo_lenh[lid] = float(st or 0)
     for x in lich_su:
         x["thuc_chi"] = theo_lenh.get(x["id"], x["so_tien"])
-    try:
-        ngoai_lenh = _thuc_chi_ngoai_lenh(db, lich_su)
-    except Exception:
-        ngoai_lenh = []
+    ngoai_lenh = []
+    if co_ngoai_lenh:
+        try:
+            ngoai_lenh = _thuc_chi_ngoai_lenh(db, lich_su)
+        except Exception:
+            ngoai_lenh = []
     cho_duyet = [_lcb_dict(db, r) for r in rows if r.trang_thai == "CHO_DUYET"]
     da_duyet = [_lcb_dict(db, r) for r in rows if r.trang_thai == "DA_DUYET"]
     _lcb_gan_nghi_trung(cho_duyet + da_duyet, lich_su, bo_qua=_bo_qua_trung(db))     # ⚠ lớp 1: nhãn nghi trùng
     try:
-        _lcb_gan_san_pham(db, cho_duyet + da_duyet + lich_su)      # cột «Sản phẩm» (cả Lịch sử thực chi) — lỗi ở đây không được làm hỏng cả bảng
+        _lcb_gan_san_pham(db, cho_duyet + da_duyet + lich_su, toi_da=sp_toi_da)      # cột «Sản phẩm» (cả Lịch sử thực chi) — lỗi ở đây không được làm hỏng cả bảng
     except Exception as _e:
         print(f"[duyet-chi-bank] không gắn được sản phẩm: {type(_e).__name__}: {str(_e)[:150]}")
     return {"cho_duyet": cho_duyet, "da_duyet": da_duyet, "lich_su": lich_su, "ngoai_lenh": ngoai_lenh}
 
 
-def _lcb_gan_san_pham(db, ds: list):
+def _lcb_gan_san_pham(db, ds: list, toi_da: int = 40):
     """Gắn vào từng lệnh CHỜ DUYỆT / ĐÃ DUYỆT để người duyệt biết đang duyệt chi cho SẢN PHẨM nào:
     • lệnh PO → các dòng hàng của PO (tên · SL · đơn vị) trong `san_pham`;
     • lệnh trả công nợ của một PO → dòng hàng của PO đó; công nợ nhập ngoài → ghi chú / số chứng từ trong `mo_ta_sp`;
@@ -2212,9 +2220,123 @@ def _lcb_gan_san_pham(db, ds: list):
             mo = (x.get("dien_giai") or (cn.ghi_chu if cn is not None else None)
                   or (f"Hóa đơn / chứng từ {cn.so_ct}" if (cn is not None and cn.so_ct) else None)
                   or x.get("ghi_chu"))
-        x["san_pham"] = sp[:40]
+        x["san_pham"] = sp[:toi_da]
         x["san_pham_tong"] = len(sp)
         x["mo_ta_sp"] = (str(mo).strip()[:300] or None) if mo else None
+
+
+def _lcb_sp_text(x: dict, toi_da: int | None = None, ky_tu: int | None = None) -> str:
+    """Chữ mô tả sản phẩm của một lệnh (đã qua _lcb_gan_san_pham): «Tên × SL đơn vị; …» hoặc ghi chú / diễn giải.
+    toi_da = số mặt hàng tối đa (dư thì «… và N mục khác»); ky_tu = cắt độ dài (tin nhắn)."""
+    def so(v):
+        n = float(v or 0)
+        return str(int(n)) if n == int(n) else f"{n:.3f}".rstrip("0").rstrip(".")
+    sp = x.get("san_pham") or []
+    if sp:
+        muc = [str(i.get("ten") or "") + (f" × {so(i['sl'])}" + (f" {i['dv']}" if i.get("dv") else "")
+                                           if float(i.get("sl") or 0) > 0 else "") for i in sp]
+        hien = muc[:toi_da] if toi_da else muc
+        s = "; ".join(hien)
+        con = int(x.get("san_pham_tong") or len(sp)) - len(hien)
+        if con > 0:
+            s += f" … và {con} mục khác"
+    else:
+        s = str(x.get("mo_ta_sp") or "")
+    if ky_tu and len(s) > ky_tu:
+        s = s[:ky_tu - 1].rstrip() + "…"
+    return s
+
+
+def _duyet_chi_excel_bytes(d: dict, bang: str = "tat_ca") -> bytes:
+    """Excel 3 bảng Duyệt chi (Chờ duyệt · Đã duyệt chờ thực chi · Lịch sử thực chi), mỗi lệnh một dòng, có cột Sản phẩm
+    đầy đủ để kế toán lọc / phân loại theo sản phẩm. Không công thức."""
+    import io as _io
+    from openpyxl import Workbook
+    from openpyxl.styles import Alignment, Font, PatternFill, Border, Side
+    from openpyxl.utils import get_column_letter
+    from ..nhac_viec_service import gio_hien_tai
+    wb = Workbook()
+    wb.remove(wb.active)
+    fill = PatternFill("solid", fgColor="E3EDF6")
+    thin = Side(style="thin", color="C9D3DD")
+    bd = Border(left=thin, right=thin, top=thin, bottom=thin)
+    luc_xuat = gio_hien_tai().strftime("%d/%m/%Y %H:%M")
+
+    def nghi(x):
+        return "; ".join(str(t.get("ly_do") or "") for t in (x.get("nghi_trung") or [])) or None
+
+    def so_muc(x):
+        return int(x.get("san_pham_tong") or 0) or None
+
+    def them_sheet(ten, tieu_de, cot, rong, dong, cot_tien):
+        ws = wb.create_sheet(ten)
+        ws["A1"] = f"{tieu_de} — xuất lúc {luc_xuat}"
+        ws["A1"].font = Font(bold=True, size=13)
+        for i, (c, w) in enumerate(zip(cot, rong), 1):
+            cell = ws.cell(row=3, column=i, value=c)
+            cell.font = Font(bold=True)
+            cell.fill = fill
+            cell.alignment = Alignment(wrap_text=True, vertical="center", horizontal="center")
+            cell.border = bd
+            ws.column_dimensions[get_column_letter(i)].width = w
+        ws.row_dimensions[3].height = 30
+        for r_i, vals in enumerate(dong, 4):
+            for j, v in enumerate(vals, 1):
+                cell = ws.cell(row=r_i, column=j, value=v)
+                cell.border = bd
+                cell.alignment = Alignment(wrap_text=True, vertical="top")
+                if j in cot_tien:
+                    cell.number_format = "#,##0;[Red]-#,##0"
+        ws.freeze_panes = "A4"
+        if dong:
+            ws.auto_filter.ref = f"A3:{get_column_letter(len(cot))}{3 + len(dong)}"
+
+    def dot(x):
+        v = x.get("so_tien_chi")
+        return float(v if v is not None else (x.get("so_tien") or 0))
+
+    if bang in ("tat_ca", "cho_duyet"):
+        them_sheet("Chờ duyệt", "DUYỆT CHI NGÂN HÀNG — LỆNH CHỜ DUYỆT",
+                   ["STT", "Số PO / lệnh", "Loại lệnh", "Mã đơn bán", "Nhà cung cấp", "Số HĐ", "Sản phẩm", "Số mặt hàng",
+                    "Tổng PO (đ)", "Chi đợt này (đ)", "Đề nghị lúc", "Nghi trùng"],
+                   [6, 20, 24, 20, 34, 16, 70, 10, 16, 16, 16, 44],
+                   [[i, x.get("so"), x.get("loai_nhan"), x.get("ma_don_ban"), x.get("ncc_ten"), x.get("so_hoa_don"),
+                     _lcb_sp_text(x) or None, so_muc(x), float(x.get("tong_tien") or 0), dot(x), x.get("de_nghi_luc"), nghi(x)]
+                    for i, x in enumerate(d.get("cho_duyet") or [], 1)], {9, 10})
+    if bang in ("tat_ca", "da_duyet"):
+        them_sheet("Đã duyệt chờ chi", "DUYỆT CHI NGÂN HÀNG — ĐÃ DUYỆT, CHỜ NGÂN HÀNG THỰC CHI",
+                   ["STT", "Số PO / lệnh", "Loại lệnh", "Mã đơn bán", "Nhà cung cấp", "Số HĐ", "Sản phẩm", "Số mặt hàng",
+                    "Chi đợt này (đ)", "Duyệt lúc", "Người duyệt", "Nghi trùng"],
+                   [6, 20, 24, 20, 34, 16, 70, 10, 16, 16, 28, 44],
+                   [[i, x.get("so"), x.get("loai_nhan"), x.get("ma_don_ban"), x.get("ncc_ten"), x.get("so_hoa_don"),
+                     _lcb_sp_text(x) or None, so_muc(x), dot(x), x.get("duyet_luc"), x.get("nguoi_duyet"), nghi(x)]
+                    for i, x in enumerate(d.get("da_duyet") or [], 1)], {9})
+    if bang in ("tat_ca", "lich_su"):
+        them_sheet("Lịch sử thực chi", "DUYỆT CHI NGÂN HÀNG — LỊCH SỬ THỰC CHI (ĐÃ CHI)",
+                   ["STT", "Chi lúc", "Số PO / lệnh", "Loại lệnh", "Số HĐ", "Mã đơn bán", "Nhà cung cấp", "Sản phẩm",
+                    "Số mặt hàng", "Số tiền lệnh (đ)", "Thực chi (đ)", "Người duyệt", "Duyệt lúc", "Đề nghị lúc"],
+                   [6, 16, 20, 24, 16, 20, 34, 70, 10, 16, 16, 28, 16, 16],
+                   [[i, x.get("chi_luc"), x.get("so"), x.get("loai_nhan"), x.get("so_hoa_don"), x.get("ma_don_ban"),
+                     x.get("ncc_ten"), _lcb_sp_text(x) or None, so_muc(x), float(x.get("so_tien") or 0),
+                     float(x.get("thuc_chi") if x.get("thuc_chi") is not None else (x.get("so_tien") or 0)),
+                     x.get("nguoi_duyet"), x.get("duyet_luc"), x.get("de_nghi_luc")]
+                    for i, x in enumerate(d.get("lich_su") or [], 1)], {10, 11})
+    buf = _io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+@router.get("/duyet-chi-bank/xuat-excel")
+def xuat_excel_duyet_chi(bang: str = "tat_ca", db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
+    """📥 Xuất Excel tab Duyệt chi Ngân Hàng (kèm cột Sản phẩm): bang = cho_duyet | da_duyet | lich_su | tat_ca."""
+    from fastapi.responses import Response
+    if bang not in ("tat_ca", "cho_duyet", "da_duyet", "lich_su"):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "bang phải là cho_duyet, da_duyet, lich_su hoặc tat_ca")
+    d = _duyet_chi_du_lieu(db, gioi_han=5000, sp_toi_da=300, co_ngoai_lenh=False)
+    data = _duyet_chi_excel_bytes(d, bang)
+    ten = f"Duyet-chi-ngan-hang-{bang.replace('_', '-')}-{date.today():%Y%m%d}.xlsx"
+    return Response(content=data, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={"Content-Disposition": f'attachment; filename="{ten}"', "Cache-Control": "no-store"})
 
 
 def _bo_qua_trung(db) -> set:
@@ -2387,10 +2509,17 @@ def duyet_lenh_chi_bank(lcb_id: int, ep: bool = False, db: Session = Depends(get
             ten_nd = getattr(nd, "ho_ten", None) or nd.email
             tien = f"{_tien_dot_wh:,.0f}".replace(",", ".")
             phan_bo = "nghĩa vụ PO ghi ở Công nợ phải trả — trừ dần khi ✔ Đã chi (ngân hàng chi thật)"
+            sp_txt = ""
+            try:                                   # sản phẩm của lệnh — lỗi ở đây chỉ làm tin thiếu dòng này, không chặn tin
+                _lcb_gan_san_pham(db, [kq], toi_da=60)
+                sp_txt = _lcb_sp_text(kq, toi_da=5, ky_tu=450)
+            except Exception:
+                sp_txt = ""
             gui_webhook_rieng(settings.gchat_webhook_duyet_chi,
                 "🏦 *DUYỆT CHI NGÂN HÀNG*\n"
                 f"• PO: {kq['so']} · NCC: {kq.get('ncc_ten') or '—'}\n"
-                f"• Số tiền duyệt chi: {tien} ₫\n"
+                + (f"• Sản phẩm: {sp_txt}\n" if sp_txt else "")
+                + f"• Số tiền duyệt chi: {tien} ₫\n"
                 + (f"• Mã đơn bán: {kq['ma_don_ban']}\n" if kq.get("ma_don_ban") else "")
                 + f"• Người duyệt: {ten_nd}\n"
                 f"• Phân bổ: {phan_bo} — lệnh đã chuyển sang Kế toán để thực chi.")
