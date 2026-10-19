@@ -63,7 +63,7 @@ def _up(ten, nd):
 
 def _them(db, nd, **kw):
     a = dict(tieu_de="Đào tạo EC", loai="HUAN_LUYEN_THI", mo_ta=None, diem_dat=80.0, hien=True, file=_up("bai.html", HTML), db=db, nd=nd,
-             bat_buoc=False, han_hoan_thanh=None, vai_tro_ap_dung=None, nhac_tu_dong=True)
+             bat_buoc=False, han_hoan_thanh=None, vai_tro_ap_dung=None, nhac_tu_dong=True, nhan_vien_ap_dung=None)
     a.update(kw)
     return asyncio.run(d.them_bai(**a))
 

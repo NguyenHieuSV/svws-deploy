@@ -46,9 +46,10 @@ def test_danh_sach_dung_doi_tuong(ctx):
     b = _them(db, ql)
     d.sua_bai(b["id"], d.BaiSua(bat_buoc=True, han_hoan_thanh=_ngay(10)), db, ql)
     r = d._can_nhac_ds(db, db.get(m.TrnBai, b["id"]))
-    ten = {x["ten"]: x for x in r["can_nhac"]}
-    assert set(ten) == {"Nguyễn Văn A", "Lê Văn C", "Hoàng E"} and r["thieu_tai_khoan"] == ["Phạm Thị D", "Trần Thị B"]
-    assert ten["Lê Văn C"]["co_email"] is False
+    ten = {x["ten"]: x for x in r["ds"]}
+    assert set(ten) == {"Nguyễn Văn A", "Trần Thị B", "Lê Văn C", "Phạm Thị D", "Hoàng E"}            # ĐỦ nhân viên đang làm việc
+    assert len(r["can_nhac"]) == 5 and r["thieu_tai_khoan"] == ["Phạm Thị D", "Trần Thị B"]
+    assert ten["Lê Văn C"]["co_email"] is False and ten["Phạm Thị D"]["co_tai_khoan"] is False and ten["Hoàng E"]["co_tai_khoan"] is True
     # A thi chưa đạt → vẫn phải nhắc, kèm điểm; sau đó đạt → hết nhắc
     muc["v"] = "XEM"
     d.ghi_ket_qua(b["id"], d.KetQuaVao(diem=60, so_cau=30, so_dung=18), db, nv)
@@ -56,13 +57,36 @@ def test_danh_sach_dung_doi_tuong(ctx):
     assert x["tinh_trang"] == "CHUA_DAT" and x["diem_gan_nhat"] == 60
     d.ghi_ket_qua(b["id"], d.KetQuaVao(diem=90, so_cau=30, so_dung=27), db, nv)
     r = d._can_nhac_ds(db, db.get(m.TrnBai, b["id"]))
-    assert "Nguyễn Văn A" not in {y["ten"] for y in r["can_nhac"]} and r["da_xong"] == 1
-    # chọn vai trò CEO → chỉ Hoàng E thuộc đối tượng (mã vai trò không tồn tại bị bỏ)
+    assert "Nguyễn Văn A" not in {y["ten"] for y in r["can_nhac"]} and r["da_xong"] == 1 and len(r["ds"]) == 5
+    assert {y["ten"]: y["tinh_trang"] for y in r["ds"]}["Nguyễn Văn A"] == "XONG"                   # người đã xong vẫn hiện trong danh sách
+    # chọn vai trò CEO → chỉ Hoàng E thuộc đối tượng (mã vai trò không tồn tại bị bỏ; người chưa có tài khoản không khớp vai trò)
     muc["v"] = "THAO_TAC"
     d.sua_bai(b["id"], d.BaiSua(vai_tro_ap_dung=["CEO", "KHONG_CO"]), db, ql)
     bb = db.get(m.TrnBai, b["id"])
     assert bb.vai_tro_ap_dung == "CEO"
-    assert [y["ten"] for y in d._can_nhac_ds(db, bb)["can_nhac"]] == ["Hoàng E"]
+    r = d._can_nhac_ds(db, bb)
+    assert [y["ten"] for y in r["ds"]] == ["Hoàng E"] and r["ngoai_doi_tuong"] == 4
+    # chọn TỪNG NHÂN VIÊN: ưu tiên hơn vai trò, kể cả người chưa có tài khoản; id lạ / đã nghỉ bị bỏ
+    nghi = m.NhanVien(ma="NV09", ho_ten="Đã Nghỉ", trang_thai="NGHI_VIEC")
+    db.add(nghi)
+    db.commit()
+    id_b = db.query(m.NhanVien).filter_by(ma="NV02").one().id
+    id_a = db.query(m.NhanVien).filter_by(ma="NV01").one().id
+    d.sua_bai(b["id"], d.BaiSua(nhan_vien_ap_dung=[id_b, id_a, id_a, 9999, nghi.id]), db, ql)
+    bb = db.get(m.TrnBai, b["id"])
+    assert bb.nhan_vien_ap_dung == f"{id_b},{id_a}"
+    r = d._can_nhac_ds(db, bb)
+    assert [y["ten"] for y in r["ds"]] == ["Nguyễn Văn A", "Trần Thị B"] and r["ngoai_doi_tuong"] == 3
+    d.sua_bai(b["id"], d.BaiSua(nhan_vien_ap_dung=[], vai_tro_ap_dung=[]), db, ql)               # bỏ hết → lại là tất cả
+    assert len(d._can_nhac_ds(db, db.get(m.TrnBai, b["id"]))["ds"]) == 5
+
+
+def test_danh_sach_nhan_vien_de_chon(ctx):
+    db, ql, nv, muc = ctx
+    _them_nhan_vien(db)
+    muc["v"] = "THAO_TAC"
+    ds = {x["ten"]: x for x in d.ds_nhan_vien_chon(db, ql)}
+    assert len(ds) == 5 and ds["Phạm Thị D"]["co_tai_khoan"] is False and ds["Hoàng E"]["vai_tro"] == "CEO"
 
 
 def test_nhac_tay_gui_chat_nhat_ky_va_chong_don(ctx, monkeypatch):
@@ -80,8 +104,9 @@ def test_nhac_tay_gui_chat_nhat_ky_va_chong_don(ctx, monkeypatch):
     kq2 = d.nhac_ngay(b["id"], d.NhacVao(), db, ql)                                             # bấm lại ngay → không nhắn dồn
     assert kq2["da_gui"] == 0 and kq2["bo_qua_gan"] == 2
     xem = d.nhac_xem(b["id"], db, ql)
-    assert xem["chat"]["dang_bat"] is True and all("email" not in x for x in xem["can_nhac"])    # xem trước không lộ email
-    assert {x["ten"]: x["so_lan_nhac"] for x in xem["can_nhac"]}["Nguyễn Văn A"] == 1
+    assert xem["chat"]["dang_bat"] is True and all("email" not in x for x in xem["nhan_vien"])   # xem trước không lộ email
+    assert len(xem["nhan_vien"]) == 5 and xem["so_can_nhac"] == 5                                # hiện ĐỦ nhân viên, kể cả chưa có tài khoản
+    assert {x["ten"]: x["so_lan_nhac"] for x in xem["nhan_vien"]}["Nguyễn Văn A"] == 1
     # chọn riêng một người
     b2 = _them(db, ql, tieu_de="Thi khác")
     d.sua_bai(b2["id"], d.BaiSua(bat_buoc=True), db, ql)
@@ -204,3 +229,51 @@ def test_bai_khong_nguong_chi_can_da_thi(ctx):
     muc["v"] = "XEM"
     d.ghi_ket_qua(b["id"], d.KetQuaVao(diem=20, so_cau=10, so_dung=2), db, nv)                  # không có ngưỡng đạt → đã thi là xong
     assert d.can_lam(db, nv) == [] and d.ds_bai(db, nv)[0]["can_lam"] is False
+
+
+def test_nhac_nguoi_chua_co_tai_khoan_duoc_chon_tay(ctx, monkeypatch):
+    from app import chat_gateway
+    db, ql, nv, muc = ctx
+    _them_nhan_vien(db)
+    muc["v"] = "THAO_TAC"
+    b = _them(db, ql, tieu_de="Thi EC")
+    d.sua_bai(b["id"], d.BaiSua(bat_buoc=True), db, ql)
+    id_d = db.query(m.NhanVien).filter_by(ma="NV04").one().id
+    id_a = db.query(m.NhanVien).filter_by(ma="NV01").one().id
+    # Chat APP: nhắn riêng — người chưa có tài khoản chỉ nhận được khi có email (D không có email → báo thiếu email)
+    gui = _dung_chat(monkeypatch)
+    kq = d.nhac_ngay(b["id"], d.NhacVao(nhan_vien_ids=[id_a, id_d]), db, ql)
+    assert kq["da_gui"] == 1 and kq["thieu_email"] == ["Phạm Thị D"]
+    db.query(m.NhanVien).filter_by(ma="NV04").one().email = "d@x.vn"
+    db.commit()
+    kq = d.nhac_ngay(b["id"], d.NhacVao(nhan_vien_ids=[id_d]), db, ql)
+    assert kq["da_gui"] == 1 and "chưa có tài khoản app" in dict(gui)["d@x.vn"]
+    # Chat WEBHOOK: một tin gộp, có dòng liệt kê người chưa có tài khoản
+    phong = []
+
+    class Phong:
+        che_do = "WEBHOOK"
+
+        def gui_phong(self, nd):
+            phong.append(nd)
+            return {"da_gui": True}
+
+    monkeypatch.setattr(chat_gateway, "lay_chat_provider", lambda: Phong())
+    id_b = db.query(m.NhanVien).filter_by(ma="NV02").one().id
+    kq = d.nhac_ngay(b["id"], d.NhacVao(nhan_vien_ids=[id_b, id_a]), db, ql)                      # A vừa được nhắc → bỏ qua; chỉ B
+    assert kq["da_gui"] == 1 and "Chưa có tài khoản app SVWS" in phong[0] and "Trần Thị B" in phong[0]
+
+
+def test_can_lam_theo_nhan_vien_duoc_chon(ctx):
+    db, ql, nv, muc = ctx
+    muc["v"] = "THAO_TAC"
+    b = _them(db, ql, tieu_de="Chọn người")
+    id_a = db.query(m.NhanVien).filter_by(ma="NV01").one().id
+    id_b = db.query(m.NhanVien).filter_by(ma="NV02").one().id
+    d.sua_bai(b["id"], d.BaiSua(bat_buoc=True, nhan_vien_ap_dung=[id_b]), db, ql)                 # chỉ B (chưa có tài khoản)
+    muc["v"] = "XEM"
+    assert d.can_lam(db, nv) == [] and d.ds_bai(db, nv)[0]["can_lam"] is False                  # A (user nv) không thuộc đối tượng
+    muc["v"] = "THAO_TAC"
+    d.sua_bai(b["id"], d.BaiSua(nhan_vien_ap_dung=[id_a]), db, ql)
+    muc["v"] = "XEM"
+    assert [x["bai_id"] for x in d.can_lam(db, nv)] == [b["id"]] and d.ds_bai(db, nv)[0]["can_lam"] is True

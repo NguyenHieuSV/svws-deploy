@@ -65,6 +65,28 @@ def _ds_vai_tro(b: TrnBai) -> list:
     return [x.strip() for x in (b.vai_tro_ap_dung or "").split(",") if x.strip()]
 
 
+def _ds_nv_ap_dung(b: TrnBai) -> list:
+    return [int(x) for x in (b.nhan_vien_ap_dung or "").split(",") if x.strip().isdigit()]
+
+
+def _chuan_nv_ap_dung(db: Session, ids) -> str | None:
+    """Danh sách id nhân viên gửi lên → chuỗi lưu (chỉ nhân viên đang làm việc, bỏ trùng); rỗng = không chọn từng người."""
+    co = {i for (i,) in db.query(NhanVien.id).filter(NhanVien.trang_thai == "DANG_LAM").all()}
+    ok = [int(i) for i in dict.fromkeys(ids or []) if int(i) in co]
+    return ",".join(map(str, ok)) or None
+
+
+def _thuoc_doi_tuong(b: TrnBai, nv_id, ma_vt) -> bool:
+    """Một người có thuộc đối tượng của bài không: chọn từng nhân viên > chọn vai trò > tất cả."""
+    ids = _ds_nv_ap_dung(b)
+    if ids:
+        return nv_id in ids
+    vt = _ds_vai_tro(b)
+    if vt:
+        return ma_vt in vt
+    return True
+
+
 def _chuan_vai_tro(db: Session, ds) -> str | None:
     """Danh sách mã vai trò gửi lên → chuỗi lưu (bỏ mã không tồn tại); rỗng = áp dụng cho tất cả."""
     co = {v.ma for v in db.query(VaiTro).all()}
@@ -87,7 +109,7 @@ def _bai_dict(b: TrnBai, ten_tao=None, thong_ke=None, cua_toi=None) -> dict:
             "hien": bool(b.hien), "diem_dat": _f(b.diem_dat), "nguoi_tao": ten_tao,
             "bat_buoc": bool(b.bat_buoc), "han_hoan_thanh": str(b.han_hoan_thanh) if b.han_hoan_thanh else None,
             "so_ngay_con": ((b.han_hoan_thanh - gio_hien_tai().date()).days if b.han_hoan_thanh else None),
-            "vai_tro_ap_dung": _ds_vai_tro(b), "nhac_tu_dong": bool(b.nhac_tu_dong),
+            "vai_tro_ap_dung": _ds_vai_tro(b), "nhan_vien_ap_dung": _ds_nv_ap_dung(b), "nhac_tu_dong": bool(b.nhac_tu_dong),
             "tao_luc": str(b.tao_luc)[:16] if b.tao_luc else None,
             "cap_nhat_luc": str(b.cap_nhat_luc)[:16] if b.cap_nhat_luc else None,
             "co_thi": b.loai in LOAI_CO_THI,
@@ -149,6 +171,8 @@ def ds_bai(db: Session = Depends(get_db), nd: NguoiDung = Depends(yeu_cau(MODULE
                     c["_nop"], c["gan_nhat"], c["ngay"] = nop, d, (str(nop)[:10] if nop else None)
     out = []
     ma_vt = nd.vai_tro.ma if getattr(nd, "vai_tro", None) is not None else None
+    _nv_toi = _nv_cua(db, nd)
+    nv_toi = _nv_toi.id if _nv_toi is not None else None
     for b in bais:
         t = tk.get(b.id)
         thong_ke = ({"so_luot": t["so_luot"], "so_nguoi": len(t["_nguoi"]), "so_dat": t["so_dat"]} if t
@@ -158,8 +182,7 @@ def ds_bai(db: Session = Depends(get_db), nd: NguoiDung = Depends(yeu_cau(MODULE
             c.pop("_nop", None)
         o = _bai_dict(b, _ten_tao(db, b.nguoi_tao), thong_ke if ql else None, c)
         # 📌 bài bắt buộc mà CHÍNH người xem phải làm và chưa xong
-        vt = _ds_vai_tro(b)
-        o["can_lam"] = bool(b.bat_buoc and b.hien and (not vt or ma_vt in vt) and not _da_xong_cua(c))
+        o["can_lam"] = bool(b.bat_buoc and b.hien and _thuoc_doi_tuong(b, nv_toi, ma_vt) and not _da_xong_cua(c))
         if ql and b.bat_buoc:
             try:
                 o["chua_xong"] = len(_can_nhac_ds(db, b)["can_nhac"])
@@ -190,7 +213,7 @@ async def _doc_tep_tai_len(file: UploadFile):
 async def them_bai(tieu_de: str = Form(...), loai: str = Form("HUAN_LUYEN"), mo_ta: str = Form(None),
                    diem_dat: float = Form(None), hien: bool = Form(True), file: UploadFile = File(...),
                    bat_buoc: bool = Form(False), han_hoan_thanh: date = Form(None), vai_tro_ap_dung: str = Form(None),
-                   nhac_tu_dong: bool = Form(True),
+                   nhac_tu_dong: bool = Form(True), nhan_vien_ap_dung: str = Form(None),
                    db: Session = Depends(get_db), nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
     """Tải LÊN một bài huấn luyện / bài thi."""
     if loai not in LOAI_BAI:
@@ -206,7 +229,8 @@ async def them_bai(tieu_de: str = Form(...), loai: str = Form("HUAN_LUYEN"), mo_
                loai_tep=loai_tep, noi_dung_loai=ctype[:120], duong_dan=ref, kich_thuoc=len(data), phien_ban=1,
                hien=bool(hien), diem_dat=diem_dat, nguoi_tao=nd.id, tao_luc=gio_hien_tai(),
                bat_buoc=bool(bat_buoc), han_hoan_thanh=han_hoan_thanh, nhac_tu_dong=bool(nhac_tu_dong),
-               vai_tro_ap_dung=_chuan_vai_tro(db, (vai_tro_ap_dung or "").split(",")))
+               vai_tro_ap_dung=_chuan_vai_tro(db, (vai_tro_ap_dung or "").split(",")),
+               nhan_vien_ap_dung=_chuan_nv_ap_dung(db, [int(x) for x in (nhan_vien_ap_dung or "").split(",") if x.strip().isdigit()]))
     db.add(b)
     db.flush()
     ghi_audit(db, nd.id, "TAO", "trn_bai", b.id, moi={"tieu_de": b.tieu_de, "loai": loai, "file": b.ten_file, "kb": round(len(data) / 1024)})
@@ -224,7 +248,8 @@ class BaiSua(BaseModel):
     bat_buoc: bool | None = None
     han_hoan_thanh: date | None = None
     xoa_han: bool = False
-    vai_tro_ap_dung: list[str] | None = None            # [] = áp dụng cho tất cả
+    vai_tro_ap_dung: list[str] | None = None            # [] = không chọn theo vai trò
+    nhan_vien_ap_dung: list[int] | None = None          # [] = không chọn từng nhân viên
     nhac_tu_dong: bool | None = None
 
 
@@ -258,13 +283,15 @@ def sua_bai(bai_id: int, data: BaiSua, db: Session = Depends(get_db), nd: NguoiD
         b.han_hoan_thanh = data.han_hoan_thanh
     if data.vai_tro_ap_dung is not None:
         b.vai_tro_ap_dung = _chuan_vai_tro(db, data.vai_tro_ap_dung)
+    if data.nhan_vien_ap_dung is not None:
+        b.nhan_vien_ap_dung = _chuan_nv_ap_dung(db, data.nhan_vien_ap_dung)
     if data.nhac_tu_dong is not None:
         b.nhac_tu_dong = bool(data.nhac_tu_dong)
     b.cap_nhat_luc = gio_hien_tai()
     ghi_audit(db, nd.id, "SUA", "trn_bai", b.id, cu=cu,
               moi={"tieu_de": b.tieu_de, "loai": b.loai, "hien": b.hien, "diem_dat": _f(b.diem_dat), "bat_buoc": b.bat_buoc,
                    "han": str(b.han_hoan_thanh) if b.han_hoan_thanh else None, "vai_tro": b.vai_tro_ap_dung,
-                   "nhac_tu_dong": b.nhac_tu_dong})
+                   "nhan_vien": b.nhan_vien_ap_dung, "nhac_tu_dong": b.nhac_tu_dong})
     db.commit()
     return _bai_dict(b, _ten_tao(db, b.nguoi_tao))
 
@@ -360,8 +387,10 @@ def _da_xong_cua(c) -> bool:
 
 
 def _can_nhac_ds(db: Session, b: TrnBai) -> dict:
-    """Ai thuộc đối tượng của bài, ai đã xong, ai cần nhắc. Đối tượng = nhân viên ĐANG LÀM có tài khoản (đúng vai trò nếu bài chọn vai trò).
-    Nhân viên thiếu tài khoản không vào app để thi được → liệt kê riêng; thiếu email → không nhắn Google Chat được."""
+    """Danh sách ĐỦ nhân viên đang làm việc thuộc đối tượng của bài (chọn từng người > vai trò > tất cả), kèm tình trạng:
+    XONG / CHUA_DAT / CHUA_THI, có tài khoản app chưa (chưa có thì không vào app thi được), đã nhắc mấy lần.
+    can_nhac = những người chưa xong. Thiếu email chỉ ảnh hưởng nhắn riêng (chế độ Chat APP)."""
+    ids = _ds_nv_ap_dung(b)
     vt = _ds_vai_tro(b)
     nvs = (db.query(NhanVien, NguoiDung, VaiTro).outerjoin(NguoiDung, NguoiDung.id == NhanVien.nguoi_dung_id)
            .outerjoin(VaiTro, VaiTro.id == NguoiDung.vai_tro_id)
@@ -383,26 +412,25 @@ def _can_nhac_ds(db: Session, b: TrnBai) -> dict:
             if n.nguon == "TU_DONG":
                 o["so_tu_dong"] += 1
             o["gan_nhat"] = n.tao_luc
-    can_nhac, da_xong, thieu_tk, ngoai_vai_tro = [], 0, [], 0
+    ds, ngoai = [], 0
     for nv, u, v in nvs:
-        if u is None or u.trang_thai != "HOAT_DONG":
-            thieu_tk.append(nv.ho_ten)
+        co_tk = u is not None and u.trang_thai == "HOAT_DONG"
+        ma_vt = v.ma if (co_tk and v is not None) else None
+        if not _thuoc_doi_tuong(b, nv.id, ma_vt):
+            ngoai += 1
             continue
-        if vt and (v is None or v.ma not in vt):
-            ngoai_vai_tro += 1
-            continue
-        c = kq.get(u.id)
-        if _da_xong_cua(c):
-            da_xong += 1
-            continue
+        c = kq.get(u.id) if co_tk else None
+        xong = _da_xong_cua(c)
         o = nhac.get(nv.id) or {"so_lan": 0, "so_tu_dong": 0, "gan_nhat": None}
-        can_nhac.append({"nhan_vien_id": nv.id, "ten": nv.ho_ten, "ma": nv.ma, "email": nv.email,
-                         "co_email": bool((nv.email or "").strip()),
-                         "tinh_trang": "CHUA_DAT" if (c and c["so_lan"]) else "CHUA_THI",
-                         "diem_gan_nhat": c["gan_nhat"] if c else None, "so_lan_thi": c["so_lan"] if c else 0,
-                         "so_lan_nhac": o["so_lan"], "so_tu_dong": o["so_tu_dong"],
-                         "nhac_gan_nhat": str(o["gan_nhat"])[:16] if o["gan_nhat"] else None, "_nhac_dt": o["gan_nhat"]})
-    return {"can_nhac": can_nhac, "da_xong": da_xong, "thieu_tai_khoan": thieu_tk, "ngoai_vai_tro": ngoai_vai_tro}
+        ds.append({"nhan_vien_id": nv.id, "ten": nv.ho_ten, "ma": nv.ma, "chuc_danh": nv.chuc_danh, "email": nv.email,
+                   "co_email": bool((nv.email or "").strip()), "co_tai_khoan": co_tk,
+                   "tinh_trang": "XONG" if xong else ("CHUA_DAT" if (c and c["so_lan"]) else "CHUA_THI"),
+                   "diem_gan_nhat": c["gan_nhat"] if c else None, "so_lan_thi": c["so_lan"] if c else 0,
+                   "so_lan_nhac": o["so_lan"], "so_tu_dong": o["so_tu_dong"],
+                   "nhac_gan_nhat": str(o["gan_nhat"])[:16] if o["gan_nhat"] else None, "_nhac_dt": o["gan_nhat"]})
+    can_nhac = [x for x in ds if x["tinh_trang"] != "XONG"]
+    return {"ds": ds, "can_nhac": can_nhac, "da_xong": len(ds) - len(can_nhac),
+            "thieu_tai_khoan": [x["ten"] for x in ds if not x["co_tai_khoan"]], "ngoai_doi_tuong": ngoai}
 
 
 def _noi_dung_nhac(b: TrnBai, x: dict, hom_nay: date) -> str:
@@ -417,6 +445,8 @@ def _noi_dung_nhac(b: TrnBai, x: dict, hom_nay: date) -> str:
         tinh = "⚠️ *ĐÃ QUÁ HẠN*" if con < 0 else ("hôm nay là ngày cuối" if con == 0 else f"còn {con} ngày")
         d.append(f"• Hạn hoàn thành: {b.han_hoan_thanh.strftime('%d/%m/%Y')} ({tinh})")
     d.append("• Cách làm: mở app SVWS → Nội bộ → Training → bấm ▶ Mở ở bài này, làm và nộp bài, điểm tự lưu.")
+    if not x.get("co_tai_khoan", True):
+        d.append("• Bạn chưa có tài khoản app SVWS — nhờ quản trị tạo tài khoản để làm bài.")
     return "\n".join(d)
 
 
@@ -434,6 +464,9 @@ def _noi_dung_nhac_chung(b: TrnBai, ds: list, hom_nay: date) -> str:
         tinh = "⚠️ *ĐÃ QUÁ HẠN*" if con < 0 else ("hôm nay là ngày cuối" if con == 0 else f"còn {con} ngày")
         d.append(f"• Hạn hoàn thành: {b.han_hoan_thanh.strftime('%d/%m/%Y')} ({tinh})")
     d.append("• Cách làm: mở app SVWS → Nội bộ → Training → bấm ▶ Mở ở bài này, làm và nộp bài, điểm tự lưu.")
+    chua_tk = [x["ten"] for x in ds if not x.get("co_tai_khoan", True)]
+    if chua_tk:
+        d.append("• Chưa có tài khoản app SVWS (nhờ quản trị tạo tài khoản để làm bài): " + "; ".join(chua_tk))
     return "\n".join(d)
 
 
@@ -501,15 +534,29 @@ def ds_vai_tro(db: Session = Depends(get_db), nd: NguoiDung = Depends(yeu_cau(MO
     return [{"ma": v.ma, "ten": v.ten} for v in db.query(VaiTro).order_by(VaiTro.id).all()]
 
 
+@router.get("/nhan-vien")
+def ds_nhan_vien_chon(db: Session = Depends(get_db), nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    """ĐỦ nhân viên đang làm việc để chọn đối tượng của bài (kể cả người chưa có tài khoản app)."""
+    out = []
+    for nv, u, v in (db.query(NhanVien, NguoiDung, VaiTro).outerjoin(NguoiDung, NguoiDung.id == NhanVien.nguoi_dung_id)
+                     .outerjoin(VaiTro, VaiTro.id == NguoiDung.vai_tro_id)
+                     .filter(NhanVien.trang_thai == "DANG_LAM").order_by(NhanVien.ho_ten).all()):
+        co_tk = u is not None and u.trang_thai == "HOAT_DONG"
+        out.append({"id": nv.id, "ten": nv.ho_ten, "ma": nv.ma, "chuc_danh": nv.chuc_danh, "co_tai_khoan": co_tk,
+                    "vai_tro": v.ma if (co_tk and v is not None) else None, "co_email": bool((nv.email or "").strip())})
+    return out
+
+
 @router.get("/can-lam")
 def can_lam(db: Session = Depends(get_db), nd: NguoiDung = Depends(yeu_cau(MODULE, "XEM"))):
     """Bài BẮT BUỘC mà người đang đăng nhập chưa hoàn thành — cho dấu chấm đỏ ở menu và dải nhắc đầu tab."""
     ma_vt = nd.vai_tro.ma if getattr(nd, "vai_tro", None) is not None else None
+    _nv_toi = _nv_cua(db, nd)
+    nv_toi = _nv_toi.id if _nv_toi is not None else None
     hom_nay = gio_hien_tai().date()
     out = []
     for b in db.query(TrnBai).filter(TrnBai.bat_buoc.is_(True), TrnBai.hien.is_(True)).order_by(TrnBai.han_hoan_thanh, TrnBai.id).all():
-        vt = _ds_vai_tro(b)
-        if vt and ma_vt not in vt:
+        if not _thuoc_doi_tuong(b, nv_toi, ma_vt):
             continue
         rs = db.query(TrnKetQua).filter(TrnKetQua.bai_id == b.id, TrnKetQua.nguoi_dung_id == nd.id).order_by(TrnKetQua.nop_luc, TrnKetQua.id).all()
         c = {"so_lan": len(rs), "dat": any(r.dat for r in rs), "khong_nguong": any(r.dat is None for r in rs),
@@ -530,15 +577,15 @@ def nhac_xem(bai_id: int, db: Session = Depends(get_db), nd: NguoiDung = Depends
     if b is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy bài")
     r = _can_nhac_ds(db, b)
-    for x in r["can_nhac"]:
+    for x in r["ds"]:
         x.pop("_nhac_dt", None)
         x.pop("email", None)
     che_do = getattr(lay_chat_provider(), "che_do", "?")
     return {"bai": {"id": b.id, "tieu_de": b.tieu_de, "bat_buoc": bool(b.bat_buoc), "han": str(b.han_hoan_thanh) if b.han_hoan_thanh else None,
-                    "nhac_tu_dong": bool(b.nhac_tu_dong), "vai_tro_ap_dung": _ds_vai_tro(b), "hien": bool(b.hien)},
-            "can_nhac": r["can_nhac"], "da_xong": r["da_xong"], "thieu_tai_khoan": r["thieu_tai_khoan"],
-            "ngoai_vai_tro": r["ngoai_vai_tro"], "chat": {"dang_bat": dang_bat(), "che_do": che_do,
-                                                          "nhan_rieng": che_do == "APP"}}
+                    "nhac_tu_dong": bool(b.nhac_tu_dong), "vai_tro_ap_dung": _ds_vai_tro(b), "nhan_vien_ap_dung": _ds_nv_ap_dung(b),
+                    "hien": bool(b.hien)},
+            "nhan_vien": r["ds"], "so_can_nhac": len(r["can_nhac"]), "da_xong": r["da_xong"], "thieu_tai_khoan": r["thieu_tai_khoan"],
+            "ngoai_doi_tuong": r["ngoai_doi_tuong"], "chat": {"dang_bat": dang_bat(), "che_do": che_do, "nhan_rieng": che_do == "APP"}}
 
 
 class NhacVao(BaseModel):
@@ -554,7 +601,9 @@ def nhac_ngay(bai_id: int, data: NhacVao, db: Session = Depends(get_db), nd: Ngu
     ds = _can_nhac_ds(db, b)["can_nhac"]
     if data.nhan_vien_ids:
         chon = set(data.nhan_vien_ids)
-        ds = [x for x in ds if x["nhan_vien_id"] in chon]
+        ds = [x for x in ds if x["nhan_vien_id"] in chon]          # người đã xong (nếu lỡ gửi lên) tự bị loại
+    else:
+        ds = [x for x in ds if x["co_tai_khoan"]]                  # không chọn riêng: chỉ người đã có tài khoản app
     if not ds:
         return {"da_gui": 0, "loi": [], "thieu_email": [], "bo_qua_gan": 0, "so_can_nhac": 0}
     kq = _gui_nhac(db, b, ds, "TAY", nd.id)
@@ -578,7 +627,7 @@ def nhac_tu_dong_hang_ngay(db: Session) -> dict:
         gan = b.han_hoan_thanh is not None and (b.han_hoan_thanh - now.date()).days <= 3
         chu_ky = timedelta(days=CHU_KY_NHAC_GAN_HAN if gan else CHU_KY_NHAC)
         den_luot = [x for x in _can_nhac_ds(db, b)["can_nhac"]
-                    if x["so_tu_dong"] < TOI_DA_NHAC_TU_DONG and (not x["_nhac_dt"] or now - x["_nhac_dt"] >= chu_ky - timedelta(hours=2))]
+                    if x["co_tai_khoan"] and x["so_tu_dong"] < TOI_DA_NHAC_TU_DONG and (not x["_nhac_dt"] or now - x["_nhac_dt"] >= chu_ky - timedelta(hours=2))]
         if not den_luot:
             continue
         r = _gui_nhac(db, b, den_luot, "TU_DONG", None)

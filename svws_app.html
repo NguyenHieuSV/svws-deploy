@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="vi">
 <head>
-<!-- build: ho-so-thu-viec-2026-10-19 -->
+<!-- build: training-doi-tuong-2026-10-19 -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#0f2c44">
@@ -19317,7 +19317,7 @@ async function _trnTabBai(h){
     return `<tr${b.hien?'':' style="opacity:.65"'}>
       <td><div style="font-weight:700">${TRN_ICON[b.loai_tep]||'📎'} ${_trnEc(b.tieu_de)}</div>
         ${b.mo_ta?`<div style="font-size:12px;color:var(--muted);white-space:pre-line;margin-top:2px">${_trnEc(b.mo_ta)}</div>`:''}
-        <div style="margin-top:4px"><span class="badge b-info">${_trnEc(b.loai_ten)}</span> <span class="badge b-ok" title="Phiên bản của tệp — mỗi lần thay tệp tăng một">Rev ${b.phien_ban}</span>${b.hien?'':' <span class="badge b-cho" title="Nhân viên không nhìn thấy bài này">đang ẩn</span>'}${b.diem_dat!=null?` <span class="badge b-cho" title="Điểm đạt của bài">đạt từ ${b.diem_dat}%</span>`:''}${_trnBatBuoc(b)}</div></td>
+        <div style="margin-top:4px"><span class="badge b-info">${_trnEc(b.loai_ten)}</span> <span class="badge b-ok" title="Phiên bản của tệp — mỗi lần thay tệp tăng một">Rev ${b.phien_ban}</span>${b.hien?'':' <span class="badge b-cho" title="Nhân viên không nhìn thấy bài này">đang ẩn</span>'}${b.diem_dat!=null?` <span class="badge b-cho" title="Điểm đạt của bài">đạt từ ${b.diem_dat}%</span>`:''}${_trnDoiTuongBadge(b)}${_trnBatBuoc(b)}</div></td>
       <td style="font-size:12px">${_trnEc(b.ten_file)}<div style="color:var(--muted)">${_trnKb(b.kich_thuoc)}</div></td>
       <td style="font-size:12px">${_trnEc(b.nguoi_tao||'—')}<div style="color:var(--muted)">${_trnNgayGio(b.cap_nhat_luc||b.tao_luc)}</div></td>
       ${ql?`<td class="num" style="font-size:12px">${tk.so_luot?`<b>${tk.so_luot}</b> lượt<div style="color:var(--muted)">${tk.so_nguoi} người · ${tk.so_dat} đạt</div>`:'<span style="color:var(--muted)">—</span>'}${b.bat_buoc&&b.chua_xong!=null?`<div style="font-size:11px;font-weight:700;color:${b.chua_xong?'#dc2626':'#16a34a'}">${b.chua_xong?b.chua_xong+' người chưa xong':'ai cũng đã xong'}</div>`:''}</td>`:''}
@@ -19377,28 +19377,63 @@ async function trnNhacMenu(){
   a.insertBefore(p,a.querySelector('.lvl'));
   if(gb){const d=document.createElement('span'); d.className='nav-dot'; d.title=tip; gb.appendChild(d);}
 }
+function _trnDtLoai(b){return (b.nhan_vien_ap_dung||[]).length?'NHAN_VIEN':((b.vai_tro_ap_dung||[]).length?'VAI_TRO':'TAT_CA');}
+function _trnDoiTuongBadge(b){
+  const l=_trnDtLoai(b); if(l==='TAT_CA')return '';
+  return l==='NHAN_VIEN'?` <span class="badge b-info" title="Chỉ ${b.nhan_vien_ap_dung.length} nhân viên được chọn làm bài này">👥 ${b.nhan_vien_ap_dung.length} nhân viên</span>`
+    :` <span class="badge b-info" title="Vai trò: ${_trnEc((b.vai_tro_ap_dung||[]).join(', '))}">👥 theo vai trò</span>`;
+}
 function _trnFormBatBuoc(b){
-  b=b||{};
+  b=b||{}; const dt=_trnDtLoai(b);
+  const rd=(v,t)=>`<label style="display:flex;gap:6px;align-items:center;margin:0;font-weight:400;cursor:pointer"><input type="radio" name="trn_dt" value="${v}"${dt===v?' checked':''} style="width:auto" onchange="trnDtDoi()"> ${t}</label>`;
   return `<div style="margin-top:12px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:#f8fafc">
-    <label style="display:flex;gap:8px;align-items:center;margin:0;font-weight:700"><input id="trn_bb" type="checkbox"${b.bat_buoc?' checked':''} style="width:auto" onchange="trnBbDoi()"> 📌 Bài BẮT BUỘC (có hạn · có nhắc nhân viên)</label>
+    <div style="font-weight:700">👥 Đối tượng làm bài</div>
+    <div style="display:flex;gap:6px 18px;flex-wrap:wrap;margin:6px 0 4px;font-size:13px">${rd('TAT_CA','Tất cả nhân viên đang làm việc')}${rd('VAI_TRO','Theo vai trò')}${rd('NHAN_VIEN','Chọn từng nhân viên')}</div>
+    <div id="trn_dt_vt" style="${dt==='VAI_TRO'?'':'display:none;'}padding:4px 0"><div id="trn_vt" style="display:flex;flex-wrap:wrap;gap:4px 14px;font-size:12.5px"><span style="color:var(--muted)">Đang tải danh sách vai trò…</span></div></div>
+    <div id="trn_dt_nv" style="${dt==='NHAN_VIEN'?'':'display:none;'}padding:4px 0">
+      <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:6px"><input id="trn_nvq" placeholder="🔍 Tìm tên, mã NV…" oninput="trnNvLoc()" style="max-width:220px;padding:5px 9px;font-size:12.5px"><button type="button" class="btn-sm ghost" onclick="trnNvChon(true)">Chọn tất cả đang hiện</button><button type="button" class="btn-sm ghost" onclick="trnNvChon(false)">Bỏ chọn tất cả</button><span id="trn_nv_dem" style="font-size:12px;color:var(--muted)"></span></div>
+      <div id="trn_nv" style="max-height:230px;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:6px 8px;background:#fff;display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:3px 12px"><span style="color:var(--muted)">Đang tải danh sách nhân viên…</span></div>
+    </div>
+    <div style="font-size:11.5px;color:var(--muted);margin-top:4px">Đối tượng dùng cho dải «Bạn còn N bài», số người «chưa xong» và nút 📣 Nhắc. Danh sách chọn có ĐỦ nhân viên đang làm việc, kể cả người chưa có tài khoản app.</div>
+  </div>
+  <div style="margin-top:10px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:#f8fafc">
+    <label style="display:flex;gap:8px;align-items:center;margin:0;font-weight:700"><input id="trn_bb" type="checkbox"${b.bat_buoc?' checked':''} style="width:auto" onchange="trnBbDoi()"> 📌 Bài BẮT BUỘC (có hạn · tự động nhắc)</label>
     <div id="trn_bb_ct" style="${b.bat_buoc?'':'display:none;'}margin-top:8px">
       <label>Hạn hoàn thành</label><input id="trn_han" type="date" value="${b.han_hoan_thanh||''}">
-      <label>Áp dụng cho vai trò <span style="font-weight:400;color:var(--muted)">(không tick = mọi nhân viên có tài khoản)</span></label>
-      <div id="trn_vt" style="display:flex;flex-wrap:wrap;gap:4px 14px;font-size:12.5px;padding:4px 0"><span style="color:var(--muted)">Đang tải danh sách vai trò…</span></div>
       <label style="display:flex;gap:8px;align-items:center;margin-top:6px"><input id="trn_tdn" type="checkbox"${b.nhac_tu_dong===false?'':' checked'} style="width:auto"> Tự động nhắc qua Google Chat</label>
-      <div style="font-size:11.5px;color:var(--muted);margin-top:2px">8h–17h các ngày trong tuần (trừ Chủ nhật), hệ thống nhắn riêng từng người chưa thi hoặc chưa đạt: 7 ngày một lần; còn 3 ngày tới hạn hoặc quá hạn thì 2 ngày một lần (tối đa 8 lần). Người đã đạt không bị nhắc. Bấm 📣 ở danh sách bài để nhắc ngay.</div>
+      <div style="font-size:11.5px;color:var(--muted);margin-top:2px">8h–17h các ngày trong tuần (trừ Chủ nhật), hệ thống nhắc người chưa thi hoặc chưa đạt (chỉ người đã có tài khoản app): 7 ngày một lần; còn 3 ngày tới hạn hoặc quá hạn thì 2 ngày một lần (tối đa 8 lần). Người đã đạt không bị nhắc. Bấm 📣 ở danh sách bài để nhắc ngay.</div>
     </div></div>`;
 }
 function trnBbDoi(){const c=$("#trn_bb_ct"); if(c)c.style.display=$("#trn_bb").checked?'':'none';}
-async function _trnNapVaiTro(chon){
-  const box=$("#trn_vt"); if(!box)return;
-  try{window._trnVaiTro=window._trnVaiTro||await api('/dao-tao/vai-tro');}catch(e){box.textContent='Không tải được danh sách vai trò';return;}
-  const sel=new Set(chon||[]);
-  box.innerHTML=window._trnVaiTro.map(v=>`<label style="display:flex;gap:5px;align-items:center;margin:0;font-weight:400;cursor:pointer"><input type="checkbox" class="trnVt" value="${_trnEc(v.ma)}"${sel.has(v.ma)?' checked':''} style="width:auto"> ${_trnEc(v.ten)}</label>`).join('');
+function trnDtDoi(){
+  const v=(document.querySelector('input[name="trn_dt"]:checked')||{}).value, a=$("#trn_dt_vt"), n=$("#trn_dt_nv");
+  if(a)a.style.display=v==='VAI_TRO'?'':'none'; if(n)n.style.display=v==='NHAN_VIEN'?'':'none';
 }
+async function _trnNapDoiTuong(vtChon,nvChon){
+  const [vt,nv]=await Promise.all([window._trnVaiTro?Promise.resolve(window._trnVaiTro):api('/dao-tao/vai-tro').catch(()=>null),api('/dao-tao/nhan-vien').catch(()=>null)]);
+  if(vt)window._trnVaiTro=vt;
+  const bv=$("#trn_vt"), sv=new Set(vtChon||[]);
+  if(bv)bv.innerHTML=vt?vt.map(v=>`<label style="display:flex;gap:5px;align-items:center;margin:0;font-weight:400;cursor:pointer"><input type="checkbox" class="trnVt" value="${_trnEc(v.ma)}"${sv.has(v.ma)?' checked':''} style="width:auto"> ${_trnEc(v.ten)}</label>`).join(''):'Không tải được danh sách vai trò';
+  const bn=$("#trn_nv"), sn=new Set((nvChon||[]).map(Number));
+  if(bn){
+    bn.innerHTML=nv?nv.map(x=>`<label data-k="${_trnEc((x.ten+' '+(x.ma||'')+' '+(x.chuc_danh||'')).toLowerCase())}" style="display:flex;gap:6px;align-items:flex-start;margin:0;font-weight:400;cursor:pointer;font-size:12.5px"><input type="checkbox" class="trnNvCb" value="${x.id}"${sn.has(x.id)?' checked':''} onchange="trnNvDem()" style="width:auto;margin-top:2px"><span><b>${_trnEc(x.ten)}</b> <span style="color:var(--muted)">${_trnEc([x.ma,x.chuc_danh].filter(Boolean).join(' · '))}</span>${x.co_tai_khoan?'':' <span class="badge b-cho" title="Chưa có tài khoản app — cần tạo ở Cấu hình thì mới làm bài được">chưa có tài khoản</span>'}</span></label>`).join(''):'Không tải được danh sách nhân viên';
+    trnNvDem();
+  }
+}
+function trnNvLoc(){const q=String(($("#trn_nvq")||{}).value||'').toLowerCase().trim();
+  document.querySelectorAll('#trn_nv label').forEach(l=>{l.style.display=(!q||(l.dataset.k||'').includes(q))?'flex':'none';});}
+function trnNvChon(on){document.querySelectorAll('#trn_nv label').forEach(l=>{if(l.style.display==='none')return; const c=l.querySelector('.trnNvCb'); if(c)c.checked=on;}); trnNvDem();}
+function trnNvDem(){const n=document.querySelectorAll('.trnNvCb:checked').length, t=document.querySelectorAll('.trnNvCb').length;
+  const e=$("#trn_nv_dem"); if(e)e.textContent=`Đã chọn ${n} / ${t} nhân viên`;}
 function _trnDocBatBuoc(){
-  return {bat_buoc:!!($("#trn_bb")&&$("#trn_bb").checked), han:($("#trn_han")||{}).value||'',
-    vt:[...document.querySelectorAll('.trnVt:checked')].map(c=>c.value), tdn:!!($("#trn_tdn")||{}).checked};
+  return {dt:(document.querySelector('input[name="trn_dt"]:checked')||{}).value||'TAT_CA',
+    vt:[...document.querySelectorAll('.trnVt:checked')].map(c=>c.value), nv:[...document.querySelectorAll('.trnNvCb:checked')].map(c=>+c.value),
+    bat_buoc:!!($("#trn_bb")&&$("#trn_bb").checked), han:($("#trn_han")||{}).value||'', tdn:!!($("#trn_tdn")||{}).checked};
+}
+function _trnKiemDoiTuong(bb){
+  if(bb.dt==='VAI_TRO'&&!bb.vt.length){toast('Tick ít nhất một vai trò, hoặc chọn «Tất cả nhân viên»','err');return false;}
+  if(bb.dt==='NHAN_VIEN'&&!bb.nv.length){toast('Chọn ít nhất một nhân viên, hoặc chọn «Tất cả nhân viên»','err');return false;}
+  return true;
 }
 
 function trnThemForm(){
@@ -19413,19 +19448,22 @@ function trnThemForm(){
     ${_trnFormBatBuoc(null)}
     <button class="btn-sm" style="margin-top:14px" id="trn_ok" onclick="trnThemLuu()">⬆ Tải lên</button>`);
   const f=$("#trn_f"); f.onchange=()=>{const t=$("#trn_td"); if(!t.value&&f.files[0])t.value=f.files[0].name.replace(/\.[^.]+$/,'').replace(/_+/g,' ');};
-  _trnNapVaiTro([]);
+  _trnNapDoiTuong([],[]);
 }
 async function trnThemLuu(){
   const td=$("#trn_td").value.trim(), f=$("#trn_f").files[0];
   if(!td)return toast('Nhập tiêu đề bài','err'); if(!f)return toast('Chọn tệp bài','err');
+  const bb=_trnDocBatBuoc(); if(!_trnKiemDoiTuong(bb))return;
   const fd=new FormData(); fd.append('tieu_de',td); fd.append('loai',$("#trn_loai").value); fd.append('mo_ta',$("#trn_mt").value);
   const dd=$("#trn_dd").value; if(dd!=='')fd.append('diem_dat',dd);
-  const bb=_trnDocBatBuoc(); fd.append('bat_buoc',bb.bat_buoc?'true':'false');
-  if(bb.bat_buoc){if(bb.han)fd.append('han_hoan_thanh',bb.han); fd.append('vai_tro_ap_dung',bb.vt.join(',')); fd.append('nhac_tu_dong',bb.tdn?'true':'false');}
+  fd.append('bat_buoc',bb.bat_buoc?'true':'false');
+  if(bb.dt==='VAI_TRO')fd.append('vai_tro_ap_dung',bb.vt.join(','));
+  if(bb.dt==='NHAN_VIEN')fd.append('nhan_vien_ap_dung',bb.nv.join(','));
+  if(bb.bat_buoc){if(bb.han)fd.append('han_hoan_thanh',bb.han); fd.append('nhac_tu_dong',bb.tdn?'true':'false');}
   fd.append('hien',$("#trn_hien").checked?'true':'false'); fd.append('file',f);
   const nut=$("#trn_ok"); nut.disabled=true; nut.textContent='Đang tải lên…';
   try{await apiUpload('/dao-tao/bai',fd);}catch(e){nut.disabled=false;nut.textContent='⬆ Tải lên';return toast(e.detail||e.message,'err');}
-  document.getElementById('ktModal')?.remove(); toast('✅ Đã lưu bài lên Training','ok'); trnRender();
+  document.getElementById('ktModal')?.remove(); toast('✅ Đã lưu bài lên Training','ok'); trnRender(); trnNhacMenu();
 }
 function trnSuaForm(id){
   const b=(window._trnBai||[]).find(x=>x.id===id); if(!b)return;
@@ -19437,40 +19475,66 @@ function trnSuaForm(id){
     <label style="display:flex;gap:8px;align-items:center;margin-top:8px"><input id="trn_hien" type="checkbox"${b.hien?' checked':''} style="width:auto"> Hiện cho nhân viên</label>
     ${_trnFormBatBuoc(b)}
     <button class="btn-sm" style="margin-top:14px" onclick="trnSuaLuu(${id})">Lưu</button>`);
-  _trnNapVaiTro(b.vai_tro_ap_dung||[]);
+  _trnNapDoiTuong(b.vai_tro_ap_dung||[],b.nhan_vien_ap_dung||[]);
 }
 async function trnSuaLuu(id){
-  const dd=$("#trn_dd").value, bb=_trnDocBatBuoc();
-  const body={tieu_de:$("#trn_td").value,loai:$("#trn_loai").value,mo_ta:$("#trn_mt").value,hien:$("#trn_hien").checked,bat_buoc:bb.bat_buoc};
+  const dd=$("#trn_dd").value, bb=_trnDocBatBuoc(); if(!_trnKiemDoiTuong(bb))return;
+  const body={tieu_de:$("#trn_td").value,loai:$("#trn_loai").value,mo_ta:$("#trn_mt").value,hien:$("#trn_hien").checked,bat_buoc:bb.bat_buoc,
+    vai_tro_ap_dung:bb.dt==='VAI_TRO'?bb.vt:[],nhan_vien_ap_dung:bb.dt==='NHAN_VIEN'?bb.nv:[]};
   if(dd==='')body.xoa_diem_dat=true; else body.diem_dat=Number(dd);
-  if(bb.bat_buoc){ if(bb.han)body.han_hoan_thanh=bb.han; else body.xoa_han=true; body.vai_tro_ap_dung=bb.vt; body.nhac_tu_dong=bb.tdn; }
+  if(bb.bat_buoc){ if(bb.han)body.han_hoan_thanh=bb.han; else body.xoa_han=true; body.nhac_tu_dong=bb.tdn; }
   try{await api('/dao-tao/bai/'+id,{method:'PUT',body:JSON.stringify(body)});}catch(e){return toast(e.detail||e.message,'err');}
   document.getElementById('ktModal')?.remove(); toast('Đã lưu','ok'); trnRender(); trnNhacMenu();
 }
 
-/* ----- 📣 Nhắc nhân viên chưa thi / chưa đạt: xem trước danh sách → tick → gửi ----- */
+/* ----- 📣 Nhắc nhân viên: danh sách ĐỦ nhân viên thuộc đối tượng → tìm / tick → gửi ----- */
 async function trnNhacForm(id){
   let r; try{r=await api('/dao-tao/bai/'+id+'/nhac-xem');}catch(e){return toast(e.detail||e.message,'err');}
   window._trnNhac={id:id,r:r};
-  const ch=r.chat, b=r.bai;
+  const ch=r.chat, b=r.bai, ds=r.nhan_vien||[];
   const kenh=!ch.dang_bat?`<div style="background:#fef2f2;color:#991b1b;padding:7px 11px;border-radius:8px;font-size:12.5px">⚠ <b>Google Chat chưa bật</b> trên máy chủ (chế độ ${_trnEc(ch.che_do)}) — chưa gửi được tin. Danh sách vẫn dùng để theo dõi; nhân viên vẫn thấy dải nhắc ở tab Training và chấm đỏ ở menu.</div>`
     :ch.nhan_rieng?'<div style="color:#166534;font-size:12.5px">✅ Nhắn riêng từng người qua Google Chat.</div>'
     :`<div style="background:#fffbeb;color:#92400e;padding:7px 11px;border-radius:8px;font-size:12.5px">ℹ Chat đang ở chế độ <b>${_trnEc(ch.che_do)}</b> nên <b>không nhắn riêng được</b>: hệ thống đăng <b>một tin gộp vào phòng chung</b>, chỉ ghi <b>tên</b> những người được tick — <b>không nêu điểm</b> của ai. Muốn nhắn riêng từng người cần chuyển Chat sang chế độ APP (Render).</div>`;
-  const hang=x=>`<tr><td><input type="checkbox" class="trnNc" value="${x.nhan_vien_id}"${(x.co_email||!ch.nhan_rieng)?' checked':' disabled'} style="width:auto"></td>
-    <td><b>${_trnEc(x.ten)}</b><div style="font-size:11px;color:var(--muted)">${_trnEc(x.ma||'')}</div></td>
-    <td>${x.tinh_trang==='CHUA_DAT'?`<span class="badge b-cho">chưa đạt</span> <span style="font-size:12px">${_trnDiem(x.diem_gan_nhat)} · thi ${x.so_lan_thi} lần</span>`:'<span class="badge b-tc">chưa thi</span>'}</td>
-    <td style="font-size:12px">${x.so_lan_nhac?`${x.so_lan_nhac} lần · gần nhất ${_trnNgayGio(x.nhac_gan_nhat)}`:'<span style="color:var(--muted)">chưa nhắc</span>'}</td>
-    <td>${(x.co_email||!ch.nhan_rieng)?'':'<span class="badge b-tc" title="Hồ sơ nhân viên chưa có email nên không nhắn Chat riêng được">thiếu email</span>'}</td></tr>`;
-  const tk=r.thieu_tai_khoan||[];
+  const tt=x=>x.tinh_trang==='XONG'?'<span class="badge b-ok">✔ đã xong</span>'
+    :x.tinh_trang==='CHUA_DAT'?`<span class="badge b-cho">chưa đạt</span> <span style="font-size:12px">${_trnDiem(x.diem_gan_nhat)} · thi ${x.so_lan_thi} lần</span>`:'<span class="badge b-tc">chưa thi</span>';
+  const hang=x=>{const xong=x.tinh_trang==='XONG', thieuMail=ch.nhan_rieng&&!x.co_email, khoa=xong||thieuMail, tick=(!khoa&&x.co_tai_khoan);
+    return `<tr data-xong="${xong?1:0}" data-tk="${x.co_tai_khoan?1:0}" data-k="${_trnEc((x.ten+' '+(x.ma||'')+' '+(x.chuc_danh||'')).toLowerCase())}"${xong?' style="opacity:.6"':''}>
+      <td><input type="checkbox" class="trnNc" value="${x.nhan_vien_id}"${tick?' checked':''}${khoa?' disabled':''} onchange="trnNcDem()" style="width:auto"></td>
+      <td><b>${_trnEc(x.ten)}</b><div style="font-size:11px;color:var(--muted)">${_trnEc([x.ma,x.chuc_danh].filter(Boolean).join(' · '))}</div></td>
+      <td>${x.co_tai_khoan?'<span style="color:#16a34a" title="Đã có tài khoản app">✔</span>':'<span class="badge b-cho" title="Chưa có tài khoản app — cần tạo ở Cấu hình thì mới làm bài được">chưa có tài khoản</span>'}</td>
+      <td>${tt(x)}</td>
+      <td style="font-size:12px">${x.so_lan_nhac?`${x.so_lan_nhac} lần · gần nhất ${_trnNgayGio(x.nhac_gan_nhat)}`:'<span style="color:var(--muted)">chưa nhắc</span>'}</td>
+      <td>${thieuMail?'<span class="badge b-tc" title="Hồ sơ nhân viên chưa có email nên không nhắn Chat riêng được">thiếu email</span>':''}</td></tr>`;};
+  const chuaTk=ds.filter(x=>!x.co_tai_khoan).length;
   _ktModal('📣 Nhắc nhân viên — '+_trnEc(b.tieu_de),`
-    <div style="font-size:13px;margin-bottom:6px"><b>${r.can_nhac.length}</b> người cần nhắc · <b>${r.da_xong}</b> người đã xong${b.han?` · hạn ${b.han.slice(8,10)}/${b.han.slice(5,7)}/${b.han.slice(0,4)}`:''}${b.bat_buoc?'':' · <span style="color:var(--muted)">(bài chưa đặt «bắt buộc» — vẫn nhắc được)</span>'}</div>
-    ${tk.length?`<div style="font-size:12px;color:var(--muted);margin-bottom:6px" title="${_trnEc(tk.join(', '))}">${tk.length} nhân viên chưa có tài khoản app nên chưa thi được (rê chuột xem tên) · cần tạo tài khoản ở Cấu hình.</div>`:''}
-    ${r.ngoai_vai_tro?`<div style="font-size:12px;color:var(--muted);margin-bottom:6px">${r.ngoai_vai_tro} người ngoài vai trò áp dụng của bài nên không nhắc.</div>`:''}
+    <div style="font-size:13px;margin-bottom:6px"><b>${ds.length}</b> nhân viên trong đối tượng · <b>${r.da_xong}</b> đã xong · <b>${r.so_can_nhac}</b> cần nhắc${chuaTk?` · <span title="Chưa có tài khoản thì chưa vào app làm bài được — tạo ở Cấu hình">${chuaTk} chưa có tài khoản app</span>`:''}${b.han?` · hạn ${b.han.slice(8,10)}/${b.han.slice(5,7)}/${b.han.slice(0,4)}`:''}${b.bat_buoc?'':' · <span style="color:var(--muted)">(bài chưa đặt «bắt buộc» — vẫn nhắc được)</span>'}</div>
+    ${r.ngoai_doi_tuong?`<div style="font-size:12px;color:var(--muted);margin-bottom:6px">${r.ngoai_doi_tuong} nhân viên nằm ngoài đối tượng của bài nên không hiện ở đây — sửa đối tượng bằng nút ✏️ ở danh sách bài.</div>`:''}
     ${kenh}
-    <table class="trnTbl" style="table-layout:auto;margin-top:8px"><thead><tr><th style="width:28px"></th><th>Nhân viên</th><th>Tình trạng</th><th>Đã nhắc</th><th></th></tr></thead>
-    <tbody>${r.can_nhac.map(hang).join('')||'<tr><td colspan="5" class="empty" style="padding:16px">🎉 Mọi người thuộc đối tượng đều đã hoàn thành bài này.</td></tr>'}</tbody></table>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:8px 0 4px">
+      <input id="trn_ncq" placeholder="🔍 Tìm tên, mã NV…" oninput="trnNcLoc()" style="max-width:200px;padding:5px 9px;font-size:12.5px">
+      <label style="display:flex;gap:5px;align-items:center;margin:0;font-weight:400;font-size:12.5px;cursor:pointer"><input type="checkbox" id="trn_ncAn" onchange="trnNcLoc()" style="width:auto"> ẩn người đã xong</label>
+      <button type="button" class="btn-sm ghost" onclick="trnNcChon('tk')" title="Tick những người chưa xong và đã có tài khoản app">Chọn người chưa xong</button>
+      <button type="button" class="btn-sm ghost" onclick="trnNcChon('tat')" title="Tick cả người chưa có tài khoản app — tin sẽ nhắc họ nhờ quản trị tạo tài khoản">Chọn cả người chưa có tài khoản</button>
+      <button type="button" class="btn-sm ghost" onclick="trnNcChon('bo')">Bỏ chọn</button></div>
+    <div style="max-height:330px;overflow:auto"><table class="trnTbl" style="table-layout:auto"><thead><tr><th style="width:28px"></th><th>Nhân viên</th><th>Tài khoản</th><th>Tình trạng</th><th>Đã nhắc</th><th></th></tr></thead>
+    <tbody id="trn_nc_body">${ds.map(hang).join('')||'<tr><td colspan="6" class="empty" style="padding:16px">Không có nhân viên nào thuộc đối tượng của bài.</td></tr>'}</tbody></table></div>
     <div style="font-size:11.5px;color:var(--muted);margin-top:6px">Tin nhắn nêu tên bài, hạn và cách mở bài. Người vừa được nhắc trong 12 giờ qua được bỏ qua để khỏi nhắn dồn.</div>
-    ${r.can_nhac.length?`<button class="btn-sm" style="margin-top:12px" id="trn_nc_ok" onclick="trnNhacGui()"${ch.dang_bat?'':' disabled title="Google Chat chưa bật"'}>📣 Gửi nhắc cho người đã chọn</button>`:''}`);
+    ${r.so_can_nhac?`<button class="btn-sm" style="margin-top:12px" id="trn_nc_ok" onclick="trnNhacGui()"${ch.dang_bat?'':' disabled title="Google Chat chưa bật"'}>📣 Gửi nhắc</button>`:''}`);
+  trnNcDem();
+}
+function trnNcLoc(){
+  const q=String(($("#trn_ncq")||{}).value||'').toLowerCase().trim(), an=!!($("#trn_ncAn")||{}).checked;
+  document.querySelectorAll('#trn_nc_body tr[data-k]').forEach(tr=>{tr.style.display=((!q||tr.dataset.k.includes(q))&&!(an&&tr.dataset.xong==='1'))?'':'none';});
+}
+function trnNcChon(m){
+  document.querySelectorAll('#trn_nc_body tr[data-k]').forEach(tr=>{
+    if(tr.style.display==='none')return; const c=tr.querySelector('.trnNc'); if(!c||c.disabled)return;
+    c.checked=m==='bo'?false:(m==='tat'?true:tr.dataset.tk==='1');});
+  trnNcDem();
+}
+function trnNcDem(){
+  const n=document.querySelectorAll('.trnNc:checked').length, nut=$("#trn_nc_ok");
+  if(nut)nut.textContent=n?`📣 Gửi nhắc cho ${n} người đã chọn`:'📣 Gửi nhắc';
 }
 async function trnNhacGui(){
   const w=window._trnNhac; if(!w)return;
@@ -19479,7 +19543,7 @@ async function trnNhacGui(){
   if(!confirm('Gửi nhắc qua Google Chat cho '+ids.length+' người chưa hoàn thành bài «'+w.r.bai.tieu_de+'»?\n\n'+(w.r.chat.nhan_rieng?'Mỗi người nhận một tin riêng.':'Hệ thống đăng MỘT tin gộp vào phòng chung, chỉ ghi tên, không nêu điểm.')+' Người vừa được nhắc trong 12 giờ qua sẽ được bỏ qua.'))return;
   const nut=$("#trn_nc_ok"); nut.disabled=true; nut.textContent='Đang gửi…';
   let k; try{k=await api('/dao-tao/bai/'+w.id+'/nhac',{method:'POST',body:JSON.stringify({nhan_vien_ids:ids})});}
-  catch(e){nut.disabled=false;nut.textContent='📣 Gửi nhắc cho người đã chọn';return toast(e.detail||e.message,'err');}
+  catch(e){nut.disabled=false;trnNcDem();return toast(e.detail||e.message,'err');}
   document.getElementById('ktModal')?.remove();
   const p=[`Đã nhắc ${k.da_gui} người`];
   if(k.bo_qua_gan)p.push(`${k.bo_qua_gan} người vừa được nhắc nên bỏ qua`);

@@ -1808,6 +1808,7 @@ class TrnBai(Base):
     han_hoan_thanh: Mapped[date | None] = mapped_column(Date, nullable=True)
     vai_tro_ap_dung: Mapped[str | None] = mapped_column(Text, nullable=True)       # mã vai trò cách nhau dấu phẩy; trống = tất cả
     nhac_tu_dong: Mapped[bool] = mapped_column(Boolean, default=True)
+    nhan_vien_ap_dung: Mapped[str | None] = mapped_column(Text, nullable=True)     # mig 152: id nhân viên cách nhau dấu phẩy
 
 
 class TrnNhac(Base):
