@@ -7,6 +7,7 @@
   QUAN_TRI = xóa bài (chưa có kết quả), xóa kết quả thi."""
 import io
 import json
+from datetime import date, datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
@@ -14,7 +15,7 @@ from sqlalchemy.orm import Session
 from ..database import get_db
 from ..rbac import yeu_cau, muc_cua, THU_BAC
 from ..audit import ghi_audit
-from ..models import NguoiDung, NhanVien, TrnBai, TrnKetQua
+from ..models import NguoiDung, NhanVien, TrnBai, TrnKetQua, TrnNhac, VaiTro
 from ..luu_tru import luu, xoa, doc, ton_tai, phan_hoi_tai, dung_r2
 from ..nhac_viec_service import gio_hien_tai
 
@@ -60,6 +61,17 @@ def _f(v):
     return float(v) if v is not None else None
 
 
+def _ds_vai_tro(b: TrnBai) -> list:
+    return [x.strip() for x in (b.vai_tro_ap_dung or "").split(",") if x.strip()]
+
+
+def _chuan_vai_tro(db: Session, ds) -> str | None:
+    """Danh sách mã vai trò gửi lên → chuỗi lưu (bỏ mã không tồn tại); rỗng = áp dụng cho tất cả."""
+    co = {v.ma for v in db.query(VaiTro).all()}
+    ok = [x.strip() for x in (ds or []) if x and x.strip() in co]
+    return ",".join(dict.fromkeys(ok)) or None
+
+
 def _ten_tao(db: Session, nd_id):
     if not nd_id:
         return None
@@ -73,6 +85,9 @@ def _bai_dict(b: TrnBai, ten_tao=None, thong_ke=None, cua_toi=None) -> dict:
     return {"id": b.id, "tieu_de": b.tieu_de, "loai": b.loai, "loai_ten": LOAI_BAI.get(b.loai, b.loai), "mo_ta": b.mo_ta,
             "ten_file": b.ten_file, "loai_tep": b.loai_tep, "kich_thuoc": int(b.kich_thuoc or 0), "phien_ban": b.phien_ban or 1,
             "hien": bool(b.hien), "diem_dat": _f(b.diem_dat), "nguoi_tao": ten_tao,
+            "bat_buoc": bool(b.bat_buoc), "han_hoan_thanh": str(b.han_hoan_thanh) if b.han_hoan_thanh else None,
+            "so_ngay_con": ((b.han_hoan_thanh - gio_hien_tai().date()).days if b.han_hoan_thanh else None),
+            "vai_tro_ap_dung": _ds_vai_tro(b), "nhac_tu_dong": bool(b.nhac_tu_dong),
             "tao_luc": str(b.tao_luc)[:16] if b.tao_luc else None,
             "cap_nhat_luc": str(b.cap_nhat_luc)[:16] if b.cap_nhat_luc else None,
             "co_thi": b.loai in LOAI_CO_THI,
@@ -121,8 +136,11 @@ def ds_bai(db: Session = Depends(get_db), nd: NguoiDung = Depends(yeu_cau(MODULE
             if dat:
                 t["so_dat"] += 1
             if ndid == nd.id:
-                c = ct.setdefault(bid, {"so_lan": 0, "tot_nhat": None, "gan_nhat": None, "dat": False, "ngay": None, "_nop": None})
+                c = ct.setdefault(bid, {"so_lan": 0, "tot_nhat": None, "gan_nhat": None, "dat": False, "khong_nguong": False,
+                                        "ngay": None, "_nop": None})
                 c["so_lan"] += 1
+                if dat is None:
+                    c["khong_nguong"] = True
                 d = float(diem)
                 c["tot_nhat"] = d if c["tot_nhat"] is None else max(c["tot_nhat"], d)
                 if dat:
@@ -130,6 +148,7 @@ def ds_bai(db: Session = Depends(get_db), nd: NguoiDung = Depends(yeu_cau(MODULE
                 if c["_nop"] is None or (nop and nop >= c["_nop"]):
                     c["_nop"], c["gan_nhat"], c["ngay"] = nop, d, (str(nop)[:10] if nop else None)
     out = []
+    ma_vt = nd.vai_tro.ma if getattr(nd, "vai_tro", None) is not None else None
     for b in bais:
         t = tk.get(b.id)
         thong_ke = ({"so_luot": t["so_luot"], "so_nguoi": len(t["_nguoi"]), "so_dat": t["so_dat"]} if t
@@ -137,7 +156,16 @@ def ds_bai(db: Session = Depends(get_db), nd: NguoiDung = Depends(yeu_cau(MODULE
         c = ct.get(b.id)
         if c:
             c.pop("_nop", None)
-        out.append(_bai_dict(b, _ten_tao(db, b.nguoi_tao), thong_ke if ql else None, c))
+        o = _bai_dict(b, _ten_tao(db, b.nguoi_tao), thong_ke if ql else None, c)
+        # 📌 bài bắt buộc mà CHÍNH người xem phải làm và chưa xong
+        vt = _ds_vai_tro(b)
+        o["can_lam"] = bool(b.bat_buoc and b.hien and (not vt or ma_vt in vt) and not _da_xong_cua(c))
+        if ql and b.bat_buoc:
+            try:
+                o["chua_xong"] = len(_can_nhac_ds(db, b)["can_nhac"])
+            except Exception:
+                o["chua_xong"] = None
+        out.append(o)
     return out
 
 
@@ -161,6 +189,8 @@ async def _doc_tep_tai_len(file: UploadFile):
 @router.post("/bai", status_code=201)
 async def them_bai(tieu_de: str = Form(...), loai: str = Form("HUAN_LUYEN"), mo_ta: str = Form(None),
                    diem_dat: float = Form(None), hien: bool = Form(True), file: UploadFile = File(...),
+                   bat_buoc: bool = Form(False), han_hoan_thanh: date = Form(None), vai_tro_ap_dung: str = Form(None),
+                   nhac_tu_dong: bool = Form(True),
                    db: Session = Depends(get_db), nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
     """Tải LÊN một bài huấn luyện / bài thi."""
     if loai not in LOAI_BAI:
@@ -174,7 +204,9 @@ async def them_bai(tieu_de: str = Form(...), loai: str = Form("HUAN_LUYEN"), mo_
     ref = luu(data, "dao_tao", "bai", file.filename, ctype)
     b = TrnBai(tieu_de=tieu_de[:250], loai=loai, mo_ta=(mo_ta or "").strip() or None, ten_file=file.filename[:250],
                loai_tep=loai_tep, noi_dung_loai=ctype[:120], duong_dan=ref, kich_thuoc=len(data), phien_ban=1,
-               hien=bool(hien), diem_dat=diem_dat, nguoi_tao=nd.id, tao_luc=gio_hien_tai())
+               hien=bool(hien), diem_dat=diem_dat, nguoi_tao=nd.id, tao_luc=gio_hien_tai(),
+               bat_buoc=bool(bat_buoc), han_hoan_thanh=han_hoan_thanh, nhac_tu_dong=bool(nhac_tu_dong),
+               vai_tro_ap_dung=_chuan_vai_tro(db, (vai_tro_ap_dung or "").split(",")))
     db.add(b)
     db.flush()
     ghi_audit(db, nd.id, "TAO", "trn_bai", b.id, moi={"tieu_de": b.tieu_de, "loai": loai, "file": b.ten_file, "kb": round(len(data) / 1024)})
@@ -189,6 +221,11 @@ class BaiSua(BaseModel):
     diem_dat: float | None = Field(None, ge=0, le=100)
     xoa_diem_dat: bool = False
     hien: bool | None = None
+    bat_buoc: bool | None = None
+    han_hoan_thanh: date | None = None
+    xoa_han: bool = False
+    vai_tro_ap_dung: list[str] | None = None            # [] = áp dụng cho tất cả
+    nhac_tu_dong: bool | None = None
 
 
 @router.put("/bai/{bai_id}")
@@ -213,9 +250,21 @@ def sua_bai(bai_id: int, data: BaiSua, db: Session = Depends(get_db), nd: NguoiD
         b.diem_dat = data.diem_dat
     if data.hien is not None:
         b.hien = bool(data.hien)
+    if data.bat_buoc is not None:
+        b.bat_buoc = bool(data.bat_buoc)
+    if data.xoa_han:
+        b.han_hoan_thanh = None
+    elif data.han_hoan_thanh is not None:
+        b.han_hoan_thanh = data.han_hoan_thanh
+    if data.vai_tro_ap_dung is not None:
+        b.vai_tro_ap_dung = _chuan_vai_tro(db, data.vai_tro_ap_dung)
+    if data.nhac_tu_dong is not None:
+        b.nhac_tu_dong = bool(data.nhac_tu_dong)
     b.cap_nhat_luc = gio_hien_tai()
     ghi_audit(db, nd.id, "SUA", "trn_bai", b.id, cu=cu,
-              moi={"tieu_de": b.tieu_de, "loai": b.loai, "hien": b.hien, "diem_dat": _f(b.diem_dat)})
+              moi={"tieu_de": b.tieu_de, "loai": b.loai, "hien": b.hien, "diem_dat": _f(b.diem_dat), "bat_buoc": b.bat_buoc,
+                   "han": str(b.han_hoan_thanh) if b.han_hoan_thanh else None, "vai_tro": b.vai_tro_ap_dung,
+                   "nhac_tu_dong": b.nhac_tu_dong})
     db.commit()
     return _bai_dict(b, _ten_tao(db, b.nguoi_tao))
 
@@ -295,6 +344,205 @@ def xoa_bai(bai_id: int, db: Session = Depends(get_db), nd: NguoiDung = Depends(
         except Exception:
             pass
     return {"ok": True}
+
+
+# ================================================================== NHẮC NHÂN VIÊN CHƯA THI / CHƯA ĐẠT
+CHU_KY_NHAC = 7              # ngày giữa 2 lần nhắc tự động
+CHU_KY_NHAC_GAN_HAN = 2      # còn ≤ 3 ngày tới hạn hoặc đã quá hạn → 2 ngày một lần
+TOI_DA_NHAC_TU_DONG = 8      # mỗi người mỗi bài tối đa 8 lần nhắc tự động
+GAP_TOI_THIEU_TAY_GIO = 12   # nhắc tay: bỏ qua người vừa được nhắc trong 12 giờ qua (tránh dồn tin)
+
+
+def _da_xong_cua(c) -> bool:
+    """c = {"so_lan", "dat", ...} điểm của một người ở một bài: đã XONG khi có lượt không «chưa đạt»
+    (đạt, hoặc bài không có ngưỡng nên chỉ cần đã thi)."""
+    return bool(c and c.get("so_lan") and (c.get("dat") or c.get("khong_nguong")))
+
+
+def _can_nhac_ds(db: Session, b: TrnBai) -> dict:
+    """Ai thuộc đối tượng của bài, ai đã xong, ai cần nhắc. Đối tượng = nhân viên ĐANG LÀM có tài khoản (đúng vai trò nếu bài chọn vai trò).
+    Nhân viên thiếu tài khoản không vào app để thi được → liệt kê riêng; thiếu email → không nhắn Google Chat được."""
+    vt = _ds_vai_tro(b)
+    nvs = (db.query(NhanVien, NguoiDung, VaiTro).outerjoin(NguoiDung, NguoiDung.id == NhanVien.nguoi_dung_id)
+           .outerjoin(VaiTro, VaiTro.id == NguoiDung.vai_tro_id)
+           .filter(NhanVien.trang_thai == "DANG_LAM").order_by(NhanVien.ho_ten).all())
+    kq = {}
+    for r in db.query(TrnKetQua).filter(TrnKetQua.bai_id == b.id).order_by(TrnKetQua.nop_luc, TrnKetQua.id).all():
+        c = kq.setdefault(r.nguoi_dung_id, {"so_lan": 0, "dat": False, "khong_nguong": False, "gan_nhat": None})
+        c["so_lan"] += 1
+        if r.dat:
+            c["dat"] = True
+        if r.dat is None:
+            c["khong_nguong"] = True
+        c["gan_nhat"] = float(r.diem)
+    nhac = {}
+    for n in db.query(TrnNhac).filter(TrnNhac.bai_id == b.id).order_by(TrnNhac.tao_luc).all():
+        o = nhac.setdefault(n.nhan_vien_id, {"so_lan": 0, "so_tu_dong": 0, "gan_nhat": None})
+        if n.ket_qua == "OK":
+            o["so_lan"] += 1
+            if n.nguon == "TU_DONG":
+                o["so_tu_dong"] += 1
+            o["gan_nhat"] = n.tao_luc
+    can_nhac, da_xong, thieu_tk, ngoai_vai_tro = [], 0, [], 0
+    for nv, u, v in nvs:
+        if u is None or u.trang_thai != "HOAT_DONG":
+            thieu_tk.append(nv.ho_ten)
+            continue
+        if vt and (v is None or v.ma not in vt):
+            ngoai_vai_tro += 1
+            continue
+        c = kq.get(u.id)
+        if _da_xong_cua(c):
+            da_xong += 1
+            continue
+        o = nhac.get(nv.id) or {"so_lan": 0, "so_tu_dong": 0, "gan_nhat": None}
+        can_nhac.append({"nhan_vien_id": nv.id, "ten": nv.ho_ten, "ma": nv.ma, "email": nv.email,
+                         "co_email": bool((nv.email or "").strip()),
+                         "tinh_trang": "CHUA_DAT" if (c and c["so_lan"]) else "CHUA_THI",
+                         "diem_gan_nhat": c["gan_nhat"] if c else None, "so_lan_thi": c["so_lan"] if c else 0,
+                         "so_lan_nhac": o["so_lan"], "so_tu_dong": o["so_tu_dong"],
+                         "nhac_gan_nhat": str(o["gan_nhat"])[:16] if o["gan_nhat"] else None, "_nhac_dt": o["gan_nhat"]})
+    return {"can_nhac": can_nhac, "da_xong": da_xong, "thieu_tai_khoan": thieu_tk, "ngoai_vai_tro": ngoai_vai_tro}
+
+
+def _noi_dung_nhac(b: TrnBai, x: dict, hom_nay: date) -> str:
+    d = [f"🎓 *Nhắc thi — {b.tieu_de}* (Rev {b.phien_ban or 1})"]
+    if x["tinh_trang"] == "CHUA_DAT":
+        nguong = f" (cần từ {float(b.diem_dat):g}%)" if b.diem_dat is not None else ""
+        d.append(f"Chào {x['ten']}, bạn đã thi {x['so_lan_thi']} lần, điểm gần nhất {x['diem_gan_nhat']:g}% chưa đạt{nguong}. Mời bạn ôn lại và thi lại.")
+    else:
+        d.append(f"Chào {x['ten']}, bạn chưa làm bài này.")
+    if b.han_hoan_thanh:
+        con = (b.han_hoan_thanh - hom_nay).days
+        tinh = "⚠️ *ĐÃ QUÁ HẠN*" if con < 0 else ("hôm nay là ngày cuối" if con == 0 else f"còn {con} ngày")
+        d.append(f"• Hạn hoàn thành: {b.han_hoan_thanh.strftime('%d/%m/%Y')} ({tinh})")
+    d.append("• Cách làm: mở app SVWS → Nội bộ → Training → bấm ▶ Mở ở bài này, làm và nộp bài, điểm tự lưu.")
+    return "\n".join(d)
+
+
+def _gui_nhac(db: Session, b: TrnBai, ds: list, nguon: str, nguoi_gui=None) -> dict:
+    """Gửi nhắc Google Chat cho từng người trong ds (kết quả của _can_nhac_ds), ghi nhật ký. Không ném lỗi chat ra ngoài."""
+    from ..chat_gateway import lay_chat_provider, dang_bat
+    from ..nhac_viec_service import gui_toi_nguoi
+    tong = {"da_gui": 0, "loi": [], "thieu_email": [], "bo_qua_gan": 0}
+    if not dang_bat():
+        tong["loi"].append("Google Chat chưa được bật trên máy chủ (đang ở chế độ DEMO) nên chưa gửi được.")
+        return tong
+    prov = lay_chat_provider()
+    now = gio_hien_tai()
+    for x in ds:
+        if not x["co_email"]:
+            tong["thieu_email"].append(x["ten"])
+            continue
+        if nguon == "TAY" and x.get("_nhac_dt") and (now - x["_nhac_dt"]).total_seconds() < GAP_TOI_THIEU_TAY_GIO * 3600:
+            tong["bo_qua_gan"] += 1
+            continue
+        try:
+            kq = gui_toi_nguoi(db, prov, x["email"], _noi_dung_nhac(b, x, now.date()))
+        except Exception as e:                                      # noqa: BLE001
+            kq = {"da_gui": False, "loi": f"{type(e).__name__}: {str(e)[:120]}"}
+        ok = bool(kq.get("da_gui"))
+        db.add(TrnNhac(bai_id=b.id, nhan_vien_id=x["nhan_vien_id"], nguon=nguon, ket_qua="OK" if ok else "LOI",
+                       loi=None if ok else str(kq.get("loi") or "")[:500] or None, nguoi_gui=nguoi_gui, tao_luc=now))
+        if ok:
+            tong["da_gui"] += 1
+        else:
+            tong["loi"].append(f"{x['ten']}: {kq.get('loi') or 'không gửi được'}")
+    db.commit()
+    return tong
+
+
+@router.get("/vai-tro")
+def ds_vai_tro(db: Session = Depends(get_db), nd: NguoiDung = Depends(yeu_cau(MODULE, "XEM"))):
+    """Các vai trò để chọn «áp dụng cho» ở bài bắt buộc."""
+    return [{"ma": v.ma, "ten": v.ten} for v in db.query(VaiTro).order_by(VaiTro.id).all()]
+
+
+@router.get("/can-lam")
+def can_lam(db: Session = Depends(get_db), nd: NguoiDung = Depends(yeu_cau(MODULE, "XEM"))):
+    """Bài BẮT BUỘC mà người đang đăng nhập chưa hoàn thành — cho dấu chấm đỏ ở menu và dải nhắc đầu tab."""
+    ma_vt = nd.vai_tro.ma if getattr(nd, "vai_tro", None) is not None else None
+    hom_nay = gio_hien_tai().date()
+    out = []
+    for b in db.query(TrnBai).filter(TrnBai.bat_buoc.is_(True), TrnBai.hien.is_(True)).order_by(TrnBai.han_hoan_thanh, TrnBai.id).all():
+        vt = _ds_vai_tro(b)
+        if vt and ma_vt not in vt:
+            continue
+        rs = db.query(TrnKetQua).filter(TrnKetQua.bai_id == b.id, TrnKetQua.nguoi_dung_id == nd.id).order_by(TrnKetQua.nop_luc, TrnKetQua.id).all()
+        c = {"so_lan": len(rs), "dat": any(r.dat for r in rs), "khong_nguong": any(r.dat is None for r in rs),
+             "gan_nhat": float(rs[-1].diem) if rs else None}
+        if _da_xong_cua(c):
+            continue
+        out.append({"bai_id": b.id, "tieu_de": b.tieu_de, "han": str(b.han_hoan_thanh) if b.han_hoan_thanh else None,
+                    "so_ngay_con": (b.han_hoan_thanh - hom_nay).days if b.han_hoan_thanh else None,
+                    "tinh_trang": "CHUA_DAT" if rs else "CHUA_THI", "diem_gan_nhat": c["gan_nhat"], "diem_dat": _f(b.diem_dat)})
+    return out
+
+
+@router.get("/bai/{bai_id}/nhac-xem")
+def nhac_xem(bai_id: int, db: Session = Depends(get_db), nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    """XEM TRƯỚC danh sách người sẽ được nhắc (chưa gửi gì): chưa thi / đã thi chưa đạt, đã nhắc mấy lần, thiếu email / tài khoản."""
+    from ..chat_gateway import lay_chat_provider, dang_bat
+    b = db.get(TrnBai, bai_id)
+    if b is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy bài")
+    r = _can_nhac_ds(db, b)
+    for x in r["can_nhac"]:
+        x.pop("_nhac_dt", None)
+        x.pop("email", None)
+    che_do = getattr(lay_chat_provider(), "che_do", "?")
+    return {"bai": {"id": b.id, "tieu_de": b.tieu_de, "bat_buoc": bool(b.bat_buoc), "han": str(b.han_hoan_thanh) if b.han_hoan_thanh else None,
+                    "nhac_tu_dong": bool(b.nhac_tu_dong), "vai_tro_ap_dung": _ds_vai_tro(b), "hien": bool(b.hien)},
+            "can_nhac": r["can_nhac"], "da_xong": r["da_xong"], "thieu_tai_khoan": r["thieu_tai_khoan"],
+            "ngoai_vai_tro": r["ngoai_vai_tro"], "chat": {"dang_bat": dang_bat(), "che_do": che_do,
+                                                          "nhan_rieng": che_do == "APP"}}
+
+
+class NhacVao(BaseModel):
+    nhan_vien_ids: list[int] | None = None               # trống = tất cả người cần nhắc
+
+
+@router.post("/bai/{bai_id}/nhac")
+def nhac_ngay(bai_id: int, data: NhacVao, db: Session = Depends(get_db), nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    """📣 Nhắc NGAY qua Google Chat những người chưa thi / chưa đạt (người quản lý bấm, đã xem trước danh sách)."""
+    b = db.get(TrnBai, bai_id)
+    if b is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy bài")
+    ds = _can_nhac_ds(db, b)["can_nhac"]
+    if data.nhan_vien_ids:
+        chon = set(data.nhan_vien_ids)
+        ds = [x for x in ds if x["nhan_vien_id"] in chon]
+    if not ds:
+        return {"da_gui": 0, "loi": [], "thieu_email": [], "bo_qua_gan": 0, "so_can_nhac": 0}
+    kq = _gui_nhac(db, b, ds, "TAY", nd.id)
+    kq["so_can_nhac"] = len(ds)
+    ghi_audit(db, nd.id, "NHAC", "trn_bai", b.id, moi={"da_gui": kq["da_gui"], "so_can_nhac": len(ds), "loi": len(kq["loi"])})
+    db.commit()
+    return kq
+
+
+def nhac_tu_dong_hang_ngay(db: Session) -> dict:
+    """Chạy từ bộ hẹn giờ (8h–17h giờ VN, trừ Chủ nhật): với mỗi bài BẮT BUỘC đang hiện có bật nhắc tự động, nhắc người chưa xong.
+    Nhịp: 7 ngày một lần; còn ≤ 3 ngày tới hạn hoặc quá hạn thì 2 ngày một lần; tối đa 8 lần tự động mỗi người mỗi bài.
+    Mốc đã nhắc nằm trong bảng trn_nhac nên khởi động lại / chạy lặp không nhắn trùng."""
+    from ..chat_gateway import dang_bat
+    kq = {"bai": 0, "da_gui": 0, "loi": []}
+    if not dang_bat():
+        kq["bo_qua"] = "Google Chat chưa bật"
+        return kq
+    now = gio_hien_tai()
+    for b in (db.query(TrnBai).filter(TrnBai.bat_buoc.is_(True), TrnBai.hien.is_(True), TrnBai.nhac_tu_dong.is_(True)).all()):
+        gan = b.han_hoan_thanh is not None and (b.han_hoan_thanh - now.date()).days <= 3
+        chu_ky = timedelta(days=CHU_KY_NHAC_GAN_HAN if gan else CHU_KY_NHAC)
+        den_luot = [x for x in _can_nhac_ds(db, b)["can_nhac"]
+                    if x["so_tu_dong"] < TOI_DA_NHAC_TU_DONG and (not x["_nhac_dt"] or now - x["_nhac_dt"] >= chu_ky - timedelta(hours=2))]
+        if not den_luot:
+            continue
+        r = _gui_nhac(db, b, den_luot, "TU_DONG", None)
+        kq["bai"] += 1
+        kq["da_gui"] += r["da_gui"]
+        kq["loi"] += r["loi"][:3]
+    return kq
 
 
 # ================================================================== KẾT QUẢ THI

@@ -33,7 +33,7 @@ def ctx(monkeypatch):
     monkeypatch.setattr(d, "ghi_audit", lambda *a, **k: None)
     monkeypatch.setattr(d, "muc_cua", lambda db, vt, mod: muc["v"])
     eng = create_engine("sqlite://")
-    for t in (m.VaiTro, m.NguoiDung, m.NhanVien, m.TrnBai, m.TrnKetQua):
+    for t in (m.VaiTro, m.NguoiDung, m.NhanVien, m.TrnBai, m.TrnKetQua, m.TrnNhac):
         t.__table__.create(eng)
     db = sessionmaker(eng)()
     n = {}
@@ -62,7 +62,8 @@ def _up(ten, nd):
 
 
 def _them(db, nd, **kw):
-    a = dict(tieu_de="Đào tạo EC", loai="HUAN_LUYEN_THI", mo_ta=None, diem_dat=80.0, hien=True, file=_up("bai.html", HTML), db=db, nd=nd)
+    a = dict(tieu_de="Đào tạo EC", loai="HUAN_LUYEN_THI", mo_ta=None, diem_dat=80.0, hien=True, file=_up("bai.html", HTML), db=db, nd=nd,
+             bat_buoc=False, han_hoan_thanh=None, vai_tro_ap_dung=None, nhac_tu_dong=True)
     a.update(kw)
     return asyncio.run(d.them_bai(**a))
 

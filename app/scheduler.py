@@ -16,6 +16,7 @@ _luong: threading.Thread | None = None
 _GIO_LAI_LO = ""       # mốc giờ đã chốt Lãi/Lỗ Record gần nhất
 _TUAN_BCVH = ""        # tuần đã gửi nhắc Báo cáo vận hành (thứ Bảy 14h)
 _THANG_SAO_KE = ""     # tháng đã kiểm tra nhắc tải sao kê (ngày 7 hàng tháng)
+_NGAY_NHAC_TRN = ""    # ngày đã chạy nhắc thi Training (8h–17h VN, trừ Chủ nhật)
 
 
 def _vong_lap():
@@ -70,6 +71,21 @@ def _vong_lap():
                     from .routers.tai_chinh import nhac_sao_ke_thang
                     kq3 = nhac_sao_ke_thang(db)
                     print(f"[SCHEDULER] Nhắc sao kê tháng: {kq3.get('thang')} → {kq3.get('da_gui')} {kq3.get('ly_do') or kq3.get('loi') or ''}")
+                finally:
+                    db.close()
+            # 🎓 Nhắc nhân viên chưa thi / chưa đạt các bài Training BẮT BUỘC: mỗi ngày 1 lần trong 8h–17h (VN), trừ Chủ nhật.
+            #    Nhịp nhắc từng người nằm trong bảng trn_nhac (nên khởi động lại không nhắn trùng).
+            global _NGAY_NHAC_TRN
+            g4 = gio_hien_tai()
+            ngay4 = g4.strftime("%Y-%m-%d")
+            if 8 <= g4.hour <= 17 and g4.weekday() != 6 and _NGAY_NHAC_TRN != ngay4:
+                _NGAY_NHAC_TRN = ngay4
+                db = SessionLocal()
+                try:
+                    from .routers.dao_tao import nhac_tu_dong_hang_ngay
+                    kq4 = nhac_tu_dong_hang_ngay(db)
+                    if kq4.get("da_gui") or kq4.get("loi"):
+                        print(f"[SCHEDULER] 🎓 Nhắc thi Training: {kq4}")
                 finally:
                     db.close()
             # 📬 Tự quét thư hàng tuần — «đến hạn thì chạy»: mốc thứ+giờ (VN) lưu trong CSDL; app ngủ qua giờ hẹn

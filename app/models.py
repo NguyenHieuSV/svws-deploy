@@ -1802,6 +1802,24 @@ class TrnBai(Base):
     nguoi_tao: Mapped[int | None] = mapped_column(ForeignKey("nguoi_dung.id", ondelete="SET NULL"), nullable=True)
     tao_luc: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     cap_nhat_luc: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # mig 150: bài BẮT BUỘC + hạn + nhắc
+    bat_buoc: Mapped[bool] = mapped_column(Boolean, default=False)
+    han_hoan_thanh: Mapped[date | None] = mapped_column(Date, nullable=True)
+    vai_tro_ap_dung: Mapped[str | None] = mapped_column(Text, nullable=True)       # mã vai trò cách nhau dấu phẩy; trống = tất cả
+    nhac_tu_dong: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
+class TrnNhac(Base):
+    """mig 150: nhật ký một lần NHẮC thi của một nhân viên ở một bài."""
+    __tablename__ = "trn_nhac"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    bai_id: Mapped[int] = mapped_column(ForeignKey("trn_bai.id", ondelete="CASCADE"))
+    nhan_vien_id: Mapped[int] = mapped_column(ForeignKey("nhan_vien.id", ondelete="CASCADE"))
+    nguon: Mapped[str] = mapped_column(String(10), default="TAY")           # TAY | TU_DONG
+    ket_qua: Mapped[str] = mapped_column(String(10), default="OK")          # OK | LOI
+    loi: Mapped[str | None] = mapped_column(Text, nullable=True)
+    nguoi_gui: Mapped[int | None] = mapped_column(ForeignKey("nguoi_dung.id", ondelete="SET NULL"), nullable=True)
+    tao_luc: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
 class TrnKetQua(Base):
