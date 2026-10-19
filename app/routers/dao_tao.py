@@ -420,30 +420,73 @@ def _noi_dung_nhac(b: TrnBai, x: dict, hom_nay: date) -> str:
     return "\n".join(d)
 
 
+def _noi_dung_nhac_chung(b: TrnBai, ds: list, hom_nay: date) -> str:
+    """Tin GỘP đăng vào phòng chung (chế độ WEBHOOK): chỉ ghi TÊN, KHÔNG nêu điểm của ai."""
+    chua_thi = [x["ten"] for x in ds if x["tinh_trang"] == "CHUA_THI"]
+    chua_dat = [x["ten"] for x in ds if x["tinh_trang"] == "CHUA_DAT"]
+    d = [f"🎓 *Nhắc thi — {b.tieu_de}* (Rev {b.phien_ban or 1})"]
+    if chua_thi:
+        d.append("• Chưa làm bài: " + "; ".join(chua_thi))
+    if chua_dat:
+        d.append("• Chưa đạt, mời ôn lại và thi lại: " + "; ".join(chua_dat))
+    if b.han_hoan_thanh:
+        con = (b.han_hoan_thanh - hom_nay).days
+        tinh = "⚠️ *ĐÃ QUÁ HẠN*" if con < 0 else ("hôm nay là ngày cuối" if con == 0 else f"còn {con} ngày")
+        d.append(f"• Hạn hoàn thành: {b.han_hoan_thanh.strftime('%d/%m/%Y')} ({tinh})")
+    d.append("• Cách làm: mở app SVWS → Nội bộ → Training → bấm ▶ Mở ở bài này, làm và nộp bài, điểm tự lưu.")
+    return "\n".join(d)
+
+
 def _gui_nhac(db: Session, b: TrnBai, ds: list, nguon: str, nguoi_gui=None) -> dict:
-    """Gửi nhắc Google Chat cho từng người trong ds (kết quả của _can_nhac_ds), ghi nhật ký. Không ném lỗi chat ra ngoài."""
+    """Gửi nhắc Google Chat, ghi nhật ký từng người. Không ném lỗi chat ra ngoài.
+    • Chế độ APP (nhắn riêng được): mỗi người MỘT tin riêng (cần email, có nêu điểm gần nhất).
+    • Chế độ WEBHOOK (chỉ đăng phòng chung): MỘT tin gộp ghi tên những người cần nhắc, KHÔNG nêu điểm; không cần email."""
     from ..chat_gateway import lay_chat_provider, dang_bat
     from ..nhac_viec_service import gui_toi_nguoi
-    tong = {"da_gui": 0, "loi": [], "thieu_email": [], "bo_qua_gan": 0}
+    tong = {"da_gui": 0, "loi": [], "thieu_email": [], "bo_qua_gan": 0, "kieu": None}
     if not dang_bat():
         tong["loi"].append("Google Chat chưa được bật trên máy chủ (đang ở chế độ DEMO) nên chưa gửi được.")
         return tong
     prov = lay_chat_provider()
     now = gio_hien_tai()
+    rieng = getattr(prov, "che_do", "") == "APP"
+    tong["kieu"] = "RIENG" if rieng else "PHONG_CHUNG"
+
+    def ghi(x, ok, loi=None):
+        db.add(TrnNhac(bai_id=b.id, nhan_vien_id=x["nhan_vien_id"], nguon=nguon, ket_qua="OK" if ok else "LOI",
+                       loi=None if ok else (str(loi or "")[:500] or None), nguoi_gui=nguoi_gui, tao_luc=now))
+
+    chon = []
     for x in ds:
-        if not x["co_email"]:
-            tong["thieu_email"].append(x["ten"])
-            continue
         if nguon == "TAY" and x.get("_nhac_dt") and (now - x["_nhac_dt"]).total_seconds() < GAP_TOI_THIEU_TAY_GIO * 3600:
             tong["bo_qua_gan"] += 1
             continue
+        if rieng and not x["co_email"]:
+            tong["thieu_email"].append(x["ten"])
+            continue
+        chon.append(x)
+    if not rieng:
+        if chon:
+            try:
+                kq = prov.gui_phong(_noi_dung_nhac_chung(b, chon, now.date()))
+            except Exception as e:                                  # noqa: BLE001
+                kq = {"da_gui": False, "loi": f"{type(e).__name__}: {str(e)[:120]}"}
+            ok = bool(kq.get("da_gui"))
+            for x in chon:
+                ghi(x, ok, kq.get("loi"))
+            if ok:
+                tong["da_gui"] = len(chon)
+            else:
+                tong["loi"].append(str(kq.get("loi") or "không gửi được vào phòng chung"))
+        db.commit()
+        return tong
+    for x in chon:
         try:
             kq = gui_toi_nguoi(db, prov, x["email"], _noi_dung_nhac(b, x, now.date()))
         except Exception as e:                                      # noqa: BLE001
             kq = {"da_gui": False, "loi": f"{type(e).__name__}: {str(e)[:120]}"}
         ok = bool(kq.get("da_gui"))
-        db.add(TrnNhac(bai_id=b.id, nhan_vien_id=x["nhan_vien_id"], nguon=nguon, ket_qua="OK" if ok else "LOI",
-                       loi=None if ok else str(kq.get("loi") or "")[:500] or None, nguoi_gui=nguoi_gui, tao_luc=now))
+        ghi(x, ok, kq.get("loi"))
         if ok:
             tong["da_gui"] += 1
         else:

@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="vi">
 <head>
-<!-- build: training-nhac-2026-10-19 -->
+<!-- build: training-nhac-2026-10-19b -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#0f2c44">
@@ -19454,12 +19454,12 @@ async function trnNhacForm(id){
   const ch=r.chat, b=r.bai;
   const kenh=!ch.dang_bat?`<div style="background:#fef2f2;color:#991b1b;padding:7px 11px;border-radius:8px;font-size:12.5px">⚠ <b>Google Chat chưa bật</b> trên máy chủ (chế độ ${_trnEc(ch.che_do)}) — chưa gửi được tin. Danh sách vẫn dùng để theo dõi; nhân viên vẫn thấy dải nhắc ở tab Training và chấm đỏ ở menu.</div>`
     :ch.nhan_rieng?'<div style="color:#166534;font-size:12.5px">✅ Nhắn riêng từng người qua Google Chat.</div>'
-    :`<div style="background:#fffbeb;color:#92400e;padding:7px 11px;border-radius:8px;font-size:12.5px">⚠ Chat đang ở chế độ <b>${_trnEc(ch.che_do)}</b>: tin được đăng vào <b>phòng chung</b> (có ghi tên người nhận), không nhắn riêng được.</div>`;
-  const hang=x=>`<tr><td><input type="checkbox" class="trnNc" value="${x.nhan_vien_id}"${x.co_email?' checked':' disabled'} style="width:auto"></td>
+    :`<div style="background:#fffbeb;color:#92400e;padding:7px 11px;border-radius:8px;font-size:12.5px">ℹ Chat đang ở chế độ <b>${_trnEc(ch.che_do)}</b> nên <b>không nhắn riêng được</b>: hệ thống đăng <b>một tin gộp vào phòng chung</b>, chỉ ghi <b>tên</b> những người được tick — <b>không nêu điểm</b> của ai. Muốn nhắn riêng từng người cần chuyển Chat sang chế độ APP (Render).</div>`;
+  const hang=x=>`<tr><td><input type="checkbox" class="trnNc" value="${x.nhan_vien_id}"${(x.co_email||!ch.nhan_rieng)?' checked':' disabled'} style="width:auto"></td>
     <td><b>${_trnEc(x.ten)}</b><div style="font-size:11px;color:var(--muted)">${_trnEc(x.ma||'')}</div></td>
     <td>${x.tinh_trang==='CHUA_DAT'?`<span class="badge b-cho">chưa đạt</span> <span style="font-size:12px">${_trnDiem(x.diem_gan_nhat)} · thi ${x.so_lan_thi} lần</span>`:'<span class="badge b-tc">chưa thi</span>'}</td>
     <td style="font-size:12px">${x.so_lan_nhac?`${x.so_lan_nhac} lần · gần nhất ${_trnNgayGio(x.nhac_gan_nhat)}`:'<span style="color:var(--muted)">chưa nhắc</span>'}</td>
-    <td>${x.co_email?'':'<span class="badge b-tc" title="Hồ sơ nhân viên chưa có email nên không nhắn Chat được">thiếu email</span>'}</td></tr>`;
+    <td>${(x.co_email||!ch.nhan_rieng)?'':'<span class="badge b-tc" title="Hồ sơ nhân viên chưa có email nên không nhắn Chat riêng được">thiếu email</span>'}</td></tr>`;
   const tk=r.thieu_tai_khoan||[];
   _ktModal('📣 Nhắc nhân viên — '+_trnEc(b.tieu_de),`
     <div style="font-size:13px;margin-bottom:6px"><b>${r.can_nhac.length}</b> người cần nhắc · <b>${r.da_xong}</b> người đã xong${b.han?` · hạn ${b.han.slice(8,10)}/${b.han.slice(5,7)}/${b.han.slice(0,4)}`:''}${b.bat_buoc?'':' · <span style="color:var(--muted)">(bài chưa đặt «bắt buộc» — vẫn nhắc được)</span>'}</div>
@@ -19475,7 +19475,7 @@ async function trnNhacGui(){
   const w=window._trnNhac; if(!w)return;
   const ids=[...document.querySelectorAll('.trnNc:checked')].map(c=>+c.value);
   if(!ids.length)return toast('Chọn ít nhất một người','err');
-  if(!confirm('Gửi nhắc qua Google Chat cho '+ids.length+' người chưa hoàn thành bài «'+w.r.bai.tieu_de+'»?\n\nMỗi người nhận một tin riêng. Người vừa được nhắc trong 12 giờ qua sẽ được bỏ qua.'))return;
+  if(!confirm('Gửi nhắc qua Google Chat cho '+ids.length+' người chưa hoàn thành bài «'+w.r.bai.tieu_de+'»?\n\n'+(w.r.chat.nhan_rieng?'Mỗi người nhận một tin riêng.':'Hệ thống đăng MỘT tin gộp vào phòng chung, chỉ ghi tên, không nêu điểm.')+' Người vừa được nhắc trong 12 giờ qua sẽ được bỏ qua.'))return;
   const nut=$("#trn_nc_ok"); nut.disabled=true; nut.textContent='Đang gửi…';
   let k; try{k=await api('/dao-tao/bai/'+w.id+'/nhac',{method:'POST',body:JSON.stringify({nhan_vien_ids:ids})});}
   catch(e){nut.disabled=false;nut.textContent='📣 Gửi nhắc cho người đã chọn';return toast(e.detail||e.message,'err');}

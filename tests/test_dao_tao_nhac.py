@@ -91,6 +91,43 @@ def test_nhac_tay_gui_chat_nhat_ky_va_chong_don(ctx, monkeypatch):
     assert kq3["da_gui"] == 1 and [e for e, _ in gui] == ["e@x.vn"]
 
 
+def test_nhac_phong_chung_mot_tin_gop_khong_neu_diem(ctx, monkeypatch):
+    """Chat chế độ WEBHOOK (không nhắn riêng được): MỘT tin gộp vào phòng chung, chỉ ghi tên, KHÔNG nêu điểm, không cần email."""
+    from app import chat_gateway
+    db, ql, nv, muc = ctx
+    _them_nhan_vien(db)
+    muc["v"] = "THAO_TAC"
+    b = _them(db, ql, tieu_de="Thi EC")
+    d.sua_bai(b["id"], d.BaiSua(bat_buoc=True, han_hoan_thanh=_ngay(5)), db, ql)
+    muc["v"] = "XEM"
+    d.ghi_ket_qua(b["id"], d.KetQuaVao(diem=61.5, so_cau=30, so_dung=18), db, nv)                  # A thi chưa đạt 61,5%
+    phong = []
+
+    class Phong:
+        che_do = "WEBHOOK"
+
+        def gui_phong(self, nd):
+            phong.append(nd)
+            return {"da_gui": True}
+
+    monkeypatch.setattr(chat_gateway, "dang_bat", lambda: True)
+    monkeypatch.setattr(chat_gateway, "lay_chat_provider", lambda: Phong())
+    muc["v"] = "THAO_TAC"
+    assert d.nhac_xem(b["id"], db, ql)["chat"]["nhan_rieng"] is False
+    kq = d.nhac_ngay(b["id"], d.NhacVao(), db, ql)
+    assert kq["kieu"] == "PHONG_CHUNG" and kq["da_gui"] == 3 and kq["thieu_email"] == [] and len(phong) == 1
+    tin = phong[0]
+    assert "Lê Văn C" in tin and "Hoàng E" in tin and "Chưa đạt" in tin and "Nguyễn Văn A" in tin and "còn 5 ngày" in tin
+    assert "61" not in tin and "%" not in tin                                                      # không lộ điểm trong phòng chung
+    assert db.query(m.TrnNhac).filter_by(ket_qua="OK").count() == 3
+    assert d.nhac_ngay(b["id"], d.NhacVao(), db, ql)["da_gui"] == 0 and len(phong) == 1            # bấm lại → bỏ qua, không đăng thêm
+    # tự động cũng gộp một tin
+    for n in db.query(m.TrnNhac).all():
+        n.tao_luc = n.tao_luc - timedelta(days=9)
+    db.commit()
+    assert d.nhac_tu_dong_hang_ngay(db)["da_gui"] == 3 and len(phong) == 2
+
+
 def test_nhac_khi_chat_chua_bat(ctx, monkeypatch):
     db, ql, nv, muc = ctx
     _them_nhan_vien(db)
