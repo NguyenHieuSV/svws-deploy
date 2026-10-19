@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="vi">
 <head>
-<!-- build: pwa-icon-goc-2026-10-17 -->
+<!-- build: training-tab-2026-10-19 -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#0f2c44">
@@ -102,6 +102,20 @@
   .sidebar .brand{position:relative}
   .nav-pin{position:absolute;right:10px;top:50%;transform:translateY(-50%);background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.16);color:#cfe0e8;border-radius:8px;width:28px;height:28px;cursor:pointer;font-size:14px;line-height:1;padding:0}
   .nav-pin:hover{background:rgba(255,255,255,.18);color:#fff}
+  /* 🎓 Training */
+  .trnTbl{width:100%;table-layout:fixed;border-collapse:collapse}
+  .trnTbl th,.trnTbl td{padding:6px 8px;font-size:12.5px;vertical-align:middle;overflow-wrap:anywhere;border-bottom:1px solid var(--line);text-align:left}
+  .trnTbl th{font-size:11.5px;line-height:1.2;white-space:normal;color:var(--muted);font-weight:700}
+  .trnTbl td.num,.trnTbl th.num{text-align:right}
+  .trnTbl .badge{white-space:normal;display:inline-block;line-height:1.25;font-size:10.5px;padding:1px 6px}
+  .trnTbl button{white-space:nowrap}
+  #trnViewer{position:fixed;inset:0;z-index:9998;background:#fff;display:flex;flex-direction:column}
+  #trnViewer .trnBar{display:flex;align-items:center;gap:12px;background:var(--ink);color:#fff;padding:8px 16px;flex:none}
+  #trnViewer .trnBar .spacer{flex:1}
+  #trnViewer .trnRev{font-size:11px;background:rgba(255,255,255,.16);padding:1px 9px;border-radius:10px}
+  #trnKhung{flex:1;min-height:0}
+  #trnKhung iframe{width:100%;height:100%;border:0;background:#fff;display:block}
+  #toast{z-index:10000}
   .lvl{font-size:9.5px;font-weight:800;letter-spacing:.4px;padding:2px 6px;border-radius:20px;
     text-transform:uppercase}
   .lvl.XEM{background:rgba(12,68,124,.25);color:#bcd8f5}
@@ -304,6 +318,7 @@ const MODULES = {
   tai_chinh:{label:"Tài chính", group:"Tài chính"},
   nhan_su:{label:"Nhân sự & Lương", group:"Nội bộ"},
   tai_lieu:{label:"Tài liệu", group:"Nội bộ"},
+  training:{label:"Training", group:"Nội bộ"},
   cau_hinh:{label:"Cấu hình", group:"Nội bộ"},
 };
 const GROUP_ORDER = ["Điều hành","Thương mại","Cung ứng","Dịch vụ","Tài chính","Nội bộ"];
@@ -315,12 +330,12 @@ const DH_FLOW = [
   {g:"Cung ứng & Kho", items:["ncc","kho"]},
   {g:"Dịch vụ", items:["du_an","cho_thue","dich_vu_kt"]},
   {g:"Tài chính — Kế toán", items:["ke_toan","tai_chinh"]},
-  {g:"Nội bộ & Hỗ trợ", items:["nhan_su","tai_lieu","dashboard","cau_hinh"]},
+  {g:"Nội bộ & Hỗ trợ", items:["nhan_su","tai_lieu","training","dashboard","cau_hinh"]},
 ];
 const DH_CHAIN = ["ban_hang","crm","ncc","kho","du_an","ke_toan","tai_chinh"];
 /* Cột module cho ma trận phân quyền (theo permKey thực trong bảng phan_quyen) */
-const DH_MODCOLS = ["dieu_hanh","ban_hang","crm","ncc","kho","du_an","cho_thue","dich_vu_kt","ke_toan","tai_chinh","nhan_su","working_time","tai_lieu","dashboard","cau_hinh"];
-const DH_COLLABEL = {dieu_hanh:"Overall Op",ban_hang:"Bán hàng",crm:"CRM",ncc:"Cung ứng/NCC",kho:"Kho",du_an:"Dự án",cho_thue:"Cho thuê",dich_vu_kt:"DV Kỹ thuật",ke_toan:"Kế toán",tai_chinh:"Tài chính",nhan_su:"Nhân sự",working_time:"Working time",tai_lieu:"Tài liệu",dashboard:"Tổng quan",cau_hinh:"Cấu hình"};
+const DH_MODCOLS = ["dieu_hanh","ban_hang","crm","ncc","kho","du_an","cho_thue","dich_vu_kt","ke_toan","tai_chinh","nhan_su","working_time","tai_lieu","training","dashboard","cau_hinh"];
+const DH_COLLABEL = {dieu_hanh:"Overall Op",ban_hang:"Bán hàng",crm:"CRM",ncc:"Cung ứng/NCC",kho:"Kho",du_an:"Dự án",cho_thue:"Cho thuê",dich_vu_kt:"DV Kỹ thuật",ke_toan:"Kế toán",tai_chinh:"Tài chính",nhan_su:"Nhân sự",working_time:"Working time",tai_lieu:"Tài liệu",training:"Training",dashboard:"Tổng quan",cau_hinh:"Cấu hình"};
 const MUC_TEN = {KHONG:"Không",XEM:"Xem",THAO_TAC:"Thao tác",DUYET:"Duyệt",QUAN_TRI:"Quản trị"};
 const DH_DESC = {
   dashboard:"Bức tranh điều hành theo thời gian thực",
@@ -335,6 +350,7 @@ const DH_DESC = {
   tai_chinh:"Dòng tiền · vay · quỹ · trích lập",
   nhan_su:"Nhân sự & Lương",
   tai_lieu:"Tài liệu nội bộ",
+  training:"Bài huấn luyện · bài thi · điểm từng nhân viên",
   cau_hinh:"Cấu hình hệ thống",
 };
 function ico(){return '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/></svg>';}
@@ -641,7 +657,7 @@ function go(mod){ S.khSel=null;
   S.page=mod; $("#pageTitle").textContent=MODULES[mod].label; highlight();
   $("#sidebar").classList.remove('open');
   const m=$("#main"); m.scrollTop=0;
-  ({dashboard:viewDashboard,dieu_hanh:viewDieuHanh,overall_financial:viewOverallFinancial,working_time:viewWorkingTime,crm:viewCRM,cho_thue:viewChoThue,dich_vu_kt:viewDichVuKT,kho:viewKho,ban_hang:viewBanHang,ncc:viewNCC,ke_toan:viewKeToan,tai_chinh:viewTaiChinh,nhan_su:viewNhanSu,du_an:viewDuAn,cau_hinh:viewCauHinh}[mod]||viewGeneric)(m,mod);
+  ({dashboard:viewDashboard,dieu_hanh:viewDieuHanh,overall_financial:viewOverallFinancial,working_time:viewWorkingTime,crm:viewCRM,cho_thue:viewChoThue,dich_vu_kt:viewDichVuKT,kho:viewKho,ban_hang:viewBanHang,ncc:viewNCC,ke_toan:viewKeToan,tai_chinh:viewTaiChinh,nhan_su:viewNhanSu,du_an:viewDuAn,cau_hinh:viewCauHinh,training:viewTraining}[mod]||viewGeneric)(m,mod);
 }
 
 /* ---------- Tổng quan ---------- */
@@ -19259,6 +19275,305 @@ function viewGeneric(m,mod){
   </div></div>`;
 }
 function countEndpoints(){return "các";}
+/* ============ 🎓 TRAINING (Nội bộ): bài huấn luyện & thi + điểm thi từng nhân viên (19/10/2026) ============ */
+const TRN_LOAI={HUAN_LUYEN:'Huấn luyện',THI:'Thi',HUAN_LUYEN_THI:'Huấn luyện + thi'};
+const TRN_ICON={html:'🧩',pdf:'📕',hinh:'🖼',video:'🎬',khac:'📎'};
+const _trnEc=s=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+function _trnKb(n){n=Number(n||0);return n>=1048576?(n/1048576).toFixed(1).replace('.',',')+' MB':Math.max(1,Math.round(n/1024))+' KB';}
+function _trnDiem(v){return v==null?'—':(Math.round(Number(v)*10)/10).toString().replace('.',',')+' %';}
+function _trnNhan(dat){return dat===true?'<span class="badge b-ok">Đạt</span>':dat===false?'<span class="badge b-tc">Chưa đạt</span>':'<span style="color:var(--muted)">—</span>';}
+function _trnNgayGio(s){s=String(s||'');return s.length>=16?`${s.slice(8,10)}/${s.slice(5,7)}/${s.slice(0,4)} ${s.slice(11,16)}`:s;}
+
+async function viewTraining(m){
+  if(S.mode!=="live"){m.innerHTML=head("Training","Bài huấn luyện và bài thi")+'<div class="empty" style="padding:30px">Tab Training lưu file và điểm thi trên máy chủ nên chỉ dùng ở bản kết nối backend.</div>';return;}
+  const ql=can('training','THAO_TAC');
+  if(!S.trnTab||(S.trnTab==='bang'&&!ql))S.trnTab='bai';
+  m.innerHTML=head("Training","Bài huấn luyện và bài thi · lưu file · điểm thi của từng nhân viên")
+    +`<div class="tabs">
+      <button class="${S.trnTab==='bai'?'active':''}" onclick="trnTab('bai')">Bài huấn luyện &amp; thi</button>
+      <button class="${S.trnTab==='toi'?'active':''}" onclick="trnTab('toi')">Kết quả của tôi</button>
+      ${ql?`<button class="${S.trnTab==='bang'?'active':''}" onclick="trnTab('bang')">Bảng điểm nhân viên</button>`:''}
+    </div><div id="trnBody"></div>`;
+  trnRender();
+}
+function trnTab(t){S.trnTab=t;viewTraining($("#main"));}
+async function trnRender(){
+  const h=$("#trnBody"); if(!h)return;
+  h.innerHTML='<div class="empty" style="padding:20px">Đang tải…</div>';
+  try{ if(S.trnTab==='toi')await _trnTabToi(h); else if(S.trnTab==='bang')await _trnTabBang(h); else await _trnTabBai(h); }
+  catch(e){ h.innerHTML=`<div class="perm-denied">${_trnEc(e.detail||e.message)}</div>`; }
+}
+
+/* ---------- Tab 1: danh sách bài ---------- */
+async function _trnTabBai(h){
+  const ql=can('training','THAO_TAC'), qt=can('training','QUAN_TRI');
+  const ds=await api('/dao-tao/bai'); window._trnBai=ds;
+  const hang=b=>{const ct=b.cua_toi, tk=b.thong_ke||{so_luot:0,so_nguoi:0,so_dat:0};
+    return `<tr${b.hien?'':' style="opacity:.65"'}>
+      <td><div style="font-weight:700">${TRN_ICON[b.loai_tep]||'📎'} ${_trnEc(b.tieu_de)}</div>
+        ${b.mo_ta?`<div style="font-size:12px;color:var(--muted);white-space:pre-line;margin-top:2px">${_trnEc(b.mo_ta)}</div>`:''}
+        <div style="margin-top:4px"><span class="badge b-info">${_trnEc(b.loai_ten)}</span> <span class="badge b-ok" title="Phiên bản của tệp — mỗi lần thay tệp tăng một">Rev ${b.phien_ban}</span>${b.hien?'':' <span class="badge b-cho" title="Nhân viên không nhìn thấy bài này">đang ẩn</span>'}${b.diem_dat!=null?` <span class="badge b-cho" title="Điểm đạt của bài">đạt từ ${b.diem_dat}%</span>`:''}</div></td>
+      <td style="font-size:12px">${_trnEc(b.ten_file)}<div style="color:var(--muted)">${_trnKb(b.kich_thuoc)}</div></td>
+      <td style="font-size:12px">${_trnEc(b.nguoi_tao||'—')}<div style="color:var(--muted)">${_trnNgayGio(b.cap_nhat_luc||b.tao_luc)}</div></td>
+      ${ql?`<td class="num" style="font-size:12px">${tk.so_luot?`<b>${tk.so_luot}</b> lượt<div style="color:var(--muted)">${tk.so_nguoi} người · ${tk.so_dat} đạt</div>`:'<span style="color:var(--muted)">—</span>'}</td>`:''}
+      <td class="num">${b.co_thi?(ct?`<b style="color:${ct.dat?'#16a34a':'#dc2626'}">${_trnDiem(ct.tot_nhat)}</b><div style="font-size:11px;color:var(--muted)">${ct.so_lan} lần${ct.dat?' · đạt':''}</div>`:'<span style="color:var(--muted)">chưa thi</span>'):'<span style="color:var(--muted)">—</span>'}</td>
+      <td><div style="display:flex;gap:4px;flex-wrap:wrap">
+        <button class="btn-sm" onclick="trnMo(${b.id})">▶ Mở</button>
+        <button class="btn-sm ghost" title="Tải tệp về máy" onclick="trnTai(${b.id})">📥</button>
+        ${ql?`<button class="btn-sm ghost" title="Sửa tên · loại · mô tả · điểm đạt" onclick="trnSuaForm(${b.id})">✏️</button>
+          <button class="btn-sm ghost" title="Thay bằng phiên bản mới (Rev mới) — điểm cũ giữ nguyên" onclick="trnThayForm(${b.id})">🔄</button>
+          <button class="btn-sm ghost" title="${b.hien?'Ẩn khỏi nhân viên':'Hiện cho nhân viên'}" onclick="trnHien(${b.id},${b.hien?'false':'true'})">${b.hien?'🙈':'👁'}</button>`:''}
+        ${qt?`<button class="btn-sm ghost" style="color:var(--red)" title="Xóa bài (chỉ xóa được khi chưa có lượt thi)" onclick="trnXoa(${b.id})">🗑</button>`:''}
+      </div></td></tr>`;};
+  h.innerHTML=`<div class="panel"><div class="panel-h"><h3>📚 Bài huấn luyện &amp; bài thi ${ds.length?`<span class="badge b-info">${ds.length}</span>`:''}</h3><div class="spacer"></div>
+      <input id="trnQ" placeholder="🔍 Tìm bài…" value="${_trnEc(S.trnQ||'')}" oninput="S.trnQ=this.value;trnLocBai()" style="padding:6px 10px;border:1px solid var(--line);border-radius:7px;font-size:13px;width:190px;margin-right:8px">
+      ${ql?`<button class="btn-sm" onclick="trnThemForm()">⬆ Tải bài lên</button>`:''}</div>
+    <div class="note">Bấm <b>▶ Mở</b> để học hoặc làm bài thi ngay trong app. Bài <b>HTML tự chấm điểm</b>: khi bạn <b>nộp bài, điểm được lưu tự động</b> cho tài khoản của bạn (xem ở «Kết quả của tôi»). PDF, Word, PowerPoint, video… mở hoặc tải về để học.${ql?' Người quản lý còn <b>tải bài lên, thay phiên bản, ẩn / hiện</b> và xem <b>Bảng điểm nhân viên</b>.':''}</div>
+    <div class="panel-b"><table class="trnTbl"><colgroup><col style="width:${ql?'34%':'40%'}"><col style="width:15%"><col style="width:13%">${ql?'<col style="width:11%">':''}<col style="width:11%"><col></colgroup>
+      <thead><tr><th>Bài</th><th>Tệp</th><th>Đăng</th>${ql?'<th class="num">Lượt thi</th>':''}<th class="num">Điểm của tôi</th><th></th></tr></thead>
+      <tbody id="trnTbody">${ds.map(hang).join('')||`<tr><td colspan="${ql?6:5}" class="empty" style="padding:18px">Chưa có bài nào${ql?' — bấm «⬆ Tải bài lên» để thêm bài huấn luyện hoặc bài thi đầu tiên.':'.'}</td></tr>`}</tbody></table></div></div>`;
+  trnLocBai();
+}
+function trnLocBai(){const q=String(S.trnQ||'').toLowerCase().trim();
+  document.querySelectorAll('#trnTbody tr').forEach(tr=>{tr.style.display=(!q||tr.textContent.toLowerCase().includes(q))?'':'none';});}
+
+/* ---------- Tải lên / sửa / thay tệp / ẩn / xóa ---------- */
+function trnThemForm(){
+  _ktModal('⬆ Tải bài huấn luyện / bài thi lên',`
+    <div style="font-size:12.5px;color:var(--muted);margin-bottom:8px">Tệp <b>HTML tương tác</b> (có phần thi tự chấm điểm, như file «Đào tạo &amp; sát hạch») chạy ngay trong app và <b>tự lưu điểm từng nhân viên</b>. PDF, Word, PowerPoint, Excel, ảnh, video chỉ để học (tối đa 60 MB).</div>
+    <label>Tiêu đề bài *</label><input id="trn_td" placeholder="VD: Đào tạo vận hành và sát hạch hệ EC — Rev E">
+    <label>Loại</label><select id="trn_loai"><option value="HUAN_LUYEN_THI">Huấn luyện + thi</option><option value="THI">Thi</option><option value="HUAN_LUYEN">Huấn luyện</option></select>
+    <label>Mô tả</label><textarea id="trn_mt" rows="3" placeholder="Đối tượng, nội dung chính, thời lượng…"></textarea>
+    <label>Điểm đạt (%) — để trống nếu bài tự báo kết quả đạt / chưa đạt</label><input id="trn_dd" type="number" min="0" max="100" step="0.1" placeholder="VD: 80">
+    <label>Tệp bài *</label><input id="trn_f" type="file" accept=".html,.htm,.pdf,.ppt,.pptx,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg,.gif,.mp4,.webm,.mp3">
+    <label style="display:flex;gap:8px;align-items:center;margin-top:8px"><input id="trn_hien" type="checkbox" checked style="width:auto"> Hiện cho nhân viên ngay</label>
+    <button class="btn-sm" style="margin-top:14px" id="trn_ok" onclick="trnThemLuu()">⬆ Tải lên</button>`);
+  const f=$("#trn_f"); f.onchange=()=>{const t=$("#trn_td"); if(!t.value&&f.files[0])t.value=f.files[0].name.replace(/\.[^.]+$/,'').replace(/_+/g,' ');};
+}
+async function trnThemLuu(){
+  const td=$("#trn_td").value.trim(), f=$("#trn_f").files[0];
+  if(!td)return toast('Nhập tiêu đề bài','err'); if(!f)return toast('Chọn tệp bài','err');
+  const fd=new FormData(); fd.append('tieu_de',td); fd.append('loai',$("#trn_loai").value); fd.append('mo_ta',$("#trn_mt").value);
+  const dd=$("#trn_dd").value; if(dd!=='')fd.append('diem_dat',dd);
+  fd.append('hien',$("#trn_hien").checked?'true':'false'); fd.append('file',f);
+  const nut=$("#trn_ok"); nut.disabled=true; nut.textContent='Đang tải lên…';
+  try{await apiUpload('/dao-tao/bai',fd);}catch(e){nut.disabled=false;nut.textContent='⬆ Tải lên';return toast(e.detail||e.message,'err');}
+  document.getElementById('ktModal')?.remove(); toast('✅ Đã lưu bài lên Training','ok'); trnRender();
+}
+function trnSuaForm(id){
+  const b=(window._trnBai||[]).find(x=>x.id===id); if(!b)return;
+  _ktModal('✏️ Sửa bài',`
+    <label>Tiêu đề bài</label><input id="trn_td" value="${_trnEc(b.tieu_de)}">
+    <label>Loại</label><select id="trn_loai">${Object.keys(TRN_LOAI).map(k=>`<option value="${k}"${k===b.loai?' selected':''}>${TRN_LOAI[k]}</option>`).join('')}</select>
+    <label>Mô tả</label><textarea id="trn_mt" rows="3">${_trnEc(b.mo_ta||'')}</textarea>
+    <label>Điểm đạt (%) — để trống nếu bài tự báo</label><input id="trn_dd" type="number" min="0" max="100" step="0.1" value="${b.diem_dat!=null?b.diem_dat:''}">
+    <label style="display:flex;gap:8px;align-items:center;margin-top:8px"><input id="trn_hien" type="checkbox"${b.hien?' checked':''} style="width:auto"> Hiện cho nhân viên</label>
+    <button class="btn-sm" style="margin-top:14px" onclick="trnSuaLuu(${id})">Lưu</button>`);
+}
+async function trnSuaLuu(id){
+  const dd=$("#trn_dd").value;
+  const body={tieu_de:$("#trn_td").value,loai:$("#trn_loai").value,mo_ta:$("#trn_mt").value,hien:$("#trn_hien").checked};
+  if(dd==='')body.xoa_diem_dat=true; else body.diem_dat=Number(dd);
+  try{await api('/dao-tao/bai/'+id,{method:'PUT',body:JSON.stringify(body)});}catch(e){return toast(e.detail||e.message,'err');}
+  document.getElementById('ktModal')?.remove(); toast('Đã lưu','ok'); trnRender();
+}
+function trnThayForm(id){
+  const b=(window._trnBai||[]).find(x=>x.id===id); if(!b)return;
+  _ktModal('🔄 Thay bằng phiên bản mới',`
+    <div style="font-size:12.5px;color:var(--muted);margin-bottom:8px">Bài hiện tại: <b>${_trnEc(b.tieu_de)}</b> · Rev ${b.phien_ban} · ${_trnEc(b.ten_file)}.<br>Thay tệp sẽ tăng lên <b>Rev ${b.phien_ban+1}</b>. <b>Điểm thi cũ giữ nguyên</b> và ghi rõ thi ở Rev nào.</div>
+    <label>Tệp mới *</label><input id="trn_f" type="file" accept=".html,.htm,.pdf,.ppt,.pptx,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg,.gif,.mp4,.webm,.mp3">
+    <button class="btn-sm" style="margin-top:14px" id="trn_ok" onclick="trnThayLuu(${id})">🔄 Thay tệp</button>`);
+}
+async function trnThayLuu(id){
+  const f=$("#trn_f").files[0]; if(!f)return toast('Chọn tệp mới','err');
+  const fd=new FormData(); fd.append('file',f);
+  const nut=$("#trn_ok"); nut.disabled=true; nut.textContent='Đang tải lên…';
+  try{await apiUpload('/dao-tao/bai/'+id+'/thay-tep',fd);}catch(e){nut.disabled=false;nut.textContent='🔄 Thay tệp';return toast(e.detail||e.message,'err');}
+  document.getElementById('ktModal')?.remove(); toast('✅ Đã thay tệp — phiên bản mới','ok'); trnRender();
+}
+async function trnHien(id,on){
+  try{await api('/dao-tao/bai/'+id,{method:'PUT',body:JSON.stringify({hien:on})});}catch(e){return toast(e.detail||e.message,'err');}
+  toast(on?'Đã hiện bài cho nhân viên':'Đã ẩn bài khỏi nhân viên','ok'); trnRender();
+}
+async function trnXoa(id){
+  const b=(window._trnBai||[]).find(x=>x.id===id); if(!b)return;
+  if(!confirm('Xóa bài «'+b.tieu_de+'»?\n\nChỉ xóa được khi chưa có ai thi. Nếu đã có điểm, hãy dùng nút Ẩn.'))return;
+  try{await api('/dao-tao/bai/'+id,{method:'DELETE'});}catch(e){return toast(e.detail||e.message,'err');}
+  toast('Đã xóa bài','ok'); trnRender();
+}
+function trnTai(id){const b=(window._trnBai||[]).find(x=>x.id===id); tepTaiVe('/dao-tao/bai/'+id+'/tai-ve',b?b.ten_file:'bai');}
+
+/* ---------- Khung xem bài ---------- */
+/* Cầu nối chèn vào bài HTML (chạy TRONG khung cách ly): ① thay localStorage bằng bộ nhớ tạm (khung không được đọc localStorage của app)
+   ② điền sẵn họ tên / mã NV / chức danh của người đang đăng nhập ③ khi bài nộp điểm (bài sinh từ bộ «Đào tạo & sát hạch» SVWS:
+   hàm trSubmit + TRAIN.recs) thì báo về app; bài tự viết gọi SVWS.ketQua({diem:%, so_cau, so_dung, dat, ...}). */
+function _trnCauNoi(U){
+  try{var mem={};var st={getItem:function(k){return Object.prototype.hasOwnProperty.call(mem,k)?mem[k]:null;},setItem:function(k,v){mem[k]=String(v);},
+    removeItem:function(k){delete mem[k];},clear:function(){mem={};},key:function(i){return Object.keys(mem)[i]||null;}};
+    Object.defineProperty(window,'localStorage',{configurable:true,get:function(){return st;}});}catch(e){}
+  function gui(o){try{parent.postMessage(o,'*');}catch(e){}}
+  function dien(){try{var f={tr_name:U.ten,tr_id:U.ma,tr_unit:U.don_vi,tr_pos:U.chuc_danh};
+    for(var k in f){var el=document.getElementById(k);if(el&&!el.value&&f[k])el.value=f[k];}}catch(e){}}
+  function moc(){
+    try{
+      if(window.__svwsCau||typeof window.trSubmit!=='function')return; window.__svwsCau=1;
+      var s0=window.trStart;
+      if(typeof s0==='function')window.trStart=function(){dien();return s0.apply(this,arguments);};
+      var f0=window.trSubmit;
+      window.trSubmit=function(){
+        var n0=0;try{n0=TRAIN.recs.length;}catch(e){}
+        var kq=f0.apply(this,arguments);
+        try{var rs=TRAIN.recs;if(rs.length>n0){var mods=null;try{mods=TR_MOD.map(function(x){return {m:x.m,code:x.code,name:x.name};});}catch(e){}
+          gui({svws:'TRAIN_REC',rec:rs[rs.length-1],mods:mods});}}catch(e){}
+        return kq;
+      };
+    }catch(e){}
+  }
+  window.addEventListener('DOMContentLoaded',moc);window.addEventListener('load',moc);
+  var lan=0,iv=setInterval(function(){moc();if(window.__svwsCau||++lan>200)clearInterval(iv);},300);   // bài nặng: cài móc ngay khi hàm nộp bài xuất hiện
+  window.SVWS={ketQua:function(o){o=o||{};o.svws='RESULT';gui(o);},nguoiDung:U};
+}
+function _trnChen(html,u){
+  const tag='<script>('+_trnCauNoi.toString()+')('+JSON.stringify(u).replace(/</g,'\\u003c')+');<\/script>';
+  return /<head[^>]*>/i.test(html)?html.replace(/<head[^>]*>/i,m=>m+tag):tag+html;
+}
+async function trnMo(id){
+  const b=(window._trnBai||[]).find(x=>x.id===id); if(!b)return;
+  if(b.loai_tep==='khac'){toast('Loại tệp này mở bằng ứng dụng trên máy — đang tải về…','ok');return trnTai(id);}
+  const hd={}; if(S.token)hd['Authorization']='Bearer '+S.token;
+  let r; try{r=await fetch(S.api+'/dao-tao/bai/'+id+'/tep',{headers:hd});}catch(_){return toast('Mất kết nối máy chủ — thử lại sau ít phút','err');}
+  if(!r.ok){let m='Không mở được bài';try{const j=await r.json();m=j.detail||m;}catch(_){}return toast(m,'err');}
+  trnDongViewer(true);
+  const v={id:id,b:b,khongGhi:false,chuaLuu:[],daLuu:0}; window._trnViewer=v;
+  const w=document.createElement('div'); w.id='trnViewer';
+  w.innerHTML=`<div class="trnBar"><b>${TRN_ICON[b.loai_tep]||''} ${_trnEc(b.tieu_de)}</b><span class="trnRev">Rev ${b.phien_ban}</span>
+    <span id="trnTrangThai" style="font-size:12px"></span><span class="spacer"></span>
+    ${b.co_thi&&can('training','THAO_TAC')?`<label style="display:flex;gap:5px;align-items:center;font-size:12px;cursor:pointer"><input type="checkbox" id="trnGhi" checked style="width:auto" onchange="window._trnViewer.khongGhi=!this.checked"> Ghi điểm (bỏ tick = xem thử)</label>`:''}
+    <button class="btn-sm" style="background:rgba(255,255,255,.14);border-color:rgba(255,255,255,.35);color:#fff" onclick="trnDongViewer()">✖ Đóng</button></div><div id="trnKhung"></div>`;
+  document.body.appendChild(w);
+  const kh=w.querySelector('#trnKhung');
+  if(b.loai_tep==='html'){
+    const text=await r.text(); let u={ten:'',ma:'',don_vi:'',chuc_danh:''};
+    try{const t=await api('/dao-tao/toi'); u={ten:t.ten||'',ma:t.ma_nv||'',don_vi:'',chuc_danh:t.chuc_danh||''};}catch(_){}
+    const fr=document.createElement('iframe');
+    fr.setAttribute('sandbox','allow-scripts allow-modals allow-forms allow-downloads allow-popups');   // KHÔNG allow-same-origin: bài không đọc được token / dữ liệu app
+    fr.srcdoc=_trnChen(text,u); kh.appendChild(fr); v.frame=fr;
+  }else{
+    const blob=await r.blob(); const url=URL.createObjectURL(blob); v.url=url;
+    kh.innerHTML=b.loai_tep==='pdf'?`<iframe src="${url}"></iframe>`
+      :b.loai_tep==='video'?`<video src="${url}" controls autoplay style="width:100%;height:100%;background:#000"></video>`
+      :`<div style="height:100%;overflow:auto;text-align:center;background:#0f172a"><img src="${url}" style="max-width:100%"></div>`;
+  }
+}
+function trnDongViewer(luon){
+  const w=document.getElementById('trnViewer'); if(!w)return; const v=window._trnViewer||{};
+  if(!luon){
+    if(v.chuaLuu&&v.chuaLuu.length&&!confirm('Còn '+v.chuaLuu.length+' kết quả CHƯA LƯU được. Đóng bây giờ sẽ mất điểm này.\n\nVẫn đóng?'))return;
+    if(!(v.chuaLuu&&v.chuaLuu.length)&&v.b&&v.b.co_thi&&v.frame&&!v.daLuu&&!confirm('Đóng bài?\n\nBài thi đang làm dở (chưa nộp) sẽ không được ghi điểm.'))return;
+  }
+  if(v.url)URL.revokeObjectURL(v.url);
+  w.remove(); window._trnViewer=null;
+  if(!luon&&S.page==='training'&&S.trnTab!=='bang')trnRender();
+}
+window.addEventListener('message',e=>{
+  const v=window._trnViewer; if(!v||!v.frame||e.source!==v.frame.contentWindow)return;
+  const d=e.data; if(!d||typeof d!=='object')return;
+  let kq=null;
+  if(d.svws==='TRAIN_REC'&&d.rec){
+    const r=d.rec, m=String(r.dur||'').match(/(\d+)'(\d+)/);
+    kq={diem:Number(r.pct),so_cau:r.n,so_dung:r.ok,dat:(r.pass===true||r.pass===false)?r.pass:null,diem_dat:r.passMark,
+        thoi_gian_giay:m?(+m[1]*60+(+m[2])):null,ten_khai:r.name,ma_nv_khai:r.id,don_vi_khai:r.unit,chuc_danh_khai:r.pos,
+        chi_tiet:{det:r.det,mods:d.mods,exm:r.exm,auto:!!r.auto,dur:r.dur}};
+  }else if(d.svws==='RESULT'){
+    kq={diem:Number(d.diem),so_cau:d.so_cau,so_dung:d.so_dung,dat:typeof d.dat==='boolean'?d.dat:null,diem_dat:d.diem_dat,thoi_gian_giay:d.thoi_gian_giay,
+        ten_khai:d.ten,ma_nv_khai:d.ma_nv,don_vi_khai:d.don_vi,chuc_danh_khai:d.chuc_danh,chi_tiet:d.chi_tiet||null};
+  }
+  if(!kq||!(kq.diem>=0&&kq.diem<=100))return;
+  Object.keys(kq).forEach(k=>{if(kq[k]==null||(typeof kq[k]==='number'&&isNaN(kq[k])))delete kq[k];});
+  if(v.khongGhi)return toast('Xem thử — điểm không được lưu','ok');
+  trnGuiKetQua(v,kq);
+});
+async function trnGuiKetQua(v,kq){
+  try{
+    const r=await api('/dao-tao/bai/'+v.id+'/ket-qua',{method:'POST',body:JSON.stringify(kq)});
+    v.chuaLuu=(v.chuaLuu||[]).filter(x=>x!==kq); v.daLuu=(v.daLuu||0)+1; _trnBao(v);
+    toast(`✅ Đã lưu điểm ${_trnDiem(r.diem)} — ${r.dat===true?'ĐẠT':r.dat===false?'CHƯA ĐẠT':'đã ghi nhận'} (lần thi ${r.lan_thi})`,'ok');
+  }catch(e){
+    if(!(v.chuaLuu||[]).includes(kq))(v.chuaLuu=v.chuaLuu||[]).push(kq); _trnBao(v);
+    toast('⚠ Chưa lưu được điểm: '+(e.detail||e.message)+' — bấm «Gửi lại điểm» trên thanh phía trên','err');
+  }
+}
+function trnGuiLai(){const v=window._trnViewer; if(!v)return; (v.chuaLuu||[]).slice().forEach(kq=>trnGuiKetQua(v,kq));}
+function _trnBao(v){const el=document.getElementById('trnTrangThai'); if(!el)return;
+  el.innerHTML=(v.chuaLuu&&v.chuaLuu.length)?`<span style="background:#dc2626;padding:2px 9px;border-radius:10px">⚠ ${v.chuaLuu.length} kết quả chưa lưu</span> <button class="btn-sm" onclick="trnGuiLai()">Gửi lại điểm</button>`
+    :(v.daLuu?'<span style="background:#16a34a;padding:2px 9px;border-radius:10px">✅ Điểm đã được lưu</span>':'');}
+
+/* ---------- Tab 2: kết quả của tôi ---------- */
+async function _trnTabToi(h){
+  const ds=await api('/dao-tao/ket-qua?cua_toi=true');
+  const hang=r=>`<tr><td>${_trnNgayGio(r.nop_luc)}</td><td><b>${_trnEc(r.bai)}</b><div style="font-size:11px;color:var(--muted)">Rev ${r.phien_ban||1}</div></td>
+    <td class="num">${r.lan_thi}</td><td class="num"><b>${_trnDiem(r.diem)}</b></td>
+    <td class="num">${r.so_cau!=null?`${r.so_dung==null?'?':r.so_dung} / ${r.so_cau}`:'—'}</td><td>${_trnNhan(r.dat)}</td>
+    <td><button class="btn-sm ghost" onclick="trnChiTiet(${r.id})">Chi tiết</button></td></tr>`;
+  h.innerHTML=`<div class="panel"><div class="panel-h"><h3>🏅 Kết quả thi của tôi ${ds.length?`<span class="badge b-info">${ds.length}</span>`:''}</h3></div>
+    <div class="panel-b"><table class="trnTbl"><colgroup><col style="width:16%"><col style="width:34%"><col style="width:7%"><col style="width:10%"><col style="width:12%"><col style="width:11%"><col></colgroup>
+      <thead><tr><th>Ngày giờ nộp</th><th>Bài</th><th class="num">Lần</th><th class="num">Điểm</th><th class="num">Đúng / Tổng</th><th>Kết quả</th><th></th></tr></thead>
+      <tbody>${ds.map(hang).join('')||'<tr><td colspan="7" class="empty" style="padding:18px">Bạn chưa có lượt thi nào. Vào «Bài huấn luyện &amp; thi», bấm ▶ Mở một bài thi, làm và nộp bài — điểm tự lưu ở đây.</td></tr>'}</tbody></table></div></div>`;
+}
+
+/* ---------- Tab 3: bảng điểm nhân viên ---------- */
+async function _trnTabBang(h){
+  const bd=await api('/dao-tao/bang-diem'); window._trnBang=bd;
+  const loc=S.trnLoc||'tat_ca', q=String(S.trnBQ||'').toLowerCase().trim();
+  let ds=bd.nhan_vien.filter(x=>!q||((x.ten||'')+' '+(x.ma||'')+' '+(x.chuc_danh||'')).toLowerCase().includes(q));
+  if(loc==='chua_thi')ds=ds.filter(x=>!x.so_bai_thi);
+  if(loc==='chua_dat')ds=ds.filter(x=>x.so_bai_thi&&x.so_bai_dat<bd.bai.length);
+  const ngan=s=>String(s||'').length>26?String(s).slice(0,25)+'…':String(s||'');
+  const th=bd.bai.map(b=>`<th class="num" title="${_trnEc(b.tieu_de)} — Rev ${b.phien_ban}${b.hien?'':' (đang ẩn)'}" style="min-width:104px">${_trnEc(ngan(b.tieu_de))}<div style="font-weight:400;font-size:10.5px;color:var(--muted)">Rev ${b.phien_ban}</div></th>`).join('');
+  const o=(x,b)=>{const c=x.o[String(b.id)]; if(!c)return '<td class="num" style="color:var(--muted)">—</td>';
+    return `<td class="num"><a href="#" onclick="trnLuotCua('${x.key}',${b.id});return false" style="text-decoration:none;color:${c.dat?'#16a34a':'#dc2626'}" title="Bấm xem các lượt thi"><b>${_trnDiem(c.tot_nhat)}</b></a><div style="font-size:10.5px;color:var(--muted)">${c.so_lan} lần${c.dat?' · đạt':''}</div></td>`;};
+  const hang=(x,i)=>`<tr><td style="color:var(--muted)">${i+1}</td><td><b>${_trnEc(x.ten)}</b><div style="font-size:11px;color:var(--muted)">${_trnEc([x.ma,x.chuc_danh].filter(Boolean).join(' · '))}</div></td>${bd.bai.map(b=>o(x,b)).join('')}
+    <td class="num"><b>${x.so_bai_thi}</b>/${bd.bai.length}<div style="font-size:10.5px;color:var(--muted)">${x.so_bai_dat} đạt</div></td></tr>`;
+  h.innerHTML=`<div class="panel"><div class="panel-h"><h3>📊 Bảng điểm nhân viên <span class="badge b-info">${ds.length}</span></h3><div class="spacer"></div>
+      <input placeholder="🔍 Tìm tên, mã NV…" value="${_trnEc(S.trnBQ||'')}" oninput="S.trnBQ=this.value;clearTimeout(window._trnT);window._trnT=setTimeout(trnRender,250)" style="padding:6px 10px;border:1px solid var(--line);border-radius:7px;font-size:13px;width:180px;margin-right:8px">
+      <select onchange="S.trnLoc=this.value;trnRender()" style="width:auto;padding:6px 8px;font-size:13px;margin-right:8px"><option value="tat_ca"${loc==='tat_ca'?' selected':''}>Tất cả</option><option value="chua_thi"${loc==='chua_thi'?' selected':''}>Chưa thi bài nào</option><option value="chua_dat"${loc==='chua_dat'?' selected':''}>Có bài chưa đạt</option></select>
+      <button class="btn-sm ghost" onclick="trnXuatExcel()" title="Excel: bảng điểm (nhân viên × bài) và tất cả lượt thi">📥 Xuất Excel</button></div>
+    <div class="note">Mỗi ô là <b>điểm cao nhất</b> của nhân viên ở bài đó (xanh = đã đạt, đỏ = chưa đạt), kèm số lần thi. <b>Bấm vào điểm</b> để xem từng lượt và chi tiết theo nhóm câu hỏi. Chỉ hiện bài có phần thi; nhân viên đang làm việc luôn có dòng (— = chưa thi).</div>
+    <div class="panel-b" style="overflow-x:auto"><table class="trnTbl" style="table-layout:auto;min-width:0"><thead><tr><th>#</th><th style="min-width:170px">Nhân viên</th>${th}<th class="num">Đã thi / đạt</th></tr></thead>
+      <tbody>${ds.map(hang).join('')||`<tr><td colspan="${bd.bai.length+3}" class="empty" style="padding:18px">${bd.bai.length?'Không có nhân viên nào khớp bộ lọc.':'Chưa có bài thi nào — tải một bài «Thi» hoặc «Huấn luyện + thi» ở tab đầu.'}</td></tr>`}</tbody></table></div></div>`;
+}
+function trnXuatExcel(){const n=new Date(),p=v=>String(v).padStart(2,'0');
+  toast('Đang tạo file Excel…','ok'); tepTaiVe('/dao-tao/xuat-excel','Training-bang-diem-'+n.getFullYear()+p(n.getMonth()+1)+p(n.getDate())+'.xlsx');}
+async function trnLuotCua(key,baiId){
+  const x=((window._trnBang||{}).nhan_vien||[]).find(v=>v.key===key); if(!x)return;
+  const qs=`bai_id=${baiId}`+(x.nhan_vien_id?`&nhan_vien_id=${x.nhan_vien_id}`:(x.nguoi_dung_id?`&nguoi_dung_id=${x.nguoi_dung_id}`:''));
+  let ds; try{ds=await api('/dao-tao/ket-qua?'+qs);}catch(e){return toast(e.detail||e.message,'err');}
+  const qt=can('training','QUAN_TRI');
+  _ktModal(`Các lượt thi — ${_trnEc(x.ten)}`,`<div style="font-size:12.5px;color:var(--muted);margin-bottom:6px">${_trnEc(ds[0]?ds[0].bai:'')}</div>
+    <table class="trnTbl" style="table-layout:auto"><thead><tr><th>Ngày giờ</th><th class="num">Lần</th><th class="num">Điểm</th><th class="num">Đúng / Tổng</th><th>Kết quả</th><th>Tên khai trong bài</th><th></th></tr></thead>
+    <tbody>${ds.map(r=>`<tr><td>${_trnNgayGio(r.nop_luc)}</td><td class="num">${r.lan_thi}</td><td class="num"><b>${_trnDiem(r.diem)}</b></td><td class="num">${r.so_cau!=null?`${r.so_dung==null?'?':r.so_dung} / ${r.so_cau}`:'—'}</td><td>${_trnNhan(r.dat)}</td>
+      <td style="font-size:12px">${_trnEc(r.ten_khai||'—')}${r.ma_nv_khai?` · ${_trnEc(r.ma_nv_khai)}`:''}</td>
+      <td><button class="btn-sm ghost" onclick="trnChiTiet(${r.id})">Chi tiết</button>${qt?` <button class="btn-sm ghost" style="color:var(--red)" title="Xóa lượt thi này (CEO / Admin)" onclick="trnXoaKq(${r.id},'${key}',${baiId})">🗑</button>`:''}</td></tr>`).join('')||'<tr><td colspan="7" class="empty">Không có lượt thi.</td></tr>'}</tbody></table>`);
+}
+async function trnXoaKq(id,key,baiId){
+  if(!confirm('Xóa lượt thi này khỏi bảng điểm?\n\nKhông khôi phục được.'))return;
+  try{await api('/dao-tao/ket-qua/'+id,{method:'DELETE'});}catch(e){return toast(e.detail||e.message,'err');}
+  toast('Đã xóa lượt thi','ok'); await trnRender(); trnLuotCua(key,baiId);
+}
+async function trnChiTiet(id){
+  let r; try{r=await api('/dao-tao/ket-qua/'+id);}catch(e){return toast(e.detail||e.message,'err');}
+  const ct=r.chi_tiet||{}, det=Array.isArray(ct.det)?ct.det:[], mods=Array.isArray(ct.mods)?ct.mods:[], nguong=r.diem_dat!=null?r.diem_dat:80;
+  const nhom={}; det.forEach(d=>{const k=String(d.m); (nhom[k]=nhom[k]||{n:0,ok:0}); nhom[k].n++; if(d.ok)nhom[k].ok++;});
+  const ten=k=>{const x=mods.find(m=>String(m.m)===k); return x?((x.code?x.code+' · ':'')+x.name):'Nhóm '+k;};
+  const bang=Object.keys(nhom).length?`<div style="font-weight:700;margin:12px 0 4px">Kết quả theo nhóm câu hỏi</div><table class="trnTbl" style="table-layout:auto"><thead><tr><th>Nhóm</th><th class="num">Đúng / Tổng</th><th class="num">%</th></tr></thead><tbody>${
+    Object.keys(nhom).sort((a,b)=>a-b).map(k=>{const x=nhom[k],p=x.ok*100/x.n;return `<tr><td>${_trnEc(ten(k))}</td><td class="num">${x.ok} / ${x.n}</td><td class="num" style="color:${p>=nguong?'#16a34a':'#dc2626'}"><b>${_trnDiem(p)}</b></td></tr>`;}).join('')}</tbody></table>`:'';
+  _ktModal('Chi tiết lượt thi',`<div style="display:flex;flex-wrap:wrap;gap:6px 24px;font-size:13px">
+    <div>Người thi: <b>${_trnEc(r.ten||'—')}</b></div><div>Bài: <b>${_trnEc(r.bai||'—')}</b> · Rev ${r.phien_ban||1}</div>
+    <div>Nộp lúc: <b>${_trnNgayGio(r.nop_luc)}</b> · lần thi <b>${r.lan_thi}</b>${r.thoi_gian_giay!=null?` · ${Math.floor(r.thoi_gian_giay/60)} phút ${r.thoi_gian_giay%60} giây`:''}</div>
+    <div>Điểm: <b style="font-size:18px;color:${r.dat===false?'#dc2626':'#16a34a'}">${_trnDiem(r.diem)}</b> ${_trnNhan(r.dat)}${r.diem_dat!=null?` <span style="color:var(--muted)">(đạt từ ${r.diem_dat}%)</span>`:''}${r.so_cau!=null?` · đúng ${r.so_dung==null?'?':r.so_dung}/${r.so_cau} câu`:''}</div>
+    ${(r.ten_khai||r.ma_nv_khai||r.don_vi_khai||r.chuc_danh_khai)?`<div style="color:var(--muted)">Khai trong bài: ${_trnEc([r.ten_khai,r.ma_nv_khai,r.don_vi_khai,r.chuc_danh_khai].filter(Boolean).join(' · '))}</div>`:''}</div>${bang}`);
+}
+
 function head(title,sub){return `<div class="crumb">SVWS · ${S.roleName}</div>
   <div class="h-row"><h2>${title}</h2><p>${sub}</p></div>`;}
 function logout(){

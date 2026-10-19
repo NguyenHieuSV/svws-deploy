@@ -1781,3 +1781,48 @@ class DuToanBanMuc(Base):
     san_pham_ncc_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     # mig 147: bỏ bước đề xuất mua — dòng khóa theo PO đã lập thẳng từ dự toán
     don_mua_id: Mapped[int | None] = mapped_column(ForeignKey("don_mua.id", ondelete="SET NULL"), nullable=True)
+
+
+# ---------- TRAINING (mục Nội bộ) — bài huấn luyện / thi + điểm thi từng nhân viên (mig 149) ----------
+class TrnBai(Base):
+    """Một bài huấn luyện hoặc bài thi: file (HTML tương tác tự chấm điểm, PDF, Office, video…) lưu ở kho lưu trữ chung."""
+    __tablename__ = "trn_bai"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    tieu_de: Mapped[str] = mapped_column(String(250))
+    loai: Mapped[str] = mapped_column(String(16), default="HUAN_LUYEN")        # HUAN_LUYEN | THI | HUAN_LUYEN_THI
+    mo_ta: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ten_file: Mapped[str | None] = mapped_column(String(250), nullable=True)
+    loai_tep: Mapped[str | None] = mapped_column(String(10), nullable=True)    # html | pdf | hinh | video | khac
+    noi_dung_loai: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    duong_dan: Mapped[str | None] = mapped_column(Text, nullable=True)
+    kich_thuoc: Mapped[int] = mapped_column(BigInteger, default=0)
+    phien_ban: Mapped[int] = mapped_column(Integer, default=1)
+    hien: Mapped[bool] = mapped_column(Boolean, default=True)
+    diem_dat: Mapped[Decimal | None] = mapped_column(Numeric(5, 1), nullable=True)
+    nguoi_tao: Mapped[int | None] = mapped_column(ForeignKey("nguoi_dung.id", ondelete="SET NULL"), nullable=True)
+    tao_luc: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    cap_nhat_luc: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class TrnKetQua(Base):
+    """Một LƯỢT THI của một người dùng ở một bài (điểm quy về %)."""
+    __tablename__ = "trn_ket_qua"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    bai_id: Mapped[int] = mapped_column(ForeignKey("trn_bai.id", ondelete="CASCADE"))
+    nguoi_dung_id: Mapped[int | None] = mapped_column(ForeignKey("nguoi_dung.id", ondelete="SET NULL"), nullable=True)
+    nhan_vien_id: Mapped[int | None] = mapped_column(ForeignKey("nhan_vien.id", ondelete="SET NULL"), nullable=True)
+    ten_nguoi_thi: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    ten_khai: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    ma_nv_khai: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    don_vi_khai: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    chuc_danh_khai: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    diem: Mapped[Decimal] = mapped_column(Numeric(6, 1))
+    so_cau: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    so_dung: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    diem_dat: Mapped[Decimal | None] = mapped_column(Numeric(6, 1), nullable=True)
+    dat: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    lan_thi: Mapped[int] = mapped_column(Integer, default=1)
+    phien_ban: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    thoi_gian_giay: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    chi_tiet: Mapped[dict | list | None] = mapped_column(JSONB, nullable=True)
+    nop_luc: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
