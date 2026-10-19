@@ -1614,6 +1614,7 @@ def ds_ho_so(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
                     "ma_so_thue": nv.ma_so_thue, "so_tai_khoan": nv.so_tai_khoan,
                     "loai_hop_dong": nv.loai_hop_dong or "CHINH_THUC",
                     "cam_ket_08": bool(nv.cam_ket_08), "phu_thuoc_chi_tiet": nv.phu_thuoc_chi_tiet,
+                    "ngay_bat_dau_thu_viec": str(nv.ngay_bat_dau_thu_viec) if nv.ngay_bat_dau_thu_viec else None,
                     "ngan_hang": nv.ngan_hang, "email": nv.email, "tk_chi_phi": nv.tk_chi_phi})
     return out
 
@@ -1636,7 +1637,7 @@ def xuat_excel_ho_so(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "X
     thin = Border(*[Side(style="thin", color="D7DEE3")] * 4)
     money = "#,##0"
 
-    ws.merge_cells("A1:P1")
+    ws.merge_cells("A1:Q1")
     ws["A1"] = "HỒ SƠ LƯƠNG NHÂN VIÊN"
     ws["A1"].font = Font(bold=True, size=15, color="0E7490"); ws["A1"].alignment = center
     ws.append(["Ngày lập:", _date.today().strftime("%d/%m/%Y")])
@@ -1645,7 +1646,7 @@ def xuat_excel_ho_so(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "X
 
     head = ["STT", "Mã NV", "Họ tên", "Chức danh", "Trạng thái", "Lương cơ bản",
             "Lương đóng BH", "PC ăn", "PC đi lại", "PC điện thoại", "PC trách nhiệm",
-            "Tổng phụ cấp", "Phụ thuộc", "Email", "Số tài khoản", "Ngân hàng"]
+            "Tổng phụ cấp", "Phụ thuộc", "Email", "Số tài khoản", "Ngân hàng", "Bắt đầu thử việc"]
     ws.append(head)
     hr = ws.max_row
     for c in ws[hr]:
@@ -1657,14 +1658,15 @@ def xuat_excel_ho_so(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "X
         ws.append([i, nv.ma or nv.id, nv.ho_ten, nv.chuc_danh or "", nv.trang_thai or "",
                    _f(nv.luong_co_ban) or 0, _f(nv.luong_dong_bh) or _f(nv.luong_co_ban) or 0,
                    pc[0], pc[1], pc[2], pc[3], sum(pc), nv.so_phu_thuoc or 0,
-                   nv.email or "", nv.so_tai_khoan or "", nv.ngan_hang or ""])
+                   nv.email or "", nv.so_tai_khoan or "", nv.ngan_hang or "",
+                   nv.ngay_bat_dau_thu_viec.strftime("%d/%m/%Y") if nv.ngay_bat_dau_thu_viec else ""])
         rr = ws.max_row
         for c in ws[rr]:
             c.border = thin
         for col in range(6, 13):
             ws.cell(row=rr, column=col).number_format = money
 
-    for w, i in zip([6, 10, 26, 22, 12, 14, 14, 11, 11, 12, 13, 13, 10, 26, 16, 14], range(1, 17)):
+    for w, i in zip([6, 10, 26, 22, 12, 14, 14, 11, 11, 12, 13, 13, 10, 26, 16, 14, 16], range(1, 18)):
         ws.column_dimensions[get_column_letter(i)].width = w
     ws.freeze_panes = f"A{hr + 1}"
 
@@ -1941,6 +1943,8 @@ def cap_nhat_ho_so(nv_id: int, data: HoSoLuongVao, db: Session = Depends(get_db)
         nv.loai_hop_dong = data.loai_hop_dong
     if data.cam_ket_08 is not None:
         nv.cam_ket_08 = bool(data.cam_ket_08)
+    if "ngay_bat_dau_thu_viec" in data.model_fields_set:      # không gửi = giữ nguyên; gửi null = xóa ngày
+        nv.ngay_bat_dau_thu_viec = data.ngay_bat_dau_thu_viec
     if data.chuc_danh is not None:
         nv.chuc_danh = data.chuc_danh
     if data.ho_ten is not None and data.ho_ten.strip():
@@ -1966,7 +1970,8 @@ def cap_nhat_ho_so(nv_id: int, data: HoSoLuongVao, db: Session = Depends(get_db)
                 _cap_nhat_tong_ky(db, ky)
             tinh_lai.append(bl.thang)
     ghi_audit(db, nd.id, "CAP_NHAT", "nhan_vien", nv.id,
-              moi={"luong_co_ban": _f(nv.luong_co_ban), "tinh_lai": tinh_lai})
+              moi={"luong_co_ban": _f(nv.luong_co_ban), "tinh_lai": tinh_lai,
+                   "ngay_bat_dau_thu_viec": str(nv.ngay_bat_dau_thu_viec) if nv.ngay_bat_dau_thu_viec else None})
     db.commit()
     return {"id": nv.id, "trang_thai": "DA_LUU", "tinh_lai": tinh_lai}
 

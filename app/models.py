@@ -80,6 +80,7 @@ class NhanVien(Base):
     loai_hop_dong: Mapped[str] = mapped_column(String(20), default="CHINH_THUC")   # mig 81: CHINH_THUC | THU_VIEC
     cam_ket_08: Mapped[bool] = mapped_column(Boolean, default=False)               # mig 81: cam kết 08/CK-TNCN
     phu_thuoc_chi_tiet: Mapped[str | None] = mapped_column(Text, nullable=True)    # mig 81: DS người phụ thuộc
+    ngay_bat_dau_thu_viec: Mapped[date | None] = mapped_column(Date, nullable=True)   # mig 151
 
 
 # ---------- Module Kho ----------

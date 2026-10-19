@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="vi">
 <head>
-<!-- build: training-nhac-2026-10-19b -->
+<!-- build: ho-so-thu-viec-2026-10-19 -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#0f2c44">
@@ -16758,6 +16758,7 @@ function nsSuaHoSo(x){
     <div id="h_pb_kq"></div>
     <div class="formrow" style="padding-top:0">
       <div class="f"><label>${_hsLb('hdld','Loại hợp đồng')}</label><select id="h_lhd" data-nocbx><option value="CHINH_THUC" ${(x.loai_hop_dong||'CHINH_THUC')!=='THU_VIEC'?'selected':''}>Chính thức (HĐLĐ ≥ 3 tháng)</option><option value="THU_VIEC" ${x.loai_hop_dong==='THU_VIEC'?'selected':''}>Thử việc / HĐ dưới 3 tháng</option></select></div>
+      <div class="f"><label>Ngày bắt đầu thử việc</label><input id="h_tv" type="date" value="${x.ngay_bat_dau_thu_viec||''}" title="Để trống nếu nhân viên không qua thử việc. HĐ thử việc (bấm «Loại hợp đồng 📄») tự điền «từ ngày» theo ô này"></div>
       <div class="f"><label>${_hsLb('ck08','Cam kết 08/CK-TNCN (thử việc)')}</label><label style="display:flex;align-items:center;gap:8px;padding:9px 0;font-weight:400;cursor:pointer"><input type="checkbox" id="h_ck08" ${x.cam_ket_08?'checked':''} style="width:auto"> Có cam kết — tạm không khấu trừ 10%</label></div>
       <div class="f"><label>${_hsLb('mst','MST thuế TNCN cá nhân')}</label><input id="h_mst" value="${String(x.ma_so_thue||'').replace(/"/g,'&quot;')}" placeholder="VD: 8xxxxxxxxx"></div></div>
     <div class="f" style="padding:0 0 4px"><label>Người phụ thuộc giảm trừ — mỗi dòng: Họ tên – MST/CCCD – quan hệ (khớp số người phụ thuộc ở trên)</label><textarea id="h_ptct" rows="2" style="width:100%" placeholder="VD: Nguyễn Văn B – 8123456789 – con">${String(x.phu_thuoc_chi_tiet||'').replace(/</g,'&lt;')}</textarea></div>
@@ -16850,7 +16851,7 @@ function nsHsDoc(k){
       <p class="tt">BÊN B — NGƯỜI LAO ĐỘNG: ${ht}</p>
       <p>Sinh ngày: ${cham(6)} · CCCD số: ${cham(10)} cấp ngày ${cham(6)}<br>Địa chỉ cư trú: ${cham(26)}</p>
       <p><b>Điều 1. Công việc và địa điểm làm việc:</b> Bên B làm việc theo chức danh <b>${cd}</b>; địa điểm chính tại ${DC} và các công trình/dự án theo phân công của Công ty; nhiệm vụ theo Bảng mô tả công việc của vị trí.</p>
-      <p><b>Điều 2. Thời hạn hợp đồng:</b> ${thuViec?`thử việc ${cham(3)} ngày, từ ngày ${cham(6)} đến ngày ${cham(6)} (tối đa 60 ngày với công việc cần trình độ cao đẳng trở lên; 30 ngày với trình độ trung cấp). Hết thử việc đạt yêu cầu hai bên ký HĐLĐ chính thức.`:`loại hợp đồng: không xác định thời hạn ☐ / xác định thời hạn ${cham(3)} tháng ☐; từ ngày ${cham(6)} đến ngày ${cham(6)}.`}</p>
+      <p><b>Điều 2. Thời hạn hợp đồng:</b> ${thuViec?`thử việc ${cham(3)} ngày, từ ngày ${g('h_tv')?`<b>${_ngayVN(g('h_tv'))}</b>`:cham(6)} đến ngày ${cham(6)} (tối đa 60 ngày với công việc cần trình độ cao đẳng trở lên; 30 ngày với trình độ trung cấp). Hết thử việc đạt yêu cầu hai bên ký HĐLĐ chính thức.`:`loại hợp đồng: không xác định thời hạn ☐ / xác định thời hạn ${cham(3)} tháng ☐; từ ngày ${cham(6)} đến ngày ${cham(6)}.`}</p>
       <p><b>Điều 3. Tiền lương và phụ cấp:</b> mức lương: <b>${vn(thuViec?Math.round(lcb*0.85):lcb)} đ/tháng</b>${thuViec?` (= 85% mức lương chính thức ${vn(lcb)} đ theo Điều 26 BLLĐ)`:''}; mức lương đóng BH: ${vn(ldbh)} đ/tháng. Phụ cấp: ăn ca ${vnz(pan)} · đi lại ${vnz(pdl)} · điện thoại ${vnz(pdt)} · trách nhiệm ${vnz(ptn)}. Hình thức trả: chuyển khoản; kỳ trả lương: 01 lần/tháng, chậm nhất ngày ${cham(3)} tháng kế tiếp.</p>
       <p><b>Điều 4. Thời giờ làm việc, nghỉ ngơi:</b> 8 giờ/ngày, ${cham(2)} ngày/tuần; làm thêm giờ, nghỉ hằng năm, nghỉ lễ Tết theo Bộ luật Lao động và Nội quy lao động Công ty.</p>
       <p><b>Điều 5. BHXH, BHYT, BHTN:</b> ${thuViec?'giai đoạn thử việc chưa thuộc diện tham gia BHXH bắt buộc; khi ký HĐLĐ chính thức hai bên tham gia đầy đủ theo luật.':'hai bên tham gia BHXH, BHYT, BHTN theo quy định pháp luật trên mức lương đóng BH nêu tại Điều 3.'}</p>
@@ -16975,7 +16976,7 @@ async function nsLuuHoSo(id){
     luong_co_ban:Number(gv('h_lcb')||0),luong_dong_bh:Number(gv('h_ldbh')||0),so_phu_thuoc:Number(gv('h_pt')||0),
     phu_cap_an:Number(gv('h_pan')||0),phu_cap_di_lai:Number(gv('h_pdl')||0),phu_cap_dien_thoai:Number(gv('h_pdt')||0),phu_cap_trach_nhiem:Number(gv('h_ptn')||0),
     email:gv('h_email')||null,so_tai_khoan:gv('h_stk')||null,ngan_hang:gv('h_nh')||null,tk_chi_phi:gv('h_tk')||'642',
-    ma_so_thue:gv('h_mst')||null,loai_hop_dong:gv('h_lhd')||'CHINH_THUC',
+    ma_so_thue:gv('h_mst')||null,loai_hop_dong:gv('h_lhd')||'CHINH_THUC',ngay_bat_dau_thu_viec:gv('h_tv')||null,
     cam_ket_08:!!(document.getElementById('h_ck08')||{}).checked,phu_thuoc_chi_tiet:gv('h_ptct')||null,
     ap_dung_tu:gv('h_apdung')||null};
   if(S.mode==="live"){ try{const r=await api(`/nhan-su/nhan-vien/${id}/ho-so`,{method:'PUT',body:JSON.stringify(body)});

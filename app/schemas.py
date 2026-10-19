@@ -477,6 +477,7 @@ class HoSoLuongVao(BaseModel):
     loai_hop_dong: str | None = None      # CHINH_THUC | THU_VIEC
     cam_ket_08: bool | None = None
     phu_thuoc_chi_tiet: str | None = None
+    ngay_bat_dau_thu_viec: date | None = None   # mig 151; gửi null = xóa ngày, không gửi = giữ nguyên
 
 
 class KyLuongVao(BaseModel):
