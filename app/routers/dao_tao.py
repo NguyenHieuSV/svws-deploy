@@ -15,7 +15,7 @@ from ..database import get_db
 from ..rbac import yeu_cau, muc_cua, THU_BAC
 from ..audit import ghi_audit
 from ..models import NguoiDung, NhanVien, TrnBai, TrnKetQua
-from ..luu_tru import luu, xoa, doc, ton_tai, phan_hoi_tai
+from ..luu_tru import luu, xoa, doc, ton_tai, phan_hoi_tai, dung_r2
 from ..nhac_viec_service import gio_hien_tai
 
 router = APIRouter(prefix="/dao-tao", tags=["dao_tao"])
@@ -97,7 +97,8 @@ def thong_tin_toi(db: Session = Depends(get_db), nd: NguoiDung = Depends(yeu_cau
     nv = _nv_cua(db, nd)
     return {"ten": _ten_nguoi(db, nd), "ma_nv": nv.ma if nv is not None else None,
             "chuc_danh": nv.chuc_danh if nv is not None else None, "email": nd.email,
-            "quan_ly": _la_quan_ly(db, nd)}
+            "quan_ly": _la_quan_ly(db, nd),
+            "kho_ben": dung_r2()}           # False = file lưu ở ổ đĩa tạm của máy chủ (mất khi khởi động lại) — chưa cấu hình R2/B2
 
 
 @router.get("/bai")

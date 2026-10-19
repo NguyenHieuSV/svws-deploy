@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="vi">
 <head>
-<!-- build: training-tab-2026-10-19 -->
+<!-- build: training-tab-2026-10-19b -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#0f2c44">
@@ -19308,6 +19308,8 @@ async function trnRender(){
 async function _trnTabBai(h){
   const ql=can('training','THAO_TAC'), qt=can('training','QUAN_TRI');
   const ds=await api('/dao-tao/bai'); window._trnBai=ds;
+  let canhBao='';
+  if(ql){try{const t=await api('/dao-tao/toi'); if(t.kho_ben===false)canhBao='<div class="note" style="background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:8px 12px;margin:0 0 10px;color:#991b1b">⚠ <b>Kho lưu trữ file chưa bền vững</b>: máy chủ đang lưu file bài ở ổ đĩa tạm nên <b>có thể mất khi khởi động lại</b> (điểm thi vẫn an toàn trong cơ sở dữ liệu). Cần khai báo kho R2 / B2 trên Render (R2_ENDPOINT · R2_ACCESS_KEY_ID · R2_SECRET_ACCESS_KEY · R2_BUCKET) để file được giữ vĩnh viễn.</div>';}catch(_){}}
   const hang=b=>{const ct=b.cua_toi, tk=b.thong_ke||{so_luot:0,so_nguoi:0,so_dat:0};
     return `<tr${b.hien?'':' style="opacity:.65"'}>
       <td><div style="font-weight:700">${TRN_ICON[b.loai_tep]||'📎'} ${_trnEc(b.tieu_de)}</div>
@@ -19325,7 +19327,7 @@ async function _trnTabBai(h){
           <button class="btn-sm ghost" title="${b.hien?'Ẩn khỏi nhân viên':'Hiện cho nhân viên'}" onclick="trnHien(${b.id},${b.hien?'false':'true'})">${b.hien?'🙈':'👁'}</button>`:''}
         ${qt?`<button class="btn-sm ghost" style="color:var(--red)" title="Xóa bài (chỉ xóa được khi chưa có lượt thi)" onclick="trnXoa(${b.id})">🗑</button>`:''}
       </div></td></tr>`;};
-  h.innerHTML=`<div class="panel"><div class="panel-h"><h3>📚 Bài huấn luyện &amp; bài thi ${ds.length?`<span class="badge b-info">${ds.length}</span>`:''}</h3><div class="spacer"></div>
+  h.innerHTML=canhBao+`<div class="panel"><div class="panel-h"><h3>📚 Bài huấn luyện &amp; bài thi ${ds.length?`<span class="badge b-info">${ds.length}</span>`:''}</h3><div class="spacer"></div>
       <input id="trnQ" placeholder="🔍 Tìm bài…" value="${_trnEc(S.trnQ||'')}" oninput="S.trnQ=this.value;trnLocBai()" style="padding:6px 10px;border:1px solid var(--line);border-radius:7px;font-size:13px;width:190px;margin-right:8px">
       ${ql?`<button class="btn-sm" onclick="trnThemForm()">⬆ Tải bài lên</button>`:''}</div>
     <div class="note">Bấm <b>▶ Mở</b> để học hoặc làm bài thi ngay trong app. Bài <b>HTML tự chấm điểm</b>: khi bạn <b>nộp bài, điểm được lưu tự động</b> cho tài khoản của bạn (xem ở «Kết quả của tôi»). PDF, Word, PowerPoint, video… mở hoặc tải về để học.${ql?' Người quản lý còn <b>tải bài lên, thay phiên bản, ẩn / hiện</b> và xem <b>Bảng điểm nhân viên</b>.':''}</div>
