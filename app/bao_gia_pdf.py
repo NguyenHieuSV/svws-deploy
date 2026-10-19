@@ -81,7 +81,7 @@ def tao_bao_gia_pdf(path, d, cong_ty=None,
         except Exception:
             pass
     right = [P(f"<b>{ct.get('ten', 'Song Viet Technical Solutions Co., Ltd')}</b>", 12, FB),
-             P(ct.get('dia_chi', 'Address: 448 Vo Van Tan St., Ban Co Ward, HCMC'), 8.5, F, GREY),
+             P(ct.get('dia_chi', 'Address: 14th Floor, HM Town Building, 412 Nguyen Thi Minh Khai St., Ban Co Ward, Ho Chi Minh City, Vietnam'), 8.5, F, GREY),
              P(f"Email: {ct.get('email','sv-sales@watersolutions.company')} · Tel: {ct.get('tel','(084) 937 120 039')}", 8.5, F, GREY)]
     hd = Table([[left or "", right]], colWidths=[W * 0.24, W * 0.76])
     hd.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "MIDDLE"),

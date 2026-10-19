@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="vi">
 <head>
-<!-- build: training-doi-tuong-2026-10-19 -->
+<!-- build: dia-chi-moi-2026-10-19 -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#0f2c44">
@@ -3471,7 +3471,7 @@ async function ctBcvhInXuat(cheDo0){
     .ky b{display:block;margin-bottom:52px}
     .ky span{font-size:10.5px;color:#555}
   </style></head><body>
-    <div class="hd"><div class="cty">SONG VIET WATER SOLUTIONS<small>275 An Phú Đông 3, P. An Phú Đông, TP.HCM · inf@watersolutions.company</small></div>
+    <div class="hd"><div class="cty">SONG VIET WATER SOLUTIONS<small>Tầng 14, Toà nhà HM Town, 412 Nguyễn Thị Minh Khai, P. Bàn Cờ, TP.HCM · inf@watersolutions.company</small></div>
       <div class="so">Mẫu: BCVH-01<br>Ngày in: ${new Date().toLocaleDateString('vi-VN')}</div></div>
     <h1>${tieuDeLon}</h1>
     <div class="sub">${nhan} · Dự án: <b>${esc(daTen)}</b>${nvvh?` · Nhân viên vận hành: <b>${esc(nvvh)}</b>`:''}</div>
@@ -4692,7 +4692,7 @@ async function ctBaoTriIn(){
     .ky b{display:block;margin-bottom:52px}
     .ky span{font-size:10.5px;color:#555}
   </style></head><body>
-    <div class="hd"><div class="cty">SONG VIET WATER SOLUTIONS<small>275 An Phú Đông 3, P. An Phú Đông, TP.HCM · inf@watersolutions.company</small></div>
+    <div class="hd"><div class="cty">SONG VIET WATER SOLUTIONS<small>Tầng 14, Toà nhà HM Town, 412 Nguyễn Thị Minh Khai, P. Bàn Cờ, TP.HCM · inf@watersolutions.company</small></div>
       <div class="so">Mẫu: BT-01<br>Ngày in: ${new Date().toLocaleDateString('vi-VN')}</div></div>
     <h1>KẾ HOẠCH BẢO TRÌ THIẾT BỊ</h1>
     <div class="sub">${daTen?`Dự án: <b>${esc(daTen)}</b> · `:''}${list.length} hạng mục</div>
@@ -5045,7 +5045,7 @@ function _inBienBan(type,pinfo){
   const letterhead=`<table style="width:100%;border-bottom:2px solid #0e7490;padding-bottom:6px;margin-bottom:6px"><tr>
     <td style="vertical-align:top">
       <div style="font-weight:800;color:#0e7490;font-size:15px">CÔNG TY TNHH GPKT SÓNG VIỆT</div>
-      <div style="font-size:11.5px">448 Võ Văn Tần, P. Bàn Cờ, Q.3, TP. Hồ Chí Minh</div>
+      <div style="font-size:11.5px">Tầng 14, Toà nhà HM Town, 412 Nguyễn Thị Minh Khai, Phường Bàn Cờ, Thành phố Hồ Chí Minh, Việt Nam</div>
       <div style="font-size:11.5px">ĐT: +84 28 3736 7889 · songviet.com.vn</div>
     </td><td style="text-align:right;vertical-align:top;font-size:11.5px">
       <div>Số: ......./BB-SVWS</div></td></tr></table>`;
@@ -5854,7 +5854,7 @@ async function bgfMoi(){
     vat_pct:8,
     tt:"40% deposit upon order, remaining 60% upon delivery notification",
     giao:"8-10 weeks after order placement", dia_diem:"As per agreement",
-    nguoi_bg:"Nguyen Nghi", email_lh:"sv-sales@watersolutions.company"
+    nguoi_bg:"Nguyễn Thương", email_lh:"sv-sales@watersolutions.company"
   }};
   viewBanHang($("#main"));
 }
@@ -5925,7 +5925,7 @@ async function bgfEditor(host){
     </div>
     <div style="display:flex;gap:12px;flex-wrap:wrap">
       <div style="flex:1;min-width:160px"><label>Địa điểm giao hàng</label><input value="${esc(d.dia_diem)}" oninput="bgfSetD('dia_diem',this.value)"></div>
-      <div style="flex:1;min-width:160px"><label>Người báo giá</label><input value="${esc(d.nguoi_bg)}" oninput="bgfSetD('nguoi_bg',this.value)" placeholder="VD: Nguyễn Tiên"></div>
+      <div style="flex:1;min-width:160px"><label>Người báo giá</label><input value="${esc(d.nguoi_bg)}" oninput="bgfSetD('nguoi_bg',this.value)" placeholder="VD: Nguyễn Thương"></div>
       <div style="flex:1;min-width:180px"><label>Email liên hệ</label><input value="${esc(d.email_lh)}" oninput="bgfSetD('email_lh',this.value)"></div>
     </div>
   </div></div>`;
@@ -6179,7 +6179,7 @@ function _bgfPrint(d){
     .foot{margin-top:30px;text-align:center;color:#5B7186;font-size:11px;border-top:1px solid #d7e3ea;padding-top:8px}
   </style></head><body>
   <div class="hd">${logo?`<img src="${logo}">`:''}
-    <div class="cty"><b>Song Viet Technical Solutions Co., Ltd</b><br>Address: 448 Vo Van Tan St., Ban Co Ward, HCMC</div></div>
+    <div class="cty"><b>Song Viet Technical Solutions Co., Ltd</b><br>Address: 14th Floor, HM Town Building, 412 Nguyen Thi Minh Khai St., Ban Co Ward, Ho Chi Minh City, Vietnam</div></div>
   <h1>QUOTATION</h1>
   <p>Song Viet Technical Solutions appreciates your interest. We are pleased to send you our quotation as requested:</p>
   <table class="meta"><tr><td class="k">QUOTE NO.</td><td class="v">${d.so||''}</td><td class="k">QUOTE DATE</td><td>${ngayVN}</td></tr>
@@ -7353,7 +7353,7 @@ function docSoVN(n){
 /* Mẫu Hợp đồng dịch vụ song ngữ (theo SongViet_Contract_Form) */
 const HD_BENB_MD={ten:"CÔNG TY TNHH GIẢI PHÁP KỸ THUẬT SÓNG VIỆT",ten_en:"SONG VIET ENGINEERING SOLUTIONS CO., LTD",
   dai_dien:"Ông NGUYỄN LÊ HIẾU",chuc_vu:"Giám đốc",
-  dia_chi:"448 Võ Văn Tần, Phường 5, Quận 3, Tp. Hồ Chí Minh",dien_thoai:"(08) 37273369",
+  dia_chi:"Tầng 14, Toà nhà HM Town, 412 Nguyễn Thị Minh Khai, Phường Bàn Cờ, Thành phố Hồ Chí Minh, Việt Nam",dien_thoai:"(08) 37273369",
   mst:"0303620066",tai_khoan:"002001700001 — Ngân hàng TMCP Đông Á - PGD Lê Văn Sỹ, Quận 3, Tp.HCM"};
 function HD_DK_MD(){return [
  {ten:"ĐIỀU 5: TRÁCH NHIỆM CỦA BÊN A / RESPONSIBILITIES OF PARTY A",
@@ -10084,7 +10084,7 @@ async function dtbTaoBaoGia(id){
       items:its.map(x=>({ten:x.ten,mo_ta:x.quy_cach||"",so_luong:Number(x.so_luong||0),don_vi:x.don_vi||"Unit",don_gia:Number(x.don_gia||0),vat_pct:8})),
       vat_pct:8, tt:"40% deposit upon order, remaining 60% upon delivery notification",
       giao:"8-10 weeks after order placement", dia_diem:"As per agreement",
-      nguoi_bg:"Nguyen Nghi", email_lh:"sv-sales@watersolutions.company"
+      nguoi_bg:"Nguyễn Thương", email_lh:"sv-sales@watersolutions.company"
     }};
     if(!khObj&&d.khach_hang)toast(`Khách "${d.khach_hang}" chưa có trong danh mục CRM — chọn lại khách ở form báo giá`,"err");
   }
@@ -10304,7 +10304,7 @@ function _poBodyDemo(po,f){
   if(f.ghi_chu)L.push(`- Ghi chú: ${f.ghi_chu}`);
   L.push("","Đề nghị Quý công ty xác nhận đơn hàng và phản hồi về email inf@watersolutions.company.","");
   L.push("Trân trọng,","------------------------------","CÔNG TY SONG VIỆT WATER SOLUTIONS (SVWS)",'"We Have Solutions"',
-    "Địa chỉ: 448 Võ Văn Tần, Phường Bàn Cờ, TP. Hồ Chí Minh","Email: inf@watersolutions.company","Bộ phận Mua hàng");
+    "Địa chỉ: Tầng 14, Toà nhà HM Town, 412 Nguyễn Thị Minh Khai, Phường Bàn Cờ, Thành phố Hồ Chí Minh, Việt Nam","Email: inf@watersolutions.company","Bộ phận Mua hàng");
   return L.join("\n");
 }
 function _poFields(id){return {noi_giao:gv('po_ng_'+id)||null,dieu_kien_giao_hang:gv('po_gh_'+id)||null,dieu_kien_thanh_toan:gv('po_tt_'+id)||null,ghi_chu:gv('po_gc_'+id)||null,ngay_hen_giao:gv('po_hen_'+id)||null};}
@@ -14991,7 +14991,7 @@ async function nsJDPdf(vt){
 /* ===== Tin tuyển dụng từ JD ===== */
 const TD_CTY={ten:"Công ty TNHH Giải Pháp Kỹ Thuật Sóng Việt",slogan:"We Have Solutions",
   gioi_thieu:"Song Việt là công ty giải pháp kỹ thuật chuyên sâu về xử lý nước cấp, nước thải và khí thải công nghiệp: tư vấn - thiết kế - thi công - vận hành và cho thuê hệ thống xử lý nước trọn gói cho các nhà máy, khu công nghiệp.",
-  dia_chi:"448 Võ Văn Tần, P. Bàn Cờ, TP. Hồ Chí Minh",
+  dia_chi:"Tầng 14, Toà nhà HM Town, 412 Nguyễn Thị Minh Khai, Phường Bàn Cờ, Thành phố Hồ Chí Minh, Việt Nam",
   workshop:"275 An Phú Đông 3, P. An Phú Đông, TP. Hồ Chí Minh",
   dien_thoai:"0937 120 039",
   email:"sv-admin1@watersolutions.company",       // email nhận hồ sơ (ứng tuyển)
@@ -16789,7 +16789,7 @@ function nsHsDoc(k){
   const email=g('h_email'), thuViec=(document.getElementById('h_lhd')||{}).value==='THU_VIEC';
   const vn=v=>Number(v||0).toLocaleString('vi-VN'), vnz=v=>v>0?vn(v)+' đ':cham(4), d=new Date();
   const ngayDu=`TP. Hồ Chí Minh, ngày ${d.getDate()} tháng ${d.getMonth()+1} năm ${d.getFullYear()}`;
-  const CTY='CÔNG TY TNHH GIẢI PHÁP KỸ THUẬT SÓNG VIỆT', DC='275 An Phú Đông 3, P. An Phú Đông, TP. Hồ Chí Minh';
+  const CTY='CÔNG TY TNHH GIẢI PHÁP KỸ THUẬT SÓNG VIỆT', DC='Tầng 14, Toà nhà HM Town, 412 Nguyễn Thị Minh Khai, Phường Bàn Cờ, Thành phố Hồ Chí Minh, Việt Nam';
   const ts=S._tsLuat||{giam_tru_ban_than:11000000,giam_tru_phu_thuoc:4400000};
   const ky2=(a,b)=>`<div class="ngay">${ngayDu}</div><div class="ky"><div><b>${a}</b><span>(Ký, ghi rõ họ tên)</span></div><div><b>${b}</b><span>(Ký, ghi rõ họ tên)</span></div></div>`;
   const ky1=a=>`<div class="ngay">${ngayDu}</div><div class="ky"><div></div><div><b>${a}</b><span>(Ký, ghi rõ họ tên)</span></div></div>`;
@@ -17715,7 +17715,7 @@ function nsLuongIn(){
     .ky b{display:block;margin-bottom:46px}
     .ky span{font-size:9.5px;color:#555}
   </style></head><body>
-    <div class="hd"><div class="cty">SONG VIET WATER SOLUTIONS<small>275 An Phú Đông 3, P. An Phú Đông, TP.HCM · inf@watersolutions.company</small></div>
+    <div class="hd"><div class="cty">SONG VIET WATER SOLUTIONS<small>Tầng 14, Toà nhà HM Town, 412 Nguyễn Thị Minh Khai, P. Bàn Cờ, TP.HCM · inf@watersolutions.company</small></div>
       <div class="so">Mẫu: BL-01<br>Ngày in: ${new Date().toLocaleDateString('vi-VN')}</div></div>
     <h1>BẢNG THANH TOÁN TIỀN LƯƠNG THÁNG ${esc(p2[1]||'')}/${esc(p2[0]||'')}</h1>
     <table><thead>

@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     email_cc_bao_gia: str = "sv-hieu@watersolutions.company"  # CC tự động khi gửi báo giá
     cong_ty_ten: str = "CÔNG TY TNHH GPKT SÓNG VIỆT"
     cong_ty_slogan: str = "We Have Solutions"
-    cong_ty_dia_chi: str = "448 Võ Văn Tần, P. Bàn Cờ, Q.3, Tp. HCM"
+    cong_ty_dia_chi: str = "Tầng 14, Toà nhà HM Town, 412 Nguyễn Thị Minh Khai, Phường Bàn Cờ, Thành phố Hồ Chí Minh, Việt Nam"
     cong_ty_tel: str = "(084) 937120039"
     cong_ty_email: str = "info@watersolutions.company"
     cong_ty_website: str = "watersolutions.company"
