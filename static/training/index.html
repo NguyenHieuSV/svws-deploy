@@ -4597,6 +4597,9 @@ goHome();
  const css=document.createElement('style');
  css.textContent='.trnOv{position:fixed;inset:0;background:rgba(10,25,47,.92);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px}.trnBox{background:#fff;border-radius:14px;max-width:410px;width:100%;padding:24px;box-shadow:0 20px 60px rgba(0,0,0,.4)}.trnBox h2{margin:0 0 4px;color:#13315c;font-size:19px}.trnBox p{color:#5a6b85;font-size:12.5px;margin:0 0 12px}.trnTabs{display:flex;gap:6px;margin-bottom:14px}.trnTab{flex:1;text-align:center;padding:9px 6px;border-radius:9px;border:1.5px solid #d7e3f4;font-size:13.5px;font-weight:700;color:#5a6b85;cursor:pointer}.trnTab.on{background:#13315c;color:#fff;border-color:#13315c}.trnBox input{width:100%;box-sizing:border-box;border:1.5px solid #d7e3f4;border-radius:9px;padding:11px 12px;font-size:15px;margin-bottom:10px}.trnBox button{width:100%;border:0;border-radius:9px;padding:12px;font-size:15px;font-weight:700;cursor:pointer}.trnGo{background:#0582ca;color:#fff}.trnOff{background:#eef3fa;color:#13315c;margin-top:8px;font-weight:600;font-size:13px}.trnReg{background:none;color:#0582ca;margin-top:10px;font-size:13.5px;text-decoration:underline;font-weight:600}.trnErr{color:#b02020;font-size:12.5px;min-height:16px;margin:2px 0 6px}.trnChip{position:fixed;right:10px;bottom:10px;z-index:999;background:#13315c;color:#fff;border-radius:999px;padding:7px 14px;font-size:12px;box-shadow:0 4px 14px rgba(0,0,0,.25);display:flex;gap:10px;align-items:center}.trnChip b{font-weight:700}.trnChip span{opacity:.85;cursor:pointer}.trnChip .q{background:#0582ca;border-radius:999px;padding:1px 8px;font-size:11px}';
  document.head.appendChild(css);
+ const css2=document.createElement('style');
+ css2.textContent='.trnChk{display:flex;gap:8px;align-items:flex-start;font-size:13px;color:#33445e;line-height:1.45;margin:0 0 10px;cursor:pointer;text-align:left}.trnBox .trnChk input{width:auto;margin:2px 0 0;flex:none}.trnChk a{color:#0582ca}.trnBox .trnSec{border-top:1px solid #e3eaf4;margin-top:12px;padding-top:10px}.trnBox .trnSec b{display:block;color:#13315c;font-size:13.5px;margin-bottom:6px}.trnDel{background:#b02020;color:#fff}.trnOk{color:#0a7a3d;font-size:12.5px;min-height:16px;margin:2px 0 6px}#trnAcc{cursor:pointer;opacity:.85}';
+ document.head.appendChild(css2);
  function auth(){try{return JSON.parse(localStorage.getItem('svws_trn_auth')||'null');}catch(e){return null;}}
  function setAuth(a){localStorage.setItem('svws_trn_auth',JSON.stringify(a));}
  function queue(){try{return JSON.parse(localStorage.getItem('svws_trn_queue')||'[]');}catch(e){return[];}}
@@ -4621,8 +4624,83 @@ goHome();
    if(!a){if(c)c.remove();return;}
    if(!c){c=document.createElement('div');c.id='trnChip';c.className='trnChip';document.body.appendChild(c);}
    const n=queue().length;
-   c.innerHTML='👤 <b>'+(a.name||'Học viên')+'</b>'+(a.code?' · '+a.code:'')+(a.token?(n?' <span class="q">chờ gửi: '+n+'</span>':''):' <span class="q">offline</span>')+' <span id="trnOut" title="Đăng xuất">✕</span>';
+   c.innerHTML='👤 <b>'+(a.name||'Học viên')+'</b>'+(a.code?' · '+a.code:'')+(a.token?(n?' <span class="q">chờ gửi: '+n+'</span>':''):' <span class="q">offline</span>')+(a.token?' <span id="trnAcc" title="Tài khoản của tôi">⚙</span>':'')+' <span id="trnOut" title="Đăng xuất">✕</span>';
    c.querySelector('#trnOut').onclick=function(){if(confirm('Đăng xuất khỏi app?')){setAuth(null);location.reload();}};
+   const ac=c.querySelector('#trnAcc'); if(ac)ac.onclick=showAccount;
+ }
+ /* ---- H6: đồng ý xử lý dữ liệu — tài khoản cũ / khi chính sách đổi phiên bản phải bấm đồng ý mới dùng tiếp ---- */
+ function esc(v){return String(v==null?'':v).replace(/[&<>"']/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
+ const TERMS_LINKS='<a href="/training/terms" target="_blank">Điều khoản sử dụng</a> và <a href="/training/privacy" target="_blank">Chính sách xử lý dữ liệu cá nhân</a>';
+ async function checkMe(){
+   const a=auth(); if(!a||!a.token)return;
+   try{
+     const r=await fetch(API+'/me?token='+encodeURIComponent(a.token));
+     if(r.status===401){setAuth(null);updateChip();showLogin();return;}
+     if(!r.ok)return;
+     const d=await r.json(); if(d.need_consent)showConsent(d);
+   }catch(e){}
+ }
+ function showConsent(d){
+   if(document.querySelector('.trnOv'))return;
+   const ov=document.createElement('div');ov.className='trnOv';
+   ov.innerHTML='<div class="trnBox"><h2>📄 Cập nhật điều khoản</h2><p>SVWS Training đã ban hành '+TERMS_LINKS+' (phiên bản '+(d.policy_version||'')+'). Vui lòng đọc và xác nhận để tiếp tục dùng app.</p>'
+   +'<label class="trnChk"><input type="checkbox" id="cfT"> <span>Tôi đã đọc và đồng ý '+TERMS_LINKS+'. *</span></label>'
+   +'<label class="trnChk"><input type="checkbox" id="cfM"'+(d.marketing?' checked':'')+'> <span>Nhận thông tin tuyển dụng, thực tập, sự kiện từ SVWS (tùy chọn).</span></label>'
+   +'<div class="trnErr" id="cfE"></div><button class="trnGo" id="cfGo">Đồng ý và tiếp tục</button>'
+   +'<button class="trnOff" id="cfOut">Không đồng ý — đăng xuất</button></div>';
+   document.body.appendChild(ov);
+   const err=ov.querySelector('#cfE');
+   ov.querySelector('#cfOut').onclick=function(){setAuth(null);location.reload();};
+   ov.querySelector('#cfGo').onclick=async function(){
+     if(!ov.querySelector('#cfT').checked){err.textContent='Vui lòng tick ô đồng ý (bắt buộc).';return;}
+     err.textContent='Đang lưu…';
+     try{
+       const r=await fetch(API+'/me/consent',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:auth().token,terms:true,marketing:ov.querySelector('#cfM').checked})});
+       const x=await r.json().catch(function(){return{}});
+       if(!r.ok){err.textContent=x.detail||'Không lưu được.';return;}
+       ov.remove();
+     }catch(e){err.textContent='Không kết nối được máy chủ.';}
+   };
+ }
+ /* ---- H6: Tài khoản của tôi — đổi lựa chọn, tải dữ liệu, xóa tài khoản ---- */
+ async function showAccount(){
+   if(document.querySelector('.trnOv'))return;
+   const a=auth(); if(!a||!a.token)return;
+   let d={};
+   try{const r=await fetch(API+'/me?token='+encodeURIComponent(a.token));if(r.status===401){setAuth(null);updateChip();showLogin();return;}d=await r.json();}catch(e){alert('Không kết nối được máy chủ.');return;}
+   const ov=document.createElement('div');ov.className='trnOv';
+   ov.innerHTML='<div class="trnBox"><h2>⚙ Tài khoản của tôi</h2><p>'+esc(d.name)+' · '+esc(d.code)+'<br>'+esc(d.email)+'</p>'
+   +'<div class="trnSec"><b>Lựa chọn</b><label class="trnChk"><input type="checkbox" id="acM"'+(d.marketing?' checked':'')+'> <span>Nhận thông tin tuyển dụng, thực tập, sự kiện từ SVWS</span></label>'
+   +'<p style="margin:0 0 8px">Đã đồng ý '+TERMS_LINKS+' (phiên bản '+(d.policy_version||'')+').</p>'
+   +'<div class="trnOk" id="acOk"></div><button class="trnGo" id="acSave">Lưu lựa chọn</button></div>'
+   +'<div class="trnSec"><b>Dữ liệu của tôi</b><button class="trnOff" id="acDl" style="margin-top:0">⬇ Tải dữ liệu của tôi (JSON)</button></div>'
+   +'<div class="trnSec"><b>Xóa tài khoản</b><p style="margin:0 0 8px">Xóa thông tin tài khoản; điểm đã làm và lịch sử đồng ý chỉ còn ở dạng ẩn danh (không tên, email, SĐT). Không thể hoàn tác.</p>'
+   +'<input id="acPw" type="password" placeholder="Nhập mật khẩu để xác nhận" maxlength="60"><div class="trnErr" id="acE"></div><button class="trnDel" id="acDel">Xóa tài khoản</button></div>'
+   +'<button class="trnOff" id="acX">Đóng</button></div>';
+   document.body.appendChild(ov);
+   const ok=ov.querySelector('#acOk'),err=ov.querySelector('#acE');
+   ov.querySelector('#acX').onclick=function(){ov.remove();};
+   ov.querySelector('#acSave').onclick=async function(){
+     ok.textContent='Đang lưu…';
+     try{const r=await fetch(API+'/me/consent',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:a.token,terms:true,marketing:ov.querySelector('#acM').checked})});
+       ok.textContent=r.ok?'✅ Đã lưu.':'Không lưu được.';}catch(e){ok.textContent='Không kết nối được máy chủ.';}
+   };
+   ov.querySelector('#acDl').onclick=async function(){
+     try{const r=await fetch(API+'/me/export?token='+encodeURIComponent(a.token));if(!r.ok){alert('Không tải được dữ liệu.');return;}
+       const u=URL.createObjectURL(await r.blob());const l=document.createElement('a');l.href=u;l.download='svws_training_du_lieu_cua_toi.json';document.body.appendChild(l);l.click();l.remove();setTimeout(function(){URL.revokeObjectURL(u)},2000);
+     }catch(e){alert('Không kết nối được máy chủ.');}
+   };
+   ov.querySelector('#acDel').onclick=async function(){
+     const pw=ov.querySelector('#acPw').value;
+     if(!pw){err.textContent='Nhập mật khẩu để xác nhận.';return;}
+     if(!confirm('Xóa vĩnh viễn tài khoản này? Không thể hoàn tác.'))return;
+     err.textContent='Đang xóa…';
+     try{const r=await fetch(API+'/me/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:a.token,password:pw})});
+       const x=await r.json().catch(function(){return{}});
+       if(!r.ok){err.textContent=x.detail||'Không xóa được.';return;}
+       setAuth(null);setQueue([]);alert(x.message||'Đã xóa tài khoản.');location.reload();
+     }catch(e){err.textContent='Không kết nối được máy chủ.';}
+   };
  }
  function showLogin(){
    if(document.querySelector('.trnOv'))return;
@@ -4651,6 +4729,7 @@ goHome();
        const d=await r.json().catch(function(){return{}});
        if(!r.ok){err.textContent=d.detail||'Đăng nhập không thành công.';return;}
        setAuth({code:d.emp_code||d.student_code,name:d.name,token:d.token});ov.remove();updateChip();flush();
+       if(d.need_consent)showConsent(d);
      }catch(e){err.textContent='Không kết nối được máy chủ — kiểm tra mạng, hoặc chọn Học offline.';}
    };
    ov.querySelector('#trnOffB').onclick=function(){setAuth({code:'',name:'Khách (offline)',token:null});ov.remove();updateChip();};
@@ -4663,7 +4742,7 @@ goHome();
    }
  }catch(e){}
  window.addEventListener('online',flush);
- function boot(){ if(!auth())showLogin(); updateChip(); flush(); }
+ function boot(){ if(!auth())showLogin(); updateChip(); flush(); checkMe(); }
  document.addEventListener('DOMContentLoaded',boot);
  if(document.readyState!=='loading')boot();
 })();
