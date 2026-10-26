@@ -69,12 +69,13 @@ def test_quy_tac_phai_bao_cao():
 
 def test_tong_hop_va_ty_le(db):
     hom_nay = date(2026, 10, 26)                         # thứ Hai
+    _giao(db, 1, None, None)                             # An có việc được giao không thời hạn → mọi ngày làm việc phải báo cáo
     _bc(db, 1, date(2026, 10, 19)); _bc(db, 1, date(2026, 10, 20)); _bc(db, 1, date(2026, 10, 22))
     _wt(db, 1, date(2026, 10, 21), "NGHI_PHEP")          # nghỉ phép → miễn
     _wt(db, 1, date(2026, 10, 25), "OT_CUOI_TUAN")       # CN tăng ca → phải, mà chưa báo cáo → thiếu
     _wt(db, 1, date(2026, 10, 23), "VIEC_RIENG_CO_LUONG", so_ngay=0.5)   # nửa ngày → vẫn phải → thiếu
-    bc, ot, nghi = bs.nap_du_lieu(db, [1], date(2026, 10, 19), date(2026, 10, 31))
-    th = bs.tong_hop_nv(db.get(m.NhanVien, 1), bc, ot, nghi, date(2026, 10, 19), date(2026, 10, 31), hom_nay)
+    bc, ot, nghi, viec = bs.nap_du_lieu(db, [1], date(2026, 10, 19), date(2026, 10, 31))
+    th = bs.tong_hop_nv(db.get(m.NhanVien, 1), bc, ot, nghi, viec, date(2026, 10, 19), date(2026, 10, 31), hom_nay)
     tt = {x["ngay"]: x["trang_thai"] for x in th["ngay"]}
     assert tt["2026-10-19"] == "DA" and tt["2026-10-21"] == "MIEN" and tt["2026-10-23"] == "THIEU"
     assert tt["2026-10-24"] == "THIEU" and tt["2026-10-25"] == "THIEU" and tt["2026-10-26"] == "CHO"
@@ -86,14 +87,16 @@ def test_tong_hop_va_ty_le(db):
 
 def test_ot_bi_tu_choi_khong_tinh_va_ngay_vao_lam(db):
     nv = db.get(m.NhanVien, 1); nv.ngay_vao_lam = date(2026, 10, 22); db.commit()
+    _giao(db, 1, None, None)
     _wt(db, 1, date(2026, 10, 25), "OT_CUOI_TUAN", tt="TU_CHOI")
-    bc, ot, nghi = bs.nap_du_lieu(db, [1], date(2026, 10, 1), date(2026, 10, 31))
-    th = bs.tong_hop_nv(nv, bc, ot, nghi, date(2026, 10, 1), date(2026, 10, 31), date(2026, 10, 26))
+    bc, ot, nghi, viec = bs.nap_du_lieu(db, [1], date(2026, 10, 1), date(2026, 10, 31))
+    th = bs.tong_hop_nv(nv, bc, ot, nghi, viec, date(2026, 10, 1), date(2026, 10, 31), date(2026, 10, 26))
     assert th["ngay"][0]["ngay"] == "2026-10-22"          # trước ngày vào làm không tính
     assert {x["ngay"]: x["trang_thai"] for x in th["ngay"]}["2026-10-25"] == "MIEN"
 
 
 def test_ds_thieu_de_nhac_bo_qua_nguoi_khong_tai_khoan_va_chu_nhat(db):
+    _giao(db, 1, None, None); _giao(db, 2, None, None); _giao(db, 3, None, None)
     _bc(db, 1, date(2026, 10, 23))
     assert [x["ten"] for x in bs.ds_thieu_bao_cao(db, date(2026, 10, 23))] == ["Bình"]   # NV03 không TK → bỏ
     assert bs.ds_thieu_bao_cao(db, date(2026, 10, 25)) == []                              # Chủ nhật
@@ -116,7 +119,7 @@ def test_gui_nhac_moi_nguoi_mot_lan(db, monkeypatch):
     monkeypatch.setattr(cg, "dang_bat", lambda: True)
     monkeypatch.setattr(cg, "lay_chat_provider", lambda: Prov())
     kq0 = bs.gui_nhac(db, date(2026, 10, 23))             # chưa ai được giao việc → không nhắn
-    assert kq0["da_gui"] == 0 and kq0["khong_co_viec"] == 2 and gui == []
+    assert kq0["da_gui"] == 0 and kq0["thieu"] == 0 and gui == []   # không có việc → không phải báo cáo
     _giao(db, 1, date(2026, 10, 20), date(2026, 10, 25)); _giao(db, 2, None, None)
     _giao(db, 2, date(2026, 9, 1), date(2026, 9, 30))       # việc đã hết hạn không tính, nhưng Bình còn việc không thời hạn
     kq = bs.gui_nhac(db, date(2026, 10, 23))
@@ -141,7 +144,7 @@ def test_gui_nhac_webhook_mot_tin_gop(db, monkeypatch):
     _giao(db, 1, date(2026, 10, 23), date(2026, 10, 23))     # chỉ An là người nhận việc ngày 23/10
     _giao(db, 2, date(2026, 10, 24), None)                   # việc của Bình bắt đầu sau → không nhắc Bình
     kq = bs.gui_nhac(db, date(2026, 10, 23))
-    assert kq["da_gui"] == 1 and kq["kieu"] == "PHONG_CHUNG" and len(gui) == 1 and kq["khong_co_viec"] == 1
+    assert kq["da_gui"] == 1 and kq["kieu"] == "PHONG_CHUNG" and len(gui) == 1
     assert "• An" in gui[0] and "Bình" not in gui[0] and "23/10/2026" in gui[0] and "người nhận việc" in gui[0]
 
 
@@ -247,9 +250,27 @@ def test_truoc_ngay_ap_dung_khong_tinh(db, monkeypatch):
     from app.config import settings
     monkeypatch.setattr(settings, "bao_cao_tinh_tu", "2026-10-26")
     nv = db.get(m.NhanVien, 1)
-    bc, ot, nghi = bs.nap_du_lieu(db, [1], date(2026, 10, 1), date(2026, 10, 31))
-    th = bs.tong_hop_nv(nv, bc, ot, nghi, date(2026, 10, 1), date(2026, 10, 31), date(2026, 10, 27))
+    _giao(db, 1, None, None)
+    bc, ot, nghi, viec = bs.nap_du_lieu(db, [1], date(2026, 10, 1), date(2026, 10, 31))
+    th = bs.tong_hop_nv(nv, bc, ot, nghi, viec, date(2026, 10, 1), date(2026, 10, 31), date(2026, 10, 27))
     assert [x["ngay"] for x in th["ngay"]] == ["2026-10-26", "2026-10-27"]       # 1–25/10 không còn bị tính thiếu
     assert (th["can"], th["thieu"]) == (1, 1)
     assert bs.ds_thieu_bao_cao(db, date(2026, 10, 24)) == []                     # không nhắc ngày trước áp dụng
     assert bs.thieu_gan_day(db, 1, date(2026, 10, 27)) == ["2026-10-26"]
+
+
+def test_khong_co_viec_duoc_giao_thi_khong_phai_bao_cao(db):
+    # An có việc 21–22/10 (T4–T5); các ngày khác không phải báo cáo, không tính tỉ lệ, không nhắc
+    _giao(db, 1, date(2026, 10, 21), date(2026, 10, 22))
+    _bc(db, 1, date(2026, 10, 21))
+    bc, ot, nghi, viec = bs.nap_du_lieu(db, [1], date(2026, 10, 19), date(2026, 10, 31))
+    th = bs.tong_hop_nv(db.get(m.NhanVien, 1), bc, ot, nghi, viec, date(2026, 10, 19), date(2026, 10, 31), date(2026, 10, 26))
+    tt = {x["ngay"]: (x["trang_thai"], x["ly_do"]) for x in th["ngay"]}
+    assert tt["2026-10-20"] == ("MIEN", "Không có việc được giao")
+    assert tt["2026-10-21"][0] == "DA" and tt["2026-10-22"] == ("THIEU", None)
+    assert (th["can"], th["xong"], th["ty_le"]) == (2, 1, 50.0)
+    assert [x["ten"] for x in bs.ds_thieu_bao_cao(db, date(2026, 10, 22))] == ["An"]
+    assert bs.ds_thieu_bao_cao(db, date(2026, 10, 23)) == []           # hết hạn việc → không nhắc
+    bc, ot, nghi, viec = bs.nap_du_lieu(db, [2], date(2026, 10, 19), date(2026, 10, 31))
+    th2 = bs.tong_hop_nv(db.get(m.NhanVien, 2), bc, ot, nghi, viec, date(2026, 10, 19), date(2026, 10, 31), date(2026, 10, 26))
+    assert (th2["can"], th2["thieu"], th2["ty_le"]) == (0, 0, None)    # Bình chưa được giao việc

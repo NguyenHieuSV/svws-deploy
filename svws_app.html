@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="vi">
 <head>
-<!-- build: nhac-nguoi-nhan-viec-2026-10-26 -->
+<!-- build: chi-nguoi-nhan-viec-2026-10-26 -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#0f2c44">
@@ -15875,6 +15875,7 @@ async function wtReport(host){
     const byNv={}; (ds.danh_sach||[]).forEach(r=>byNv[r.nhan_vien_id]=r);
     const daBc=(ds.danh_sach||[]).length, tong=nvs.length;
     const _tl=v=>{const t=tyle&&tyle.nhan_vien&&tyle.nhan_vien[String(v.id)];if(!t)return '<span style="color:var(--muted)" title="Chưa có tài khoản đăng nhập gắn hồ sơ — không tính">—</span>';
+      if(!t.can&&!t.xong)return '<span style="color:var(--muted)" title="Tháng này chưa có ngày nào phải báo cáo (không có việc được giao)">—</span>';
       const m=t.ty_le==null?'var(--muted)':t.ty_le>=90?'#16a34a':t.ty_le>=70?'#d97706':'#dc2626';
       return `<b style="color:${m}">${t.ty_le==null?'—':t.ty_le+'%'}</b> <span style="font-size:11px;color:var(--muted)">${t.xong}/${t.can}${t.thieu?` · thiếu ${t.thieu}`:''}</span>`;};
     const rows=nvs.map(v=>{const r=byNv[v.id];
@@ -15955,7 +15956,7 @@ function _brTongHop(th,thieu){
       <span style="font-size:12.5px;color:var(--muted)">Phải báo cáo <b>${th.can}</b> ngày · đã <b style="color:#16a34a">${th.xong}</b> · thiếu <b style="color:#dc2626">${th.thieu}</b> · tỉ lệ hoàn thành <b style="color:${mau};font-size:15px">${tl}</b></span></div>
     <div class="panel-b"><details ${th.thieu?'open':''}><summary style="cursor:pointer;color:var(--muted);font-size:12.5px;padding:4px 0">Ngày ; kết quả — bấm để mở / đóng danh sách từng ngày</summary>
       <table style="margin-top:6px"><thead><tr><th>Ngày</th><th>Trạng thái</th><th>Kết quả</th><th></th></tr></thead><tbody>${rows||'<tr><td colspan="4" class="empty">Chưa tới ngày nào trong tháng này.</td></tr>'}</tbody></table></details>
-      <div class="note" style="margin-top:8px;color:var(--muted)">${th.tinh_tu?`Tính từ ngày áp dụng <b>${_bcNgayVn(th.tinh_tu)}</b>; các ngày trước đó không tính. `:''}Ngày thường và thứ Bảy phải báo cáo, trừ ngày nghỉ (phép, việc riêng, ốm…) và ngày lễ trong lịch. Chủ nhật / ngày lễ có tăng ca thì vẫn phải báo cáo. Người có việc được giao mà thiếu báo cáo sẽ được nhắc tên trong nhóm Google Chat sáng hôm sau.</div></div></div>`;
+      <div class="note" style="margin-top:8px;color:var(--muted)">${th.tinh_tu?`Tính từ ngày áp dụng <b>${_bcNgayVn(th.tinh_tu)}</b>; các ngày trước đó không tính. `:''}Chỉ những ngày bạn có <b>việc được giao</b> (trong khoảng ngày bắt đầu → kết thúc) mới phải báo cáo: ngày thường và thứ Bảy, trừ ngày nghỉ (phép, việc riêng, ốm…) và ngày lễ trong lịch; Chủ nhật / ngày lễ có tăng ca thì vẫn phải báo cáo. Người có việc được giao mà thiếu báo cáo sẽ được nhắc tên trong nhóm Google Chat sáng hôm sau.</div></div></div>`;
 }
 function _brFill(r){
   const set=(id,val)=>{const e=document.getElementById(id);if(e)e.value=(val==null?'':val);};

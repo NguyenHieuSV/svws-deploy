@@ -6,6 +6,8 @@ Quy tắc «phải báo cáo» (anh Hiếu chốt 26/10/2026):
   • Tăng ca luôn phải báo cáo. Đăng ký (kể cả đang chờ duyệt) bị từ chối thì không tính.
   • Nghỉ nửa ngày (0 < số ngày < 1) vẫn phải báo cáo.
   • Chỉ tính người ĐANG LÀM, trong khoảng ngày vào làm … ngày nghỉ việc, và CÓ tài khoản đăng nhập gắn hồ sơ (không có tài khoản thì không báo cáo được).
+  • CHỈ ngày người đó là NGƯỜI NHẬN của một việc được giao còn hiệu lực (bắt đầu ≤ ngày ≤ kết thúc) mới phải báo cáo
+    (anh Hiếu 26/10/2026) — không có việc được giao thì không tính thiếu, không tính tỉ lệ, không nhắc.
 Nhắc: sáng hôm sau, ai thiếu báo cáo của ngày hôm trước → «Bạn chưa hoàn thành báo cáo ngày …» qua Google Chat.
 """
 from datetime import date, timedelta
@@ -54,12 +56,18 @@ def phai_bao_cao(d: date, co_ot: bool, loai_nghi: str | None):
 
 
 def nap_du_lieu(db: Session, nv_ids, tu: date, den: date):
-    """Nạp một lượt báo cáo + tăng ca + nghỉ của các nhân viên trong khoảng ngày."""
+    """Nạp một lượt báo cáo + tăng ca + nghỉ + VIỆC ĐƯỢC GIAO của các nhân viên trong khoảng ngày.
+    → (bc, ot, nghi, viec) — viec = {nhan_vien_id: [(bắt đầu, kết thúc), …]}."""
+    from .models import GiaoViec
     from .routers.nhan_su import _WT_OT, _WT_NGHI
     ids = list(nv_ids)
-    bc, ot, nghi = {}, set(), {}
+    bc, ot, nghi, viec = {}, set(), {}, {}
     if not ids:
-        return bc, ot, nghi
+        return bc, ot, nghi, viec
+    for g in (db.query(GiaoViec).filter(GiaoViec.nhan_vien_id.in_(ids),
+                                        (GiaoViec.bat_dau.is_(None)) | (GiaoViec.bat_dau <= den),
+                                        (GiaoViec.ket_thuc.is_(None)) | (GiaoViec.ket_thuc >= tu)).all()):
+        viec.setdefault(g.nhan_vien_id, []).append((g.bat_dau, g.ket_thuc))
     for r in (db.query(BaoCaoNgay).filter(BaoCaoNgay.nhan_vien_id.in_(ids), BaoCaoNgay.ngay >= tu,
                                           BaoCaoNgay.ngay <= den).all()):
         bc[(r.nhan_vien_id, r.ngay)] = r
@@ -71,10 +79,15 @@ def nap_du_lieu(db: Session, nv_ids, tu: date, den: date):
             sn = float(r.so_ngay or 0)
             if not (0 < sn < 1):                       # nghỉ nửa ngày vẫn phải báo cáo
                 nghi[(r.nhan_vien_id, r.ngay)] = r.loai
-    return bc, ot, nghi
+    return bc, ot, nghi, viec
 
 
-def tong_hop_nv(nv: NhanVien, bc, ot, nghi, tu: date, den: date, hom_nay: date) -> dict:
+def co_viec(viec: dict, nv_id: int, d: date) -> bool:
+    """Ngày d người này có việc được giao còn hiệu lực (bắt đầu ≤ d ≤ kết thúc; để trống = không giới hạn)."""
+    return any((bd is None or bd <= d) and (kt is None or kt >= d) for bd, kt in viec.get(nv_id, ()))
+
+
+def tong_hop_nv(nv: NhanVien, bc, ot, nghi, viec, tu: date, den: date, hom_nay: date) -> dict:
     """Từng ngày trong [tu, min(den, hôm nay)] + tỉ lệ hoàn thành.
     Trạng thái: DA (đã báo cáo) · THIEU (đến hạn mà chưa báo cáo) · CHO (hôm nay, chưa tới hạn) · MIEN (không phải báo cáo)."""
     if nv.ngay_vao_lam and nv.ngay_vao_lam > tu:
@@ -90,6 +103,8 @@ def tong_hop_nv(nv: NhanVien, bc, ot, nghi, tu: date, den: date, hom_nay: date) 
     while d <= cuoi:
         r = bc.get((nv.id, d))
         bat_buoc, ly_do = phai_bao_cao(d, (nv.id, d) in ot, nghi.get((nv.id, d)))
+        if bat_buoc and not co_viec(viec, nv.id, d):
+            bat_buoc, ly_do = False, "Không có việc được giao"
         if r is not None:
             tt = "DA"
         elif not bat_buoc:
@@ -117,15 +132,6 @@ def nv_du_dieu_kien(db: Session):
             .order_by(NhanVien.ho_ten).all())
 
 
-def nv_co_viec_ngay(db: Session, ngay: date) -> set:
-    """Nhân viên là NGƯỜI NHẬN của ít nhất một việc được giao còn hiệu lực ngày `ngay` (bắt đầu ≤ ngày ≤ kết thúc)."""
-    from .models import GiaoViec
-    rows = (db.query(GiaoViec.nhan_vien_id)
-            .filter((GiaoViec.bat_dau.is_(None)) | (GiaoViec.bat_dau <= ngay),
-                    (GiaoViec.ket_thuc.is_(None)) | (GiaoViec.ket_thuc >= ngay)).all())
-    return {r[0] for r in rows}
-
-
 def ds_thieu_bao_cao(db: Session, ngay: date) -> list:
     """Người phải báo cáo ngày `ngay` mà chưa có báo cáo → [{nhan_vien_id, ten, email, co_viec}].
     co_viec = có việc được giao còn hiệu lực ngày đó (CHỈ những người này mới bị nhắc tên)."""
@@ -133,8 +139,7 @@ def ds_thieu_bao_cao(db: Session, ngay: date) -> list:
     if ad and ngay < ad:
         return []
     cap = nv_du_dieu_kien(db)
-    bc, ot, nghi = nap_du_lieu(db, [nv.id for nv, _ in cap], ngay, ngay)
-    co_viec = nv_co_viec_ngay(db, ngay)
+    bc, ot, nghi, viec = nap_du_lieu(db, [nv.id for nv, _ in cap], ngay, ngay)
     out = []
     for nv, u in cap:
         if (nv.id, ngay) in bc:
@@ -143,8 +148,8 @@ def ds_thieu_bao_cao(db: Session, ngay: date) -> list:
             continue
         if nv.ngay_nghi_viec and nv.ngay_nghi_viec < ngay:
             continue
-        if phai_bao_cao(ngay, (nv.id, ngay) in ot, nghi.get((nv.id, ngay)))[0]:
-            out.append({"nhan_vien_id": nv.id, "ten": nv.ho_ten, "email": u.email, "co_viec": nv.id in co_viec})
+        if phai_bao_cao(ngay, (nv.id, ngay) in ot, nghi.get((nv.id, ngay)))[0] and co_viec(viec, nv.id, ngay):
+            out.append({"nhan_vien_id": nv.id, "ten": nv.ho_ten, "email": u.email, "co_viec": True})
     return out
 
 
@@ -154,8 +159,8 @@ def thieu_gan_day(db: Session, nv_id: int, hom_nay: date, so_ngay: int = 14) -> 
     if nv is None:
         return []
     tu, den = hom_nay - timedelta(days=so_ngay), hom_nay - timedelta(days=1)
-    bc, ot, nghi = nap_du_lieu(db, [nv_id], tu, den)
-    th = tong_hop_nv(nv, bc, ot, nghi, tu, den, hom_nay)
+    bc, ot, nghi, viec = nap_du_lieu(db, [nv_id], tu, den)
+    th = tong_hop_nv(nv, bc, ot, nghi, viec, tu, den, hom_nay)
     return [x["ngay"] for x in th["ngay"] if x["trang_thai"] == "THIEU"]
 
 

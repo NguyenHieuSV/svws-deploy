@@ -1274,8 +1274,8 @@ def bao_cao_tong_hop(thang: str | None = None, nhan_vien_id: int | None = None, 
     nv = db.get(NhanVien, nv_id)
     if nv is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy nhân viên")
-    bc, ot, nghi = bs.nap_du_lieu(db, [nv_id], tu, den)
-    kq = bs.tong_hop_nv(nv, bc, ot, nghi, tu, den, hom_nay)
+    bc, ot, nghi, viec = bs.nap_du_lieu(db, [nv_id], tu, den)
+    kq = bs.tong_hop_nv(nv, bc, ot, nghi, viec, tu, den, hom_nay)
     ad = bs.ngay_ap_dung()
     kq.update({"thang": thang, "nhan_vien_id": nv_id, "ho_ten": nv.ho_ten, "hom_nay": str(hom_nay),
                "tinh_tu": str(ad) if ad else None})
@@ -1303,10 +1303,10 @@ def bao_cao_ty_le(thang: str | None = None, db: Session = Depends(get_db),
     hom_nay = ngay_hien_tai()
     tu, den, thang = _thang_khoang(thang, hom_nay)
     cap = bs.nv_du_dieu_kien(db)
-    bc, ot, nghi = bs.nap_du_lieu(db, [nv.id for nv, _ in cap], tu, den)
+    bc, ot, nghi, viec = bs.nap_du_lieu(db, [nv.id for nv, _ in cap], tu, den)
     out = {}
     for nv, _u in cap:
-        t = bs.tong_hop_nv(nv, bc, ot, nghi, tu, den, hom_nay)
+        t = bs.tong_hop_nv(nv, bc, ot, nghi, viec, tu, den, hom_nay)
         out[str(nv.id)] = {"can": t["can"], "xong": t["xong"], "thieu": t["thieu"], "ty_le": t["ty_le"]}
     tong_can = sum(v["can"] for v in out.values())
     tong_xong = sum(v["xong"] for v in out.values())
