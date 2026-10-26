@@ -17,7 +17,7 @@ from app.routers import nhan_su as ns
 def db(monkeypatch):
     monkeypatch.setattr(ns, "ghi_audit", lambda *a, **k: None)
     eng = create_engine("sqlite://")
-    for t in (m.VaiTro, m.NguoiDung, m.NhanVien, m.BaoCaoNgay, m.NgayNghiOt, m.BaoCaoNhac):
+    for t in (m.VaiTro, m.NguoiDung, m.NhanVien, m.GiaoViec, m.BaoCaoNgay, m.NgayNghiOt, m.BaoCaoNhac):
         t.__table__.create(eng)
     s = sessionmaker(eng)()
     n = {}
@@ -29,7 +29,7 @@ def db(monkeypatch):
                 n[type(o)] = n.get(type(o), 0) + 1
                 o.id = n[type(o)]
 
-    s.add(m.VaiTro(ma="NV_DA", ten="NV Dự án")); s.flush()
+    s.add(m.VaiTro(ma="NV_DA", ten="NV Dự án")); s.add(m.VaiTro(ma="CEO", ten="Giám đốc")); s.flush()
     s.add(m.NguoiDung(email="a@x.vn", mat_khau_hash="x", vai_tro_id=1, trang_thai="HOAT_DONG"))
     s.add(m.NguoiDung(email="b@x.vn", mat_khau_hash="x", vai_tro_id=1, trang_thai="HOAT_DONG"))
     s.flush()
@@ -133,16 +133,53 @@ def test_gui_nhac_webhook_mot_tin_gop(db, monkeypatch):
     assert "• An" in gui[0] and "• Bình" in gui[0] and "23/10/2026" in gui[0]
 
 
-def test_giao_viec_luu_va_kiem_tra(db):
-    u = db.get(m.NguoiDung, 1)
-    ok = ns.gui_bao_cao_ngay(ns.BaoCaoNgayVao(ngay="2026-10-23", da_lam="x", giao_viec_email="B@X.vn ",
-                                              ten_cong_viec="Lắp bơm", cv_bat_dau="2026-10-23", cv_ket_thuc="2026-10-25"),
-                             db, nd=u)
-    r = db.get(m.BaoCaoNgay, ok["id"])
-    assert (r.giao_viec_email, r.ten_cong_viec, r.cv_bat_dau, r.cv_ket_thuc) == ("b@x.vn", "Lắp bơm", date(2026, 10, 23), date(2026, 10, 25))
-    assert ns._bc_ra(r)["cv_ket_thuc"] == "2026-10-25"
+def _ceo(db):
+    u = m.NguoiDung(email="ceo@x.vn", mat_khau_hash="x", vai_tro_id=2, trang_thai="HOAT_DONG")
+    db.add(u); db.flush()
+    db.add(m.NhanVien(ma="SV01", ho_ten="Giám đốc", trang_thai="DANG_LAM", nguoi_dung_id=u.id)); db.commit()
+    return u
+
+
+def test_chi_ceo_nhap_tay_4_truong(db):
     from fastapi import HTTPException
-    with pytest.raises(HTTPException):
-        ns.gui_bao_cao_ngay(ns.BaoCaoNgayVao(ngay="2026-10-24", da_lam="x", cv_bat_dau="2026-10-25", cv_ket_thuc="2026-10-24"), db, nd=u)
-    with pytest.raises(HTTPException):
-        ns.gui_bao_cao_ngay(ns.BaoCaoNgayVao(ngay="2026-10-24", da_lam="x", giao_viec_email="khong-phai-email"), db, nd=u)
+    nv_u = db.get(m.NguoiDung, 1)
+    with pytest.raises(HTTPException) as e:          # nhân viên tự gõ người nhận / tên việc → bị chặn
+        ns.gui_bao_cao_ngay(ns.BaoCaoNgayVao(ngay="2026-10-23", da_lam="x", ten_cong_viec="Tự đặt"), db, nd=nv_u)
+    assert e.value.status_code == 403
+    ok = ns.gui_bao_cao_ngay(ns.BaoCaoNgayVao(ngay="2026-10-23", da_lam="x"), db, nd=nv_u)   # không gõ thì vẫn gửi được
+    with pytest.raises(HTTPException) as e:
+        ns.sua_bao_cao_ngay(ok["id"], ns.BcNgaySuaVao(cv_ket_thuc="2026-10-30"), db, nd=nv_u)
+    assert e.value.status_code == 403
+    ceo = _ceo(db)
+    ns.sua_bao_cao_ngay(ok["id"], ns.BcNgaySuaVao(giao_viec_email="A@x.vn", ten_cong_viec="Lắp bơm",
+                                                  cv_bat_dau="2026-10-23", cv_ket_thuc="2026-10-25"), db, nd=ceo)
+    r = db.get(m.BaoCaoNgay, ok["id"])
+    assert (r.giao_viec_email, r.ten_cong_viec, r.cv_ket_thuc) == ("a@x.vn", "Lắp bơm", date(2026, 10, 25))
+    ns.gui_bao_cao_ngay(ns.BaoCaoNgayVao(ngay="2026-10-23", da_lam="sửa lại"), db, nd=nv_u)   # NV gửi lại: giữ thông tin CEO nhập
+    assert db.get(m.BaoCaoNgay, ok["id"]).ten_cong_viec == "Lắp bơm"
+
+
+def test_ceo_giao_viec_nhan_vien_chon_khi_bao_cao(db):
+    from fastapi import HTTPException
+    ceo, an, binh = _ceo(db), db.get(m.NguoiDung, 1), db.get(m.NguoiDung, 2)
+    g = ns.tao_giao_viec(ns.GiaoViecVao(email="A@X.vn", ten_cong_viec="Lắp bơm", bat_dau="2026-10-20", ket_thuc="2026-10-25"), db, nd=ceo)
+    assert g["nhan_vien_id"] == 1 and g["ho_ten"] == "An"
+    with pytest.raises(HTTPException):               # email không phải nhân viên đang làm
+        ns.tao_giao_viec(ns.GiaoViecVao(email="ai@x.vn", ten_cong_viec="x"), db, nd=ceo)
+    with pytest.raises(HTTPException):               # kết thúc trước bắt đầu
+        ns.tao_giao_viec(ns.GiaoViecVao(email="a@x.vn", ten_cong_viec="x", bat_dau="2026-10-25", ket_thuc="2026-10-20"), db, nd=ceo)
+    assert [x["id"] for x in ns.ds_giao_viec(None, db, nd=an)] == [g["id"]]       # An thấy việc của mình
+    assert ns.ds_giao_viec(None, db, nd=binh) == []                               # Bình không thấy việc của An
+    assert ns.ds_giao_viec("2026-10-26", db, nd=an) == []                         # hết hạn thì không còn hiệu lực
+    ok = ns.gui_bao_cao_ngay(ns.BaoCaoNgayVao(ngay="2026-10-23", da_lam="lắp", giao_viec_id=g["id"]), db, nd=an)
+    r = db.get(m.BaoCaoNgay, ok["id"])
+    assert (r.giao_viec_id, r.ten_cong_viec, r.giao_viec_email, r.cv_bat_dau) == (g["id"], "Lắp bơm", "a@x.vn", date(2026, 10, 20))
+    with pytest.raises(HTTPException):               # Bình không gắn được việc của An
+        ns.gui_bao_cao_ngay(ns.BaoCaoNgayVao(ngay="2026-10-23", da_lam="x", giao_viec_id=g["id"]), db, nd=binh)
+    ns.sua_giao_viec(g["id"], ns.GiaoViecVao(email="a@x.vn", ten_cong_viec="Lắp bơm + chạy thử", bat_dau="2026-10-20", ket_thuc="2026-10-27"), db, nd=ceo)
+    assert db.get(m.BaoCaoNgay, ok["id"]).ten_cong_viec == "Lắp bơm + chạy thử"   # báo cáo đã gắn cập nhật theo
+    ns.gui_bao_cao_ngay(ns.BaoCaoNgayVao(ngay="2026-10-23", da_lam="lắp"), db, nd=an)  # bỏ chọn việc → xóa bản chụp
+    r = db.get(m.BaoCaoNgay, ok["id"])
+    assert r.giao_viec_id is None and r.ten_cong_viec is None
+    ns.xoa_giao_viec(g["id"], db, nd=ceo)
+    assert ns.ds_giao_viec(None, db, nd=ceo) == []

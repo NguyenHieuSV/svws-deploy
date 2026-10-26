@@ -1109,11 +1109,25 @@ class BaoCaoNgayVao(_NVBase):
     ke_hoach: str | None = None
     so_gio: float | None = 0
     ma_lien_quan: str | None = None
-    # mig 154: giao việc
+    # mig 154: giao việc — 4 trường này CHỈ CEO nhập; nhân viên chọn việc đã giao qua giao_viec_id (mig 155)
     giao_viec_email: str | None = None
     ten_cong_viec: str | None = None
     cv_bat_dau: str | None = None
     cv_ket_thuc: str | None = None
+    giao_viec_id: int | None = None
+
+
+def _la_ceo(nd) -> bool:
+    return (nd.vai_tro.ma if getattr(nd, "vai_tro", None) else "").upper() == "CEO"
+
+
+_GV_TRUONG = ("giao_viec_email", "ten_cong_viec", "cv_bat_dau", "cv_ket_thuc")
+
+
+def _bc_co_gv_tho(data) -> bool:
+    """Có gửi giá trị (khác rỗng) cho một trong 4 trường giao việc không."""
+    return any((getattr(data, k, None) or "").strip() if isinstance(getattr(data, k, None), str)
+               else getattr(data, k, None) is not None for k in _GV_TRUONG)
 
 
 def _bc_giao_viec(data) -> dict:
@@ -1142,6 +1156,7 @@ def _bc_ra(r: BaoCaoNgay, nv: NhanVien | None = None) -> dict:
             "giao_viec_email": r.giao_viec_email, "ten_cong_viec": r.ten_cong_viec,
             "cv_bat_dau": str(r.cv_bat_dau) if r.cv_bat_dau else None,
             "cv_ket_thuc": str(r.cv_ket_thuc) if r.cv_ket_thuc else None,
+            "giao_viec_id": r.giao_viec_id,
             "ho_ten": (nv.ho_ten if nv else None), "ma_nv": (nv.ma if nv else None)}
 
 
@@ -1157,7 +1172,22 @@ def gui_bao_cao_ngay(data: BaoCaoNgayVao, db: Session = Depends(get_db),
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Ngày không hợp lệ (YYYY-MM-DD)")
     if not (data.da_lam or "").strip():
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Vui lòng nhập nội dung công việc đã làm")
-    gv_ = _bc_giao_viec(data)
+    from ..models import GiaoViec
+    gv_id = None
+    if data.giao_viec_id:
+        g = db.get(GiaoViec, data.giao_viec_id)
+        if g is None or g.nhan_vien_id != nv_id:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Công việc được giao không hợp lệ (không phải việc giao cho bạn)")
+        gv_id = g.id
+        gv_ = {"giao_viec_email": g.email, "ten_cong_viec": g.ten_cong_viec, "cv_bat_dau": g.bat_dau, "cv_ket_thuc": g.ket_thuc}
+    elif _bc_co_gv_tho(data):
+        if not _la_ceo(nd):
+            raise HTTPException(status.HTTP_403_FORBIDDEN,
+                                "Chỉ CEO được nhập / sửa Người nhận việc, Tên công việc, Ngày bắt đầu, Ngày kết thúc — "
+                                "hãy chọn trong «Công việc được giao»")
+        gv_ = _bc_giao_viec(data)
+    else:
+        gv_ = None          # không chọn việc: bỏ chọn thì xóa bản chụp; CEO đã nhập tay thì giữ nguyên
     r = db.query(BaoCaoNgay).filter(BaoCaoNgay.nhan_vien_id == nv_id,
                                     BaoCaoNgay.ngay == ng).first()
     moi = r is None
@@ -1170,8 +1200,14 @@ def gui_bao_cao_ngay(data: BaoCaoNgayVao, db: Session = Depends(get_db),
     r.ke_hoach = (data.ke_hoach or "").strip() or None
     r.so_gio = _Dec(str(data.so_gio or 0))
     r.ma_lien_quan = (data.ma_lien_quan or "").strip()[:120] or None
-    for k, v in gv_.items():
-        setattr(r, k, v)
+    if gv_ is None:
+        if r.giao_viec_id is not None:
+            for k in _GV_TRUONG:
+                setattr(r, k, None)
+    else:
+        for k, v in gv_.items():
+            setattr(r, k, v)
+    r.giao_viec_id = gv_id
     db.flush()
     ghi_audit(db, nd.id, "TAO" if moi else "SUA", "bao_cao_ngay", r.id,
               moi={"ngay": str(ng), "so_gio": _f(r.so_gio)})
@@ -1311,6 +1347,121 @@ def bao_cao_nhac_tay(ngay: str | None = None, db: Session = Depends(get_db),
     return kq
 
 
+# ============ 📌 Giao việc — CHỈ CEO nhập / sửa / xóa (mig 155) ============
+class GiaoViecVao(_NVBase):
+    email: str                                  # người nhận việc
+    ten_cong_viec: str
+    bat_dau: str | None = None
+    ket_thuc: str | None = None
+
+
+def _gv_ra(g, nv=None) -> dict:
+    return {"id": g.id, "nhan_vien_id": g.nhan_vien_id, "email": g.email, "ten_cong_viec": g.ten_cong_viec,
+            "bat_dau": str(g.bat_dau) if g.bat_dau else None, "ket_thuc": str(g.ket_thuc) if g.ket_thuc else None,
+            "ho_ten": nv.ho_ten if nv is not None else None, "ma_nv": nv.ma if nv is not None else None}
+
+
+def _gv_kiem(db: Session, data: GiaoViecVao):
+    """Chuẩn hóa + tìm NGƯỜI NHẬN theo email (email tài khoản đăng nhập hoặc email trong hồ sơ, đang làm việc)."""
+    email = (data.email or "").strip().lower()
+    if not email:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Nhập email người nhận việc")
+    ten = (data.ten_cong_viec or "").strip()[:250]
+    if not ten:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Nhập tên công việc")
+    try:
+        bd = date.fromisoformat(data.bat_dau) if (data.bat_dau or "").strip() else None
+        kt = date.fromisoformat(data.ket_thuc) if (data.ket_thuc or "").strip() else None
+    except ValueError:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Ngày bắt đầu / kết thúc không hợp lệ (YYYY-MM-DD)")
+    if bd and kt and kt < bd:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Ngày kết thúc phải sau hoặc cùng ngày bắt đầu")
+    nv = (db.query(NhanVien).join(NguoiDung, NguoiDung.id == NhanVien.nguoi_dung_id)
+          .filter(func.lower(NguoiDung.email) == email, NhanVien.trang_thai == "DANG_LAM").first())
+    if nv is None:
+        nv = (db.query(NhanVien).filter(func.lower(NhanVien.email) == email, NhanVien.trang_thai == "DANG_LAM")
+              .order_by(NhanVien.id).first())
+    if nv is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND,
+                            f"Không tìm thấy nhân viên đang làm có email '{email}' (email tài khoản hoặc email trong Hồ sơ lương)")
+    return nv, email, ten, bd, kt
+
+
+@router.get("/giao-viec")
+def ds_giao_viec(ngay: str | None = None, db: Session = Depends(get_db),
+                 nd: NguoiDung = Depends(lay_nguoi_dung_hien_tai)):
+    """CEO: mọi việc đã giao. Người khác: chỉ việc giao cho mình. `ngay` = chỉ việc còn hiệu lực ngày đó."""
+    from ..models import GiaoViec
+    q = db.query(GiaoViec, NhanVien).join(NhanVien, NhanVien.id == GiaoViec.nhan_vien_id)
+    if not _la_ceo(nd):
+        nv_id = nhan_vien_id_cua(db, nd.id)
+        if not nv_id:
+            return []
+        q = q.filter(GiaoViec.nhan_vien_id == nv_id)
+    if ngay:
+        try:
+            ng = date.fromisoformat(ngay)
+        except ValueError:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Ngày không hợp lệ (YYYY-MM-DD)")
+        q = q.filter((GiaoViec.bat_dau.is_(None)) | (GiaoViec.bat_dau <= ng),
+                     (GiaoViec.ket_thuc.is_(None)) | (GiaoViec.ket_thuc >= ng))
+    return [_gv_ra(g, nv) for g, nv in q.order_by(GiaoViec.id.desc()).all()]
+
+
+@router.post("/giao-viec", status_code=201)
+def tao_giao_viec(data: GiaoViecVao, db: Session = Depends(get_db),
+                  nd: NguoiDung = Depends(chi_vai_tro("CEO"))):
+    from ..models import GiaoViec
+    from ..nhac_viec_service import gio_hien_tai
+    nv, email, ten, bd, kt = _gv_kiem(db, data)
+    g = GiaoViec(nhan_vien_id=nv.id, email=email, ten_cong_viec=ten, bat_dau=bd, ket_thuc=kt,
+                 nguoi_giao=nd.id, tao_luc=gio_hien_tai())
+    db.add(g); db.flush()
+    ghi_audit(db, nd.id, "TAO", "giao_viec", g.id, moi={"nv": nv.id, "ten": ten, "bat_dau": str(bd), "ket_thuc": str(kt)})
+    db.commit()
+    return _gv_ra(g, nv)
+
+
+@router.put("/giao-viec/{gv_id}")
+def sua_giao_viec(gv_id: int, data: GiaoViecVao, db: Session = Depends(get_db),
+                  nd: NguoiDung = Depends(chi_vai_tro("CEO"))):
+    """Sửa việc đã giao; các báo cáo đang gắn việc này cập nhật theo (bản chụp 4 trường)."""
+    from ..models import GiaoViec
+    from ..nhac_viec_service import gio_hien_tai
+    g = db.get(GiaoViec, gv_id)
+    if g is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy việc đã giao")
+    nv, email, ten, bd, kt = _gv_kiem(db, data)
+    cu = {"nv": g.nhan_vien_id, "ten": g.ten_cong_viec, "bat_dau": str(g.bat_dau), "ket_thuc": str(g.ket_thuc)}
+    doi_nguoi = nv.id != g.nhan_vien_id
+    g.nhan_vien_id, g.email, g.ten_cong_viec, g.bat_dau, g.ket_thuc = nv.id, email, ten, bd, kt
+    g.cap_nhat_luc = gio_hien_tai()
+    for r in db.query(BaoCaoNgay).filter(BaoCaoNgay.giao_viec_id == g.id).all():
+        if doi_nguoi and r.nhan_vien_id != nv.id:           # đổi người nhận → báo cáo của người cũ thôi gắn việc này
+            r.giao_viec_id = None
+            continue
+        r.giao_viec_email, r.ten_cong_viec, r.cv_bat_dau, r.cv_ket_thuc = email, ten, bd, kt
+    ghi_audit(db, nd.id, "SUA", "giao_viec", g.id, cu=cu,
+              moi={"nv": nv.id, "ten": ten, "bat_dau": str(bd), "ket_thuc": str(kt)})
+    db.commit()
+    return _gv_ra(g, nv)
+
+
+@router.delete("/giao-viec/{gv_id}")
+def xoa_giao_viec(gv_id: int, db: Session = Depends(get_db),
+                  nd: NguoiDung = Depends(chi_vai_tro("CEO"))):
+    """Xóa việc đã giao; báo cáo cũ giữ nguyên bản chụp tên việc / ngày, chỉ bỏ liên kết."""
+    from ..models import GiaoViec
+    g = db.get(GiaoViec, gv_id)
+    if g is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy việc đã giao")
+    for r in db.query(BaoCaoNgay).filter(BaoCaoNgay.giao_viec_id == g.id).all():
+        r.giao_viec_id = None
+    ghi_audit(db, nd.id, "XOA", "giao_viec", g.id, cu={"nv": g.nhan_vien_id, "ten": g.ten_cong_viec})
+    db.delete(g); db.commit()
+    return {"da_xoa": True}
+
+
 class BcNgaySuaVao(_NVBase):
     da_lam: str | None = None
     ket_qua: str | None = None
@@ -1348,9 +1499,13 @@ def sua_bao_cao_ngay(bc_id: int, data: BcNgaySuaVao, db: Session = Depends(get_d
         r.so_gio = data.so_gio
     if data.ma_lien_quan is not None:
         r.ma_lien_quan = data.ma_lien_quan.strip()[:120] or None
-    if any(getattr(data, k) is not None for k in ("giao_viec_email", "ten_cong_viec", "cv_bat_dau", "cv_ket_thuc")):
+    if any(getattr(data, k) is not None for k in _GV_TRUONG):
+        if not _la_ceo(nd):
+            raise HTTPException(status.HTTP_403_FORBIDDEN,
+                                "Chỉ CEO được nhập / sửa Người nhận việc, Tên công việc, Ngày bắt đầu, Ngày kết thúc")
         for k, v in _bc_giao_viec(data).items():
             setattr(r, k, v)
+        r.giao_viec_id = None
     ghi_audit(db, nd.id, "SUA", "bao_cao_ngay", bc_id, cu=cu,
               moi=data.model_dump(exclude_none=True, mode="json"))
     db.commit()
