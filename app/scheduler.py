@@ -17,6 +17,7 @@ _GIO_LAI_LO = ""       # mốc giờ đã chốt Lãi/Lỗ Record gần nhất
 _TUAN_BCVH = ""        # tuần đã gửi nhắc Báo cáo vận hành (thứ Bảy 14h)
 _THANG_SAO_KE = ""     # tháng đã kiểm tra nhắc tải sao kê (ngày 7 hàng tháng)
 _NGAY_NHAC_TRN = ""    # ngày đã chạy nhắc thi Training (8h–17h VN, trừ Chủ nhật)
+_NGAY_NHAC_BC = ""     # ngày đã chạy nhắc «chưa hoàn thành báo cáo ngày» (sáng hôm sau, giờ VN)
 
 
 def _vong_lap():
@@ -86,6 +87,21 @@ def _vong_lap():
                     kq4 = nhac_tu_dong_hang_ngay(db)
                     if kq4.get("da_gui") or kq4.get("loi"):
                         print(f"[SCHEDULER] 🎓 Nhắc thi Training: {kq4}")
+                finally:
+                    db.close()
+            # 📝 Nhắc người CHƯA HOÀN THÀNH BÁO CÁO NGÀY hôm qua: mỗi ngày 1 lần từ bao_cao_nhac_gio (giờ VN).
+            #    Mỗi (ngày, người) chỉ nhắc một lần — mốc nằm trong bảng bao_cao_nhac nên khởi động lại không nhắn trùng.
+            global _NGAY_NHAC_BC
+            g5 = gio_hien_tai()
+            ngay5 = g5.strftime("%Y-%m-%d")
+            if g5.hour >= settings.bao_cao_nhac_gio and _NGAY_NHAC_BC != ngay5:
+                _NGAY_NHAC_BC = ngay5
+                db = SessionLocal()
+                try:
+                    from .bao_cao_ngay_service import nhac_tu_dong_hang_ngay as _nhac_bc
+                    kq5 = _nhac_bc(db)
+                    if kq5.get("da_gui") or kq5.get("loi"):
+                        print(f"[SCHEDULER] 📝 Nhắc báo cáo ngày: {kq5}")
                 finally:
                     db.close()
             # 📬 Tự quét thư hàng tuần — «đến hạn thì chạy»: mốc thứ+giờ (VN) lưu trong CSDL; app ngủ qua giờ hẹn

@@ -630,6 +630,24 @@ class BaoCaoNgay(Base):
     ke_hoach: Mapped[str | None] = mapped_column(Text, nullable=True)
     so_gio: Mapped[Decimal] = mapped_column(Numeric(5, 2), default=0)
     ma_lien_quan: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    # mig 154: thông tin giao việc
+    giao_viec_email: Mapped[str | None] = mapped_column(String(150), nullable=True)   # người được giao việc
+    ten_cong_viec: Mapped[str | None] = mapped_column(String(250), nullable=True)
+    cv_bat_dau: Mapped[date | None] = mapped_column(Date, nullable=True)
+    cv_ket_thuc: Mapped[date | None] = mapped_column(Date, nullable=True)
+
+
+class BaoCaoNhac(Base):
+    """mig 154: nhật ký một lần NHẮC «chưa hoàn thành báo cáo ngày …» của một nhân viên."""
+    __tablename__ = "bao_cao_nhac"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    ngay: Mapped[date] = mapped_column(Date)
+    nhan_vien_id: Mapped[int] = mapped_column(ForeignKey("nhan_vien.id", ondelete="CASCADE"))
+    nguon: Mapped[str] = mapped_column(String(10), default="TU_DONG")        # TU_DONG | TAY
+    ket_qua: Mapped[str] = mapped_column(String(10), default="OK")           # OK | LOI
+    loi: Mapped[str | None] = mapped_column(Text, nullable=True)
+    nguoi_gui: Mapped[int | None] = mapped_column(ForeignKey("nguoi_dung.id", ondelete="SET NULL"), nullable=True)
+    tao_luc: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
 class NhacViec(Base):

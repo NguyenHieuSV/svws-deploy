@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from ..database import get_db
-from ..rbac import yeu_cau, chi_vai_tro
+from ..rbac import yeu_cau, chi_vai_tro, muc_cua, THU_BAC
 from ..deps import nhan_vien_id_cua, lay_nguoi_dung_hien_tai
 from ..audit import ghi_audit
 from ..luong_service import tinh_luong
@@ -22,7 +22,7 @@ from ..schemas import (NhanVienRa, ChamCongVao, NghiPhepVao, TinhLuongVao, BangL
                         HoSoLuongVao, KyLuongVao, ChamCongLuongVao, ThamSoLuongVao, ChamCongImportVao,
                         NgayNghiOtVao, DangKyOtVao, TuChoiOtVao)
 import json as _json
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from ..email_gateway import lay_email_provider
 from ..config import settings
 from decimal import Decimal as _Dec
@@ -1109,6 +1109,29 @@ class BaoCaoNgayVao(_NVBase):
     ke_hoach: str | None = None
     so_gio: float | None = 0
     ma_lien_quan: str | None = None
+    # mig 154: giao việc
+    giao_viec_email: str | None = None
+    ten_cong_viec: str | None = None
+    cv_bat_dau: str | None = None
+    cv_ket_thuc: str | None = None
+
+
+def _bc_giao_viec(data) -> dict:
+    """Kiểm tra + chuẩn hóa 4 trường giao việc (đều tùy chọn)."""
+    import re as _re
+    email = (data.giao_viec_email or "").strip().lower() or None
+    if email and not _re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Email người được giao việc không hợp lệ")
+    bd = kt = None
+    try:
+        bd = date.fromisoformat(data.cv_bat_dau) if (data.cv_bat_dau or "").strip() else None
+        kt = date.fromisoformat(data.cv_ket_thuc) if (data.cv_ket_thuc or "").strip() else None
+    except ValueError:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Ngày bắt đầu / kết thúc công việc không hợp lệ (YYYY-MM-DD)")
+    if bd and kt and kt < bd:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Ngày kết thúc công việc phải sau hoặc cùng ngày bắt đầu")
+    return {"giao_viec_email": email, "ten_cong_viec": (data.ten_cong_viec or "").strip()[:250] or None,
+            "cv_bat_dau": bd, "cv_ket_thuc": kt}
 
 
 def _bc_ra(r: BaoCaoNgay, nv: NhanVien | None = None) -> dict:
@@ -1116,6 +1139,9 @@ def _bc_ra(r: BaoCaoNgay, nv: NhanVien | None = None) -> dict:
             "da_lam": r.da_lam or "", "ket_qua": r.ket_qua or "",
             "kho_khan": r.kho_khan, "ke_hoach": r.ke_hoach,
             "so_gio": _f(r.so_gio), "ma_lien_quan": r.ma_lien_quan,
+            "giao_viec_email": r.giao_viec_email, "ten_cong_viec": r.ten_cong_viec,
+            "cv_bat_dau": str(r.cv_bat_dau) if r.cv_bat_dau else None,
+            "cv_ket_thuc": str(r.cv_ket_thuc) if r.cv_ket_thuc else None,
             "ho_ten": (nv.ho_ten if nv else None), "ma_nv": (nv.ma if nv else None)}
 
 
@@ -1131,6 +1157,7 @@ def gui_bao_cao_ngay(data: BaoCaoNgayVao, db: Session = Depends(get_db),
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Ngày không hợp lệ (YYYY-MM-DD)")
     if not (data.da_lam or "").strip():
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Vui lòng nhập nội dung công việc đã làm")
+    gv_ = _bc_giao_viec(data)
     r = db.query(BaoCaoNgay).filter(BaoCaoNgay.nhan_vien_id == nv_id,
                                     BaoCaoNgay.ngay == ng).first()
     moi = r is None
@@ -1143,6 +1170,8 @@ def gui_bao_cao_ngay(data: BaoCaoNgayVao, db: Session = Depends(get_db),
     r.ke_hoach = (data.ke_hoach or "").strip() or None
     r.so_gio = _Dec(str(data.so_gio or 0))
     r.ma_lien_quan = (data.ma_lien_quan or "").strip()[:120] or None
+    for k, v in gv_.items():
+        setattr(r, k, v)
     db.flush()
     ghi_audit(db, nd.id, "TAO" if moi else "SUA", "bao_cao_ngay", r.id,
               moi={"ngay": str(ng), "so_gio": _f(r.so_gio)})
@@ -1181,6 +1210,107 @@ def ds_bao_cao_ngay(ngay: str | None = None, thang: str | None = None,
     return {"danh_sach": [_bc_ra(r, nv) for r, nv in rows]}
 
 
+def _thang_khoang(thang: str | None, hom_nay: date):
+    """'YYYY-MM' → (ngày đầu, ngày cuối) của tháng; mặc định tháng hiện tại."""
+    import calendar
+    t = (thang or str(hom_nay)[:7]).strip()
+    try:
+        y, m = int(t[:4]), int(t[5:7])
+        return date(y, m, 1), date(y, m, calendar.monthrange(y, m)[1]), f"{y:04d}-{m:02d}"
+    except Exception:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Tháng không hợp lệ (YYYY-MM)")
+
+
+@router.get("/bao-cao-ngay/tong-hop")
+def bao_cao_tong_hop(thang: str | None = None, nhan_vien_id: int | None = None, db: Session = Depends(get_db),
+                     nd: NguoiDung = Depends(lay_nguoi_dung_hien_tai)):
+    """Tổng hợp báo cáo trong tháng (từng ngày: đã báo cáo / chưa / không phải báo cáo + kết quả) + TỈ LỆ hoàn thành.
+    Mặc định của chính mình; xem người khác cần quyền XEM Working time."""
+    from .. import bao_cao_ngay_service as bs
+    from ..nhac_viec_service import ngay_hien_tai
+    hom_nay = ngay_hien_tai()
+    tu, den, thang = _thang_khoang(thang, hom_nay)
+    nv_id = _wt_nv_cua_toi(db, nd) if not nhan_vien_id else nhan_vien_id
+    if nhan_vien_id and nhan_vien_id != nhan_vien_id_cua(db, nd.id):
+        if THU_BAC.get(muc_cua(db, nd.vai_tro_id, MODULE_WT), 0) < THU_BAC["XEM"]:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "Chỉ xem được tổng hợp báo cáo của chính mình")
+    nv = db.get(NhanVien, nv_id)
+    if nv is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy nhân viên")
+    bc, ot, nghi = bs.nap_du_lieu(db, [nv_id], tu, den)
+    kq = bs.tong_hop_nv(nv, bc, ot, nghi, tu, den, hom_nay)
+    kq.update({"thang": thang, "nhan_vien_id": nv_id, "ho_ten": nv.ho_ten, "hom_nay": str(hom_nay)})
+    return kq
+
+
+@router.get("/bao-cao-ngay/thieu-cua-toi")
+def bao_cao_thieu_cua_toi(db: Session = Depends(get_db), nd: NguoiDung = Depends(lay_nguoi_dung_hien_tai)):
+    """Các ngày (14 ngày gần nhất, không gồm hôm nay) mà tôi PHẢI báo cáo nhưng chưa báo cáo — cho dải nhắc trong app.
+    Tài khoản chưa gắn hồ sơ thì trả rỗng (không báo lỗi)."""
+    from .. import bao_cao_ngay_service as bs
+    from ..nhac_viec_service import ngay_hien_tai
+    nv_id = nhan_vien_id_cua(db, nd.id)
+    if not nv_id:
+        return {"ngay": [], "nhan_vien_id": None}
+    return {"ngay": bs.thieu_gan_day(db, nv_id, ngay_hien_tai()), "nhan_vien_id": nv_id}
+
+
+@router.get("/bao-cao-ngay/ty-le")
+def bao_cao_ty_le(thang: str | None = None, db: Session = Depends(get_db),
+                  _=Depends(yeu_cau(MODULE_WT, "XEM"))):
+    """Tỉ lệ hoàn thành báo cáo của TỪNG nhân viên đang làm trong tháng (người chưa có tài khoản: không tính)."""
+    from .. import bao_cao_ngay_service as bs
+    from ..nhac_viec_service import ngay_hien_tai
+    hom_nay = ngay_hien_tai()
+    tu, den, thang = _thang_khoang(thang, hom_nay)
+    cap = bs.nv_du_dieu_kien(db)
+    bc, ot, nghi = bs.nap_du_lieu(db, [nv.id for nv, _ in cap], tu, den)
+    out = {}
+    for nv, _u in cap:
+        t = bs.tong_hop_nv(nv, bc, ot, nghi, tu, den, hom_nay)
+        out[str(nv.id)] = {"can": t["can"], "xong": t["xong"], "thieu": t["thieu"], "ty_le": t["ty_le"]}
+    tong_can = sum(v["can"] for v in out.values())
+    tong_xong = sum(v["xong"] for v in out.values())
+    return {"thang": thang, "nhan_vien": out, "can": tong_can, "xong": tong_xong,
+            "ty_le": round(100.0 * tong_xong / tong_can, 1) if tong_can else None}
+
+
+@router.get("/bao-cao-ngay/nhac-xem")
+def bao_cao_nhac_xem(ngay: str | None = None, db: Session = Depends(get_db),
+                     nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
+    """XEM TRƯỚC (không gửi): ai thiếu báo cáo ngày `ngay` (mặc định hôm qua) và nội dung tin sẽ gửi."""
+    from .. import bao_cao_ngay_service as bs
+    from ..models import BaoCaoNhac
+    from ..nhac_viec_service import ngay_hien_tai
+    try:
+        ng = date.fromisoformat(ngay) if ngay else ngay_hien_tai() - timedelta(days=1)
+    except ValueError:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Ngày không hợp lệ (YYYY-MM-DD)")
+    ds = bs.ds_thieu_bao_cao(db, ng)
+    da = {r.nhan_vien_id for r in db.query(BaoCaoNhac).filter(BaoCaoNhac.ngay == ng, BaoCaoNhac.ket_qua == "OK").all()}
+    for x in ds:
+        x["da_nhac"] = x["nhan_vien_id"] in da
+    chua = [x for x in ds if not x["da_nhac"]]
+    return {"ngay": str(ng), "thieu": ds, "se_gui": len(chua),
+            "noi_dung": (bs.noi_dung_chung(ng, chua) if chua else "")}
+
+
+@router.post("/bao-cao-ngay/nhac")
+def bao_cao_nhac_tay(ngay: str | None = None, db: Session = Depends(get_db),
+                     nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
+    """GỬI NGAY tin nhắc chưa hoàn thành báo cáo ngày `ngay` (mặc định hôm qua); người đã được nhắc rồi thì bỏ qua."""
+    from .. import bao_cao_ngay_service as bs
+    from ..nhac_viec_service import ngay_hien_tai
+    try:
+        ng = date.fromisoformat(ngay) if ngay else ngay_hien_tai() - timedelta(days=1)
+    except ValueError:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Ngày không hợp lệ (YYYY-MM-DD)")
+    kq = bs.gui_nhac(db, ng, "TAY", nd.id)
+    ghi_audit(db, nd.id, "NHAC", "bao_cao_ngay", None, moi={"ngay": str(ng), "da_gui": kq["da_gui"]})
+    db.commit()
+    return kq
+
+
 class BcNgaySuaVao(_NVBase):
     da_lam: str | None = None
     ket_qua: str | None = None
@@ -1188,6 +1318,10 @@ class BcNgaySuaVao(_NVBase):
     ke_hoach: str | None = None
     so_gio: Decimal | None = None
     ma_lien_quan: str | None = None
+    giao_viec_email: str | None = None
+    ten_cong_viec: str | None = None
+    cv_bat_dau: str | None = None
+    cv_ket_thuc: str | None = None
 
 
 @router.put("/bao-cao-ngay/{bc_id}")
@@ -1214,6 +1348,9 @@ def sua_bao_cao_ngay(bc_id: int, data: BcNgaySuaVao, db: Session = Depends(get_d
         r.so_gio = data.so_gio
     if data.ma_lien_quan is not None:
         r.ma_lien_quan = data.ma_lien_quan.strip()[:120] or None
+    if any(getattr(data, k) is not None for k in ("giao_viec_email", "ten_cong_viec", "cv_bat_dau", "cv_ket_thuc")):
+        for k, v in _bc_giao_viec(data).items():
+            setattr(r, k, v)
     ghi_audit(db, nd.id, "SUA", "bao_cao_ngay", bc_id, cu=cu,
               moi=data.model_dump(exclude_none=True, mode="json"))
     db.commit()
