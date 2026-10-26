@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="vi">
 <head>
-<!-- build: gan-tk-ho-so-2026-10-26d -->
+<!-- build: wt-report-quyen-2026-10-26 -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#0f2c44">
@@ -15630,7 +15630,7 @@ async function wtWork(host){
       my=await api("/nhan-su/working-time/cua-toi").catch(e=>({danh_sach:[],ot_thang:0,ot_nam:0,_loi:e.detail||e.message}));
       if(canXem){[d,nvs]=await Promise.all([
         api(`/nhan-su/working-time?thang=${S.wtThang}`).catch(()=>({danh_sach:[],tong_hop:[],cho_duyet:[]})),
-        api("/nhan-su/ho-so").catch(()=>[])]);}   // NV không có quyền nhân sự vẫn vào được trang để đăng ký
+        api("/nhan-su/ho-so").catch(()=>api("/nhan-su/danh-ba")).catch(()=>[])]);}   // NV không có quyền nhân sự vẫn vào được trang để đăng ký (danh bạ không có lương)
     } else {
       if(!DEMO.ns_hoso)DEMO.ns_hoso=_nsDemoHoSo(); nvs=DEMO.ns_hoso;
       const rows=_wtDemo();
@@ -15809,7 +15809,8 @@ async function wtReport(host){
   try{
     if(S.mode==="live"){
       my=await api("/nhan-su/bao-cao-ngay/cua-toi?thang="+S.wtRThang).catch(e=>({danh_sach:[],nhan_vien_id:null,_loi:e.detail||e.message}));
-      if(canXem){[ds,nvs]=await Promise.all([api("/nhan-su/bao-cao-ngay?ngay="+S.wtRNgay),api("/nhan-su/ho-so")]);}
+      if(canXem){[ds,nvs]=await Promise.all([api("/nhan-su/bao-cao-ngay?ngay="+S.wtRNgay),
+        api("/nhan-su/ho-so").catch(()=>api("/nhan-su/danh-ba"))]);}   // không có quyền xem hồ sơ lương → danh bạ tối giản (id · mã · tên · chức danh)
     } else {
       if(!DEMO.ns_hoso)DEMO.ns_hoso=_nsDemoHoSo(); nvs=DEMO.ns_hoso;
       if(!DEMO.bc)DEMO.bc=_bcDemo();
