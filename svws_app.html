@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="vi">
 <head>
-<!-- build: gan-tk-ho-so-2026-10-26c -->
+<!-- build: gan-tk-ho-so-2026-10-26d -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#0f2c44">
@@ -15654,7 +15654,7 @@ async function wtWork(host){
   const dangKy=`<div class="panel"><div class="panel-h"><h3>🙋 Đăng ký tăng ca / Nghỉ phép của tôi</h3>
       <button class="btn-sm ghost" onclick="wtOtHuongDan()">📖 Hướng dẫn</button><div class="spacer"></div>
       <span style="font-size:12px;color:var(--muted)">Đã duyệt: <b>${_num(my.ot_thang,1)}h</b> OT tháng này /40h · <b>${_num(my.ot_nam,1)}h</b> năm /200h · phép <b>${_num(my.phep_nam||0,1)}</b>/12 ngày</span></div>
-    <div class="panel-b">${my._loi?`<div style="background:#fef2f2;border:1px solid #dc262666;border-radius:10px;margin:10px 18px;padding:12px 16px;color:#b91c1c;font-weight:600">⚠ ${my._loi}<div style="font-weight:400;font-size:12.5px;margin-top:4px;color:#7f1d1d">Chưa gắn hồ sơ thì không đăng ký tăng ca/nghỉ phép được và tên sẽ không hiển thị đúng — nhờ HR mở <b>Nhân sự &amp; Lương → Hồ sơ lương</b>, bấm <b>🔑 Tạo tài khoản</b> (hệ tự gắn) hoặc gắn lại tài khoản đúng hồ sơ.</div></div>`:(()=>{
+    <div class="panel-b">${my._loi?`<div style="background:#fef2f2;border:1px solid #dc262666;border-radius:10px;margin:10px 18px;padding:12px 16px;color:#b91c1c;font-weight:600">⚠ ${my._loi}<div style="font-weight:400;font-size:12.5px;margin-top:4px;color:#7f1d1d">Chưa gắn hồ sơ thì không đăng ký tăng ca/nghỉ phép được và tên sẽ không hiển thị đúng — nhờ CEO/Admin mở <b>Nhân sự &amp; Lương → Hồ sơ lương</b>, bấm <b>🔑</b> ở dòng của bạn: chưa có tài khoản thì <b>Tạo tài khoản</b> (hệ tự gắn), đã có tài khoản thì <b>🔗 Gắn tài khoản có sẵn vào hồ sơ</b> với đúng email ở trên.</div></div>`:(()=>{
       const gioOpt=(a,b,sel)=>{let s='';for(let h=a;h<=b;h++)s+=`<option value="${h}" ${h===sel?'selected':''}>${h}:00</option>`;return s;};
       const hom=new Date().toISOString().slice(0,10);
       return `

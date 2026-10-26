@@ -878,7 +878,8 @@ def _wt_nv_cua_toi(db, nd) -> int:
     nv_id = nhan_vien_id_cua(db, nd.id)
     if not nv_id:
         raise HTTPException(status.HTTP_400_BAD_REQUEST,
-                            "Tài khoản của bạn chưa gắn với hồ sơ nhân viên — nhờ HR gắn ở Hồ sơ lương (nút 🔑 Tạo tài khoản).")
+                            f"Tài khoản của bạn ({nd.email}) chưa gắn với hồ sơ nhân viên — nhờ CEO/Admin gắn ở Hồ sơ lương: "
+            "bấm 🔑 ở dòng của bạn rồi «🔗 Gắn tài khoản có sẵn vào hồ sơ», nhập đúng email này.")
     return nv_id
 
 

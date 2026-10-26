@@ -65,3 +65,13 @@ def test_email_khong_co_tai_khoan_thi_bao_loi(db):
     with pytest.raises(HTTPException) as e:
         _gan(db, 1, "khong-co@x.vn")
     assert e.value.status_code == 404
+
+
+def test_thong_bao_chua_gan_neu_dung_email_dang_nhap(db):
+    # nhân viên chụp màn hình Working time gửi CEO → CEO thấy ngay email cần gắn
+    u = db.get(m.NguoiDung, 1)
+    with pytest.raises(HTTPException) as e:
+        ns._wt_nv_cua_toi(db, u)
+    assert e.value.status_code == 400 and "tuan@x.vn" in e.value.detail and "Gắn tài khoản có sẵn" in e.value.detail
+    _gan(db, 1, "tuan@x.vn")
+    assert ns._wt_nv_cua_toi(db, u) == 1
