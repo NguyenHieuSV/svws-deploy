@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="vi">
 <head>
-<!-- build: dia-chi-moi-2026-10-19 -->
+<!-- build: gan-tk-ho-so-2026-10-26 -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#0f2c44">
@@ -16548,7 +16548,8 @@ async function nsHoSo(host){
   const ds = S.mode==="live" ? await api("/nhan-su/ho-so") : DEMO.ns_hoso;
   window._nsHoSoDs=ds;
   const dangLam=ds.filter(x=>x.trang_thai!=='NGHI_VIEC'), daNghi=ds.filter(x=>x.trang_thai==='NGHI_VIEC');
-  const rows=dangLam.map(x=>`<tr><td><b>${x.ma||x.id}</b></td><td>${x.ho_ten}</td><td>${x.chuc_danh||''}</td>
+  const _tkBadge=x=>S.mode!=="live"?'':(x.tai_khoan?`<span title="Tài khoản đăng nhập: ${esc(x.tai_khoan)}" style="color:#16a34a;font-size:11px;white-space:nowrap"> ✓ có TK</span>`:`<span title="Chưa gắn tài khoản đăng nhập — nhân viên chưa dùng được Working time / đăng ký tăng ca. CEO/Admin bấm 🔑 để tạo hoặc gắn tài khoản có sẵn." style="color:#dc2626;font-size:11px;white-space:nowrap"> ⚠ chưa gắn TK</span>`);
+  const rows=dangLam.map(x=>`<tr><td><b>${x.ma||x.id}</b></td><td>${x.ho_ten}${_tkBadge(x)}</td><td>${x.chuc_danh||''}</td>
     <td class="num">${vnd(x.luong_co_ban)}</td><td class="num">${vnd(x.luong_dong_bh||x.luong_co_ban)}</td>
     <td class="num">${vnd((x.phu_cap_an||0)+(x.phu_cap_di_lai||0)+(x.phu_cap_dien_thoai||0)+(x.phu_cap_trach_nhiem||0))}</td>
     <td class="num">${x.so_phu_thuoc||0}</td><td>${x.email||'<span style="color:#dc2626">— thiếu —</span>'}</td>
@@ -17024,7 +17025,20 @@ async function nsTaoTKLuu(){
         catch(e2){toast("Tạo tài khoản OK nhưng chưa gắn được hồ sơ: "+(e2.detail||e2.message),"err");}
       }
     }
-    catch(e){return toast(e.detail||e.message,"err");}
+    catch(e){
+      const msg=e.detail||e.message||'';
+      // email đã có tài khoản (tạo ở Cấu hình) → gắn tài khoản có sẵn vào hồ sơ thay vì báo lỗi cụt
+      if(S._nsTkNv&&S._nsTkNv.id&&/đã tồn tại/.test(msg)){
+        if(!confirm(`Email ${email} đã có tài khoản.\n\nGắn tài khoản này vào hồ sơ «${S._nsTkNv.ho_ten}»?\n(Không tạo tài khoản mới, không đổi mật khẩu/vai trò của tài khoản.)`))return;
+        try{await api(`/nhan-su/nhan-vien/${S._nsTkNv.id}/gan-tai-khoan`,{method:'PUT',body:JSON.stringify({email})});}
+        catch(e3){return toast("Chưa gắn được: "+(e3.detail||e3.message),"err");}
+        document.getElementById('ktModal')?.remove();
+        toast("Đã gắn tài khoản "+email+" vào hồ sơ "+S._nsTkNv.ho_ten,"ok");
+        if(S.nsTab==="hoso")nsRender();
+        return;
+      }
+      return toast(msg,"err");
+    }
   }else{
     if(typeof DEMO_USERS!=='undefined'){
       if(DEMO_USERS.some(u=>u.email===email))return toast("Email đã tồn tại","err");
@@ -17033,6 +17047,7 @@ async function nsTaoTKLuu(){
   }
   document.getElementById('ktModal')?.remove();
   toast("Đã tạo tài khoản "+email+" ("+(ROLE_NAME[vt]||vt)+")"+(S.mode==="live"&&S._nsTkNv?" — đã gắn vào hồ sơ "+S._nsTkNv.ho_ten:"")+(S.mode==="demo"?" (demo)":""),"ok");
+  if(S.mode==="live"&&S.nsTab==="hoso")nsRender();
 }
 
 /* --- 📑 Số liệu tờ khai thuế TNCN & BHXH (CSV mở bằng Excel) --- */

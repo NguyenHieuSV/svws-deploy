@@ -1602,8 +1602,9 @@ def xoa_nhom_nhac_viec(nhom: str, db: Session = Depends(get_db),
 @router.get("/ho-so")
 def ds_ho_so(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
     out = []
+    tk_email = {u.id: u.email for u in db.query(NguoiDung.id, NguoiDung.email).all()}   # tài khoản đã gắn hồ sơ
     for nv in db.query(NhanVien).order_by(NhanVien.id).all():
-        out.append({"id": nv.id, "ma": nv.ma, "ho_ten": nv.ho_ten, "chuc_danh": nv.chuc_danh,
+        out.append({"id": nv.id, "tai_khoan": tk_email.get(nv.nguoi_dung_id) if nv.nguoi_dung_id else None, "ma": nv.ma, "ho_ten": nv.ho_ten, "chuc_danh": nv.chuc_danh,
                     "trang_thai": nv.trang_thai, "luong_co_ban": _f(nv.luong_co_ban),
                     "ngay_vao_lam": str(nv.ngay_vao_lam) if nv.ngay_vao_lam else None,
                     "ngay_nghi_viec": str(nv.ngay_nghi_viec) if nv.ngay_nghi_viec else None,
