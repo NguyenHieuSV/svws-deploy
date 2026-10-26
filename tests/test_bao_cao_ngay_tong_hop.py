@@ -183,3 +183,49 @@ def test_ceo_giao_viec_nhan_vien_chon_khi_bao_cao(db):
     assert r.giao_viec_id is None and r.ten_cong_viec is None
     ns.xoa_giao_viec(g["id"], db, nd=ceo)
     assert ns.ds_giao_viec(None, db, nd=ceo) == []
+
+
+def test_admin_giao_viec_va_nhan_tin_nguoi_nhan(db, monkeypatch):
+    gui = []
+
+    class Prov:
+        che_do = "APP"
+
+        def gui_ca_nhan(self, email, nd):
+            gui.append((email, nd)); return {"da_gui": True}
+
+    import app.chat_gateway as cg
+    monkeypatch.setattr(cg, "dang_bat", lambda: True)
+    monkeypatch.setattr(cg, "lay_chat_provider", lambda: Prov())
+    db.add(m.VaiTro(ma="ADMIN", ten="Quản trị")); db.flush()
+    ad = m.NguoiDung(email="admin@x.vn", mat_khau_hash="x", vai_tro_id=3, trang_thai="HOAT_DONG")
+    db.add(ad); db.commit()
+    assert ns._la_ceo(ad)                                   # Admin được giao việc / nhập 4 thông tin
+    g = ns.tao_giao_viec(ns.GiaoViecVao(email="b@x.vn", ten_cong_viec="Chạy thử RO", bat_dau="2026-10-27",
+                                        ket_thuc="2026-10-29"), db, nd=ad)
+    assert g["thong_bao"]["da_gui"] and gui[-1][0] == "b@x.vn"
+    assert "Bạn được giao việc: *Chạy thử RO*" in gui[-1][1] and "27/10/2026 → 29/10/2026" in gui[-1][1]
+    assert "Người giao: admin@x.vn" in gui[-1][1]           # admin chưa có hồ sơ → hiện email
+    n = len(gui)
+    r = ns.sua_giao_viec(g["id"], ns.GiaoViecVao(email="b@x.vn", ten_cong_viec="Chạy thử RO", bat_dau="2026-10-27",
+                                                 ket_thuc="2026-10-29"), db, nd=ad)
+    assert "thong_bao" not in r and len(gui) == n           # không đổi gì → không nhắn
+    ns.sua_giao_viec(g["id"], ns.GiaoViecVao(email="b@x.vn", ten_cong_viec="Chạy thử RO", bat_dau="2026-10-27",
+                                             ket_thuc="2026-10-31"), db, nd=ad)
+    assert "Cập nhật việc được giao cho bạn" in gui[-1][1] and "31/10/2026" in gui[-1][1]
+
+
+def test_giao_viec_webhook_dang_phong_chung_ghi_ten(db, monkeypatch):
+    gui = []
+
+    class Prov:
+        che_do = "WEBHOOK"
+
+        def gui_phong(self, nd):
+            gui.append(nd); return {"da_gui": True}
+
+    import app.chat_gateway as cg
+    monkeypatch.setattr(cg, "dang_bat", lambda: True)
+    monkeypatch.setattr(cg, "lay_chat_provider", lambda: Prov())
+    g = ns.tao_giao_viec(ns.GiaoViecVao(email="a@x.vn", ten_cong_viec="Lắp bơm"), db, nd=_ceo(db))
+    assert g["thong_bao"]["kieu"] == "PHONG_CHUNG" and "Giao việc cho An: *Lắp bơm*" in gui[0]

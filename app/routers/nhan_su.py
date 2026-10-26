@@ -1118,7 +1118,8 @@ class BaoCaoNgayVao(_NVBase):
 
 
 def _la_ceo(nd) -> bool:
-    return (nd.vai_tro.ma if getattr(nd, "vai_tro", None) else "").upper() == "CEO"
+    """Người được giao việc / nhập 4 thông tin giao việc: CEO và ADMIN (anh Hiếu mở thêm cho Admin 26/10/2026)."""
+    return (nd.vai_tro.ma if getattr(nd, "vai_tro", None) else "").upper() in ("CEO", "ADMIN")
 
 
 _GV_TRUONG = ("giao_viec_email", "ten_cong_viec", "cv_bat_dau", "cv_ket_thuc")
@@ -1183,7 +1184,7 @@ def gui_bao_cao_ngay(data: BaoCaoNgayVao, db: Session = Depends(get_db),
     elif _bc_co_gv_tho(data):
         if not _la_ceo(nd):
             raise HTTPException(status.HTTP_403_FORBIDDEN,
-                                "Chỉ CEO được nhập / sửa Người nhận việc, Tên công việc, Ngày bắt đầu, Ngày kết thúc — "
+                                "Chỉ CEO / Admin được nhập / sửa Người nhận việc, Tên công việc, Ngày bắt đầu, Ngày kết thúc — "
                                 "hãy chọn trong «Công việc được giao»")
         gv_ = _bc_giao_viec(data)
     else:
@@ -1347,7 +1348,7 @@ def bao_cao_nhac_tay(ngay: str | None = None, db: Session = Depends(get_db),
     return kq
 
 
-# ============ 📌 Giao việc — CHỈ CEO nhập / sửa / xóa (mig 155) ============
+# ============ 📌 Giao việc — CHỈ CEO / ADMIN nhập / sửa / xóa (mig 155); nhắn người nhận qua Google Chat ============
 class GiaoViecVao(_NVBase):
     email: str                                  # người nhận việc
     ten_cong_viec: str
@@ -1359,6 +1360,12 @@ def _gv_ra(g, nv=None) -> dict:
     return {"id": g.id, "nhan_vien_id": g.nhan_vien_id, "email": g.email, "ten_cong_viec": g.ten_cong_viec,
             "bat_dau": str(g.bat_dau) if g.bat_dau else None, "ket_thuc": str(g.ket_thuc) if g.ket_thuc else None,
             "ho_ten": nv.ho_ten if nv is not None else None, "ma_nv": nv.ma if nv is not None else None}
+
+
+def _ten_nguoi_giao(db: Session, nd) -> str:
+    nv_id = nhan_vien_id_cua(db, nd.id)
+    nv = db.get(NhanVien, nv_id) if nv_id else None
+    return (nv.ho_ten if nv is not None and nv.ho_ten else None) or nd.email
 
 
 def _gv_kiem(db: Session, data: GiaoViecVao):
@@ -1410,7 +1417,7 @@ def ds_giao_viec(ngay: str | None = None, db: Session = Depends(get_db),
 
 @router.post("/giao-viec", status_code=201)
 def tao_giao_viec(data: GiaoViecVao, db: Session = Depends(get_db),
-                  nd: NguoiDung = Depends(chi_vai_tro("CEO"))):
+                  nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
     from ..models import GiaoViec
     from ..nhac_viec_service import gio_hien_tai
     nv, email, ten, bd, kt = _gv_kiem(db, data)
@@ -1419,12 +1426,15 @@ def tao_giao_viec(data: GiaoViecVao, db: Session = Depends(get_db),
     db.add(g); db.flush()
     ghi_audit(db, nd.id, "TAO", "giao_viec", g.id, moi={"nv": nv.id, "ten": ten, "bat_dau": str(bd), "ket_thuc": str(kt)})
     db.commit()
-    return _gv_ra(g, nv)
+    from ..bao_cao_ngay_service import thong_bao_giao_viec
+    out = _gv_ra(g, nv)
+    out["thong_bao"] = thong_bao_giao_viec(db, g, nv, _ten_nguoi_giao(db, nd), la_sua=False)
+    return out
 
 
 @router.put("/giao-viec/{gv_id}")
 def sua_giao_viec(gv_id: int, data: GiaoViecVao, db: Session = Depends(get_db),
-                  nd: NguoiDung = Depends(chi_vai_tro("CEO"))):
+                  nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
     """Sửa việc đã giao; các báo cáo đang gắn việc này cập nhật theo (bản chụp 4 trường)."""
     from ..models import GiaoViec
     from ..nhac_viec_service import gio_hien_tai
@@ -1434,6 +1444,7 @@ def sua_giao_viec(gv_id: int, data: GiaoViecVao, db: Session = Depends(get_db),
     nv, email, ten, bd, kt = _gv_kiem(db, data)
     cu = {"nv": g.nhan_vien_id, "ten": g.ten_cong_viec, "bat_dau": str(g.bat_dau), "ket_thuc": str(g.ket_thuc)}
     doi_nguoi = nv.id != g.nhan_vien_id
+    co_doi = doi_nguoi or (g.ten_cong_viec, g.bat_dau, g.ket_thuc) != (ten, bd, kt)
     g.nhan_vien_id, g.email, g.ten_cong_viec, g.bat_dau, g.ket_thuc = nv.id, email, ten, bd, kt
     g.cap_nhat_luc = gio_hien_tai()
     for r in db.query(BaoCaoNgay).filter(BaoCaoNgay.giao_viec_id == g.id).all():
@@ -1444,12 +1455,16 @@ def sua_giao_viec(gv_id: int, data: GiaoViecVao, db: Session = Depends(get_db),
     ghi_audit(db, nd.id, "SUA", "giao_viec", g.id, cu=cu,
               moi={"nv": nv.id, "ten": ten, "bat_dau": str(bd), "ket_thuc": str(kt)})
     db.commit()
-    return _gv_ra(g, nv)
+    out = _gv_ra(g, nv)
+    if co_doi:                                   # chỉ nhắn khi tên việc / ngày / người nhận thật sự đổi
+        from ..bao_cao_ngay_service import thong_bao_giao_viec
+        out["thong_bao"] = thong_bao_giao_viec(db, g, nv, _ten_nguoi_giao(db, nd), la_sua=not doi_nguoi)
+    return out
 
 
 @router.delete("/giao-viec/{gv_id}")
 def xoa_giao_viec(gv_id: int, db: Session = Depends(get_db),
-                  nd: NguoiDung = Depends(chi_vai_tro("CEO"))):
+                  nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
     """Xóa việc đã giao; báo cáo cũ giữ nguyên bản chụp tên việc / ngày, chỉ bỏ liên kết."""
     from ..models import GiaoViec
     g = db.get(GiaoViec, gv_id)
@@ -1502,7 +1517,7 @@ def sua_bao_cao_ngay(bc_id: int, data: BcNgaySuaVao, db: Session = Depends(get_d
     if any(getattr(data, k) is not None for k in _GV_TRUONG):
         if not _la_ceo(nd):
             raise HTTPException(status.HTTP_403_FORBIDDEN,
-                                "Chỉ CEO được nhập / sửa Người nhận việc, Tên công việc, Ngày bắt đầu, Ngày kết thúc")
+                                "Chỉ CEO / Admin được nhập / sửa Người nhận việc, Tên công việc, Ngày bắt đầu, Ngày kết thúc")
         for k, v in _bc_giao_viec(data).items():
             setattr(r, k, v)
         r.giao_viec_id = None

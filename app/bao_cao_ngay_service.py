@@ -201,6 +201,44 @@ def gui_nhac(db: Session, ngay: date, nguon: str = "TU_DONG", nguoi_gui=None) ->
     return tong
 
 
+def noi_dung_giao_viec(g, ten_nv: str, nguoi_giao: str, la_sua: bool, rieng: bool) -> str:
+    if rieng:
+        tieu = ("✏️ Cập nhật việc được giao cho bạn" if la_sua else "📌 Bạn được giao việc") + f": *{g.ten_cong_viec}*"
+    else:
+        tieu = ("✏️ Cập nhật việc giao cho " if la_sua else "📌 Giao việc cho ") + f"{ten_nv}: *{g.ten_cong_viec}*"
+    bd = dmy(g.bat_dau) if g.bat_dau else "…"
+    kt = dmy(g.ket_thuc) if g.ket_thuc else "…"
+    return (f"{tieu}\n• Thời gian: {bd} → {kt}\n• Người giao: {nguoi_giao}\n"
+            "Khi báo cáo ngày, chọn việc này ở ô «Công việc được giao» (app SVWS → Working time & Report → Report).")
+
+
+def thong_bao_giao_viec(db: Session, g, nv: NhanVien, nguoi_giao: str, la_sua: bool = False) -> dict:
+    """Nhắn người nhận việc qua Google Chat. Không bao giờ ném lỗi (giao việc vẫn lưu dù nhắn hỏng).
+    APP: nhắn riêng người nhận. WEBHOOK: một tin vào phòng chung ghi tên người nhận."""
+    from .chat_gateway import dang_bat, lay_chat_provider
+    from .nhac_viec_service import gui_toi_nguoi
+    kq = {"da_gui": False, "kieu": None, "loi": None}
+    try:
+        if not dang_bat():
+            kq["loi"] = "Google Chat chưa bật trên máy chủ (chế độ DEMO)"
+            return kq
+        prov = lay_chat_provider()
+        rieng = getattr(prov, "che_do", "") == "APP"
+        kq["kieu"] = "RIENG" if rieng else "PHONG_CHUNG"
+        nd_ = noi_dung_giao_viec(g, nv.ho_ten, nguoi_giao, la_sua, rieng)
+        if rieng:
+            u = db.get(NguoiDung, nv.nguoi_dung_id) if nv.nguoi_dung_id else None
+            email = (u.email if u is not None else None) or g.email
+            r = gui_toi_nguoi(db, prov, email, nd_)
+        else:
+            r = prov.gui_phong(nd_)
+        kq["da_gui"] = bool(r.get("da_gui"))
+        kq["loi"] = None if kq["da_gui"] else str(r.get("loi") or "không gửi được")
+    except Exception as e:                                              # noqa: BLE001
+        kq["loi"] = f"{type(e).__name__}: {str(e)[:120]}"
+    return kq
+
+
 def nhac_tu_dong_hang_ngay(db: Session) -> dict:
     """Bộ hẹn giờ gọi: từ `bao_cao_nhac_gio` (giờ VN) nhắc báo cáo của HÔM QUA. Tắt bằng BAO_CAO_NHAC_TU_DONG=0."""
     from .config import settings

@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="vi">
 <head>
-<!-- build: giao-viec-ceo-2026-10-26 -->
+<!-- build: giao-viec-admin-nhan-2026-10-26 -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#0f2c44">
@@ -15838,9 +15838,9 @@ async function wtReport(host){
        <div class="f" style="flex:1"><label>Mã liên quan (dự án / đơn hàng)</label><input id="br_ma" value="${_bcEscA(cur.ma_lien_quan)}" placeholder="VD: CT-RO-01 · DH-2026-014"></div>
      </div>
      <div class="formrow" style="padding-top:0;align-items:end">
-       <div class="f" style="flex:1.4;min-width:240px"><label>Công việc được giao <span style="font-weight:400;color:var(--muted)">(CEO giao — chọn việc bạn đang báo cáo)</span></label>
+       <div class="f" style="flex:1.4;min-width:240px"><label>Công việc được giao <span style="font-weight:400;color:var(--muted)">(CEO / Admin giao — chọn việc bạn đang báo cáo)</span></label>
          <select id="br_gv_id" data-nocbx onchange="_brGvInfo()">${_brGvOpts(S.brNgay,cur.giao_viec_id)}</select></div>
-       <div class="f" style="flex:2;min-width:260px"><label>🔒 Người nhận việc · Tên công việc · Ngày bắt đầu · Ngày kết thúc <span style="font-weight:400;color:var(--muted)">(chỉ CEO nhập / sửa)</span></label>
+       <div class="f" style="flex:2;min-width:260px"><label>🔒 Người nhận việc · Tên công việc · Ngày bắt đầu · Ngày kết thúc <span style="font-weight:400;color:var(--muted)">(chỉ CEO / Admin nhập / sửa)</span></label>
          <div id="br_gv_info" style="font-size:12.5px;padding:7px 10px;border:1px dashed var(--line,#cbd5e1);border-radius:8px;background:var(--surface);min-height:20px">${_brGvInfoHtml(cur.giao_viec_id,cur)}</div></div>
      </div>
      <div class="formrow" style="padding-top:0"><div class="f" style="flex:1 1 100%"><label>Công việc đã làm hôm nay <span style="color:var(--red)">*</span></label>
@@ -15893,9 +15893,9 @@ async function wtReport(host){
        <tbody>${rows||'<tr><td colspan="9" class="empty">Chưa có nhân viên trong hồ sơ.</td></tr>'}</tbody></table>
        <div class="note" style="margin-top:8px;color:var(--muted)">Dòng nền cam = nhân viên <b>chưa gửi báo cáo</b> cho ngày đã chọn. Bấm “Xem” để đọc toàn văn báo cáo của từng người.</div></div></div>`;
   }
-  host.innerHTML=formMe+tongHop+myTable+(S.role==='CEO'&&S.mode==='live'?_gvPanel(nvs):'')+mgr;
+  host.innerHTML=formMe+tongHop+myTable+(laQTV()&&S.mode==='live'?_gvPanel(nvs):'')+mgr;
 }
-/* 📌 Giao việc — CHỈ CEO nhập / sửa: Người nhận việc (email) · Tên công việc · Ngày bắt đầu · Ngày kết thúc */
+/* 📌 Giao việc — CHỈ CEO / ADMIN nhập / sửa: Người nhận việc (email) · Tên công việc · Ngày bắt đầu · Ngày kết thúc */
 function _gvPanel(nvs){
   const ds=window.__gvAll||[], hn=new Date().toISOString().slice(0,10), sua=ds.find(g=>g.id===S.gvSua)||{};
   const tt=g=>g.ket_thuc&&g.ket_thuc<hn?['Đã hết hạn','b-tc']:(g.bat_dau&&g.bat_dau>hn?['Chưa bắt đầu','b-cho']:['Đang thực hiện','b-ok']);
@@ -15904,7 +15904,7 @@ function _gvPanel(nvs){
     <td>${_bcEscH(g.ten_cong_viec)}</td><td style="white-space:nowrap">${_bcNgayVn(g.bat_dau)}</td><td style="white-space:nowrap">${_bcNgayVn(g.ket_thuc)}</td>
     <td><span class="badge ${t[1]}">${t[0]}</span></td>
     <td style="white-space:nowrap"><button class="btn-sm ghost" title="Sửa" onclick="gvSua(${g.id})">✏️</button> <button class="btn-sm ghost" style="color:var(--red)" title="Xóa" onclick="gvXoa(${g.id})">✕</button></td></tr>`;}).join('');
-  return `<div class="panel"><div class="panel-h"><h3>📌 Giao việc <span style="font-weight:400;font-size:12px;color:var(--muted)">— chỉ CEO nhập / sửa</span></h3></div><div class="panel-b">
+  return `<div class="panel"><div class="panel-h"><h3>📌 Giao việc <span style="font-weight:400;font-size:12px;color:var(--muted)">— chỉ CEO / Admin nhập / sửa · người nhận được nhắn qua Google Chat</span></h3></div><div class="panel-b">
     <div class="formrow" style="padding-top:0;align-items:end">
       <div class="f" style="flex:1.3;min-width:220px"><label>Người nhận việc (email) *</label><input id="gv_email" type="email" list="gv_email_ds" value="${_bcEscA(sua.email)}" placeholder="ten@watersolutions.company"><datalist id="gv_email_ds">${emails}</datalist></div>
       <div class="f" style="flex:1.8;min-width:220px"><label>Tên công việc *</label><input id="gv_ten" value="${_bcEscA(sua.ten_cong_viec)}" placeholder="VD: Lắp bộ hút gió tươi cho bơm fowking"></div>
@@ -15914,7 +15914,7 @@ function _gvPanel(nvs){
     </div>
     <table style="margin-top:6px"><thead><tr><th>Người nhận việc</th><th>Tên công việc</th><th>Bắt đầu</th><th>Kết thúc</th><th>Tình trạng</th><th></th></tr></thead>
       <tbody>${rows||'<tr><td colspan="6" class="empty">Chưa giao việc nào.</td></tr>'}</tbody></table>
-    <div class="note" style="margin-top:8px;color:var(--muted)">Nhân viên thấy việc được giao trong form «Báo cáo công việc của tôi» (trong khoảng ngày bắt đầu → kết thúc) và chọn khi báo cáo; họ không sửa được 4 thông tin này. Sửa việc ở đây thì các báo cáo đã gắn việc cập nhật theo.</div>
+    <div class="note" style="margin-top:8px;color:var(--muted)">Giao việc xong app nhắn người nhận qua Google Chat (sửa tên việc / ngày / người nhận cũng nhắn lại). Nhân viên thấy việc được giao trong form «Báo cáo công việc của tôi» (trong khoảng ngày bắt đầu → kết thúc) và chọn khi báo cáo; họ không sửa được 4 thông tin này. Sửa việc ở đây thì các báo cáo đã gắn việc cập nhật theo.</div>
   </div></div>`;
 }
 function gvSua(id){S.gvSua=id;wtReport($('#wtBody')).then(()=>{const e=document.getElementById('gv_ten');if(e){e.scrollIntoView({behavior:'smooth',block:'center'});e.focus();}});}
@@ -15924,9 +15924,11 @@ async function gvLuu(){
   if(!body.email)return toast("Nhập email người nhận việc","err");
   if(!body.ten_cong_viec)return toast("Nhập tên công việc","err");
   if(body.bat_dau&&body.ket_thuc&&body.ket_thuc<body.bat_dau)return toast("Ngày kết thúc phải sau hoặc cùng ngày bắt đầu","err");
-  try{await api(S.gvSua?'/nhan-su/giao-viec/'+S.gvSua:'/nhan-su/giao-viec',{method:S.gvSua?'PUT':'POST',body:JSON.stringify(body)});}
+  let kq; try{kq=await api(S.gvSua?'/nhan-su/giao-viec/'+S.gvSua:'/nhan-su/giao-viec',{method:S.gvSua?'PUT':'POST',body:JSON.stringify(body)});}
   catch(e){return toast(e.detail||e.message,"err");}
-  toast(S.gvSua?"Đã sửa việc đã giao":"Đã giao việc «"+body.ten_cong_viec+"»","ok"); S.gvSua=null; wtReport($('#wtBody'));
+  const tb=kq&&kq.thong_bao;
+  const nhan=!tb?"":(tb.da_gui?(tb.kieu==='PHONG_CHUNG'?" · đã nhắn vào phòng Google Chat chung":" · đã nhắn riêng người nhận"):" · CHƯA nhắn được: "+(tb.loi||""));
+  toast((S.gvSua?"Đã sửa việc đã giao":"Đã giao việc «"+body.ten_cong_viec+"»")+nhan,tb&&!tb.da_gui?"err":"ok"); S.gvSua=null; wtReport($('#wtBody'));
 }
 async function gvXoa(id){
   const g=(window.__gvAll||[]).find(x=>x.id===id); if(!g)return;
