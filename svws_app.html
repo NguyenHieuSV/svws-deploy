@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="vi">
 <head>
-<!-- build: gan-tk-ho-so-2026-10-26b -->
+<!-- build: gan-tk-ho-so-2026-10-26c -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#0f2c44">
@@ -16548,7 +16548,7 @@ async function nsHoSo(host){
   const ds = S.mode==="live" ? await api("/nhan-su/ho-so") : DEMO.ns_hoso;
   window._nsHoSoDs=ds;
   const dangLam=ds.filter(x=>x.trang_thai!=='NGHI_VIEC'), daNghi=ds.filter(x=>x.trang_thai==='NGHI_VIEC');
-  const _tkBadge=x=>S.mode!=="live"?'':(x.tai_khoan?`<span title="Tài khoản đăng nhập: ${esc(x.tai_khoan)}" style="color:#16a34a;font-size:11px;white-space:nowrap"> ✓ có TK</span>`:`<span title="Chưa gắn tài khoản đăng nhập — nhân viên chưa dùng được Working time / đăng ký tăng ca. CEO/Admin bấm 🔑 để tạo hoặc gắn tài khoản có sẵn." style="color:#dc2626;font-size:11px;white-space:nowrap"> ⚠ chưa gắn TK</span>`);
+  const _tkBadge=x=>S.mode!=="live"?'':(x.tai_khoan?`<span title="Tài khoản đăng nhập: ${String(x.tai_khoan).replace(/[<>"]/g,'')}" style="color:#16a34a;font-size:11px;white-space:nowrap"> ✓ có TK</span>`:`<span title="Chưa gắn tài khoản đăng nhập — nhân viên chưa dùng được Working time / đăng ký tăng ca. CEO/Admin bấm 🔑 để tạo hoặc gắn tài khoản có sẵn." style="color:#dc2626;font-size:11px;white-space:nowrap"> ⚠ chưa gắn TK</span>`);
   const rows=dangLam.map(x=>`<tr><td><b>${x.ma||x.id}</b></td><td>${x.ho_ten}${_tkBadge(x)}</td><td>${x.chuc_danh||''}</td>
     <td class="num">${vnd(x.luong_co_ban)}</td><td class="num">${vnd(x.luong_dong_bh||x.luong_co_ban)}</td>
     <td class="num">${vnd((x.phu_cap_an||0)+(x.phu_cap_di_lai||0)+(x.phu_cap_dien_thoai||0)+(x.phu_cap_trach_nhiem||0))}</td>
