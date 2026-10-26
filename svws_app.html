@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="vi">
 <head>
-<!-- build: gan-tk-ho-so-2026-10-26 -->
+<!-- build: gan-tk-ho-so-2026-10-26b -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#0f2c44">
@@ -17010,7 +17010,21 @@ async function nsTaoTK(nvId){
     <label>Mật khẩu ban đầu (tối thiểu 6 ký tự)</label><input id="tk_mk" type="text" placeholder="Người dùng nên đổi sau khi nhận">
     <label>Vai trò (đoán từ chức danh — sửa được)</label>
     <select id="tk_vt" data-nocbx>${roles.map(r=>`<option value="${r.ma}" ${r.ma===doan?'selected':''}>${r.ten} (${r.ma})</option>`).join('')}</select>
-    <button class="btn-sm" style="margin-top:14px" onclick="nsTaoTKLuu()">Tạo tài khoản</button>`);
+    <button class="btn-sm" style="margin-top:14px" onclick="nsTaoTKLuu()">Tạo tài khoản</button>
+    ${S.mode==="live"?`<div class="note" style="margin-top:14px">Nhân viên <b>đã có tài khoản</b> (tạo ở Cấu hình) nhưng chưa gắn vào hồ sơ này? Chỉ cần nhập đúng email ở trên rồi bấm:</div>
+    <button class="btn-sm ghost" style="margin-top:6px" onclick="nsGanTKCoSan()">🔗 Gắn tài khoản có sẵn vào hồ sơ</button>`:''}`);
+}
+/* Gắn tài khoản ĐÃ CÓ (vd tạo ở Cấu hình) vào hồ sơ — chỉ cần email, không tạo mới, không đổi mật khẩu/vai trò */
+async function nsGanTKCoSan(){
+  const nv=S._nsTkNv, email=(gv('tk_email')||'').trim().toLowerCase();
+  if(!nv||!nv.id)return;
+  if(!email.includes('@'))return toast("Nhập email của tài khoản có sẵn","err");
+  if(!confirm(`Gắn tài khoản ${email} vào hồ sơ «${nv.ho_ten}»?\n\nKhông tạo tài khoản mới, không đổi mật khẩu hay vai trò. Nhân viên đăng nhập là đăng ký được tăng ca / nghỉ phép ở Working time.`))return;
+  try{await api(`/nhan-su/nhan-vien/${nv.id}/gan-tai-khoan`,{method:'PUT',body:JSON.stringify({email})});}
+  catch(e){return toast("Chưa gắn được: "+(e.detail||e.message),"err");}
+  document.getElementById('ktModal')?.remove();
+  toast("Đã gắn tài khoản "+email+" vào hồ sơ "+nv.ho_ten,"ok");
+  if(S.nsTab==="hoso")nsRender();
 }
 async function nsTaoTKLuu(){
   const email=(gv('tk_email')||'').toLowerCase(), mk=gv('tk_mk'), vt=gv('tk_vt');
@@ -17028,15 +17042,7 @@ async function nsTaoTKLuu(){
     catch(e){
       const msg=e.detail||e.message||'';
       // email đã có tài khoản (tạo ở Cấu hình) → gắn tài khoản có sẵn vào hồ sơ thay vì báo lỗi cụt
-      if(S._nsTkNv&&S._nsTkNv.id&&/đã tồn tại/.test(msg)){
-        if(!confirm(`Email ${email} đã có tài khoản.\n\nGắn tài khoản này vào hồ sơ «${S._nsTkNv.ho_ten}»?\n(Không tạo tài khoản mới, không đổi mật khẩu/vai trò của tài khoản.)`))return;
-        try{await api(`/nhan-su/nhan-vien/${S._nsTkNv.id}/gan-tai-khoan`,{method:'PUT',body:JSON.stringify({email})});}
-        catch(e3){return toast("Chưa gắn được: "+(e3.detail||e3.message),"err");}
-        document.getElementById('ktModal')?.remove();
-        toast("Đã gắn tài khoản "+email+" vào hồ sơ "+S._nsTkNv.ho_ten,"ok");
-        if(S.nsTab==="hoso")nsRender();
-        return;
-      }
+      if(S._nsTkNv&&S._nsTkNv.id&&/đã tồn tại/.test(msg))return nsGanTKCoSan();
       return toast(msg,"err");
     }
   }else{
