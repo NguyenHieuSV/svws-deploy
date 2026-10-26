@@ -46,6 +46,10 @@ def _bc(db, nv, d, ket_qua="xong", **kw):
     db.add(m.BaoCaoNgay(nhan_vien_id=nv, ngay=d, da_lam="làm", ket_qua=ket_qua, **kw)); db.commit()
 
 
+def _giao(db, nv, bd, kt):
+    db.add(m.GiaoViec(nhan_vien_id=nv, email=None, ten_cong_viec="Việc", bat_dau=bd, ket_thuc=kt)); db.commit()
+
+
 def _wt(db, nv, d, loai, so_ngay=1, tt="DA_DUYET"):
     db.add(m.NgayNghiOt(nhan_vien_id=nv, ngay=d, loai=loai, so_gio=2 if loai.startswith("OT") else 0,
                         so_ngay=so_ngay, trang_thai=tt)); db.commit()
@@ -111,6 +115,10 @@ def test_gui_nhac_moi_nguoi_mot_lan(db, monkeypatch):
     import app.chat_gateway as cg
     monkeypatch.setattr(cg, "dang_bat", lambda: True)
     monkeypatch.setattr(cg, "lay_chat_provider", lambda: Prov())
+    kq0 = bs.gui_nhac(db, date(2026, 10, 23))             # chưa ai được giao việc → không nhắn
+    assert kq0["da_gui"] == 0 and kq0["khong_co_viec"] == 2 and gui == []
+    _giao(db, 1, date(2026, 10, 20), date(2026, 10, 25)); _giao(db, 2, None, None)
+    _giao(db, 2, date(2026, 9, 1), date(2026, 9, 30))       # việc đã hết hạn không tính, nhưng Bình còn việc không thời hạn
     kq = bs.gui_nhac(db, date(2026, 10, 23))
     assert kq["da_gui"] == 2 and sorted(e for e, _ in gui) == ["a@x.vn", "b@x.vn"]
     assert "Bạn chưa hoàn thành báo cáo ngày: 23/10/2026" in gui[0][1]
@@ -130,9 +138,11 @@ def test_gui_nhac_webhook_mot_tin_gop(db, monkeypatch):
     import app.chat_gateway as cg
     monkeypatch.setattr(cg, "dang_bat", lambda: True)
     monkeypatch.setattr(cg, "lay_chat_provider", lambda: Prov())
+    _giao(db, 1, date(2026, 10, 23), date(2026, 10, 23))     # chỉ An là người nhận việc ngày 23/10
+    _giao(db, 2, date(2026, 10, 24), None)                   # việc của Bình bắt đầu sau → không nhắc Bình
     kq = bs.gui_nhac(db, date(2026, 10, 23))
-    assert kq["da_gui"] == 2 and kq["kieu"] == "PHONG_CHUNG" and len(gui) == 1
-    assert "• An" in gui[0] and "• Bình" in gui[0] and "23/10/2026" in gui[0]
+    assert kq["da_gui"] == 1 and kq["kieu"] == "PHONG_CHUNG" and len(gui) == 1 and kq["khong_co_viec"] == 1
+    assert "• An" in gui[0] and "Bình" not in gui[0] and "23/10/2026" in gui[0] and "người nhận việc" in gui[0]
 
 
 def _ceo(db):

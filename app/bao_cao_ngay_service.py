@@ -117,13 +117,24 @@ def nv_du_dieu_kien(db: Session):
             .order_by(NhanVien.ho_ten).all())
 
 
+def nv_co_viec_ngay(db: Session, ngay: date) -> set:
+    """Nhân viên là NGƯỜI NHẬN của ít nhất một việc được giao còn hiệu lực ngày `ngay` (bắt đầu ≤ ngày ≤ kết thúc)."""
+    from .models import GiaoViec
+    rows = (db.query(GiaoViec.nhan_vien_id)
+            .filter((GiaoViec.bat_dau.is_(None)) | (GiaoViec.bat_dau <= ngay),
+                    (GiaoViec.ket_thuc.is_(None)) | (GiaoViec.ket_thuc >= ngay)).all())
+    return {r[0] for r in rows}
+
+
 def ds_thieu_bao_cao(db: Session, ngay: date) -> list:
-    """Người phải báo cáo ngày `ngay` mà chưa có báo cáo → [{nhan_vien_id, ten, email}]."""
+    """Người phải báo cáo ngày `ngay` mà chưa có báo cáo → [{nhan_vien_id, ten, email, co_viec}].
+    co_viec = có việc được giao còn hiệu lực ngày đó (CHỈ những người này mới bị nhắc tên)."""
     ad = ngay_ap_dung()
     if ad and ngay < ad:
         return []
     cap = nv_du_dieu_kien(db)
     bc, ot, nghi = nap_du_lieu(db, [nv.id for nv, _ in cap], ngay, ngay)
+    co_viec = nv_co_viec_ngay(db, ngay)
     out = []
     for nv, u in cap:
         if (nv.id, ngay) in bc:
@@ -133,7 +144,7 @@ def ds_thieu_bao_cao(db: Session, ngay: date) -> list:
         if nv.ngay_nghi_viec and nv.ngay_nghi_viec < ngay:
             continue
         if phai_bao_cao(ngay, (nv.id, ngay) in ot, nghi.get((nv.id, ngay)))[0]:
-            out.append({"nhan_vien_id": nv.id, "ten": nv.ho_ten, "email": u.email})
+            out.append({"nhan_vien_id": nv.id, "ten": nv.ho_ten, "email": u.email, "co_viec": nv.id in co_viec})
     return out
 
 
@@ -156,19 +167,23 @@ def noi_dung_rieng(ngay: date) -> str:
 
 def noi_dung_chung(ngay: date, ds: list) -> str:
     ten = "\n".join(f"• {x['ten']}" for x in ds)
-    return (f"📝 Chưa hoàn thành báo cáo ngày: {dmy(ngay)} ({THU[ngay.weekday()]}) — {len(ds)} người:\n{ten}\n"
+    return (f"📝 Chưa hoàn thành báo cáo ngày: {dmy(ngay)} ({THU[ngay.weekday()]}) — {len(ds)} người nhận việc:\n{ten}\n"
             "Các bạn vui lòng vào app SVWS → Working time & Report → Report để hoàn thành báo cáo.")
 
 
 def gui_nhac(db: Session, ngay: date, nguon: str = "TU_DONG", nguoi_gui=None) -> dict:
     """Nhắc những người thiếu báo cáo `ngay` (mỗi người một lần). Không ném lỗi chat ra ngoài.
+    CHỈ nhắc người là NGƯỜI NHẬN của việc được giao còn hiệu lực ngày đó (anh Hiếu 26/10/2026);
+    không ai có việc được giao → không gửi tin nào.
     • Chế độ APP: mỗi người MỘT tin riêng «Bạn chưa hoàn thành báo cáo ngày: …».
     • Chế độ WEBHOOK (chỉ đăng phòng chung): MỘT tin gộp ghi tên những người thiếu."""
     from .chat_gateway import dang_bat, lay_chat_provider
     from .nhac_viec_service import gio_hien_tai, gui_toi_nguoi
-    tong = {"ngay": str(ngay), "thieu": 0, "da_gui": 0, "da_nhac_truoc": 0, "loi": [], "kieu": None, "ten": []}
-    ds = ds_thieu_bao_cao(db, ngay)
-    tong["thieu"] = len(ds)
+    tong = {"ngay": str(ngay), "thieu": 0, "da_gui": 0, "da_nhac_truoc": 0, "khong_co_viec": 0, "loi": [], "kieu": None, "ten": []}
+    tat_ca = ds_thieu_bao_cao(db, ngay)
+    ds = [x for x in tat_ca if x["co_viec"]]
+    tong["thieu"] = len(tat_ca)
+    tong["khong_co_viec"] = len(tat_ca) - len(ds)
     da = {r.nhan_vien_id for r in db.query(BaoCaoNhac).filter(BaoCaoNhac.ngay == ngay, BaoCaoNhac.ket_qua == "OK").all()}
     chon = [x for x in ds if x["nhan_vien_id"] not in da]
     tong["da_nhac_truoc"] = len(ds) - len(chon)

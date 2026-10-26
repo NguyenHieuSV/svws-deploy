@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="vi">
 <head>
-<!-- build: bao-cao-tinh-tu-2026-10-26 -->
+<!-- build: nhac-nguoi-nhan-viec-2026-10-26 -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#0f2c44">
@@ -15955,7 +15955,7 @@ function _brTongHop(th,thieu){
       <span style="font-size:12.5px;color:var(--muted)">Phải báo cáo <b>${th.can}</b> ngày · đã <b style="color:#16a34a">${th.xong}</b> · thiếu <b style="color:#dc2626">${th.thieu}</b> · tỉ lệ hoàn thành <b style="color:${mau};font-size:15px">${tl}</b></span></div>
     <div class="panel-b"><details ${th.thieu?'open':''}><summary style="cursor:pointer;color:var(--muted);font-size:12.5px;padding:4px 0">Ngày ; kết quả — bấm để mở / đóng danh sách từng ngày</summary>
       <table style="margin-top:6px"><thead><tr><th>Ngày</th><th>Trạng thái</th><th>Kết quả</th><th></th></tr></thead><tbody>${rows||'<tr><td colspan="4" class="empty">Chưa tới ngày nào trong tháng này.</td></tr>'}</tbody></table></details>
-      <div class="note" style="margin-top:8px;color:var(--muted)">${th.tinh_tu?`Tính từ ngày áp dụng <b>${_bcNgayVn(th.tinh_tu)}</b>; các ngày trước đó không tính. `:''}Ngày thường và thứ Bảy phải báo cáo, trừ ngày nghỉ (phép, việc riêng, ốm…) và ngày lễ trong lịch. Chủ nhật / ngày lễ có tăng ca thì vẫn phải báo cáo. Thiếu báo cáo thì sáng hôm sau app nhắn «Bạn chưa hoàn thành báo cáo ngày …».</div></div></div>`;
+      <div class="note" style="margin-top:8px;color:var(--muted)">${th.tinh_tu?`Tính từ ngày áp dụng <b>${_bcNgayVn(th.tinh_tu)}</b>; các ngày trước đó không tính. `:''}Ngày thường và thứ Bảy phải báo cáo, trừ ngày nghỉ (phép, việc riêng, ốm…) và ngày lễ trong lịch. Chủ nhật / ngày lễ có tăng ca thì vẫn phải báo cáo. Người có việc được giao mà thiếu báo cáo sẽ được nhắc tên trong nhóm Google Chat sáng hôm sau.</div></div></div>`;
 }
 function _brFill(r){
   const set=(id,val)=>{const e=document.getElementById(id);if(e)e.value=(val==null?'':val);};
@@ -16007,9 +16007,9 @@ async function brNhacForm(ngay){
   _ktModal("📣 Nhắc chưa hoàn thành báo cáo",`
     <div class="formrow" style="padding-top:0;align-items:end"><div class="f" style="max-width:170px"><label>Ngày báo cáo</label><input type="date" id="brn_ngay" value="${ng}" max="${hq}" onchange="document.getElementById('ktModal')?.remove();brNhacForm(this.value)"></div>
       <div class="f"><label>&nbsp;</label><span style="font-size:12.5px;color:var(--muted)">Thiếu báo cáo: <b style="color:#dc2626">${ds.length}</b> người · sẽ gửi: <b>${d.se_gui}</b>${ds.length-d.se_gui?` · đã nhắc trước: ${ds.length-d.se_gui}`:''}</span></div></div>
-    ${ds.length?`<table><thead><tr><th>Nhân viên</th><th>Email</th><th>Đã nhắc</th></tr></thead><tbody>${ds.map(x=>`<tr><td>${_bcEscH(x.ten)}</td><td style="font-size:12px">${_bcEscH(x.email)}</td><td>${x.da_nhac?'<span class="badge b-ok">đã nhắc</span>':'<span class="badge b-cho">sẽ gửi</span>'}</td></tr>`).join('')}</tbody></table>`:'<div class="empty" style="padding:12px">Không ai thiếu báo cáo ngày này 🎉</div>'}
+    ${ds.length?`<table><thead><tr><th>Nhân viên</th><th>Email</th><th>Việc được giao</th><th>Nhắc</th></tr></thead><tbody>${ds.map(x=>`<tr><td>${_bcEscH(x.ten)}</td><td style="font-size:12px">${_bcEscH(x.email)}</td><td>${x.co_viec?'✓ có':'<span style="color:var(--muted)">—</span>'}</td><td>${x.da_nhac?'<span class="badge b-ok">đã nhắc</span>':(x.co_viec?'<span class="badge b-cho">sẽ gửi</span>':'<span class="badge b-info" title="Chỉ nhắc tên người nhận việc">không nhắc</span>')}</td></tr>`).join('')}</tbody></table>`:'<div class="empty" style="padding:12px">Không ai thiếu báo cáo ngày này 🎉</div>'}
     ${d.noi_dung?`<label style="margin-top:10px">Nội dung sẽ gửi (Google Chat)</label><pre style="white-space:pre-wrap;font-size:12px;background:var(--surface);padding:8px 10px;border-radius:8px">${_bcEscH(d.noi_dung)}</pre>`:''}
-    <div class="note" style="margin-top:8px;color:var(--muted)">App tự nhắc mỗi sáng (từ 9h) cho ngày hôm trước; mỗi người mỗi ngày chỉ nhắc một lần. Nút này để nhắc ngay hoặc nhắc bù ngày khác.</div>
+    <div class="note" style="margin-top:8px;color:var(--muted)">Chỉ nhắc tên <b>người nhận việc</b> (có việc được giao còn hiệu lực ngày đó); không ai có việc thì không gửi tin. App tự nhắc mỗi sáng (từ 9h) cho ngày hôm trước; mỗi người mỗi ngày chỉ nhắc một lần. Nút này để nhắc ngay hoặc nhắc bù ngày khác.</div>
     ${d.se_gui?`<button class="btn-sm" style="margin-top:10px" onclick="brNhacGui('${ng}')">📣 Gửi nhắc ${d.se_gui} người</button>`:''}`);
 }
 async function brNhacGui(ng){

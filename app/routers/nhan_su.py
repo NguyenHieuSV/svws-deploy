@@ -1329,7 +1329,7 @@ def bao_cao_nhac_xem(ngay: str | None = None, db: Session = Depends(get_db),
     da = {r.nhan_vien_id for r in db.query(BaoCaoNhac).filter(BaoCaoNhac.ngay == ng, BaoCaoNhac.ket_qua == "OK").all()}
     for x in ds:
         x["da_nhac"] = x["nhan_vien_id"] in da
-    chua = [x for x in ds if not x["da_nhac"]]
+    chua = [x for x in ds if x["co_viec"] and not x["da_nhac"]]     # chỉ người nhận việc mới bị nhắc tên
     return {"ngay": str(ng), "thieu": ds, "se_gui": len(chua),
             "noi_dung": (bs.noi_dung_chung(ng, chua) if chua else "")}
 
