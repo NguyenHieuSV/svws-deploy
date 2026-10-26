@@ -1276,7 +1276,9 @@ def bao_cao_tong_hop(thang: str | None = None, nhan_vien_id: int | None = None, 
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy nhân viên")
     bc, ot, nghi = bs.nap_du_lieu(db, [nv_id], tu, den)
     kq = bs.tong_hop_nv(nv, bc, ot, nghi, tu, den, hom_nay)
-    kq.update({"thang": thang, "nhan_vien_id": nv_id, "ho_ten": nv.ho_ten, "hom_nay": str(hom_nay)})
+    ad = bs.ngay_ap_dung()
+    kq.update({"thang": thang, "nhan_vien_id": nv_id, "ho_ten": nv.ho_ten, "hom_nay": str(hom_nay),
+               "tinh_tu": str(ad) if ad else None})
     return kq
 
 

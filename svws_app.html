@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="vi">
 <head>
-<!-- build: giao-viec-admin-nhan-2026-10-26 -->
+<!-- build: bao-cao-tinh-tu-2026-10-26 -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#0f2c44">
@@ -15955,7 +15955,7 @@ function _brTongHop(th,thieu){
       <span style="font-size:12.5px;color:var(--muted)">Phải báo cáo <b>${th.can}</b> ngày · đã <b style="color:#16a34a">${th.xong}</b> · thiếu <b style="color:#dc2626">${th.thieu}</b> · tỉ lệ hoàn thành <b style="color:${mau};font-size:15px">${tl}</b></span></div>
     <div class="panel-b"><details ${th.thieu?'open':''}><summary style="cursor:pointer;color:var(--muted);font-size:12.5px;padding:4px 0">Ngày ; kết quả — bấm để mở / đóng danh sách từng ngày</summary>
       <table style="margin-top:6px"><thead><tr><th>Ngày</th><th>Trạng thái</th><th>Kết quả</th><th></th></tr></thead><tbody>${rows||'<tr><td colspan="4" class="empty">Chưa tới ngày nào trong tháng này.</td></tr>'}</tbody></table></details>
-      <div class="note" style="margin-top:8px;color:var(--muted)">Ngày thường và thứ Bảy phải báo cáo, trừ ngày nghỉ (phép, việc riêng, ốm…) và ngày lễ trong lịch. Chủ nhật / ngày lễ có tăng ca thì vẫn phải báo cáo. Thiếu báo cáo thì sáng hôm sau app nhắn «Bạn chưa hoàn thành báo cáo ngày …».</div></div></div>`;
+      <div class="note" style="margin-top:8px;color:var(--muted)">${th.tinh_tu?`Tính từ ngày áp dụng <b>${_bcNgayVn(th.tinh_tu)}</b>; các ngày trước đó không tính. `:''}Ngày thường và thứ Bảy phải báo cáo, trừ ngày nghỉ (phép, việc riêng, ốm…) và ngày lễ trong lịch. Chủ nhật / ngày lễ có tăng ca thì vẫn phải báo cáo. Thiếu báo cáo thì sáng hôm sau app nhắn «Bạn chưa hoàn thành báo cáo ngày …».</div></div></div>`;
 }
 function _brFill(r){
   const set=(id,val)=>{const e=document.getElementById(id);if(e)e.value=(val==null?'':val);};

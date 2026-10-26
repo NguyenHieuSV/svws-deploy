@@ -16,6 +16,8 @@ from app.routers import nhan_su as ns
 @pytest.fixture()
 def db(monkeypatch):
     monkeypatch.setattr(ns, "ghi_audit", lambda *a, **k: None)
+    from app.config import settings
+    monkeypatch.setattr(settings, "bao_cao_tinh_tu", "")       # các test dưới dùng ngày trước 26/10 → tắt mốc áp dụng
     eng = create_engine("sqlite://")
     for t in (m.VaiTro, m.NguoiDung, m.NhanVien, m.GiaoViec, m.BaoCaoNgay, m.NgayNghiOt, m.BaoCaoNhac):
         t.__table__.create(eng)
@@ -229,3 +231,15 @@ def test_giao_viec_webhook_dang_phong_chung_ghi_ten(db, monkeypatch):
     monkeypatch.setattr(cg, "lay_chat_provider", lambda: Prov())
     g = ns.tao_giao_viec(ns.GiaoViecVao(email="a@x.vn", ten_cong_viec="Lắp bơm"), db, nd=_ceo(db))
     assert g["thong_bao"]["kieu"] == "PHONG_CHUNG" and "Giao việc cho An: *Lắp bơm*" in gui[0]
+
+
+def test_truoc_ngay_ap_dung_khong_tinh(db, monkeypatch):
+    from app.config import settings
+    monkeypatch.setattr(settings, "bao_cao_tinh_tu", "2026-10-26")
+    nv = db.get(m.NhanVien, 1)
+    bc, ot, nghi = bs.nap_du_lieu(db, [1], date(2026, 10, 1), date(2026, 10, 31))
+    th = bs.tong_hop_nv(nv, bc, ot, nghi, date(2026, 10, 1), date(2026, 10, 31), date(2026, 10, 27))
+    assert [x["ngay"] for x in th["ngay"]] == ["2026-10-26", "2026-10-27"]       # 1–25/10 không còn bị tính thiếu
+    assert (th["can"], th["thieu"]) == (1, 1)
+    assert bs.ds_thieu_bao_cao(db, date(2026, 10, 24)) == []                     # không nhắc ngày trước áp dụng
+    assert bs.thieu_gan_day(db, 1, date(2026, 10, 27)) == ["2026-10-26"]

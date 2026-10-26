@@ -24,6 +24,16 @@ def dmy(d: date) -> str:
     return d.strftime("%d/%m/%Y")
 
 
+def ngay_ap_dung() -> date | None:
+    """Ngày bắt đầu áp dụng (config bao_cao_tinh_tu, mặc định 26/10/2026 — ngày bật tính năng).
+    Trước ngày này không tính thiếu báo cáo, không tính tỉ lệ, không nhắc."""
+    from .config import settings
+    try:
+        return date.fromisoformat((settings.bao_cao_tinh_tu or "").strip()) if (settings.bao_cao_tinh_tu or "").strip() else None
+    except ValueError:
+        return None
+
+
 def la_ngay_le(d: date) -> bool:
     """Ngày lễ trong lịch nghỉ lễ của Working time (cố định hằng năm + lễ chốt theo năm)."""
     from .routers.nhan_su import _wt_loai_ngay
@@ -69,6 +79,9 @@ def tong_hop_nv(nv: NhanVien, bc, ot, nghi, tu: date, den: date, hom_nay: date) 
     Trạng thái: DA (đã báo cáo) · THIEU (đến hạn mà chưa báo cáo) · CHO (hôm nay, chưa tới hạn) · MIEN (không phải báo cáo)."""
     if nv.ngay_vao_lam and nv.ngay_vao_lam > tu:
         tu = nv.ngay_vao_lam
+    ad = ngay_ap_dung()
+    if ad and ad > tu:                                   # trước ngày áp dụng: không liệt kê, không tính
+        tu = ad
     cuoi = min(den, hom_nay)
     if nv.ngay_nghi_viec and nv.ngay_nghi_viec < cuoi:
         cuoi = nv.ngay_nghi_viec
@@ -106,6 +119,9 @@ def nv_du_dieu_kien(db: Session):
 
 def ds_thieu_bao_cao(db: Session, ngay: date) -> list:
     """Người phải báo cáo ngày `ngay` mà chưa có báo cáo → [{nhan_vien_id, ten, email}]."""
+    ad = ngay_ap_dung()
+    if ad and ngay < ad:
+        return []
     cap = nv_du_dieu_kien(db)
     bc, ot, nghi = nap_du_lieu(db, [nv.id for nv, _ in cap], ngay, ngay)
     out = []

@@ -61,6 +61,7 @@ class Settings(BaseSettings):
     nhac_viec_gio_ban_tin: int = 8       # giờ gửi bản tin (0-23, GIỜ VIỆT NAM)
     bao_cao_nhac_tu_dong: bool = True    # sáng hôm sau nhắc người chưa hoàn thành báo cáo ngày (Working time & Report)
     bao_cao_nhac_gio: int = 9            # từ giờ này (GIỜ VIỆT NAM) mới nhắc
+    bao_cao_tinh_tu: str = "2026-10-26"  # ngày bắt đầu áp dụng báo cáo ngày: trước ngày này KHÔNG tính thiếu / tỉ lệ / nhắc
     # Máy chủ Render chạy giờ UTC nhưng người dùng nhập giờ Việt Nam, và cột
     # thoi_diem/han_hoan_thanh lưu giờ địa phương -> phải quy đổi khi so sánh.
     tz_offset_gio: int = 7               # UTC+7
