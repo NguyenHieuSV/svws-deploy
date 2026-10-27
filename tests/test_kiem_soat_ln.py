@@ -71,7 +71,7 @@ def test_cong_duyet_po(monkeypatch):
     assert e.value.status_code == 403 and "📉" in e.value.detail and "chỉ CEO" in e.value.detail
     with pytest.raises(HTTPException) as e:
         ncc.duyet_don_mua(5, False, _Db(), nd=_Nd("CEO"))                         # CEO chưa xác nhận → 409
-    assert e.value.status_code == 409 and "biên lợi nhuận chỉ 10.0%" in e.value.detail
+    assert e.value.status_code == 409 and "biên lợi nhuận chỉ 10,0%" in e.value.detail
     with pytest.raises(RuntimeError, match="qua cong LN"):
         ncc.duyet_don_mua(5, True, _Db(), nd=_Nd("CEO"))                          # CEO xác nhận → qua cổng 📉
     dm.ma_ban, dm.tong_tien = "TM-SIC-1026", 1e6

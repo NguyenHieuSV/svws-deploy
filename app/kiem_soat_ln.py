@@ -31,6 +31,10 @@ def _tr(v) -> str:
     return f"{float(v or 0) / 1e6:,.1f} tr".replace(",", "X").replace(".", ",").replace("X", ".")
 
 
+def _pt(b) -> str:
+    return f"{float(b):.1f}".replace(".", ",")
+
+
 def mien_kiem(ma: str) -> bool:
     """Mã không so với doanh thu: OP- / KHO / mã mẹ theo năm (cho thuê) / không có mã."""
     from .ma_code import phan_tich
@@ -111,7 +115,7 @@ def danh_gia(db: Session, ma: str, them_chi_phi: float = 0.0) -> dict | None:
     return {"muc": "LO" if bien < 0 else "BIEN_THAP", "nhom": nh, "doanh_thu": dt, "chi_phi": cp, "bien": bien,
             "nguong": ng, "tham_chieu": tham_chieu,
             "ly_do": (f"Mã {nh}: chi phí {_tr(cp)} (tính cả đơn này) so với {nguon_dt} → "
-                      + (f"LỖ {_tr(cp - dt)} (biên {bien}%)" if bien < 0 else f"biên lợi nhuận chỉ {bien}% < ngưỡng {ng:g}%")
+                      + (f"LỖ {_tr(cp - dt)} (biên {_pt(bien)}%)" if bien < 0 else f"biên lợi nhuận chỉ {_pt(bien)}% < ngưỡng {ng:g}%")
                       + ".")}
 
 
@@ -176,7 +180,7 @@ def noi_dung_tuan(bc: dict, nhan: str = "") -> str | None:
         l += [f"• {o['nhom']}: chi phí {_tr(o['cp'])}" for o in chua[:10]]
     if thap:
         l.append(f"\n🟡 *Biên lợi nhuận dưới {bc['nguong']:g}%* — {len(thap)} nhóm:")
-        l += [f"• {o['nhom']}: biên {o['bien']}% (doanh thu {_tr(o['dt'])} · chi phí {_tr(o['cp'])})" for o in thap[:10]]
+        l += [f"• {o['nhom']}: biên {_pt(o['bien'])}% (doanh thu {_tr(o['dt'])} · chi phí {_tr(o['cp'])})" for o in thap[:10]]
     l.append("\n👉 App SVWS → Nhà cung cấp → Kiểm soát (Chi phí theo mã) · Kế toán → Lãi/Lỗ mã bán")
     return "\n".join(l)
 
