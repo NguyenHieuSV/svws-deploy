@@ -1181,6 +1181,8 @@ def gui_bao_cao_ngay(data: BaoCaoNgayVao, db: Session = Depends(get_db),
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "Công việc được giao không hợp lệ (không phải việc giao cho bạn)")
         gv_id = g.id
         gv_ = {"giao_viec_email": g.email, "ten_cong_viec": g.ten_cong_viec, "cv_bat_dau": g.bat_dau, "cv_ket_thuc": g.ket_thuc}
+        if g.ma_du_an and not (data.ma_lien_quan or "").strip():
+            data.ma_lien_quan = g.ma_du_an
     elif _bc_co_gv_tho(data):
         if not _la_ceo(nd):
             raise HTTPException(status.HTTP_403_FORBIDDEN,
@@ -1365,17 +1367,42 @@ def bao_cao_nhac_tay(ngay: str | None = None, db: Session = Depends(get_db),
     return kq
 
 
+@router.get("/ma-du-an")
+def ds_ma_du_an(db: Session = Depends(get_db), nd: NguoiDung = Depends(lay_nguoi_dung_hien_tai)):
+    """Droplist «Mã dự án» (Working time & Report): mã ĐƠN HÀNG (DA / DV / TM / …) chưa Hoàn thành
+    + mã DỰ ÁN đã đặt tên mà chưa Hoàn thành. Không có số tiền. Mọi người đã đăng nhập đều xem được."""
+    from ..models import DonHang, DuAn, KhachHang
+    out = {}
+    # chỉ lấy đúng các cột cần (không nạp cả đơn + chi tiết dòng hàng)
+    for so, tt, kh in (db.query(DonHang.so, DonHang.trang_thai, KhachHang.ten)
+                       .outerjoin(KhachHang, KhachHang.id == DonHang.khach_hang_id)
+                       .filter(DonHang.so.isnot(None), DonHang.so != "", DonHang.trang_thai != "HOAN_THANH")
+                       .order_by(DonHang.id.desc()).all()):
+        ma = (so or "").strip().upper()
+        if ma:
+            out.setdefault(ma, {"ma": ma, "ten": kh or "", "nguon": "DON_HANG", "trang_thai": tt})
+    for ma0, ten, tt in (db.query(DuAn.ma, DuAn.ten, DuAn.trang_thai)
+                         .filter(DuAn.ma.isnot(None), DuAn.ma != "", DuAn.trang_thai != "HOAN_THANH")
+                         .order_by(DuAn.id.desc()).all()):
+        ma = (ma0 or "").strip().upper()
+        if ma:
+            out.setdefault(ma, {"ma": ma, "ten": ten or "", "nguon": "DU_AN", "trang_thai": str(tt)})
+    return sorted(out.values(), key=lambda x: x["ma"])
+
+
 # ============ 📌 Giao việc — CHỈ CEO / ADMIN nhập / sửa / xóa (mig 155); nhắn người nhận qua Google Chat ============
 class GiaoViecVao(_NVBase):
     email: str                                  # người nhận việc
     ten_cong_viec: str
     bat_dau: str | None = None
     ket_thuc: str | None = None
+    ma_du_an: str | None = None                 # mig 156: chọn từ /nhan-su/ma-du-an
 
 
 def _gv_ra(g, nv=None) -> dict:
     return {"id": g.id, "nhan_vien_id": g.nhan_vien_id, "email": g.email, "ten_cong_viec": g.ten_cong_viec,
             "bat_dau": str(g.bat_dau) if g.bat_dau else None, "ket_thuc": str(g.ket_thuc) if g.ket_thuc else None,
+            "ma_du_an": g.ma_du_an,
             "ho_ten": nv.ho_ten if nv is not None else None, "ma_nv": nv.ma if nv is not None else None}
 
 
@@ -1439,6 +1466,7 @@ def tao_giao_viec(data: GiaoViecVao, db: Session = Depends(get_db),
     from ..nhac_viec_service import gio_hien_tai
     nv, email, ten, bd, kt = _gv_kiem(db, data)
     g = GiaoViec(nhan_vien_id=nv.id, email=email, ten_cong_viec=ten, bat_dau=bd, ket_thuc=kt,
+                 ma_du_an=(data.ma_du_an or "").strip().upper()[:40] or None,
                  nguoi_giao=nd.id, tao_luc=gio_hien_tai())
     db.add(g); db.flush()
     ghi_audit(db, nd.id, "TAO", "giao_viec", g.id, moi={"nv": nv.id, "ten": ten, "bat_dau": str(bd), "ket_thuc": str(kt)})
@@ -1461,8 +1489,9 @@ def sua_giao_viec(gv_id: int, data: GiaoViecVao, db: Session = Depends(get_db),
     nv, email, ten, bd, kt = _gv_kiem(db, data)
     cu = {"nv": g.nhan_vien_id, "ten": g.ten_cong_viec, "bat_dau": str(g.bat_dau), "ket_thuc": str(g.ket_thuc)}
     doi_nguoi = nv.id != g.nhan_vien_id
-    co_doi = doi_nguoi or (g.ten_cong_viec, g.bat_dau, g.ket_thuc) != (ten, bd, kt)
-    g.nhan_vien_id, g.email, g.ten_cong_viec, g.bat_dau, g.ket_thuc = nv.id, email, ten, bd, kt
+    ma = (data.ma_du_an or "").strip().upper()[:40] or None
+    co_doi = doi_nguoi or (g.ten_cong_viec, g.bat_dau, g.ket_thuc, g.ma_du_an) != (ten, bd, kt, ma)
+    g.nhan_vien_id, g.email, g.ten_cong_viec, g.bat_dau, g.ket_thuc, g.ma_du_an = nv.id, email, ten, bd, kt, ma
     g.cap_nhat_luc = gio_hien_tai()
     for r in db.query(BaoCaoNgay).filter(BaoCaoNgay.giao_viec_id == g.id).all():
         if doi_nguoi and r.nhan_vien_id != nv.id:           # đổi người nhận → báo cáo của người cũ thôi gắn việc này

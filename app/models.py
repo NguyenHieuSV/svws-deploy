@@ -647,6 +647,7 @@ class GiaoViec(Base):
     ten_cong_viec: Mapped[str] = mapped_column(String(250))
     bat_dau: Mapped[date | None] = mapped_column(Date, nullable=True)
     ket_thuc: Mapped[date | None] = mapped_column(Date, nullable=True)
+    ma_du_an: Mapped[str | None] = mapped_column(String(40), nullable=True)   # mig 156
     nguoi_giao: Mapped[int | None] = mapped_column(ForeignKey("nguoi_dung.id", ondelete="SET NULL"), nullable=True)
     tao_luc: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     cap_nhat_luc: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

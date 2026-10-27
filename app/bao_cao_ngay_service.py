@@ -248,7 +248,8 @@ def noi_dung_giao_viec(g, ten_nv: str, nguoi_giao: str, la_sua: bool, rieng: boo
         tieu = ("✏️ Cập nhật việc giao cho " if la_sua else "📌 Giao việc cho ") + f"{ten_nv}: *{g.ten_cong_viec}*"
     bd = dmy(g.bat_dau) if g.bat_dau else "…"
     kt = dmy(g.ket_thuc) if g.ket_thuc else "…"
-    return (f"{tieu}\n• Thời gian: {bd} → {kt}\n• Người giao: {nguoi_giao}\n"
+    ma = f"• Mã dự án: {g.ma_du_an}\n" if getattr(g, "ma_du_an", None) else ""
+    return (f"{tieu}\n• Thời gian: {bd} → {kt}\n{ma}• Người giao: {nguoi_giao}\n"
             "Khi báo cáo ngày, chọn việc này ở ô «Công việc được giao» (app SVWS → Working time & Report → Report).")
 
 

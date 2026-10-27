@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="vi">
 <head>
-<!-- build: ds-phai-bao-cao-2026-10-27 -->
+<!-- build: ma-du-an-droplist-2026-10-27 -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#0f2c44">
@@ -15805,14 +15805,15 @@ async function wtReport(host){
   if(!S.brNgay)S.brNgay=today;
   if(!S.wtRThang)S.wtRThang=today.slice(0,7);
   if(!S.wtRNgay)S.wtRNgay=today;
-  let my={danh_sach:[],nhan_vien_id:null}, ds={danh_sach:[]}, nvs=[], th=null, thieu={ngay:[]}, tyle=null, gvs=[], phai=null;
+  let my={danh_sach:[],nhan_vien_id:null}, ds={danh_sach:[]}, nvs=[], th=null, thieu={ngay:[]}, tyle=null, gvs=[], phai=null, maDs=null;
   try{
     if(S.mode==="live"){
       my=await api("/nhan-su/bao-cao-ngay/cua-toi?thang="+S.wtRThang).catch(e=>({danh_sach:[],nhan_vien_id:null,_loi:e.detail||e.message}));
-      if(!my._loi){[th,thieu,gvs]=await Promise.all([
+      if(!my._loi){[th,thieu,gvs,maDs]=await Promise.all([
         api("/nhan-su/bao-cao-ngay/tong-hop?thang="+S.wtRThang).catch(()=>null),
         api("/nhan-su/bao-cao-ngay/thieu-cua-toi").catch(()=>({ngay:[]})),
-        api("/nhan-su/giao-viec").catch(()=>[])]);}
+        api("/nhan-su/giao-viec").catch(()=>[]),
+        api("/nhan-su/ma-du-an").catch(()=>[])]);}
       if(canXem){[ds,nvs,tyle,phai]=await Promise.all([api("/nhan-su/bao-cao-ngay?ngay="+S.wtRNgay),
         api("/nhan-su/ho-so").catch(()=>api("/nhan-su/danh-ba")),   // không có quyền xem hồ sơ lương → danh bạ tối giản (id · mã · tên · chức danh)
         api("/nhan-su/bao-cao-ngay/ty-le?thang="+S.wtRNgay.slice(0,7)).catch(()=>null),
@@ -15826,6 +15827,7 @@ async function wtReport(host){
     }
   }catch(e){host.innerHTML=`<div class="empty" style="color:#dc2626;padding:24px">${e.detail||e.message}</div>`;return;}
   window.__brMy=my.danh_sach||[];
+  if(maDs)window.__maDs=maDs;
   window.__gvAll=gvs||[]; window.__brGv=(gvs||[]).filter(g=>g.nhan_vien_id===my.nhan_vien_id);   // CEO nhận về mọi việc → lọc việc của chính mình cho form
   const cur=(my.danh_sach||[]).find(r=>r.ngay===S.brNgay)||{};
   // --- Form báo cáo của tôi (mọi nhân viên) ---
@@ -15836,7 +15838,7 @@ async function wtReport(host){
      <div class="formrow" style="align-items:end">
        <div class="f" style="max-width:175px"><label>Ngày báo cáo</label><input type="date" id="br_ngay" value="${_bcEscA(S.brNgay)}" max="${today}" onchange="brPickNgay(this.value)"></div>
        <div class="f" style="max-width:135px"><label>Số giờ làm việc</label><input type="number" id="br_gio" step="0.5" min="0" value="${cur.so_gio!=null?cur.so_gio:8}"></div>
-       <div class="f" style="flex:1"><label>Mã liên quan (dự án / đơn hàng)</label><input id="br_ma" value="${_bcEscA(cur.ma_lien_quan)}" placeholder="VD: CT-RO-01 · DH-2026-014"></div>
+       <div class="f" style="flex:1;min-width:240px"><label>Mã dự án <span style="font-weight:400;color:var(--muted)">(mã đơn hàng DA / DV / TM… chưa hoàn thành — gõ để tìm)</span></label><select id="br_ma" data-ph="— Không gắn mã — gõ để tìm">${_brMaOpts(cur.ma_lien_quan)}</select></div>
      </div>
      <div class="formrow" style="padding-top:0;align-items:end">
        <div class="f" style="flex:1.4;min-width:240px"><label>Công việc được giao <span style="font-weight:400;color:var(--muted)">(CEO / Admin giao — chọn việc bạn đang báo cáo)</span></label>
@@ -15906,7 +15908,7 @@ function _gvPanel(nvs){
   const tt=g=>g.ket_thuc&&g.ket_thuc<hn?['Đã hết hạn','b-tc']:(g.bat_dau&&g.bat_dau>hn?['Chưa bắt đầu','b-cho']:['Đang thực hiện','b-ok']);
   const emails=(nvs||[]).filter(v=>v.trang_thai!=='NGHI_VIEC'&&(v.tai_khoan||v.email)).map(v=>`<option value="${_bcEscA(v.tai_khoan||v.email)}">${_bcEscH(v.ho_ten)}</option>`).join('');
   const rows=ds.map(g=>{const t=tt(g);return `<tr><td><b>${_bcEscH(g.ho_ten||'')}</b><div style="font-size:11px;color:var(--muted)">${_bcEscH(g.email||'')}</div></td>
-    <td>${_bcEscH(g.ten_cong_viec)}</td><td style="white-space:nowrap">${_bcNgayVn(g.bat_dau)}</td><td style="white-space:nowrap">${_bcNgayVn(g.ket_thuc)}</td>
+    <td>${_bcEscH(g.ten_cong_viec)}${g.ma_du_an?`<div style="font-size:11px;color:var(--muted)">${_bcEscH(g.ma_du_an)}</div>`:''}</td><td style="white-space:nowrap">${_bcNgayVn(g.bat_dau)}</td><td style="white-space:nowrap">${_bcNgayVn(g.ket_thuc)}</td>
     <td><span class="badge ${t[1]}">${t[0]}</span></td>
     <td style="white-space:nowrap"><button class="btn-sm ghost" title="Sửa" onclick="gvSua(${g.id})">✏️</button> <button class="btn-sm ghost" style="color:var(--red)" title="Xóa" onclick="gvXoa(${g.id})">✕</button></td></tr>`;}).join('');
   return `<div class="panel"><div class="panel-h"><h3>📌 Giao việc <span style="font-weight:400;font-size:12px;color:var(--muted)">— chỉ CEO / Admin nhập / sửa · người nhận được nhắn qua Google Chat</span></h3></div><div class="panel-b">
@@ -15915,9 +15917,10 @@ function _gvPanel(nvs){
       <div class="f" style="flex:1.8;min-width:220px"><label>Tên công việc *</label><input id="gv_ten" value="${_bcEscA(sua.ten_cong_viec)}" placeholder="VD: Lắp bộ hút gió tươi cho bơm fowking"></div>
       <div class="f" style="max-width:165px"><label>Ngày bắt đầu</label><input type="date" id="gv_bd" value="${_bcEscA(sua.bat_dau)}"></div>
       <div class="f" style="max-width:165px"><label>Ngày kết thúc</label><input type="date" id="gv_kt" value="${_bcEscA(sua.ket_thuc)}"></div>
+      <div class="f" style="flex:1.4;min-width:220px"><label>Mã dự án</label><select id="gv_ma" data-ph="— Không gắn mã — gõ để tìm">${_brMaOpts(sua.ma_du_an)}</select></div>
       <div class="f" style="max-width:220px"><label>&nbsp;</label><div style="display:flex;gap:6px"><button class="btn-sm" onclick="gvLuu()">${sua.id?'💾 Lưu sửa':'➕ Giao việc'}</button>${sua.id?'<button class="btn-sm ghost" onclick="gvHuySua()">Hủy</button>':''}</div></div>
     </div>
-    <table style="margin-top:6px"><thead><tr><th>Người nhận việc</th><th>Tên công việc</th><th>Bắt đầu</th><th>Kết thúc</th><th>Tình trạng</th><th></th></tr></thead>
+    <table style="margin-top:6px"><thead><tr><th>Người nhận việc</th><th>Tên công việc · Mã dự án</th><th>Bắt đầu</th><th>Kết thúc</th><th>Tình trạng</th><th></th></tr></thead>
       <tbody>${rows||'<tr><td colspan="6" class="empty">Chưa giao việc nào.</td></tr>'}</tbody></table>
     <div class="note" style="margin-top:8px;color:var(--muted)">Giao việc xong app nhắn người nhận qua Google Chat (sửa tên việc / ngày / người nhận cũng nhắn lại). Nhân viên thấy việc được giao trong form «Báo cáo công việc của tôi» (trong khoảng ngày bắt đầu → kết thúc) và chọn khi báo cáo; họ không sửa được 4 thông tin này. Sửa việc ở đây thì các báo cáo đã gắn việc cập nhật theo.</div>
   </div></div>`;
@@ -15925,7 +15928,7 @@ function _gvPanel(nvs){
 function gvSua(id){S.gvSua=id;wtReport($('#wtBody')).then(()=>{const e=document.getElementById('gv_ten');if(e){e.scrollIntoView({behavior:'smooth',block:'center'});e.focus();}});}
 function gvHuySua(){S.gvSua=null;wtReport($('#wtBody'));}
 async function gvLuu(){
-  const body={email:gv('gv_email'),ten_cong_viec:gv('gv_ten'),bat_dau:gv('gv_bd')||null,ket_thuc:gv('gv_kt')||null};
+  const body={email:gv('gv_email'),ten_cong_viec:gv('gv_ten'),bat_dau:gv('gv_bd')||null,ket_thuc:gv('gv_kt')||null,ma_du_an:gv('gv_ma')||null};
   if(!body.email)return toast("Nhập email người nhận việc","err");
   if(!body.ten_cong_viec)return toast("Nhập tên công việc","err");
   if(body.bat_dau&&body.ket_thuc&&body.ket_thuc<body.bat_dau)return toast("Ngày kết thúc phải sau hoặc cùng ngày bắt đầu","err");
@@ -15968,6 +15971,7 @@ function _brFill(r){
   set('br_dalam',r.da_lam||''); set('br_ketqua',r.ket_qua||'');
   set('br_khokhan',r.kho_khan||''); set('br_kehoach',r.ke_hoach||'');
   const sel=document.getElementById('br_gv_id'); if(sel){sel.innerHTML=_brGvOpts(S.brNgay,r.giao_viec_id);}
+  const sm=document.getElementById('br_ma'); if(sm)sm.innerHTML=_brMaOpts(r.ma_lien_quan);
   const inf=document.getElementById('br_gv_info'); if(inf)inf.innerHTML=_brGvInfoHtml(r.giao_viec_id,r);
 }
 /* Việc CEO giao cho tôi còn hiệu lực ngày `ngay` (+ việc đang gắn với báo cáo dù đã hết hạn) */
@@ -15980,9 +15984,20 @@ function _brGvInfoHtml(id,r){
   const g=(window.__brGv||[]).find(x=>String(x.id)===String(id||''));
   const o=g?{e:g.email,t:g.ten_cong_viec,bd:g.bat_dau,kt:g.ket_thuc}:(r&&(r.ten_cong_viec||r.giao_viec_email)?{e:r.giao_viec_email,t:r.ten_cong_viec,bd:r.cv_bat_dau,kt:r.cv_ket_thuc}:null);
   if(!o)return '<span style="color:var(--muted)">—</span>';
-  return `<b>${_bcEscH(o.t||'')}</b> · ${_bcEscH(o.e||'')} · ${_bcNgayVn(o.bd)} → ${_bcNgayVn(o.kt)}`;
+  return `<b>${_bcEscH(o.t||'')}</b> · ${_bcEscH(o.e||'')} · ${_bcNgayVn(o.bd)} → ${_bcNgayVn(o.kt)}${g&&g.ma_du_an?' · '+_bcEscH(g.ma_du_an):''}`;
 }
-function _brGvInfo(){const inf=document.getElementById('br_gv_info');if(inf)inf.innerHTML=_brGvInfoHtml(gv('br_gv_id'),null);}
+function _brGvInfo(){const inf=document.getElementById('br_gv_info');if(inf)inf.innerHTML=_brGvInfoHtml(gv('br_gv_id'),null);
+  // chọn việc có mã dự án mà ô Mã dự án đang trống → tự điền mã của việc
+  const g=(window.__brGv||[]).find(x=>String(x.id)===String(gv('br_gv_id')||'')), sm=document.getElementById('br_ma');
+  if(g&&g.ma_du_an&&sm&&!sm.value)sm.innerHTML=_brMaOpts(g.ma_du_an);}
+/* Droplist «Mã dự án»: mã đơn hàng DA / DV / TM… chưa hoàn thành + mã dự án đã đặt tên chưa xong (/nhan-su/ma-du-an).
+   Mã đã lưu mà nay không còn trong danh sách (đơn đã hoàn thành / gõ tay trước đây) vẫn giữ để không mất. */
+function _brMaOpts(chon){
+  const ds=window.__maDs||[], c=String(chon||'').trim();
+  const co=c&&ds.some(x=>x.ma===c.toUpperCase());
+  return '<option value="">— Không gắn mã —</option>'+(c&&!co?`<option value="${_bcEscA(c)}" selected>${_bcEscH(c)} (mã đã lưu)</option>`:'')+
+    ds.map(x=>`<option value="${_bcEscA(x.ma)}" ${co&&x.ma===c.toUpperCase()?'selected':''}>${_bcEscH(x.ma)}${x.ten?' — '+_bcEscH(x.ten):''}</option>`).join('');
+}
 function brPickNgay(v){S.brNgay=v;const r=(window.__brMy||[]).find(x=>x.ngay===v)||{};_brFill(r);}
 function brSua(ngay){S.brNgay=ngay;wtReport($('#wtBody'));try{window.scrollTo({top:0,behavior:'smooth'});}catch(_){}}
 async function brGui(){
@@ -16030,7 +16045,7 @@ function brQlSua(id){
   _ktModal("✏️ Sửa báo cáo ngày "+r.ngay+(r.ho_ten?" — "+_bcEscH(r.ho_ten):""),`
     <div class="formrow" style="padding-top:0">
       <div class="f" style="max-width:140px"><label>Số giờ làm việc</label><input id="bql_gio" type="number" step="0.5" min="0" value="${Number(r.so_gio)||0}"></div>
-      <div class="f" style="flex:1"><label>Mã liên quan</label><input id="bql_ma" value="${_bcEscA(r.ma_lien_quan)}"></div></div>
+      <div class="f" style="flex:1"><label>Mã dự án</label><select id="bql_ma" data-ph="— Không gắn mã — gõ để tìm">${_brMaOpts(r.ma_lien_quan)}</select></div></div>
     <div class="formrow" style="padding-top:0"><div class="f" style="flex:1 1 100%"><label>Công việc đã làm</label>
       <textarea id="bql_dalam" rows="3" style="width:100%">${_bcEscH(r.da_lam)}</textarea></div></div>
     <div class="formrow" style="padding-top:0"><div class="f" style="flex:1 1 100%"><label>Kết quả / tiến độ</label>
