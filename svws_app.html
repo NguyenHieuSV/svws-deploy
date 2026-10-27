@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="vi">
 <head>
-<!-- build: chi-nguoi-nhan-viec-2026-10-26 -->
+<!-- build: ds-phai-bao-cao-2026-10-27 -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#0f2c44">
@@ -15805,7 +15805,7 @@ async function wtReport(host){
   if(!S.brNgay)S.brNgay=today;
   if(!S.wtRThang)S.wtRThang=today.slice(0,7);
   if(!S.wtRNgay)S.wtRNgay=today;
-  let my={danh_sach:[],nhan_vien_id:null}, ds={danh_sach:[]}, nvs=[], th=null, thieu={ngay:[]}, tyle=null, gvs=[];
+  let my={danh_sach:[],nhan_vien_id:null}, ds={danh_sach:[]}, nvs=[], th=null, thieu={ngay:[]}, tyle=null, gvs=[], phai=null;
   try{
     if(S.mode==="live"){
       my=await api("/nhan-su/bao-cao-ngay/cua-toi?thang="+S.wtRThang).catch(e=>({danh_sach:[],nhan_vien_id:null,_loi:e.detail||e.message}));
@@ -15813,9 +15813,10 @@ async function wtReport(host){
         api("/nhan-su/bao-cao-ngay/tong-hop?thang="+S.wtRThang).catch(()=>null),
         api("/nhan-su/bao-cao-ngay/thieu-cua-toi").catch(()=>({ngay:[]})),
         api("/nhan-su/giao-viec").catch(()=>[])]);}
-      if(canXem){[ds,nvs,tyle]=await Promise.all([api("/nhan-su/bao-cao-ngay?ngay="+S.wtRNgay),
+      if(canXem){[ds,nvs,tyle,phai]=await Promise.all([api("/nhan-su/bao-cao-ngay?ngay="+S.wtRNgay),
         api("/nhan-su/ho-so").catch(()=>api("/nhan-su/danh-ba")),   // không có quyền xem hồ sơ lương → danh bạ tối giản (id · mã · tên · chức danh)
-        api("/nhan-su/bao-cao-ngay/ty-le?thang="+S.wtRNgay.slice(0,7)).catch(()=>null)]);}
+        api("/nhan-su/bao-cao-ngay/ty-le?thang="+S.wtRNgay.slice(0,7)).catch(()=>null),
+        api("/nhan-su/bao-cao-ngay/phai-bao-cao?ngay="+S.wtRNgay).catch(()=>null)]);}
     } else {
       if(!DEMO.ns_hoso)DEMO.ns_hoso=_nsDemoHoSo(); nvs=DEMO.ns_hoso;
       if(!DEMO.bc)DEMO.bc=_bcDemo();
@@ -15873,12 +15874,15 @@ async function wtReport(host){
   if(canXem){
     window.__brDs=ds.danh_sach||[];
     const byNv={}; (ds.danh_sach||[]).forEach(r=>byNv[r.nhan_vien_id]=r);
-    const daBc=(ds.danh_sach||[]).length, tong=nvs.length;
+    // Chỉ liệt kê người PHẢI báo cáo ngày đó (người nhận việc) + người đã tự gửi báo cáo; người khác không hiện
+    const phaiSet=new Set(((phai&&phai.phai)||[]).map(String));
+    const nvsHien=phai?nvs.filter(v=>byNv[v.id]||phaiSet.has(String(v.id))):nvs;
+    const daBc=phai?(phai.da_bao_cao||0):(ds.danh_sach||[]).length, tong=phai?phaiSet.size:nvs.length;
     const _tl=v=>{const t=tyle&&tyle.nhan_vien&&tyle.nhan_vien[String(v.id)];if(!t)return '<span style="color:var(--muted)" title="Chưa có tài khoản đăng nhập gắn hồ sơ — không tính">—</span>';
       if(!t.can&&!t.xong)return '<span style="color:var(--muted)" title="Tháng này chưa có ngày nào phải báo cáo (không có việc được giao)">—</span>';
       const m=t.ty_le==null?'var(--muted)':t.ty_le>=90?'#16a34a':t.ty_le>=70?'#d97706':'#dc2626';
       return `<b style="color:${m}">${t.ty_le==null?'—':t.ty_le+'%'}</b> <span style="font-size:11px;color:var(--muted)">${t.xong}/${t.can}${t.thieu?` · thiếu ${t.thieu}`:''}</span>`;};
-    const rows=nvs.map(v=>{const r=byNv[v.id];
+    const rows=nvsHien.map(v=>{const r=byNv[v.id];
       if(r){return `<tr><td><b>${v.ma||''}</b></td><td>${v.ho_ten}</td><td style="font-size:12px">${v.chuc_danh||''}</td>
         <td><span class="badge b-ok">✓ Đã báo cáo</span></td><td class="num">${_num(r.so_gio,1)}h</td>
         <td style="font-size:12px;max-width:360px">${_bcEscH((r.da_lam||'').slice(0,150))}${(r.da_lam||'').length>150?'…':''}</td>
@@ -15887,12 +15891,12 @@ async function wtReport(host){
       return `<tr style="background:#fff7ed"><td><b>${v.ma||''}</b></td><td>${v.ho_ten}</td><td style="font-size:12px">${v.chuc_danh||''}</td>
         <td><span class="badge b-cho">⚠ Chưa báo cáo</span></td><td class="num">—</td><td class="empty" style="font-size:12px">—</td><td>—</td><td style="white-space:nowrap">${_tl(v)}</td><td>—</td></tr>`;}).join('');
     mgr=`<div class="panel"><div class="panel-h"><h3>👥 Danh mục nhân sự — báo cáo theo ngày</h3><div class="spacer"></div>
-       <span style="font-size:12px;color:var(--muted);margin-right:10px">Đã báo cáo: <b style="color:#16a34a">${daBc}</b>/${tong}${tyle&&tyle.ty_le!=null?` · tỉ lệ tháng <b>${tyle.ty_le}%</b>`:''}</span>
+       <span style="font-size:12px;color:var(--muted);margin-right:10px">${phai?'Người phải báo cáo đã gửi':'Đã báo cáo'}: <b style="color:#16a34a">${daBc}</b>/${tong}${tyle&&tyle.ty_le!=null?` · tỉ lệ tháng <b>${tyle.ty_le}%</b>`:''}</span>
        ${laQTV()?`<button class="btn-sm ghost" title="Xem ai thiếu báo cáo một ngày và gửi tin nhắc ngay (app cũng tự nhắc mỗi sáng)" onclick="brNhacForm()">📣 Nhắc chưa báo cáo</button>`:''}
        <input type="date" id="wt_r_ngay" value="${S.wtRNgay}" max="${today}" onchange="S.wtRNgay=this.value;wtReport($('#wtBody'))" style="max-width:170px"></div>
       <div class="panel-b"><table><thead><tr><th>Mã</th><th>Nhân viên</th><th>Chức danh</th><th>Trạng thái</th><th class="num">Giờ</th><th>Công việc đã làm</th><th>Mã liên quan</th><th title="Tỉ lệ hoàn thành báo cáo trong tháng của ngày đang chọn">Tỉ lệ tháng</th><th></th></tr></thead>
-       <tbody>${rows||'<tr><td colspan="9" class="empty">Chưa có nhân viên trong hồ sơ.</td></tr>'}</tbody></table>
-       <div class="note" style="margin-top:8px;color:var(--muted)">Dòng nền cam = nhân viên <b>chưa gửi báo cáo</b> cho ngày đã chọn. Bấm “Xem” để đọc toàn văn báo cáo của từng người.</div></div></div>`;
+       <tbody>${rows||`<tr><td colspan="9" class="empty">${phai?'Ngày này không ai phải báo cáo (chưa có việc được giao còn hiệu lực) và chưa ai gửi báo cáo.':'Chưa có nhân viên trong hồ sơ.'}</td></tr>`}</tbody></table>
+       <div class="note" style="margin-top:8px;color:var(--muted)">Chỉ hiện người <b>phải báo cáo</b> ngày đã chọn (người nhận việc còn hiệu lực, không nghỉ, không phải Chủ nhật / lễ trừ khi tăng ca) và người đã tự gửi báo cáo. Dòng nền cam = <b>chưa gửi báo cáo</b>. Bấm “Xem” để đọc toàn văn báo cáo.</div></div></div>`;
   }
   host.innerHTML=formMe+tongHop+myTable+(laQTV()&&S.mode==='live'?_gvPanel(nvs):'')+mgr;
 }

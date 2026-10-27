@@ -132,9 +132,9 @@ def nv_du_dieu_kien(db: Session):
             .order_by(NhanVien.ho_ten).all())
 
 
-def ds_thieu_bao_cao(db: Session, ngay: date) -> list:
-    """Người phải báo cáo ngày `ngay` mà chưa có báo cáo → [{nhan_vien_id, ten, email, co_viec}].
-    co_viec = có việc được giao còn hiệu lực ngày đó (CHỈ những người này mới bị nhắc tên)."""
+def ds_phai_bao_cao(db: Session, ngay: date) -> list:
+    """Người PHẢI báo cáo ngày `ngay` (người nhận việc còn hiệu lực, ngày làm việc, không nghỉ, từ ngày áp dụng)
+    → [{nhan_vien_id, ten, email, co_viec, da_bao_cao}]."""
     ad = ngay_ap_dung()
     if ad and ngay < ad:
         return []
@@ -142,15 +142,19 @@ def ds_thieu_bao_cao(db: Session, ngay: date) -> list:
     bc, ot, nghi, viec = nap_du_lieu(db, [nv.id for nv, _ in cap], ngay, ngay)
     out = []
     for nv, u in cap:
-        if (nv.id, ngay) in bc:
-            continue
         if nv.ngay_vao_lam and nv.ngay_vao_lam > ngay:
             continue
         if nv.ngay_nghi_viec and nv.ngay_nghi_viec < ngay:
             continue
         if phai_bao_cao(ngay, (nv.id, ngay) in ot, nghi.get((nv.id, ngay)))[0] and co_viec(viec, nv.id, ngay):
-            out.append({"nhan_vien_id": nv.id, "ten": nv.ho_ten, "email": u.email, "co_viec": True})
+            out.append({"nhan_vien_id": nv.id, "ten": nv.ho_ten, "email": u.email, "co_viec": True,
+                        "da_bao_cao": (nv.id, ngay) in bc})
     return out
+
+
+def ds_thieu_bao_cao(db: Session, ngay: date) -> list:
+    """Người phải báo cáo ngày `ngay` mà CHƯA có báo cáo → [{nhan_vien_id, ten, email, co_viec}]."""
+    return [{k: v for k, v in x.items() if k != "da_bao_cao"} for x in ds_phai_bao_cao(db, ngay) if not x["da_bao_cao"]]
 
 
 def thieu_gan_day(db: Session, nv_id: int, hom_nay: date, so_ngay: int = 14) -> list:

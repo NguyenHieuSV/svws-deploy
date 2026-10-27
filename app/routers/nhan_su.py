@@ -1314,6 +1314,21 @@ def bao_cao_ty_le(thang: str | None = None, db: Session = Depends(get_db),
             "ty_le": round(100.0 * tong_xong / tong_can, 1) if tong_can else None}
 
 
+@router.get("/bao-cao-ngay/phai-bao-cao")
+def bao_cao_phai_ngay(ngay: str | None = None, db: Session = Depends(get_db),
+                      _=Depends(yeu_cau(MODULE_WT, "XEM"))):
+    """Ai PHẢI báo cáo ngày `ngay` (mặc định hôm nay) — cho bảng «Danh mục nhân sự — báo cáo theo ngày»."""
+    from .. import bao_cao_ngay_service as bs
+    from ..nhac_viec_service import ngay_hien_tai
+    try:
+        ng = date.fromisoformat(ngay) if ngay else ngay_hien_tai()
+    except ValueError:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Ngày không hợp lệ (YYYY-MM-DD)")
+    ds = bs.ds_phai_bao_cao(db, ng)
+    return {"ngay": str(ng), "phai": [x["nhan_vien_id"] for x in ds],
+            "da_bao_cao": sum(1 for x in ds if x["da_bao_cao"])}
+
+
 @router.get("/bao-cao-ngay/nhac-xem")
 def bao_cao_nhac_xem(ngay: str | None = None, db: Session = Depends(get_db),
                      nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):

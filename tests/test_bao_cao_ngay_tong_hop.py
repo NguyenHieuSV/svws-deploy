@@ -274,3 +274,14 @@ def test_khong_co_viec_duoc_giao_thi_khong_phai_bao_cao(db):
     bc, ot, nghi, viec = bs.nap_du_lieu(db, [2], date(2026, 10, 19), date(2026, 10, 31))
     th2 = bs.tong_hop_nv(db.get(m.NhanVien, 2), bc, ot, nghi, viec, date(2026, 10, 19), date(2026, 10, 31), date(2026, 10, 26))
     assert (th2["can"], th2["thieu"], th2["ty_le"]) == (0, 0, None)    # Bình chưa được giao việc
+
+
+def test_ds_phai_bao_cao_cho_bang_quan_ly(db):
+    # 27/10 (T3): chưa giao việc → không ai phải báo cáo; giao An → chỉ An; An gửi → da_bao_cao
+    assert bs.ds_phai_bao_cao(db, date(2026, 10, 27)) == []
+    _giao(db, 1, date(2026, 10, 27), date(2026, 10, 30))
+    r = ns.bao_cao_phai_ngay("2026-10-27", db, None)
+    assert r["phai"] == [1] and r["da_bao_cao"] == 0
+    _bc(db, 1, date(2026, 10, 27))
+    assert ns.bao_cao_phai_ngay("2026-10-27", db, None)["da_bao_cao"] == 1
+    assert bs.ds_thieu_bao_cao(db, date(2026, 10, 27)) == []
