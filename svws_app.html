@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="vi">
 <head>
-<!-- build: bc-attached-file-2026-10-27 -->
+<!-- build: khoa-dong-da-mua-2026-10-27 -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#0f2c44">
@@ -545,6 +545,21 @@ async function apiUpload(path,formData){
   const txt=await r.text(); let data; try{data=JSON.parse(txt)}catch{data=txt}
   if(!r.ok){const m=_fmtLoi(data&&data.detail,r.status);const e=new Error(m);e.status=r.status;e.detail=m;throw e;}
   return data;
+}
+/* 🔒 Dòng dự toán / BOQ đã mua: máy chủ trả 409 cho CEO / Admin → hỏi xác nhận rồi gửi lại (có ghi audit).
+   st (tùy chọn) dùng chung cho thao tác hàng loạt: đồng ý / từ chối một lần là đủ. */
+async function apiKhoa(path,opts,st){
+  try{return await api(path,opts);}
+  catch(e){
+    if(e.status!==409||!/🔒/.test(e.detail||''))throw e;
+    if(st&&st.tuChoi){const h=new Error("Đã hủy — dòng đã mua giữ nguyên");h.detail=h.message;h.huy=true;throw h;}
+    if(!(st&&st.dongY)){
+      if(!confirm((e.detail||'')+"\n\nBạn là CEO / Admin — vẫn sửa / xóa dòng đã mua?")){
+        if(st)st.tuChoi=true; const h=new Error("Đã hủy — dòng đã mua giữ nguyên");h.detail=h.message;h.huy=true;throw h;}
+      if(st)st.dongY=true;
+    }
+    return api(path+(path.includes('?')?'&':'?')+'xac_nhan_khoa=1',opts);
+  }
 }
 function can(mod,lvl){return RANK[S.perm[pmod(mod)]||"KHONG"]>=RANK[lvl];}
 function pmod(m){return (MODULES[m]&&MODULES[m].permKey)||m;}
@@ -9672,8 +9687,8 @@ function _dtbMuaCuHTML(x,suaDuoc,kieu){
 }
 /* một chỗ ghi liên kết + giá cho cả 2 loại bảng */
 async function _mucGhiGia(kieu,mucId,body){
-  if(kieu==='boq'){await api(`/du-an/du-toan/${mucId}`,{method:'PUT',body:JSON.stringify(body)}); daDmRenderGiu();}
-  else{const r=await api(`/ncc/du-toan-ban/muc/${mucId}`,{method:'PUT',body:JSON.stringify(body)}); dtbRender(); return r;}
+  if(kieu==='boq'){await apiKhoa(`/du-an/du-toan/${mucId}`,{method:'PUT',body:JSON.stringify(body)}); daDmRenderGiu();}
+  else{const r=await apiKhoa(`/ncc/du-toan-ban/muc/${mucId}`,{method:'PUT',body:JSON.stringify(body)}); dtbRender(); return r;}
 }
 async function dtbApGiaCu(mucId,i,kieu){
   kieu=kieu||'dtb';
@@ -9805,7 +9820,8 @@ async function dtbRender(){
     const its=det.items||[]; let tong=0;
     const _poTT={CHO_DUYET:'Chờ duyệt',DA_DUYET:'Đã duyệt',NHAP:'Nháp'};
     const mucRows=its.map((x,i)=>{const tt=Number(x.so_luong||0)*Number(x.don_gia||0);tong+=tt;
-      const khoa=!!x.po_id;   // dòng đã lập PO (PO chưa bị từ chối) → khóa sửa/xóa, không chọn lại
+      const khoa=!!(x.khoa_po||x.po_id);   // 🔒 dòng ĐÃ MUA (tạo PO từ dòng hoặc PO lập tay cùng mã) → không chọn lại
+      const suaKhoa=canOp&&(!khoa||laQTV());   // dòng đã mua: chỉ CEO / Admin sửa (máy chủ hỏi xác nhận + ghi audit)
       const khoTag=x.hang_hoa_id?' <span class="badge b-ok" style="font-size:10px" title="Đã khớp hàng hóa có sẵn trong kho">📦 kho</span>':' <span class="badge b-cho" style="font-size:10px" title="Chưa có trong kho — khi tạo PO hệ thống tự thêm vào danh mục kho">🆕 mới</span>';
       const _ctSp=[`<b>Tên:</b> ${esc(x.ten)}`,x.ncc_ten?`<b>Nhà cung cấp:</b> ${esc(x.ncc_ten)}`:'',x.ma_sp?`<b>Mã SP:</b> ${esc(x.ma_sp)}`:'',x.nha_san_xuat?`<b>Nhà sản xuất:</b> ${esc(x.nha_san_xuat)}`:'',x.quy_cach?`<b>Mô tả:</b> ${esc(x.quy_cach)}`:'',x.spec?`<b>Spec:</b> ${esc(x.spec)}`:''].filter(Boolean);
       const _sub1=[x.ncc_ten,x.ma_sp,x.nha_san_xuat].filter(Boolean).map(esc).join(' · '), _sub2=esc(x.quy_cach||x.spec||'');
@@ -9815,12 +9831,12 @@ async function dtbRender(){
       return `<tr>${canOp?`<td style="text-align:center;width:24px">${khoa?'':`<input type="checkbox" class="dtb-cbx" value="${x.id}" data-tien="${tt}" onchange="dtbCbxDem()" style="width:auto">`}</td>`:''}<td style="width:24px">${i+1}</td>
       <td style="max-width:0;width:32%;white-space:normal;line-height:1.3"><div class="dtbTen" title="${esc(x.ten).replace(/"/g,'&quot;')}"><b>${esc(x.ten)}</b></div>${_spSub}</td>
       <td style="white-space:nowrap">${esc(x.don_vi)||'—'}</td>
-      <td class="num">${(canOp&&!khoa)?`<input type="number" step="any" id="dtb_sl_${x.id}" value="${x.so_luong??''}" style="width:62px;padding:3px 5px">`:Number(x.so_luong||0)}</td>
-      <td class="num">${(canOp&&!khoa)?`<input type="number" id="dtb_dg_${x.id}" value="${x.don_gia??''}" style="width:104px;padding:3px 5px">`:vnd(x.don_gia)}</td>
-      ${_dtbGiaCotGon(x,'dtb_dg_'+x.id,_dtbMuaCuGon(x,canOp&&!khoa))}
+      <td class="num">${suaKhoa?`<input type="number" step="any" id="dtb_sl_${x.id}" value="${x.so_luong??''}" style="width:62px;padding:3px 5px">`:Number(x.so_luong||0)}</td>
+      <td class="num">${suaKhoa?`<input type="number" id="dtb_dg_${x.id}" value="${x.don_gia??''}" style="width:104px;padding:3px 5px">`:vnd(x.don_gia)}</td>
+      ${_dtbGiaCotGon(x,'dtb_dg_'+x.id,_dtbMuaCuGon(x,suaKhoa))}
       <td class="num" style="white-space:nowrap"><b>${vnd(tt)}</b></td>
       <td style="max-width:0;width:9%">${x.tep?hvPop(`<a href="#" class="dtbSub" style="display:block;color:#0e7490;text-decoration:none;border-bottom:1px dashed currentColor" onclick="dtbTepMo(${x.id});return false">📎 ${esc(x.tep.ten_file)}</a>`,`<b>${x.tep.loai==='BAO_GIA'?'📎 File báo giá của nhà cung cấp':'📎 File nguồn của dòng (báo giá / BOQ đã nạp vào dự toán)'}</b><br>${esc(x.tep.ten_file)}<div style="color:var(--muted);margin-top:3px">Bấm vào tên file để tải về.</div>${x.ghi_chu?`<div style="margin-top:6px"><b>Ghi chú</b><br>${esc(x.ghi_chu)}</div>`:''}`,'style="display:block"'):(x.ghi_chu?hvPop(`<span class="dtbSub hvTrig" style="display:block">${esc(x.ghi_chu)}</span>`,`<b>Ghi chú</b><br>${esc(x.ghi_chu)}`,'style="display:block"'):'')}</td>
-      <td style="white-space:nowrap">${khoa?`<span class="badge b-info" style="white-space:normal;display:inline-block;line-height:1.25" title="Dòng đã lập PO — muốn sửa thì từ chối/xóa PO đó (Nhà cung cấp → Đơn mua) để mở lại dòng">🧾 ${esc(x.po_so||('PO #'+x.po_id))}<br>${_poTT[x.po_trang_thai]||x.po_trang_thai||''}</span>`:(canOp?`<button class="btn-sm ghost" title="Sửa đầy đủ dòng theo form Sản phẩm NCC (gõ cột nào cũng tìm được sản phẩm)" onclick="dtbSuaMucForm(${x.id})">✏️</button> <button class="btn-sm ghost" title="Lưu SL / đơn giá của dòng" onclick="dtbLuuMuc(${x.id})">💾</button> <button class="btn-sm ghost" title="🔎 Tìm giá theo tên (không cần nhớ mã): chọn mặt hàng kho đã mua → liên kết + điền giá" onclick="dtbTimGia(${x.id},'${esc(String(x.ten||'').split(' ').slice(0,2).join(' ')).replace(/'/g,'')}')">🔎</button> <button class="btn-sm ghost" style="color:var(--red)" title="Xóa dòng" onclick="dtbXoaMuc(${x.id})">✕</button>`:'')}</td></tr>`;}).join('');
+      <td style="white-space:nowrap">${khoa?`<span class="badge b-info" style="white-space:normal;display:inline-block;line-height:1.25" title="🔒 Dòng đã mua — chỉ CEO / Admin sửa hoặc xóa được (có hỏi xác nhận và ghi lại ai sửa). Người khác muốn sửa thì nhờ CEO / Admin, hoặc từ chối / xóa PO đó để mở lại dòng.">🔒 ${esc(x.khoa_po||x.po_so||('PO #'+x.po_id))}<br>${x.khoa_kieu==='PO_TAY'?'PO lập tay cùng mã':(_poTT[x.po_trang_thai||x.khoa_tt]||x.po_trang_thai||'')}</span>`:''}${suaKhoa?`<button class="btn-sm ghost" title="Sửa đầy đủ dòng theo form Sản phẩm NCC (gõ cột nào cũng tìm được sản phẩm)" onclick="dtbSuaMucForm(${x.id})">✏️</button> <button class="btn-sm ghost" title="Lưu SL / đơn giá của dòng" onclick="dtbLuuMuc(${x.id})">💾</button> <button class="btn-sm ghost" title="🔎 Tìm giá theo tên (không cần nhớ mã): chọn mặt hàng kho đã mua → liên kết + điền giá" onclick="dtbTimGia(${x.id},'${esc(String(x.ten||'').split(' ').slice(0,2).join(' ')).replace(/'/g,'')}')">🔎</button> <button class="btn-sm ghost" style="color:var(--red)" title="Xóa dòng" onclick="dtbXoaMuc(${x.id})">✕</button>`:''}</td></tr>`;}).join('');
     chiTiet=`<div style="padding-top:4px">
       <div style="display:flex;flex-wrap:wrap;gap:6px 22px;font-size:13px;margin-bottom:6px">
         <div>Mã: <b>${esc(det.ma)}</b></div><div>Khách hàng: <b>${esc(det.khach_hang)||'—'}</b></div>
@@ -10196,7 +10212,7 @@ function dtbSuaMucForm(id){
 async function dtbSuaMucLuu(id){
   const body=_dtbFormBody('dtbe_'); if(!body.ten)return toast("Nhập tên sản phẩm","err");
   if(S.mode!=="live")return toast("Chạy ở bản kết nối backend","err");
-  try{const r=await api(`/ncc/du-toan-ban/muc/${id}`,{method:'PUT',body:JSON.stringify(body)});const md=document.getElementById('ktModal');if(md)md.remove();await _dtbSauLuu(r,id,"Đã cập nhật dòng");dtbRender();}
+  try{const r=await apiKhoa(`/ncc/du-toan-ban/muc/${id}`,{method:'PUT',body:JSON.stringify(body)});const md=document.getElementById('ktModal');if(md)md.remove();await _dtbSauLuu(r,id,"Đã cập nhật dòng");dtbRender();}
   catch(e){toast(e.detail||e.message,"err");}
 }
 async function dtbLuuMuc(id){
@@ -10204,7 +10220,7 @@ async function dtbLuuMuc(id){
   const _ig=document.getElementById('dtb_dg_'+id);     // vừa bấm số giá gợi ý và chưa sửa lại → gửi kèm NCC của nguồn giá
   if(_ig&&_ig.dataset.gyNcc&&Number(_ig.dataset.gyGia)===body.don_gia)body.ncc_goi_y_id=Number(_ig.dataset.gyNcc);
   if(S.mode!=="live"){const dt=_dtbDemo().list.find(x=>x.id===S._dtbOpen);const it=dt&&dt.items.find(z=>z.id===id);if(it)Object.assign(it,body);toast("Đã lưu (demo)","ok");dtbRender();return;}
-  try{const r=await api(`/ncc/du-toan-ban/muc/${id}`,{method:'PUT',body:JSON.stringify(body)});await _dtbSauLuu(r,id,"Đã cập nhật"+(r&&r.ncc_dien?' · điền NCC: '+r.ncc_dien:''));dtbRender();}
+  try{const r=await apiKhoa(`/ncc/du-toan-ban/muc/${id}`,{method:'PUT',body:JSON.stringify(body)});await _dtbSauLuu(r,id,"Đã cập nhật"+(r&&r.ncc_dien?' · điền NCC: '+r.ncc_dien:''));dtbRender();}
   catch(e){toast(e.detail||e.message,"err");}
 }
 /* ---- 🔁 Dự toán → danh mục Sản phẩm NCC: báo kết quả ghi ngược sau khi lưu dòng + hỏi trước khi đổi giá danh mục ---- */
@@ -10279,7 +10295,7 @@ async function dtbDmLuu(){
 async function dtbXoaMuc(id){
   if(!confirm("Xóa sản phẩm này khỏi dự toán?"))return;
   if(S.mode!=="live"){const dt=_dtbDemo().list.find(x=>x.id===S._dtbOpen);if(dt)dt.items=dt.items.filter(z=>z.id!==id);toast("Đã xóa (demo)","ok");dtbRender();return;}
-  try{await api(`/ncc/du-toan-ban/muc/${id}`,{method:'DELETE'});toast("Đã xóa","ok");dtbRender();}
+  try{await apiKhoa(`/ncc/du-toan-ban/muc/${id}`,{method:'DELETE'});toast("Đã xóa","ok");dtbRender();}
   catch(e){toast(e.detail||e.message,"err");}
 }
 /* --- 🧾 Chi tiết đề xuất: bấm tên hàng hóa ở Hàng đợi để xem đủ danh mục sản phẩm --- */
@@ -18804,12 +18820,12 @@ async function daDanhMuc(h){
     if(!nhom.length)continue;
     body+=`<tr style="background:var(--panel2,#f4f6f8)"><td colspan="${laQTV()?12:11}" style="font-weight:600">${nhan} — ${vnd(dt.tong_theo_loai&&dt.tong_theo_loai[loai]||0)}</td></tr>`;
     body+=nhom.map(x=>{stt++;return `<tr>${laQTV()?`<td style="text-align:center"><input type="checkbox" class="dmChk" value="${x.id}" onchange="daDmChkCap()" style="width:auto"></td>`:''}<td>${stt}</td><td><b>${x.ten}</b>${x.hang_hoa_id?' <span class="badge b-ok" style="font-size:10px" title="Đã liên kết mặt hàng kho — nhận giá đầu vào, nối được tới PO">📦 kho</span>':' <span class="badge b-cho" style="font-size:10px" title="Chưa liên kết kho — bấm 🔗 Khớp tên với kho">🆕</span>'}</td><td style="font-size:12px;color:var(--muted)">${x.quy_cach||'—'}</td><td>${x.don_vi||'—'}</td>
-      <td class="num">${canOp?`<input type="number" step="any" id="dm_sl_${x.id}" value="${x.so_luong??''}" style="width:76px;padding:3px 5px">`:_num(x.so_luong,2)}</td>
-      <td class="num">${canOp?`<input type="number" id="dm_dg_${x.id}" value="${x.don_gia??''}" style="width:110px;padding:3px 5px">`:vnd(x.don_gia)}</td>
-      ${_giaCotHTML(x,'dm_dg_'+x.id,(x.loai==='THIET_BI'||x.loai==='VAT_TU')?_dtbMuaCuHTML(x,canOp&&!x.don_mua_id,'boq'):'')}
+      <td class="num">${_boqSua(x,canOp)?`<input type="number" step="any" id="dm_sl_${x.id}" value="${x.so_luong??''}" style="width:76px;padding:3px 5px">`:_num(x.so_luong,2)}</td>
+      <td class="num">${_boqSua(x,canOp)?`<input type="number" id="dm_dg_${x.id}" value="${x.don_gia??''}" style="width:110px;padding:3px 5px">`:vnd(x.don_gia)}</td>
+      ${_giaCotHTML(x,'dm_dg_'+x.id,(x.loai==='THIET_BI'||x.loai==='VAT_TU')?_dtbMuaCuHTML(x,canOp&&!x.don_mua_id&&!x.khoa_po,'boq'):'')}
       <td class="num"><b>${vnd(x.thanh_tien||0)}</b></td>
-      <td style="font-size:12px">${x.ghi_chu||''}</td>
-      <td style="white-space:nowrap">${canOp?`<button class="btn-sm ghost" onclick="daDmSua(${x.id})">Lưu</button> <button class="btn-sm ghost" title="🔎 Tìm giá theo tên (không cần nhớ mã): chọn mặt hàng kho đã mua → liên kết + điền giá" onclick="dtbTimGia(${x.id},'${String(x.ten||'').split(' ').slice(0,2).join(' ').replace(/['"<>&]/g,'')}','boq')">🔎</button>`:''}${canDx?` <button class="btn-sm ghost" title="Lập PO chờ duyệt thẳng từ dòng này — mã PO = mã dự án (bước đề xuất mua đã bỏ)" ${x.don_mua_id?'disabled':''} onclick="daDmTaoPo(${x.id},'${String(x.ten||'').replace(/'/g,'')}')">🛒 ${x.don_mua_id?'Đã có PO':'Tạo PO'}</button>`:''}${laQTV()?` <button class="btn-sm ghost" style="color:var(--red)" onclick="daDmXoa(${x.id},'${String(x.ten||'').replace(/'/g,'')}')">✕</button>`:''}</td></tr>`;}).join('');
+      <td style="font-size:12px">${x.ghi_chu||''}${x.khoa_po?`<div><span class="badge b-info" style="font-size:10.5px" title="🔒 Dòng đã mua — chỉ CEO / Admin sửa hoặc xóa được (có hỏi xác nhận và ghi lại ai sửa)">🔒 ${x.khoa_po}${x.khoa_kieu==='PO_TAY'?' · PO lập tay':''}</span></div>`:''}</td>
+      <td style="white-space:nowrap">${_boqSua(x,canOp)?`<button class="btn-sm ghost" onclick="daDmSua(${x.id})">Lưu</button> <button class="btn-sm ghost" title="🔎 Tìm giá theo tên (không cần nhớ mã): chọn mặt hàng kho đã mua → liên kết + điền giá" onclick="dtbTimGia(${x.id},'${String(x.ten||'').split(' ').slice(0,2).join(' ').replace(/['"<>&]/g,'')}','boq')">🔎</button>`:''}${canDx?` <button class="btn-sm ghost" title="Lập PO chờ duyệt thẳng từ dòng này — mã PO = mã dự án (bước đề xuất mua đã bỏ)" ${x.don_mua_id?'disabled':''} onclick="daDmTaoPo(${x.id},'${String(x.ten||'').replace(/'/g,'')}')">🛒 ${x.don_mua_id?'Đã có PO':'Tạo PO'}</button>`:''}${laQTV()?` <button class="btn-sm ghost" style="color:var(--red)" onclick="daDmXoa(${x.id},'${String(x.ten||'').replace(/'/g,'')}')">✕</button>`:''}</td></tr>`;}).join('');
   }
   html+=`<table style="margin-top:10px"><thead><tr>${laQTV()?'<th style="width:26px"><input type="checkbox" title="Chọn tất cả" onchange="daDmChkAll(this)" style="width:auto"></th>':''}<th>#</th><th>Tên</th><th>Quy cách</th><th>ĐVT</th><th class="num">SL</th><th class="num">Đơn giá</th><th class="num" title="PO đã duyệt gần nhất của mặt hàng (mọi mã) hoặc báo giá còn hiệu lực — bấm số để điền">💲 Giá gợi ý</th><th class="num" title="Giá trên PO đã lập dưới mã dự án này">🛒 Giá mua thật</th><th class="num">Thành tiền</th><th>Ghi chú</th><th></th></tr></thead>
     <tbody>${body||('<tr><td colspan="'+(laQTV()?12:11)+'" class="empty">Chưa có hạng mục nào. Nhập thiết bị, vật tư, nhân sự... ở form trên để lập dự toán.</td></tr>')}</tbody>
@@ -18829,10 +18845,12 @@ async function daDmThem(){
   const ds=_dmDemoDs(); ds.push(Object.assign({id:Date.now()},body));
   toast("Đã thêm (demo)","ok"); daRenderTab();
 }
+/* 🔒 BOQ: dòng đã mua (tạo PO từ dòng hoặc PO lập tay cùng mã dự án) — chỉ CEO / Admin sửa */
+function _boqSua(x,canOp){return canOp&&(!x.khoa_po||laQTV());}
 async function daDmSua(id){
   const sl=Number(gv('dm_sl_'+id)||0), dg=Number(gv('dm_dg_'+id)||0);
   if(S.mode==="live"){
-    try{await api(`/du-an/du-toan/${id}`,{method:'PUT',body:JSON.stringify({so_luong:sl,don_gia:dg})});toast("Đã cập nhật","ok");daDmRenderGiu();}
+    try{await apiKhoa(`/du-an/du-toan/${id}`,{method:'PUT',body:JSON.stringify({so_luong:sl,don_gia:dg})});toast("Đã cập nhật","ok");daDmRenderGiu();}
     catch(e){toast(e.detail||e.message,"err");} return;
   }
   const x=_dmDemoDs().find(z=>z.id===id); if(x){x.so_luong=sl;x.don_gia=dg;}
@@ -18841,7 +18859,7 @@ async function daDmSua(id){
 async function daDmXoa(id,ten){
   if(!confirm("Xóa \""+ten+"\" khỏi danh mục dự toán?"))return;
   if(S.mode==="live"){
-    try{await api(`/du-an/du-toan/${id}`,{method:'DELETE'});}
+    try{await apiKhoa(`/du-an/du-toan/${id}`,{method:'DELETE'});}
     catch(e){return toast(e.detail||e.message,"err");}
   }else{
     const ds=_dmDemoDs(); const i=ds.findIndex(z=>z.id===id); if(i>=0)ds.splice(i,1);
@@ -18866,7 +18884,7 @@ async function daDmXoaNhieu(){
   if(!confirm(`Xóa ${chon.length} mục đã chọn khỏi danh mục dự toán?`))return;
   if(S.mode==="live"){
     let ok=0,loi=0;
-    for(const id of chon){try{await api(`/du-an/du-toan/${id}`,{method:'DELETE'});ok++;}catch(_){loi++;}}
+    const st={};for(const id of chon){try{await apiKhoa(`/du-an/du-toan/${id}`,{method:'DELETE'},st);ok++;}catch(_){loi++;}}
     toast(loi?`Đã xóa ${ok} mục, ${loi} mục lỗi`:`Đã xóa ${ok} mục`,loi?"err":"ok");
   }else{
     const ds=_dmDemoDs();chon.forEach(id=>{const i=ds.findIndex(z=>z.id===id);if(i>=0)ds.splice(i,1);});

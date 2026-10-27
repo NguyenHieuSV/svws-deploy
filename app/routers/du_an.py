@@ -753,6 +753,22 @@ def nap_mau_chi_tieu(da_id: int, data: NapChiTieuVao, db: Session = Depends(get_
 _DT_LOAI = ("THIET_BI", "VAT_TU", "NHAN_SU", "CHI_PHI_KHAC")
 
 
+def _boq_po_hieu_luc(db, x):
+    dm_id = getattr(x, "don_mua_id", None)
+    if not dm_id:
+        return None
+    from ..models import DonMua as _KhoaDm
+    dm = db.get(_KhoaDm, dm_id)
+    return dm if (dm is not None and dm.trang_thai != "TU_CHOI") else None
+
+
+def _boq_khoa_map(db, da, rs) -> dict:
+    """🔒 dòng BOQ đã mua: lập PO từ dòng hoặc PO lập tay cùng mã dự án có đúng mặt hàng."""
+    from .ncc import khoa_map_theo_ma
+    return khoa_map_theo_ma(db, getattr(da, "ma", None) if da is not None else None,
+                            [(x.id, x.ten, x.hang_hoa_id, x) for x in rs], lambda x: _boq_po_hieu_luc(db, x))
+
+
 def _boq_khoa(db, x) -> bool:
     """Dòng BOQ đã lập PO còn hiệu lực (PO bị từ chối / đã xóa → dòng mở lại). Bỏ bước đề xuất mua 10/10/2026."""
     dm_id = getattr(x, "don_mua_id", None)
@@ -795,10 +811,13 @@ def ds_du_toan(da_id: int, db: Session = Depends(get_db), _=Depends(yeu_cau(MODU
         mua_cu = goi_y_mua_cu(db, thieu) if thieu else {}
     except Exception:
         mua_cu = {}
+    kmap = _boq_khoa_map(db, da, rs)
     for r in ds:
         h = hh_cua.get(r["id"])
         g = gia.get(h) if h else None
         t = thuc.get(h) if h else None
+        k = kmap.get(r["id"]) or {}
+        r["khoa_po"], r["khoa_kieu"], r["khoa_tt"] = k.get("so_po"), k.get("kieu"), k.get("trang_thai")
         r["hang_hoa_id"] = h
         r["gia_goi_y"] = g["gia_de_xuat"] if g else None
         r["nguon_goi_y"] = g["nguon"] if g else None
@@ -825,9 +844,10 @@ def boq_cap_nhat_gia(da_id: int, data: BoqCapNhatGiaVao, db: Session = Depends(g
     """⟳ Cập nhật đơn giá BOQ dự án theo MUA THỰC TẾ (khớp tên với danh mục kho).
     Dòng đã lập PO bị khóa. ap_dung=False chỉ trả bảng so sánh."""
     from ..gia_dau_vao import goi_y_cap_nhat
-    _da_404(db, da_id)
+    da = _da_404(db, da_id)
     rs = db.query(DuAnDuToan).filter_by(du_an_id=da_id).order_by(DuAnDuToan.thu_tu, DuAnDuToan.id).all()
-    dong = [(x.id, x.ten, x.hang_hoa_id, x.don_gia, _boq_khoa(db, x)) for x in rs]
+    kmap = _boq_khoa_map(db, da, rs)
+    dong = [(x.id, x.ten, x.hang_hoa_id, x.don_gia, kmap.get(x.id) is not None) for x in rs]
     goi_y = goi_y_cap_nhat(db, dong)
     da_ap = 0
     if data.ap_dung:
@@ -878,15 +898,24 @@ def them_du_toan(da_id: int, data: DuToanVao, db: Session = Depends(get_db),
 
 
 @router.put("/du-toan/{dt_id}")
-def sua_du_toan(dt_id: int, data: DuToanVao, db: Session = Depends(get_db),
+def sua_du_toan(dt_id: int, data: DuToanVao, xac_nhan_khoa: bool = False, db: Session = Depends(get_db),
                 nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    from .ncc import kiem_khoa_sua
     x = db.get(DuAnDuToan, dt_id)
     if x is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy dòng dự toán")
+    khoa = _boq_khoa_map(db, db.get(DuAn, x.du_an_id), [x]).get(x.id)
+    kiem_khoa_sua(khoa, x.ten, nd, xac_nhan_khoa)          # 🔒 dòng đã mua: chỉ CEO / ADMIN, phải xác nhận
+    cu = _dt_ra(x)
     for k in ("loai", "ten", "quy_cach", "don_vi", "so_luong", "don_gia", "ghi_chu", "thu_tu", "hang_hoa_id"):
         v = getattr(data, k)
         if v is not None:
             setattr(x, k, v)
+    moi = _dt_ra(x)
+    doi = {k: moi[k] for k in moi if moi[k] != cu.get(k)}
+    if doi:
+        ghi_audit(db, nd.id, "SUA_DONG_DA_MUA" if khoa else "SUA", "du_an_du_toan", x.id,
+                  cu=dict({k: cu.get(k) for k in doi}, **({"po": khoa["so_po"]} if khoa else {})), moi=doi)
     db.commit()
     return _dt_ra(x)
 
@@ -903,10 +932,11 @@ def boq_khop_kho(da_id: int, data: BoqKhopKhoVao, db: Session = Depends(get_db),
     ap_dung → gán hang_hoa_id; tùy chọn đổi tên theo kho, lấy giá đầu vào."""
     from ..gia_dau_vao import goi_y_khop_kho, bang_gia
     from ..models import HangHoa as _KkHh
-    _da_404(db, da_id)
+    da = _da_404(db, da_id)
     rs = db.query(DuAnDuToan).filter_by(du_an_id=da_id).order_by(DuAnDuToan.thu_tu, DuAnDuToan.id).all()
+    kmap = _boq_khoa_map(db, da, rs)
     if not data.ap_dung:
-        dong = [(x.id, x.ten, x.hang_hoa_id, x.don_gia, _boq_khoa(db, x)) for x in rs]
+        dong = [(x.id, x.ten, x.hang_hoa_id, x.don_gia, kmap.get(x.id) is not None) for x in rs]
         gy = goi_y_khop_kho(db, dong)
         return {"goi_y": gy, "so_chua_khop": sum(1 for r in gy if not r["da_khop"]),
                 "so_co_ung_vien": sum(1 for r in gy if not r["da_khop"] and r["ung_vien"])}
@@ -917,7 +947,7 @@ def boq_khop_kho(da_id: int, data: BoqKhopKhoVao, db: Session = Depends(get_db),
     for c in (data.chon or []):
         x = by_id.get(int(c.get("id") or 0))
         hh = db.get(_KkHh, int(c.get("hang_hoa_id") or 0)) if c.get("hang_hoa_id") else None
-        if x is None or hh is None:
+        if x is None or hh is None or kmap.get(x.id) is not None:     # 🔒 dòng đã mua không khớp lại hàng loạt
             continue
         cu = {"ten": x.ten, "hang_hoa_id": x.hang_hoa_id, "don_gia": float(x.don_gia or 0)}
         x.hang_hoa_id = hh.id
@@ -938,12 +968,16 @@ def boq_khop_kho(da_id: int, data: BoqKhopKhoVao, db: Session = Depends(get_db),
 
 
 @router.delete("/du-toan/{dt_id}")
-def xoa_du_toan(dt_id: int, db: Session = Depends(get_db),
+def xoa_du_toan(dt_id: int, xac_nhan_khoa: bool = False, db: Session = Depends(get_db),
                 nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
+    from .ncc import kiem_khoa_sua
     x = db.get(DuAnDuToan, dt_id)
     if x is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy dòng dự toán")
-    ghi_audit(db, nd.id, "XOA", "du_an_du_toan", dt_id, cu={"ten": x.ten})
+    khoa = _boq_khoa_map(db, db.get(DuAn, x.du_an_id), [x]).get(x.id)
+    kiem_khoa_sua(khoa, x.ten, nd, xac_nhan_khoa)
+    ghi_audit(db, nd.id, "XOA_DONG_DA_MUA" if khoa else "XOA", "du_an_du_toan", dt_id,
+              cu={"ten": x.ten, "so_luong": _f(x.so_luong), "don_gia": _f(x.don_gia), **({"po": khoa["so_po"]} if khoa else {})})
     db.delete(x); db.commit()
     return {"da_xoa": True}
 

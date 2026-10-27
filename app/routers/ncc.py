@@ -5323,12 +5323,59 @@ def _dtb_po_hieu_luc(db, m):
     return dm
 
 
-def _dtb_khoa_muc(db, m):
-    dm = _dtb_po_hieu_luc(db, m)
-    if dm is not None:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST,
-                            f"Dòng '{m.ten}' đã lập PO {dm.so or dm.id} — muốn sửa/xóa thì từ chối hoặc xóa PO đó "
-                            "(Nhà cung cấp → Đơn mua) để mở lại dòng.")
+
+
+# ---- 🔒 KHÓA DÒNG DỰ TOÁN ĐÃ MUA (anh Hiếu chốt 27/10/2026) ----
+# Dòng đã mua = (a) bấm 🛒 Tạo PO từ dòng (PO còn hiệu lực) HOẶC (b) PO LẬP TAY cùng mã dự toán có đúng mặt hàng này.
+# Dòng đã mua: chỉ CEO / ADMIN sửa / xóa được, phải xác nhận (?xac_nhan_khoa=1), có ghi audit cu → moi.
+def la_qtv_khoa(nd) -> bool:
+    return (nd.vai_tro.ma if getattr(nd, "vai_tro", None) else "").upper() in ("CEO", "ADMIN")
+
+
+def khoa_map_theo_ma(db, ma, dong, po_hieu_luc):
+    """dong = [(id, ten, hang_hoa_id, obj)] → {id: {so_po, kieu TAO_PO|PO_TAY, trang_thai} | None}."""
+    from ..gia_dau_vao import gia_thuc_theo_ma, hang_hoa_theo_ten
+    ten_map = hang_hoa_theo_ten(db, [t for (_i, t, h, _o) in dong if not h])
+    hh = {i: (h or ten_map.get(str(t or "").strip().lower())) for (i, t, h, _o) in dong}
+    ids = {h for h in hh.values() if h}
+    thuc = gia_thuc_theo_ma(db, ma, ids) if (ids and (ma or "").strip()) else {}
+    out = {}
+    for (i, _t, _h, o) in dong:
+        dm = po_hieu_luc(o)
+        if dm is not None:
+            out[i] = {"so_po": dm.so or f"PO #{dm.id}", "kieu": "TAO_PO", "trang_thai": dm.trang_thai}
+            continue
+        t = thuc.get(hh.get(i)) if hh.get(i) else None
+        out[i] = ({"so_po": t["so_po"] or f"PO #{t['don_mua_id']}", "kieu": "PO_TAY", "trang_thai": t["trang_thai"]}
+                  if t else None)
+    return out
+
+
+def kiem_khoa_sua(k, ten, nd, xac_nhan: bool):
+    """k = thông tin khóa của dòng (None = chưa mua). Người thường → 403; CEO / ADMIN chưa xác nhận → 409."""
+    if k is None:
+        return
+    nguon = "PO lập tay cùng mã" if k.get("kieu") == "PO_TAY" else "lập từ dòng này"
+    if not la_qtv_khoa(nd):
+        raise HTTPException(status.HTTP_403_FORBIDDEN,
+                            f"🔒 Dòng «{ten}» đã mua ({k['so_po']} · {nguon}) — chỉ CEO / Admin được sửa hoặc xóa.")
+    if not xac_nhan:
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            f"🔒 Dòng «{ten}» đã mua ({k['so_po']} · {nguon}). Sửa / xóa dòng đã mua sẽ được ghi lại "
+                            "(ai sửa, sửa gì, lúc nào).")
+
+
+def _dtb_khoa_map(db, d, mucs) -> dict:
+    """🔒 thông tin khóa của các dòng dự toán hàng bán (một lượt truy vấn)."""
+    return khoa_map_theo_ma(db, d.ma if d is not None else None,
+                            [(m.id, m.ten, m.hang_hoa_id, m) for m in mucs], lambda m: _dtb_po_hieu_luc(db, m))
+
+
+def _dtb_khoa_muc(db, m, nd=None, xac_nhan=False):
+    """Kiểm tra trước khi sửa / xóa 1 dòng → trả thông tin khóa (None nếu dòng chưa mua)."""
+    k = _dtb_khoa_map(db, db.get(DuToanBan, m.du_toan_id), [m]).get(m.id)
+    kiem_khoa_sua(k, m.ten, nd, xac_nhan)
+    return k
 
 
 @router.get("/du-toan-ban")
@@ -5804,12 +5851,14 @@ def dtb_cap_nhat_gia_danh_muc(muc_id: int, db: Session = Depends(get_db),
 # LƯU Ý thứ tự route: các đường /du-toan-ban/muc/{...} phải khai TRƯỚC /du-toan-ban/{dt_id}
 # để "muc" không bị bắt nhầm vào tham số số nguyên dt_id.
 @router.put("/du-toan-ban/muc/{muc_id}")
-def dtb_sua_muc(muc_id: int, data: DtbMucVao, db: Session = Depends(get_db),
+def dtb_sua_muc(muc_id: int, data: DtbMucVao, xac_nhan_khoa: bool = False, db: Session = Depends(get_db),
                 nd: NguoiDung = Depends(yeu_cau_bat_ky(("ncc", "THAO_TAC"), ("ban_hang", "THAO_TAC")))):
     m = db.get(DuToanBanMuc, muc_id)
     if m is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy sản phẩm trong dự toán")
-    _dtb_khoa_muc(db, m)
+    khoa = _dtb_khoa_muc(db, m, nd, xac_nhan_khoa)
+    cu_khoa = ({"ten": m.ten, "so_luong": float(m.so_luong or 0), "don_gia": float(m.don_gia or 0),
+                "quy_cach": m.quy_cach, "don_vi": m.don_vi, "ghi_chu": m.ghi_chu} if khoa else None)
     gia_truoc = Decimal(m.don_gia or 0)
     if data.ten is not None and data.ten.strip():
         m.ten = data.ten.strip()
@@ -5837,17 +5886,25 @@ def dtb_sua_muc(muc_id: int, data: DtbMucVao, db: Session = Depends(get_db),
     _d = db.get(DuToanBan, m.du_toan_id)
     dm = _dtb_ghi_danh_muc(db, m, nd, _d.ma if _d else None,
                            doi_gia=(data.don_gia is not None and Decimal(str(data.don_gia)) != gia_truoc))
+    if khoa:                                       # 🔒 CEO / ADMIN sửa dòng đã mua → ghi vết đầy đủ
+        ghi_audit(db, nd.id, "SUA_DONG_DA_MUA", "du_toan_ban_muc", m.id, cu=dict(cu_khoa, po=khoa["so_po"]),
+                  moi={"ten": m.ten, "so_luong": float(m.so_luong or 0), "don_gia": float(m.don_gia or 0),
+                       "quy_cach": m.quy_cach, "don_vi": m.don_vi, "ghi_chu": m.ghi_chu})
     db.commit()
     return {"ok": True, "danh_muc": dm, "ncc_dien": ncc_dien}
 
 
 @router.delete("/du-toan-ban/muc/{muc_id}")
-def dtb_xoa_muc(muc_id: int, db: Session = Depends(get_db),
+def dtb_xoa_muc(muc_id: int, xac_nhan_khoa: bool = False, db: Session = Depends(get_db),
                 nd: NguoiDung = Depends(yeu_cau_bat_ky(("ncc", "THAO_TAC"), ("ban_hang", "THAO_TAC")))):
     m = db.get(DuToanBanMuc, muc_id)
     if m is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy sản phẩm trong dự toán")
-    _dtb_khoa_muc(db, m)
+    khoa = _dtb_khoa_muc(db, m, nd, xac_nhan_khoa)
+    if khoa:
+        ghi_audit(db, nd.id, "XOA_DONG_DA_MUA", "du_toan_ban_muc", m.id,
+                  cu={"ten": m.ten, "so_luong": float(m.so_luong or 0), "don_gia": float(m.don_gia or 0),
+                      "du_toan_id": m.du_toan_id, "po": khoa["so_po"]})
     db.delete(m); db.commit()
     return {"ok": True}
 
@@ -5918,6 +5975,7 @@ def dtb_chi_tiet(dt_id: int, db: Session = Depends(get_db), _=Depends(yeu_cau_ba
     ids = {h for h in hh_cua.values() if h}
     gia = bang_gia(db, ids) if ids else {}
     thuc = gia_thuc_theo_ma(db, d.ma, ids) if ids else {}
+    kmap = _dtb_khoa_map(db, d, mucs)
     # 💡 dòng CHƯA có giá gợi ý (tên chung / mặt hàng liên kết chưa có giá) → dò giá từ MUA HÀNG CŨ theo tên gần giống
     thieu = [(m.id, m.ten, hh_cua.get(m.id)) for m in mucs
              if not (gia.get(hh_cua.get(m.id)) or {}).get("gia_de_xuat")]
@@ -5959,6 +6017,9 @@ def dtb_chi_tiet(dt_id: int, db: Session = Depends(get_db), _=Depends(yeu_cau_ba
                       "tep": _tep,
                       "po_id": po.id if po else None, "po_so": po.so if po else None,
                       "po_trang_thai": po.trang_thai if po else None,
+                      # 🔒 dòng đã mua (tạo PO từ dòng hoặc PO lập tay cùng mã) — chỉ CEO / Admin sửa
+                      "khoa_po": (kmap.get(r.id) or {}).get("so_po"), "khoa_kieu": (kmap.get(r.id) or {}).get("kieu"),
+                      "khoa_tt": (kmap.get(r.id) or {}).get("trang_thai"),
                       # 💲 giá gợi ý theo mua thật / báo giá + giá mua thật dưới mã này
                       "gia_goi_y": g["gia_de_xuat"] if g else None,
                       "nguon_goi_y": g["nguon"] if g else None,
@@ -5998,8 +6059,9 @@ def dtb_khop_kho(dt_id: int, data: DtbKhopKhoVao, db: Session = Depends(get_db),
     if d is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy dự toán")
     mucs = db.query(DuToanBanMuc).filter_by(du_toan_id=dt_id).order_by(DuToanBanMuc.id).all()
+    kmap = _dtb_khoa_map(db, d, mucs)               # 🔒 dòng đã mua: không đổi bằng thao tác hàng loạt
     if not data.ap_dung:
-        dong = [(m.id, m.ten, m.hang_hoa_id, m.don_gia, _dtb_po_hieu_luc(db, m) is not None) for m in mucs]
+        dong = [(m.id, m.ten, m.hang_hoa_id, m.don_gia, kmap.get(m.id) is not None) for m in mucs]
         gy = goi_y_khop_kho(db, dong)
         return {"ma": d.ma, "goi_y": gy, "so_chua_khop": sum(1 for r in gy if not r["da_khop"]),
                 "so_co_ung_vien": sum(1 for r in gy if not r["da_khop"] and r["ung_vien"])}
@@ -6010,7 +6072,7 @@ def dtb_khop_kho(dt_id: int, data: DtbKhopKhoVao, db: Session = Depends(get_db),
     for c in (data.chon or []):
         m = by_id.get(int(c.get("id") or 0))
         hh = db.get(HangHoa, int(c.get("hang_hoa_id") or 0)) if c.get("hang_hoa_id") else None
-        if m is None or hh is None or _dtb_po_hieu_luc(db, m) is not None:
+        if m is None or hh is None or kmap.get(m.id) is not None:
             continue
         cu = {"ten": m.ten, "hang_hoa_id": m.hang_hoa_id, "don_gia": float(m.don_gia or 0)}
         m.hang_hoa_id = hh.id
@@ -6045,7 +6107,8 @@ def dtb_cap_nhat_gia(dt_id: int, data: DtbCapNhatGiaVao, db: Session = Depends(g
     if d is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy dự toán")
     mucs = db.query(DuToanBanMuc).filter_by(du_toan_id=dt_id).order_by(DuToanBanMuc.id).all()
-    dong = [(m.id, m.ten, m.hang_hoa_id, m.don_gia, _dtb_po_hieu_luc(db, m) is not None) for m in mucs]
+    kmap = _dtb_khoa_map(db, d, mucs)               # 🔒 dòng đã mua (tạo PO hoặc PO lập tay) không đổi giá hàng loạt
+    dong = [(m.id, m.ten, m.hang_hoa_id, m.don_gia, kmap.get(m.id) is not None) for m in mucs]
     goi_y = goi_y_cap_nhat(db, dong)
     da_ap = 0
     if data.ap_dung:
