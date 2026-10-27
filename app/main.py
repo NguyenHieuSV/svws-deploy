@@ -32,6 +32,16 @@ def _bat_scheduler():
 
 
 @app.on_event("startup")
+def _purchasing_po_moi():
+    """🛒 Báo nhóm Purchasing Team khi có đơn mua mới (sự kiện phiên). Lỗi KHÔNG chặn app khởi động."""
+    try:
+        from .po_thong_bao import dang_ky
+        dang_ky()
+    except Exception as e:
+        print(f"[PURCHASING] Không bật được: {type(e).__name__}: {e}")
+
+
+@app.on_event("startup")
 def _bo_de_xuat_mua():
     """Chuyển đổi dữ liệu MỘT LẦN khi bỏ mục Đề xuất mua hàng (10/10/2026). Lỗi KHÔNG chặn app khởi động."""
     try:

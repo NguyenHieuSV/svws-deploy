@@ -55,6 +55,7 @@ class Settings(BaseSettings):
     gchat_webhook_duyet_chi: str = ""    # webhook GROUP RIÊNG cho Duyệt chi Ngân Hàng (hạn chế người xem)
     gchat_webhook_bcvh: str = ""         # webhook nhóm "Coats Operation - Report" — nhắc BCVH thiếu dữ liệu 14h thứ Bảy
     gchat_webhook_quet_mail: str = ""    # webhook GROUP RIÊNG cho bản tin 📬 Tự quét thư hàng tuần (hóa đơn · báo giá · spec)
+    gchat_webhook_purchasing: str = ""   # webhook nhóm "Purchasing Team" — báo mỗi ĐƠN MUA mới (PO · mã dự án · sản phẩm)
     gchat_service_account: str = ""      # dùng cho chế độ APP: DÁN NGUYÊN nội dung file JSON key
     nhac_viec_gui_khi_tao: bool = True   # gửi ngay khi vừa đặt lời nhắc
     nhac_viec_ban_tin: bool = True       # bản tin tổng hợp đầu ngày

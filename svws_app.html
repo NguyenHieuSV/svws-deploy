@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="vi">
 <head>
-<!-- build: khoa-dong-da-mua-2026-10-27 -->
+<!-- build: purchasing-po-moi-2026-10-27 -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#0f2c44">
@@ -10669,6 +10669,17 @@ async function poTuBaoGiaFile(){
   }catch(e){toast(e.detail||e.message,"err");if(sel){sel.disabled=false;sel.value='';}}
 }
 
+/* 🛒 Nhóm Google Chat «Purchasing Team»: mỗi PO mới → tin gồm số PO · mã dự án · sản phẩm (CEO / Admin thấy trạng thái + gửi thử) */
+function _purBar(p){
+  if(!p)return '';
+  return `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 10px;font-size:12.5px">🔔 Tin nhóm <b>Purchasing Team</b> khi có đơn mua mới:
+    ${p.co_webhook?'<span class="badge b-ok">đã kết nối</span> <button class="btn-sm ghost" onclick="purGuiThu()">📨 Gửi tin thử</button>'
+      :'<span class="badge b-cho">chưa cấu hình</span> <span style="color:var(--muted)">— tạo webhook trong nhóm Purchasing Team (Google Chat → tên nhóm → Ứng dụng &amp; công cụ tích hợp → Webhook), rồi khai biến <b>GCHAT_WEBHOOK_PURCHASING</b> trên Render → Environment</span>'}</div>`;
+}
+async function purGuiThu(){
+  try{const r=await api('/ncc/purchasing/gui-thu',{method:'POST'});toast(r&&r.da_gui?'Đã gửi tin thử vào nhóm Purchasing Team':'Chưa gửi được: '+((r&&r.loi)||''),r&&r.da_gui?'ok':'err');}
+  catch(e){toast(e.detail||e.message,'err');}
+}
 /* --- Tab Đơn mua (PO): tạo · duyệt · nhận hàng --- */
 async function nccPO(host){
   const sups=await _nccSups(), orders=await _nccOrders();
@@ -10783,7 +10794,8 @@ async function nccPO(host){
      <div class="note" style="padding:6px 0 0">Mỗi dòng hàng có mức VAT riêng — tổng thanh toán (tiền hàng + VAT) chính là công nợ phải trả NCC.</div></div></div>` : '';
   const recvPanel = S.poRecv ? await nccRecvPanel(S.poRecv) : '';
   const canOp=can("ncc","THAO_TAC");
-  host.innerHTML=`<div class="note" style="padding:0 0 12px">Tạo PO, gắn <b>mã đơn Bán hàng</b> để tính giá vốn; duyệt theo hạn mức; <b>nhận hàng</b> sẽ nhập kho và sinh công nợ phải trả. Hệ thống <b>chặn mua trùng</b>: mặt hàng đã có PO cho cùng mã bán hàng sẽ bị từ chối — chỉ CEO/ADMIN xác nhận mới mua bổ sung được. Riêng mã vận hành <b>DV- / OP-</b>: <b>hóa chất &amp; vật tư</b> được mua lặp — chỉ hỏi xác nhận khi còn PO cùng hàng <b>chưa về đủ</b> (người lập tự xác nhận, PO gắn 🔁 Định kỳ) và cần <b>CEO</b> khi tổng mua trong tháng vượt <b>định mức tiêu hao quá 10%</b> (tháng lấy theo đuôi MMYY của mã; định mức khai ở Cho thuê → Định mức tiêu hao); thiết bị vẫn chặn trùng như cũ.</div>
+  let _pur=null; if(S.mode==="live"&&laQTV()){try{_pur=await api('/ncc/purchasing/trang-thai');}catch(_){}}
+  host.innerHTML=_purBar(_pur)+`<div class="note" style="padding:0 0 12px">Tạo PO, gắn <b>mã đơn Bán hàng</b> để tính giá vốn; duyệt theo hạn mức; <b>nhận hàng</b> sẽ nhập kho và sinh công nợ phải trả. Hệ thống <b>chặn mua trùng</b>: mặt hàng đã có PO cho cùng mã bán hàng sẽ bị từ chối — chỉ CEO/ADMIN xác nhận mới mua bổ sung được. Riêng mã vận hành <b>DV- / OP-</b>: <b>hóa chất &amp; vật tư</b> được mua lặp — chỉ hỏi xác nhận khi còn PO cùng hàng <b>chưa về đủ</b> (người lập tự xác nhận, PO gắn 🔁 Định kỳ) và cần <b>CEO</b> khi tổng mua trong tháng vượt <b>định mức tiêu hao quá 10%</b> (tháng lấy theo đuôi MMYY của mã; định mức khai ở Cho thuê → Định mức tiêu hao); thiết bị vẫn chặn trùng như cũ.</div>
     ${createForm}${recvPanel}
     <div class="panel"><div class="panel-h"><h3>⏳ Đơn mua chưa duyệt${poChua.length?` <span class="badge b-cho" style="margin-left:6px">${poChua.length}</span>`:''}</h3></div>
     <div class="panel-b" style="overflow-x:auto">

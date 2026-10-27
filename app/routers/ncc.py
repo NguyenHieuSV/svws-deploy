@@ -3248,6 +3248,25 @@ def _tinh_tien_po(dong):
 
 
 # ----- THAO_TAC: tạo đơn mua (nháp -> chờ duyệt). NV_MUA tạo được, chưa tự duyệt. -----
+# ---- 🛒 Nhóm Google Chat «Purchasing Team»: báo mỗi ĐƠN MUA mới (app/po_thong_bao.py) ----
+@router.get("/purchasing/trang-thai")
+def purchasing_trang_thai(nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
+    """Đã khai webhook nhóm Purchasing Team chưa (không lộ đường dẫn)."""
+    return {"co_webhook": bool((settings.gchat_webhook_purchasing or "").strip())}
+
+
+@router.post("/purchasing/gui-thu")
+def purchasing_gui_thu(db: Session = Depends(get_db), nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
+    url = (settings.gchat_webhook_purchasing or "").strip()
+    if not url:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Chưa cấu hình GCHAT_WEBHOOK_PURCHASING — tạo webhook trong nhóm Purchasing Team rồi khai "
+                            "trên Render → Environment, deploy lại.")
+    from ..chat_gateway import gui_webhook_rieng
+    return gui_webhook_rieng(url, f"🔔 SVWS — tin thử nhóm Purchasing Team (người gửi: {_dtb_ten_nguoi(db, nd)}). "
+                                  "Từ nay mỗi ĐƠN MUA mới sẽ báo vào đây: số PO · mã dự án · sản phẩm.")
+
+
 @router.post("/don-mua", response_model=DonMuaRa, status_code=201)
 def tao_don_mua(data: DonMuaVao, bo_qua_trung: bool = False, ep_ma: bool = False,
                 db: Session = Depends(get_db),
