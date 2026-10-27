@@ -178,7 +178,7 @@ def test_ceo_giao_viec_nhan_vien_chon_khi_bao_cao(db):
     from fastapi import HTTPException
     ceo, an, binh = _ceo(db), db.get(m.NguoiDung, 1), db.get(m.NguoiDung, 2)
     g = ns.tao_giao_viec(ns.GiaoViecVao(email="A@X.vn", ten_cong_viec="Lắp bơm", bat_dau="2026-10-20", ket_thuc="2026-10-25"), db, nd=ceo)
-    assert g["nhan_vien_id"] == 1 and g["ho_ten"] == "An"
+    assert g["nhan_vien_id"] == 1 and g["ho_ten"] == "An" and g["co_tai_khoan"] is True
     with pytest.raises(HTTPException):               # email không phải nhân viên đang làm
         ns.tao_giao_viec(ns.GiaoViecVao(email="ai@x.vn", ten_cong_viec="x"), db, nd=ceo)
     with pytest.raises(HTTPException):               # kết thúc trước bắt đầu
@@ -285,3 +285,10 @@ def test_ds_phai_bao_cao_cho_bang_quan_ly(db):
     _bc(db, 1, date(2026, 10, 27))
     assert ns.bao_cao_phai_ngay("2026-10-27", db, None)["da_bao_cao"] == 1
     assert bs.ds_thieu_bao_cao(db, date(2026, 10, 27)) == []
+
+
+def test_giao_viec_nguoi_chua_gan_tai_khoan_co_canh_bao(db):
+    # NV03 «Chưa có TK» có email hồ sơ nhưng không gắn tài khoản → vẫn giao được, kèm cờ cảnh báo
+    nv3 = db.get(m.NhanVien, 3); nv3.email = "c@x.vn"; db.commit()
+    g = ns.tao_giao_viec(ns.GiaoViecVao(email="c@x.vn", ten_cong_viec="Đo mẫu"), db, nd=_ceo(db))
+    assert g["nhan_vien_id"] == 3 and g["co_tai_khoan"] is False

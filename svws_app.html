@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="vi">
 <head>
-<!-- build: ma-du-an-droplist-2026-10-27 -->
+<!-- build: gv-canh-bao-tk-2026-10-27 -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#0f2c44">
@@ -15907,7 +15907,7 @@ function _gvPanel(nvs){
   const ds=window.__gvAll||[], hn=new Date().toISOString().slice(0,10), sua=ds.find(g=>g.id===S.gvSua)||{};
   const tt=g=>g.ket_thuc&&g.ket_thuc<hn?['Đã hết hạn','b-tc']:(g.bat_dau&&g.bat_dau>hn?['Chưa bắt đầu','b-cho']:['Đang thực hiện','b-ok']);
   const emails=(nvs||[]).filter(v=>v.trang_thai!=='NGHI_VIEC'&&(v.tai_khoan||v.email)).map(v=>`<option value="${_bcEscA(v.tai_khoan||v.email)}">${_bcEscH(v.ho_ten)}</option>`).join('');
-  const rows=ds.map(g=>{const t=tt(g);return `<tr><td><b>${_bcEscH(g.ho_ten||'')}</b><div style="font-size:11px;color:var(--muted)">${_bcEscH(g.email||'')}</div></td>
+  const rows=ds.map(g=>{const t=tt(g);return `<tr><td><b>${_bcEscH(g.ho_ten||'')}</b><div style="font-size:11px;color:var(--muted)">${_bcEscH(g.email||'')}</div>${g.co_tai_khoan===false?'<div style="font-size:11px;color:#dc2626;font-weight:600" title="Người này chưa gắn tài khoản đăng nhập vào Hồ sơ lương nên không vào app báo cáo được và không được tính / nhắc. Gắn ở Nhân sự & Lương → Hồ sơ lương → 🔑 → Gắn tài khoản có sẵn.">⚠ chưa gắn tài khoản — chưa báo cáo được</div>':''}</td>
     <td>${_bcEscH(g.ten_cong_viec)}${g.ma_du_an?`<div style="font-size:11px;color:var(--muted)">${_bcEscH(g.ma_du_an)}</div>`:''}</td><td style="white-space:nowrap">${_bcNgayVn(g.bat_dau)}</td><td style="white-space:nowrap">${_bcNgayVn(g.ket_thuc)}</td>
     <td><span class="badge ${t[1]}">${t[0]}</span></td>
     <td style="white-space:nowrap"><button class="btn-sm ghost" title="Sửa" onclick="gvSua(${g.id})">✏️</button> <button class="btn-sm ghost" style="color:var(--red)" title="Xóa" onclick="gvXoa(${g.id})">✕</button></td></tr>`;}).join('');
@@ -15937,6 +15937,7 @@ async function gvLuu(){
   const tb=kq&&kq.thong_bao;
   const nhan=!tb?"":(tb.da_gui?(tb.kieu==='PHONG_CHUNG'?" · đã nhắn vào phòng Google Chat chung":" · đã nhắn riêng người nhận"):" · CHƯA nhắn được: "+(tb.loi||""));
   toast((S.gvSua?"Đã sửa việc đã giao":"Đã giao việc «"+body.ten_cong_viec+"»")+nhan,tb&&!tb.da_gui?"err":"ok"); S.gvSua=null; wtReport($('#wtBody'));
+  if(kq&&kq.co_tai_khoan===false)setTimeout(()=>toast("⚠ "+(kq.ho_ten||body.email)+" chưa gắn tài khoản đăng nhập vào Hồ sơ lương nên chưa báo cáo được — gắn ở Nhân sự & Lương → Hồ sơ lương → 🔑","err"),900);
 }
 async function gvXoa(id){
   const g=(window.__gvAll||[]).find(x=>x.id===id); if(!g)return;

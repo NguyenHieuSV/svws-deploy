@@ -1403,6 +1403,8 @@ def _gv_ra(g, nv=None) -> dict:
     return {"id": g.id, "nhan_vien_id": g.nhan_vien_id, "email": g.email, "ten_cong_viec": g.ten_cong_viec,
             "bat_dau": str(g.bat_dau) if g.bat_dau else None, "ket_thuc": str(g.ket_thuc) if g.ket_thuc else None,
             "ma_du_an": g.ma_du_an,
+            # người nhận chưa gắn tài khoản đăng nhập → không vào app báo cáo được, không bị tính / nhắc
+            "co_tai_khoan": bool(nv.nguoi_dung_id) if nv is not None else None,
             "ho_ten": nv.ho_ten if nv is not None else None, "ma_nv": nv.ma if nv is not None else None}
 
 
