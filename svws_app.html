@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="vi">
 <head>
-<!-- build: gv-canh-bao-tk-2026-10-27 -->
+<!-- build: bc-attached-file-2026-10-27 -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#0f2c44">
@@ -15848,6 +15848,9 @@ async function wtReport(host){
      </div>
      <div class="formrow" style="padding-top:0"><div class="f" style="flex:1 1 100%"><label>Công việc đã làm hôm nay <span style="color:var(--red)">*</span></label>
        <textarea id="br_dalam" rows="4" style="width:100%" placeholder="Liệt kê các đầu việc đã thực hiện trong ngày…">${_bcEscH(cur.da_lam)}</textarea></div></div>
+     <div class="formrow" style="padding-top:0"><div class="f" style="flex:1 1 100%"><label>📎 Attached file <span style="font-weight:400;color:var(--muted)">(dữ liệu liên quan: ảnh hiện trường, biên bản, bản vẽ, số liệu… — chọn được nhiều tệp, tối đa 10 tệp / báo cáo, mỗi tệp ≤ 20 MB)</span></label>
+       <input type="file" id="br_tep" multiple accept=".pdf,.png,.jpg,.jpeg,.gif,.webp,.heic,.heif,.bmp,.doc,.docx,.xls,.xlsx,.xlsm,.csv,.ppt,.pptx,.txt,.zip,.rar,.7z,.dwg,.dxf,.mp4,.mov,.m4a,.mp3,image/*">
+       <div id="br_tep_ds" style="margin-top:6px">${_brTepDs(cur)}</div></div></div>
      <div class="formrow" style="padding-top:0"><div class="f" style="flex:1 1 100%"><label>Kết quả / tiến độ</label>
        <textarea id="br_ketqua" rows="3" style="width:100%" placeholder="Kết quả đạt được, phần trăm hoàn thành…">${_bcEscH(cur.ket_qua)}</textarea></div></div>
      <div class="formrow" style="padding-top:0"><div class="f" style="flex:1 1 100%"><label>Khó khăn / vướng mắc (cần hỗ trợ)</label>
@@ -15860,7 +15863,7 @@ async function wtReport(host){
   const myRows=(my.danh_sach||[]).map(r=>`<tr>
      <td>${r.ngay}${r.ngay===today?' <span class="badge b-ok">hôm nay</span>':''}</td>
      <td class="num">${_num(r.so_gio,1)}h</td>
-     <td style="font-size:12px;max-width:340px">${_bcEscH((r.da_lam||'').slice(0,160))}${(r.da_lam||'').length>160?'…':''}</td>
+     <td style="font-size:12px;max-width:340px">${_bcEscH((r.da_lam||'').slice(0,160))}${(r.da_lam||'').length>160?'…':''}${_brTepLinks(r.tep)}</td>
      <td style="font-size:12px">${_bcEscH(r.ma_lien_quan)||''}</td>
      <td style="font-size:12px">${r.ten_cong_viec?`<b>${_bcEscH(r.ten_cong_viec)}</b>`:''}${r.giao_viec_email?`<div style="color:var(--muted)">${_bcEscH(r.giao_viec_email)}</div>`:''}${(r.cv_bat_dau||r.cv_ket_thuc)?`<div style="color:var(--muted)">${_bcNgayVn(r.cv_bat_dau)} → ${_bcNgayVn(r.cv_ket_thuc)}</div>`:''}</td>
      <td style="white-space:nowrap"><button class="btn-sm ghost" onclick="brSua('${r.ngay}')">✏️</button>
@@ -15887,7 +15890,7 @@ async function wtReport(host){
     const rows=nvsHien.map(v=>{const r=byNv[v.id];
       if(r){return `<tr><td><b>${v.ma||''}</b></td><td>${v.ho_ten}</td><td style="font-size:12px">${v.chuc_danh||''}</td>
         <td><span class="badge b-ok">✓ Đã báo cáo</span></td><td class="num">${_num(r.so_gio,1)}h</td>
-        <td style="font-size:12px;max-width:360px">${_bcEscH((r.da_lam||'').slice(0,150))}${(r.da_lam||'').length>150?'…':''}</td>
+        <td style="font-size:12px;max-width:360px">${_bcEscH((r.da_lam||'').slice(0,150))}${(r.da_lam||'').length>150?'…':''}${_brTepLinks(r.tep)}</td>
         <td style="font-size:12px">${_bcEscH(r.ma_lien_quan)||''}</td><td style="white-space:nowrap">${_tl(v)}</td>
         <td style="white-space:nowrap"><button class="btn-sm ghost" onclick="brXem(${v.id})">Xem</button>${laQTV()?` <button class="btn-sm ghost" title="Sửa báo cáo" onclick="brQlSua(${r.id})">✏️</button> <button class="btn-sm ghost" style="color:var(--red)" title="Xóa báo cáo" onclick="brQlXoa(${r.id},'${r.ngay}','${String(v.ho_ten||'').replace(/'/g,'')}')">🗑</button>`:''}</td></tr>`;}
       return `<tr style="background:#fff7ed"><td><b>${v.ma||''}</b></td><td>${v.ho_ten}</td><td style="font-size:12px">${v.chuc_danh||''}</td>
@@ -15945,6 +15948,25 @@ async function gvXoa(id){
   try{await api('/nhan-su/giao-viec/'+id,{method:'DELETE'});}catch(e){return toast(e.detail||e.message,"err");}
   if(S.gvSua===id)S.gvSua=null; toast("Đã xóa việc đã giao","ok"); wtReport($('#wtBody'));
 }
+/* 📎 Tệp đính kèm báo cáo ngày */
+function _brTepCo(n){n=Number(n||0);return n>=1048576?(n/1048576).toFixed(1)+' MB':Math.max(1,Math.round(n/1024))+' KB';}
+function _brTepLinks(ds){
+  if(!ds||!ds.length)return '';
+  return `<div style="margin-top:4px;display:flex;gap:6px;flex-wrap:wrap">${ds.map(t=>`<a href="#" style="font-size:11.5px;white-space:nowrap" title="Tải về ${_bcEscA(t.ten_file)}" onclick="tepTaiVe('/nhan-su/bao-cao-ngay/tep/${t.id}','${_bcEscA(String(t.ten_file).replace(/'/g,''))}');return false">📎 ${_bcEscH(String(t.ten_file).length>28?String(t.ten_file).slice(0,26)+'…':t.ten_file)}</a>`).join('')}</div>`;
+}
+function _brTepDs(r){
+  const ds=(r&&r.tep)||[];
+  if(!ds.length)return '<span style="font-size:12px;color:var(--muted)">Chưa có tệp đính kèm cho ngày này.</span>';
+  return ds.map(t=>`<span style="display:inline-flex;align-items:center;gap:4px;margin:0 8px 4px 0;padding:3px 8px;border:1px solid var(--line,#e2e8f0);border-radius:999px;font-size:12px">
+      <a href="#" onclick="tepTaiVe('/nhan-su/bao-cao-ngay/tep/${t.id}','${_bcEscA(String(t.ten_file).replace(/'/g,''))}');return false">📎 ${_bcEscH(t.ten_file)}</a>
+      <span style="color:var(--muted)">${_brTepCo(t.kich_thuoc)}</span>
+      <button class="btn-sm ghost" style="padding:0 4px;color:var(--red)" title="Xóa tệp" onclick="brTepXoa(${t.id},'${_bcEscA(String(t.ten_file).replace(/'/g,''))}')">✕</button></span>`).join('');
+}
+async function brTepXoa(id,ten){
+  if(!confirm("Xóa tệp «"+ten+"» khỏi báo cáo? Không lấy lại được."))return;
+  try{await api('/nhan-su/bao-cao-ngay/tep/'+id,{method:'DELETE'});}catch(e){return toast(e.detail||e.message,"err");}
+  toast("Đã xóa tệp","ok"); wtReport($("#wtBody"));
+}
 function _bcNgayVn(s){if(!s)return '…';const p=String(s).slice(0,10).split('-');return p.length===3?`${p[2]}/${p[1]}/${p[0]}`:s;}
 /* Tổng hợp báo cáo của tôi trong tháng: tỉ lệ hoàn thành + từng ngày (droplist) */
 function _brTongHop(th,thieu){
@@ -15973,6 +15995,8 @@ function _brFill(r){
   set('br_khokhan',r.kho_khan||''); set('br_kehoach',r.ke_hoach||'');
   const sel=document.getElementById('br_gv_id'); if(sel){sel.innerHTML=_brGvOpts(S.brNgay,r.giao_viec_id);}
   const sm=document.getElementById('br_ma'); if(sm)sm.innerHTML=_brMaOpts(r.ma_lien_quan);
+  const td=document.getElementById('br_tep_ds'); if(td)td.innerHTML=_brTepDs(r);
+  const ti=document.getElementById('br_tep'); if(ti)ti.value='';
   const inf=document.getElementById('br_gv_info'); if(inf)inf.innerHTML=_brGvInfoHtml(r.giao_viec_id,r);
 }
 /* Việc CEO giao cho tôi còn hiệu lực ngày `ngay` (+ việc đang gắn với báo cáo dù đã hết hạn) */
@@ -16007,8 +16031,16 @@ async function brGui(){
   const body={ngay,da_lam,ket_qua:gv('br_ketqua'),kho_khan:gv('br_khokhan')||null,ke_hoach:gv('br_kehoach')||null,
     so_gio:Number(gv('br_gio')||0),ma_lien_quan:gv('br_ma')||null,
     giao_viec_id:Number(gv('br_gv_id'))||null};
+  const tepChon=Array.from((document.getElementById('br_tep')||{}).files||[]);
+  if(tepChon.length>10)return toast("Mỗi báo cáo tối đa 10 tệp","err");
+  const qua=tepChon.find(f=>f.size>20*1048576); if(qua)return toast("Tệp «"+qua.name+"» quá 20 MB","err");
   if(S.mode==="live"){
-    try{await api("/nhan-su/bao-cao-ngay",{method:"POST",body:JSON.stringify(body)});}catch(e){return toast(e.detail||e.message,"err");}
+    let kqBc; try{kqBc=await api("/nhan-su/bao-cao-ngay",{method:"POST",body:JSON.stringify(body)});}catch(e){return toast(e.detail||e.message,"err");}
+    if(tepChon.length&&kqBc&&kqBc.id){
+      const fd=new FormData(); tepChon.forEach(f=>fd.append('files',f,f.name));
+      try{await apiUpload('/nhan-su/bao-cao-ngay/'+kqBc.id+'/tep',fd);}
+      catch(e){toast("Đã lưu báo cáo nhưng CHƯA đính kèm được tệp: "+(e.detail||e.message),"err"); S.brNgay=ngay; S.wtRThang=ngay.slice(0,7); return wtReport($("#wtBody"));}
+    }
   } else {
     if(!DEMO.bc)DEMO.bc=_bcDemo();
     const ex=DEMO.bc.find(r=>r.nhan_vien_id===1&&r.ngay===ngay);
@@ -16091,6 +16123,7 @@ function brXem(nvId){
        <span>⏱ Số giờ: <b>${_num(r.so_gio,1)}h</b></span>
        ${r.ma_lien_quan?`<span>🔖 Mã liên quan: <b>${_bcEscH(r.ma_lien_quan)}</b></span>`:''}</div>
      ${blk('Công việc đã làm',r.da_lam)}
+     ${(r.tep||[]).length?`<div style="margin-bottom:12px"><div style="font-size:11.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.03em;margin-bottom:2px">📎 Attached file</div>${_brTepLinks(r.tep)}</div>`:''}
      ${blk('Kết quả / tiến độ',r.ket_qua)}
      ${blk('Khó khăn / vướng mắc',r.kho_khan)}
      ${blk('Kế hoạch ngày tiếp theo',r.ke_hoach)}

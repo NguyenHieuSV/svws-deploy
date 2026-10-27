@@ -1228,7 +1228,8 @@ def bao_cao_cua_toi(thang: str | None = None, db: Session = Depends(get_db),
     if len(thang) == 7:
         q = q.filter(func.to_char(BaoCaoNgay.ngay, "YYYY-MM") == thang)
     rows = q.order_by(BaoCaoNgay.ngay.desc()).all()
-    return {"danh_sach": [_bc_ra(r) for r in rows], "nhan_vien_id": nv_id, "thang": thang}
+    tep = _bc_tep_map(db, [r.id for r in rows])
+    return {"danh_sach": [dict(_bc_ra(r), tep=tep.get(r.id, [])) for r in rows], "nhan_vien_id": nv_id, "thang": thang}
 
 
 @router.get("/bao-cao-ngay")
@@ -1246,7 +1247,8 @@ def ds_bao_cao_ngay(ngay: str | None = None, thang: str | None = None,
     else:
         q = q.filter(BaoCaoNgay.ngay == str(date.today()))
     rows = q.order_by(BaoCaoNgay.ngay.desc(), NhanVien.ma).all()
-    return {"danh_sach": [_bc_ra(r, nv) for r, nv in rows]}
+    tep = _bc_tep_map(db, [r.id for r, _ in rows])
+    return {"danh_sach": [dict(_bc_ra(r, nv), tep=tep.get(r.id, [])) for r, nv in rows]}
 
 
 def _thang_khoang(thang: str | None, hom_nay: date):
@@ -1587,7 +1589,119 @@ def xoa_bao_cao_ngay(bc_id: int, db: Session = Depends(get_db),
     if r.nhan_vien_id != nv_id and not la_qtv:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Chỉ được xóa báo cáo của chính mình")
     ghi_audit(db, nd.id, "XOA", "bao_cao_ngay", bc_id, cu={"ngay": str(r.ngay)})
+    _bc_xoa_tep(db, [bc_id])
     db.delete(r); db.commit()
+    return {"da_xoa": True}
+
+
+# ============ 📎 Tệp đính kèm báo cáo ngày (Attached file) ============
+_BC_TEP_DT = "BAO_CAO_NGAY"
+_BC_TEP_MAX_MB = 20
+_BC_TEP_MAX_SO = 10
+_BC_TEP_DUOI = {"pdf", "png", "jpg", "jpeg", "gif", "webp", "heic", "heif", "bmp", "doc", "docx", "xls", "xlsx", "xlsm",
+                "csv", "ppt", "pptx", "txt", "zip", "rar", "7z", "dwg", "dxf", "mp4", "mov", "m4a", "mp3"}
+
+
+def _bc_tep_map(db: Session, ids) -> dict:
+    """{bao_cao_ngay.id: [ {id, ten_file, kich_thuoc}, … ]} — một truy vấn cho cả danh sách."""
+    from ..models import TepDinhKem
+    ids = [i for i in ids if i]
+    out = {}
+    if not ids:
+        return out
+    for t in (db.query(TepDinhKem).filter(TepDinhKem.doi_tuong == _BC_TEP_DT, TepDinhKem.doi_tuong_id.in_(ids))
+              .order_by(TepDinhKem.id).all()):
+        out.setdefault(t.doi_tuong_id, []).append({"id": t.id, "ten_file": t.ten_file, "kich_thuoc": t.kich_thuoc})
+    return out
+
+
+def _bc_xoa_tep(db: Session, ids):
+    from ..luu_tru import xoa as _xoa_kho
+    from ..models import TepDinhKem
+    for t in db.query(TepDinhKem).filter(TepDinhKem.doi_tuong == _BC_TEP_DT, TepDinhKem.doi_tuong_id.in_(list(ids))).all():
+        _xoa_kho(t.duong_dan)
+        db.delete(t)
+
+
+def _bc_quyen(db: Session, nd, r, sua: bool) -> None:
+    """Chủ báo cáo luôn được; CEO / ADMIN được; xem thì thêm người có quyền XEM Working time."""
+    if r.nhan_vien_id == nhan_vien_id_cua(db, nd.id) or _la_ceo(nd):
+        return
+    if not sua and THU_BAC.get(muc_cua(db, nd.vai_tro_id, MODULE_WT), 0) >= THU_BAC["XEM"]:
+        return
+    raise HTTPException(status.HTTP_403_FORBIDDEN,
+                        "Chỉ người viết báo cáo hoặc CEO / Admin được " + ("đính kèm / xóa tệp" if sua else "xem tệp"))
+
+
+@router.post("/bao-cao-ngay/{bc_id}/tep", status_code=201)
+async def bc_tai_tep(bc_id: int, files: list[UploadFile] = File(...), db: Session = Depends(get_db),
+                     nd: NguoiDung = Depends(lay_nguoi_dung_hien_tai)):
+    """Đính kèm tệp (ảnh hiện trường, biên bản, bản vẽ, số liệu…) vào báo cáo ngày. Tối đa 10 tệp / báo cáo, 20 MB / tệp."""
+    from ..luu_tru import luu as _luu_kho
+    from ..models import TepDinhKem
+    r = db.get(BaoCaoNgay, bc_id)
+    if r is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy báo cáo")
+    _bc_quyen(db, nd, r, sua=True)
+    da_co = db.query(TepDinhKem).filter(TepDinhKem.doi_tuong == _BC_TEP_DT, TepDinhKem.doi_tuong_id == bc_id).count()
+    if da_co + len(files) > _BC_TEP_MAX_SO:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            f"Mỗi báo cáo tối đa {_BC_TEP_MAX_SO} tệp (đã có {da_co}, đang thêm {len(files)})")
+    goi = []
+    for f in files:
+        ten = (f.filename or "tep").strip()[:200]
+        duoi = ten.rsplit(".", 1)[-1].lower() if "." in ten else ""
+        if duoi not in _BC_TEP_DUOI:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                f"Tệp «{ten}» chưa hỗ trợ. Dùng: ảnh, PDF, Word, Excel, PowerPoint, CSV, TXT, ZIP/RAR/7Z, DWG/DXF, video / âm thanh")
+        data = await f.read()
+        if not data:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Tệp «{ten}» rỗng")
+        if len(data) > _BC_TEP_MAX_MB * 1024 * 1024:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                f"Tệp «{ten}» quá lớn ({len(data) / 1048576:.1f} MB) — tối đa {_BC_TEP_MAX_MB} MB")
+        goi.append((ten, data, f.content_type))
+    moi = []
+    for ten, data, ct in goi:
+        ref = _luu_kho(data, "bao_cao_ngay", bc_id, ten, ct)
+        t = TepDinhKem(doi_tuong=_BC_TEP_DT, doi_tuong_id=bc_id, loai="KHAC", ten_file=ten, duong_dan=ref,
+                       kich_thuoc=len(data), content_type=(ct or "")[:100] or None, nguoi_tai_len=nhan_vien_id_cua(db, nd.id))
+        db.add(t); db.flush()
+        moi.append({"id": t.id, "ten_file": ten, "kich_thuoc": len(data)})
+    ghi_audit(db, nd.id, "TAO", "tep_dinh_kem", None, moi={"bao_cao_ngay": bc_id, "so_tep": len(moi)})
+    db.commit()
+    return {"ok": True, "tep": moi}
+
+
+@router.get("/bao-cao-ngay/tep/{tep_id}")
+def bc_tai_ve_tep(tep_id: int, db: Session = Depends(get_db), nd: NguoiDung = Depends(lay_nguoi_dung_hien_tai)):
+    from ..luu_tru import phan_hoi_tai, ton_tai
+    from ..models import TepDinhKem
+    t = db.get(TepDinhKem, tep_id)
+    if t is None or t.doi_tuong != _BC_TEP_DT or not ton_tai(t.duong_dan):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy tệp")
+    r = db.get(BaoCaoNgay, t.doi_tuong_id)
+    if r is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy báo cáo")
+    _bc_quyen(db, nd, r, sua=False)
+    return phan_hoi_tai(t.duong_dan, t.ten_file, t.content_type)
+
+
+@router.delete("/bao-cao-ngay/tep/{tep_id}")
+def bc_xoa_tep(tep_id: int, db: Session = Depends(get_db), nd: NguoiDung = Depends(lay_nguoi_dung_hien_tai)):
+    from ..luu_tru import xoa as _xoa_kho
+    from ..models import TepDinhKem
+    t = db.get(TepDinhKem, tep_id)
+    if t is None or t.doi_tuong != _BC_TEP_DT:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy tệp")
+    r = db.get(BaoCaoNgay, t.doi_tuong_id)
+    if r is not None:
+        _bc_quyen(db, nd, r, sua=True)
+    elif not _la_ceo(nd):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Chỉ CEO / Admin được xóa tệp này")
+    ghi_audit(db, nd.id, "XOA", "tep_dinh_kem", t.id, cu={"bao_cao_ngay": t.doi_tuong_id, "ten": t.ten_file})
+    _xoa_kho(t.duong_dan)
+    db.delete(t); db.commit()
     return {"da_xoa": True}
 
 
