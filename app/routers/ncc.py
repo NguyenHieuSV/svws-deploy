@@ -3248,6 +3248,46 @@ def _tinh_tien_po(dong):
 
 
 # ----- THAO_TAC: tạo đơn mua (nháp -> chờ duyệt). NV_MUA tạo được, chưa tự duyệt. -----
+# ---- 📉 KIỂM SOÁT LỢI NHUẬN THEO MÃ (app/kiem_soat_ln.py) ----
+@router.get("/kiem-soat-ln/po-cho-duyet")
+def ksln_po_cho_duyet(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
+    """Cờ 📉 của từng PO CHỜ DUYỆT: {po_id: {muc, ly_do, bien}} — cùng phép tính lúc duyệt."""
+    from ..kiem_soat_ln import danh_gia
+    out = {}
+    for dm in db.query(DonMua).filter(DonMua.trang_thai == "CHO_DUYET").all():
+        ma = _ma_ban_hang_po(db, dm)
+        if not ma:
+            continue
+        try:
+            k = danh_gia(db, ma, float(dm.tong_tien or 0))
+        except Exception as e:                                    # noqa: BLE001
+            print(f"[KIEM_SOAT_LN] PO {dm.id}: {type(e).__name__}: {e}")
+            continue
+        if k:
+            out[str(dm.id)] = {"muc": k["muc"], "ly_do": k["ly_do"], "bien": k.get("bien")}
+    return out
+
+
+@router.get("/kiem-soat-ln/tuan")
+def ksln_xem_tuan(db: Session = Depends(get_db), nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
+    """Xem trước bản kiểm soát lợi nhuận theo nhóm mã (không gửi)."""
+    from ..kiem_soat_ln import bao_cao_tuan, noi_dung_tuan
+    bc = bao_cao_tuan(db)
+    return {"so_lo": len(bc["lo"]), "so_chua_dt": len(bc["chua_dt"]), "so_bien_thap": len(bc["bien_thap"]),
+            "nguong": bc["nguong"], "noi_dung": noi_dung_tuan(bc) or "",
+            "co_webhook": bool((settings.gchat_webhook_duyet_chi or "").strip())}
+
+
+@router.post("/kiem-soat-ln/gui")
+def ksln_gui(db: Session = Depends(get_db), nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
+    """Gửi NGAY bản kiểm soát lợi nhuận vào nhóm Duyệt chi."""
+    from ..kiem_soat_ln import gui_tuan
+    kq = gui_tuan(db, "TAY", nd.id)
+    ghi_audit(db, nd.id, "NHAC_TAY", "kiem_soat_ln", None, moi={k: v for k, v in kq.items() if k != "loi"})
+    db.commit()
+    return kq
+
+
 # ---- 🛒 Nhóm Google Chat «Purchasing Team»: báo mỗi ĐƠN MUA mới (app/po_thong_bao.py) ----
 @router.get("/purchasing/trang-thai")
 def purchasing_trang_thai(nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
@@ -3509,7 +3549,7 @@ def _bo_sung_du_toan_theo_po(db, dm, nd):
 
 
 @router.post("/don-mua/{dm_id}/duyet", response_model=DonMuaRa)
-def duyet_don_mua(dm_id: int, db: Session = Depends(get_db),
+def duyet_don_mua(dm_id: int, xac_nhan_ln: bool = False, db: Session = Depends(get_db),
                   nd: NguoiDung = Depends(yeu_cau(MODULE, "XEM"))):  # thấy được; quyền duyệt do han_muc
     dm = db.get(DonMua, dm_id)
     if dm is None:
@@ -3524,6 +3564,20 @@ def duyet_don_mua(dm_id: int, db: Session = Depends(get_db),
                             "(mã bán hàng · OP-… · KHO) rồi duyệt lại.")
     # ★ Tầng 1b: PO vượt/ngoài dự toán → chỉ CEO/ADMIN duyệt
     _chi_ceo_duyet_vuot(nd, getattr(dm, "vuot_du_toan", None), "PO")
+    # ★ Tầng 1c: 📉 KIỂM SOÁT LỢI NHUẬN theo nhóm mã (chi phí > doanh thu · biên < ngưỡng · chưa có doanh thu) → chỉ CEO
+    canh_bao_ln = None
+    try:
+        from ..kiem_soat_ln import danh_gia_po
+        canh_bao_ln = danh_gia_po(db, dm)
+    except Exception as _e:                          # lỗi tính toán không được chặn việc duyệt
+        print(f"[KIEM_SOAT_LN] PO {dm.id}: {type(_e).__name__}: {_e}")
+    if canh_bao_ln:
+        _so = dm.so or f"PO#{dm.id}"
+        if (getattr(getattr(nd, "vai_tro", None), "ma", None) or "").upper() != "CEO":
+            raise HTTPException(status.HTTP_403_FORBIDDEN,
+                                f"📉 {_so}: {canh_bao_ln['ly_do']} — chỉ CEO duyệt được đơn mua này.")
+        if not xac_nhan_ln:
+            raise HTTPException(status.HTTP_409_CONFLICT, f"📉 {_so}: {canh_bao_ln['ly_do']}")
     # ★ Tầng thứ hai: số tiền có nằm trong hạn mức duyệt của vai trò không?
     kiem_han_muc(db, nd, LOAI_DUYET, dm.tong_tien)
     # ★ Tầng thứ ba: kiểm soát HẠN MỨC CÔNG NỢ của NCC (dư nợ + đơn này không vượt trần)
@@ -3549,7 +3603,8 @@ def duyet_don_mua(dm_id: int, db: Session = Depends(get_db),
             bs_dt = {"loi": f"{type(_e).__name__}: {str(_e)[:150]}"}
     da_gui = gui_email_ncc(db, dm)  # gửi xác nhận PO từ đầu mối mua hàng
     ghi_audit(db, nd.id, "DUYET", "don_mua", dm.id,
-              moi={"trang_thai": "DA_DUYET", "email_ncc": da_gui, "bo_sung_du_toan": bs_dt})
+              moi={"trang_thai": "DA_DUYET", "email_ncc": da_gui, "bo_sung_du_toan": bs_dt,
+                   "canh_bao_ln": (canh_bao_ln or {}).get("ly_do")})
     db.commit()
     db.refresh(dm)
     return dm

@@ -18,6 +18,7 @@ _TUAN_BCVH = ""        # tuần đã gửi nhắc Báo cáo vận hành (thứ B
 _THANG_SAO_KE = ""     # tháng đã kiểm tra nhắc tải sao kê (ngày 7 hàng tháng)
 _NGAY_NHAC_TRN = ""    # ngày đã chạy nhắc thi Training (8h–17h VN, trừ Chủ nhật)
 _NGAY_NHAC_BC = ""     # ngày đã chạy nhắc «chưa hoàn thành báo cáo ngày» (sáng hôm sau, giờ VN)
+_TUAN_LN = ""          # tuần đã gửi 📉 bản kiểm soát lợi nhuận theo mã (thứ Hai từ 8h VN; mốc bền nằm trong audit_log)
 
 
 def _vong_lap():
@@ -102,6 +103,29 @@ def _vong_lap():
                     kq5 = _nhac_bc(db)
                     if kq5.get("da_gui") or kq5.get("loi"):
                         print(f"[SCHEDULER] 📝 Nhắc báo cáo ngày: {kq5}")
+                finally:
+                    db.close()
+            # 📉 Bản KIỂM SOÁT LỢI NHUẬN THEO MÃ: thứ Hai từ 8h (VN) → nhóm Duyệt chi, mỗi tuần một lần.
+            #    Đã gửi trong tuần (audit_log NHAC_TUAN) thì thôi — khởi động lại máy chủ không gửi trùng.
+            global _TUAN_LN
+            g6 = gio_hien_tai()
+            tuan6 = g6.strftime("%G-W%V")
+            if settings.ln_nhac_tuan and g6.weekday() == 0 and g6.hour >= 8 and _TUAN_LN != tuan6:
+                _TUAN_LN = tuan6
+                db = SessionLocal()
+                try:
+                    from datetime import timedelta as _td
+                    from .models import AuditLog as _AL
+                    dau_tuan = (g6 - _td(hours=settings.tz_offset_gio)).replace(hour=0, minute=0, second=0, microsecond=0) - _td(days=1)
+                    da = (db.query(_AL.id).filter(_AL.bang == "kiem_soat_ln", _AL.hanh_dong == "NHAC_TUAN",
+                                                  _AL.thoi_gian >= dau_tuan).first())
+                    if da is None:
+                        from .kiem_soat_ln import gui_tuan
+                        from .audit import ghi_audit as _ga
+                        kq6 = gui_tuan(db)
+                        _ga(db, None, "NHAC_TUAN", "kiem_soat_ln", None, moi={k: v for k, v in kq6.items() if k != "loi"})
+                        db.commit()
+                        print(f"[SCHEDULER] 📉 Kiểm soát lợi nhuận tuần: {kq6}")
                 finally:
                     db.close()
             # 📬 Tự quét thư hàng tuần — «đến hạn thì chạy»: mốc thứ+giờ (VN) lưu trong CSDL; app ngủ qua giờ hẹn

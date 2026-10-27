@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="vi">
 <head>
-<!-- build: purchasing-po-moi-2026-10-27 -->
+<!-- build: kiem-soat-ln-2026-10-27 -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#0f2c44">
@@ -559,6 +559,15 @@ async function apiKhoa(path,opts,st){
       if(st)st.dongY=true;
     }
     return api(path+(path.includes('?')?'&':'?')+'xac_nhan_khoa=1',opts);
+  }
+}
+/* 📉 Duyệt PO làm nhóm mã LỖ / biên thấp / chưa có doanh thu: máy chủ trả 409 cho CEO → hỏi rồi gửi lại ?xac_nhan_ln=1 */
+async function apiLn(path,opts){
+  try{return await api(path,opts);}
+  catch(e){
+    if(e.status!==409||!/📉/.test(e.detail||''))throw e;
+    if(!confirm((e.detail||'')+"\n\nAnh vẫn duyệt đơn mua này?")){const h=new Error("Đã hủy duyệt — đơn vẫn chờ duyệt");h.detail=h.message;h.huy=true;throw h;}
+    return api(path+(path.includes('?')?'&':'?')+'xac_nhan_ln=1',opts);
   }
 }
 function can(mod,lvl){return RANK[S.perm[pmod(mod)]||"KHONG"]>=RANK[lvl];}
@@ -1256,15 +1265,21 @@ function _ghepNhomMa(rows,veDong,veNhom){
     if(rs&&rs.length>=2){
       const dt=rs.reduce((s,r)=>s+Number(r.doanh_thu||0),0), cp=rs.reduce((s,r)=>s+Number(r.tong_chi_phi||0),0);
       html+=veNhom({nhom:x.nhom,so_ma:rs.length,doanh_thu:dt,tong_chi_phi:cp,loi_nhuan:dt-cp,ty_suat:dt?Math.round((dt-cp)/dt*1000)/10:null});
-      rs.forEach(r=>{daVe.add(r);html+=veDong(r,++stt,true);});
+      // mã con THU GỌN mặc định (bấm dòng 📂 để mở) — tránh «lỗ ảo» khi chi phí dồn một mã con, doanh thu chia -01/-02…
+      rs.forEach(r=>{daVe.add(r);html+=veDong(r,++stt,true).replace(/^\s*<tr/,'<tr data-con="1" hidden');});
     }else{daVe.add(x);html+=veDong(x,++stt,false);}
   });
   return html;
 }
+function _nhomMaMo(tr){
+  let n=tr.nextElementSibling, mo=null;
+  while(n&&n.getAttribute('data-con')==='1'){ if(mo===null)mo=n.hidden; n.hidden=!mo; n=n.nextElementSibling; }
+  const mui=tr.querySelector('.nhomMui'); if(mui)mui.textContent=mo?'▾':'▸';
+}
 function _nhomMaTR(g,cols){
   const ln=Number(g.loi_nhuan||0);
   const gc=g.ty_suat!=null?(ln>=0?`<span class="badge b-ok">Lãi ${g.ty_suat}%</span>`:`<span class="badge b-tc">Lỗ ${g.ty_suat}%</span>`):'<span class="badge b-cho">chưa có doanh thu</span>';
-  return `<tr style="background:var(--panel2,#f4f6f8);font-weight:700"><td></td><td style="white-space:nowrap" title="Gom mọi mã cùng gốc + tháng: đơn bán tách -01/-02/-BT… và PO chỉ ghi mã gốc">📂 ${String(g.nhom).replace(/</g,'&lt;')} <span class="badge b-info" style="font-weight:400">${g.so_ma} mã</span></td>
+  return `<tr style="background:var(--panel2,#f4f6f8);font-weight:700;cursor:pointer" onclick="_nhomMaMo(this)"><td><span class="nhomMui">▸</span></td><td style="white-space:nowrap" title="Gom mọi mã cùng gốc + tháng: đơn bán tách -01/-02/-BT… và PO chỉ ghi mã gốc — bấm để xem / ẩn từng mã con">📂 ${String(g.nhom).replace(/</g,'&lt;')} <span class="badge b-info" style="font-weight:400">${g.so_ma} mã</span></td>
     <td class="num">${vnd(g.doanh_thu)}</td><td class="num">${vnd(g.tong_chi_phi)}</td>
     <td class="num"><b style="color:${ln>=0?'#16a34a':'#dc2626'}">${vnd(ln)}</b></td><td>${gc}</td></tr>`;
 }
@@ -1274,8 +1289,8 @@ function _llBatThuong(x){const dt=Number(x.doanh_thu||0),cp=Number(x.tong_chi_ph
   if(x.la_dau_tu)return false;                                // 🏗 đơn ĐẦU TƯ – cho thuê: chi phí là vốn đầu tư, không phải lỗ
   return !!x.don_hang_id&&cp>=5e6&&dt<cp*0.1;}
 function _llMaDong(x,i,con){
-  const mau=v=>v>=0?'#16a34a':'#dc2626', bt=_llBatThuong(x), ma=String(x.ma_ban).replace(/</g,'&lt;');
-  const ghiChu=bt?`<span class="badge b-tc" style="white-space:normal" title="Mã này có đơn bán nhưng DOANH THU (${vnd(x.doanh_thu)}) nhỏ hơn 10% CHI PHÍ (${vnd(x.tong_chi_phi)}) — nhiều khả năng giá trị đơn bán nhập tạm / chưa cập nhật. Sửa giá trị đơn ở Bán hàng → Đơn hàng; lãi/lỗ mọi nơi tự tính lại.">⚠ doanh thu bất thường — kiểm tra giá trị đơn bán</span>`
+  const mau=v=>v>=0?'#16a34a':'#dc2626', bt=!con&&_llBatThuong(x), ma=String(x.ma_ban).replace(/</g,'&lt;');
+  const ghiChu=(con&&!x.la_dau_tu)?'<span style="color:var(--muted);font-size:11px" title="Mã con trong nhóm — lãi/lỗ đọc ở dòng nhóm 📂 phía trên (chi phí và doanh thu có thể nằm ở các mã con khác nhau)">↳ xem dòng nhóm</span>':bt?`<span class="badge b-tc" style="white-space:normal" title="Mã này có đơn bán nhưng DOANH THU (${vnd(x.doanh_thu)}) nhỏ hơn 10% CHI PHÍ (${vnd(x.tong_chi_phi)}) — nhiều khả năng giá trị đơn bán nhập tạm / chưa cập nhật. Sửa giá trị đơn ở Bán hàng → Đơn hàng; lãi/lỗ mọi nơi tự tính lại.">⚠ doanh thu bất thường — kiểm tra giá trị đơn bán</span>`
     :(x.la_dau_tu?`<span class="badge" style="background:#ede9fe;color:#6d28d9;white-space:normal" title="Đơn ĐẦU TƯ – cho thuê: PO của mã này là VỐN ĐẦU TƯ của dự án cho thuê (tài sản, khấu hao dần theo số tháng hợp đồng) — không vào doanh thu / chi phí theo mã. Xem Cho thuê → bảng Đầu tư.">🏗 ĐẦU TƯ${x.von_dau_tu!=null?' · vốn '+vnd(x.von_dau_tu):''}</span>`
     :(x.ty_suat!=null?(x.loi_nhuan>=0?`<span class="badge b-ok">Lãi ${x.ty_suat}%</span>`:`<span class="badge b-tc">Lỗ ${x.ty_suat}%</span>`):'—'));
   return `<tr${bt?' style="background:#fef2f2"':''}><td>${i}</td><td${con?' style="padding-left:22px"':''}>${con?'<span style="color:var(--muted)">└ </span>':''}${x.don_hang_id?`<a href="#" onclick="ksCpChiTiet(${x.don_hang_id});return false" title="Bấm để mở danh mục TẤT CẢ chi phí của mã này (tự lưu bản CSV vào Kho tệp dùng chung)"><span class="badge b-info" style="cursor:pointer;border-bottom:1px dashed currentColor">${ma}</span></a>`:`<span class="badge b-cho" title="Mã này chưa có đơn bán nào trong app — chi phí vẫn được tính, doanh thu để 0">${ma} ⚠</span>`}</td>
@@ -1290,13 +1305,19 @@ function _llMaLoc(){
   if(S._llMaBT)rows=rows.filter(_llBatThuong);
   if(q)rows=rows.filter(x=>kd(x.ma_ban).includes(q)||kd(x.nhom||'').includes(q));
   const so=f=>(a,b)=>f(b)-f(a);
-  if(kieu==='lo')rows.sort((a,b)=>Number(a.loi_nhuan||0)-Number(b.loi_nhuan||0));
-  else if(kieu==='lai')rows.sort(so(x=>Number(x.loi_nhuan||0)));
-  else if(kieu==='cp')rows.sort(so(x=>Number(x.tong_chi_phi||0)));
-  else if(kieu==='dt')rows.sort(so(x=>Number(x.doanh_thu||0)));
+  // 📂 xếp hạng theo NHÓM gốc + tháng (mã con đứng liền nhau dưới dòng nhóm) khi không tìm / không lọc
+  const gom=!q&&!S._llMaBT, agg={};
+  if(gom)rows.forEach(x=>{const k=x.nhom||('#'+x.ma_ban),a=agg[k]=agg[k]||{dt:0,cp:0};a.dt+=Number(x.doanh_thu||0);a.cp+=Number(x.tong_chi_phi||0);});
+  const G=x=>agg[x.nhom||('#'+x.ma_ban)];
+  const ln_=x=>gom?(G(x).dt-G(x).cp):Number(x.loi_nhuan||0), cp_=x=>gom?G(x).cp:Number(x.tong_chi_phi||0), dt_=x=>gom?G(x).dt:Number(x.doanh_thu||0);
+  const nk=x=>String(x.nhom||x.ma_ban||'');
+  if(kieu==='lo')rows.sort((a,b)=>ln_(a)-ln_(b)||nk(a).localeCompare(nk(b)));
+  else if(kieu==='lai')rows.sort((a,b)=>ln_(b)-ln_(a)||nk(a).localeCompare(nk(b)));
+  else if(kieu==='cp')rows.sort((a,b)=>cp_(b)-cp_(a)||nk(a).localeCompare(nk(b)));
+  else if(kieu==='dt')rows.sort((a,b)=>dt_(b)-dt_(a)||nk(a).localeCompare(nk(b)));
   else if(kieu==='az')rows.sort((a,b)=>String(a.ma_ban||'').localeCompare(String(b.ma_ban||'')));
-  // gom nhóm 📂 chỉ khi xem đủ danh sách theo thứ tự mới nhất / A→Z; đang tìm · lọc · xếp hạng → liệt kê phẳng từng mã
-  return {rows,gom:(kieu==='moi'||kieu==='az')&&!q&&!S._llMaBT};
+  // gom nhóm 📂 mặc định (mọi kiểu xếp); đang tìm · lọc bất thường → liệt kê phẳng từng mã
+  return {rows,gom};
 }
 function _llMaHTML(){
   const {rows,gom}=_llMaLoc();
@@ -10687,6 +10708,9 @@ async function nccPO(host){
   let pos;
   if(S.mode==="live"){ try{pos=await api("/ncc/don-mua");}catch(e){toast(e.detail||e.message,"err");pos=[];} }
   else pos=DEMO.don_mua;
+  // 📉 cờ kiểm soát lợi nhuận của PO chờ duyệt (cùng phép tính lúc duyệt) — chỉ CEO duyệt được PO mang cờ
+  let lnMap={}; if(S.mode==="live"&&(pos||[]).some(p=>p.trang_thai==="CHO_DUYET")){try{lnMap=await api('/ncc/kiem-soat-ln/po-cho-duyet');}catch(_){lnMap={};}}
+  const _lnNhan={LO:'📉 Làm mã LỖ',BIEN_THAP:'📉 Biên lợi nhuận thấp',CHUA_DT:'📉 Mã chưa có doanh thu'};
   const hhName=id=>{const h=hhs.find(x=>x.id===id);return h?h.ten:("HH #"+id);};
   const supName=id=>{const s=sups.find(x=>x.id===id);return s?s.ten:("NCC #"+id);};
   const ordNo=id=>{if(!id)return '—';const o=orders.find(x=>x.id===id);return o?(o.so||('DH-'+id)):('Đơn #'+id);};
@@ -10720,7 +10744,7 @@ async function nccPO(host){
       <td style="white-space:nowrap;font-size:11.5px">${p.don_hang_id?ordNo(p.don_hang_id):(p.ma_ban?String(p.ma_ban).replace(/</g,'&lt;'):'—')}</td>
       <td style="min-width:150px;max-width:280px;white-space:normal;word-break:break-word;line-height:1.25;font-size:12px" title="Bấm ✏️ để xem đầy đủ dòng hàng">${String(hhTxt).replace(/</g,'&lt;')}</td>
       <td class="num">${vnd(Number(p.tong_tien))}</td>
-      <td>${stt(p.trang_thai)}${p.da_dat_hang?' <span class="badge b-info">📦 Đã đặt hàng</span>':''}${p.vuot_du_toan?`<div><span class="badge ${_vdtLop(p.vuot_du_toan)}" title="${String(p.vuot_du_toan).replace(/"/g,'&quot;')}">${_vdtNhan(p.vuot_du_toan)}</span></div>`:''}</td><td>${nhanBadge(p.trang_thai_nhan)}</td><td style="white-space:nowrap">${act||'—'}</td></tr>`;
+      <td>${stt(p.trang_thai)}${p.da_dat_hang?' <span class="badge b-info">📦 Đã đặt hàng</span>':''}${p.vuot_du_toan?`<div><span class="badge ${_vdtLop(p.vuot_du_toan)}" title="${String(p.vuot_du_toan).replace(/"/g,'&quot;')}">${_vdtNhan(p.vuot_du_toan)}</span></div>`:''}${(p.trang_thai==="CHO_DUYET"&&lnMap[p.id])?`<div><span class="badge b-tc" style="white-space:normal" title="${String(lnMap[p.id].ly_do||'').replace(/"/g,'&quot;')} — chỉ CEO duyệt được">${_lnNhan[lnMap[p.id].muc]||'📉 Kiểm soát lợi nhuận'} · chỉ CEO duyệt</span></div>`:''}</td><td>${nhanBadge(p.trang_thai_nhan)}</td><td style="white-space:nowrap">${act||'—'}</td></tr>`;
   };
   // 2 bảng độc lập: Chưa duyệt & Đã duyệt — droplist Năm → Tháng → Tuần (bảng tuần có cột Ngày tạo)
   const poChua=pos.filter(p=>p.trang_thai!=="DA_DUYET");
@@ -10876,7 +10900,7 @@ async function poDuyetNhieu(){
   let ok=0; const loi=[];
   for(const c of cs){
     if(S.mode==="live"){
-      try{await api(`/ncc/don-mua/${c.value}/duyet`,{method:'POST'});ok++;}
+      try{await apiLn(`/ncc/don-mua/${c.value}/duyet`,{method:'POST'});ok++;}
       catch(e){loi.push(`${c.dataset.so}: ${e.detail||e.message}`);}
     } else {
       const p=(DEMO.don_mua||[]).find(x=>x.id===Number(c.value));
@@ -11164,7 +11188,7 @@ async function poTuChoi(id,so){
   viewNCC($("#main"));
 }
 async function duyetPO(id,amount){
-  if(S.mode==="live"){ try{await api(`/ncc/don-mua/${id}/duyet`,{method:'POST'});
+  if(S.mode==="live"){ try{await apiLn(`/ncc/don-mua/${id}/duyet`,{method:'POST'});
     toast("Đã duyệt đơn mua","ok");viewNCC($("#main"));}catch(e){toast(e.status===403?("Bị chặn: "+(e.detail||"vượt hạn mức")):(e.detail||e.message),"err");} return; }
   const cap=HANMUC.po[S.role];
   if(cap===undefined){toast("Vai trò "+S.role+" không có quyền duyệt đơn mua","err");return;}
@@ -12415,13 +12439,14 @@ async function nccKiemSoat(host){
   const cpTongLN=cpTongDT-cpTongCP;
   const cpRows=_ghepNhomMa(chiPhi,(x,i,con)=>{
     const ln=Number(x.loi_nhuan||0);
-    const gc=x.ty_suat!=null?(ln>=0?`<span class="badge b-ok">Lãi ${x.ty_suat}%</span>`:`<span class="badge b-tc">Lỗ ${x.ty_suat}%</span>`):'<span class="badge b-cho" title="Mã chưa có đơn bán — chỉ có chi phí">chưa có đơn bán</span>';
+    const gc=con?'<span style="color:var(--muted);font-size:11px" title="Mã con trong nhóm — lãi/lỗ đọc ở dòng nhóm 📂 phía trên (chi phí và doanh thu có thể nằm ở các mã con khác nhau)">↳ xem dòng nhóm</span>':(x.ty_suat!=null?(ln>=0?`<span class="badge b-ok">Lãi ${x.ty_suat}%</span>`:`<span class="badge b-tc">Lỗ ${x.ty_suat}%</span>`):'<span class="badge b-cho" title="Mã chưa có đơn bán — chỉ có chi phí">chưa có đơn bán</span>');
     const ma=String(x.ma_ban||'').replace(/</g,'&lt;');
     return `<tr><td>${i}</td><td style="white-space:nowrap${con?';padding-left:22px':''}">${con?'<span style="color:var(--muted)">└ </span>':''}${x.don_hang_id?`<a href="#" onclick="ksCpChiTiet(${x.don_hang_id});return false" title="Xem danh mục tất cả chi phí của mã này (tự lưu vào Kho tệp dùng chung)"><span class="badge b-info" style="cursor:pointer;border-bottom:1px dashed currentColor">${ma}</span></a>`:`<span class="badge b-cho" title="PO / công nợ mang mã này nhưng chưa có đơn bán cùng số">${ma} ⚠</span>`}</td>
       <td class="num">${vnd(x.doanh_thu)}</td><td class="num">${vnd(x.tong_chi_phi)}</td>
       <td class="num"><b style="color:${ln>=0?'#16a34a':'#dc2626'}">${vnd(ln)}</b></td>
       <td>${gc}</td></tr>`;},_nhomMaTR);
   const chiPhiPanel=`<div class="panel"><div class="panel-h"><h3>💰 Chi phí theo Mã Đơn hàng</h3><div class="spacer"></div>
+      ${laQTV()&&S.mode==="live"?`<button class="btn-sm ghost" style="margin-right:10px" title="Nhóm mã đang lỗ · có chi phí chưa có doanh thu · biên thấp — app tự gửi vào nhóm Duyệt chi mỗi thứ Hai 8h" onclick="ksLnXem()">📉 Bản kiểm soát lợi nhuận</button>`:''}
       <span class="num" style="font-weight:700">Doanh thu: ${vnd(cpTongDT)} · Chi phí: ${vnd(cpTongCP)} · Lợi nhuận: <span style="color:${cpTongLN>=0?'#16a34a':'#dc2626'}">${vnd(cpTongLN)}</span></span></div>
     <div class="note">Tổng hợp theo từng mã đơn hàng bán. <b>Tổng chi phí = Σ PO đã duyệt gắn mã</b> (nghĩa vụ — không đổi khi trả từng đợt) <b>+ công nợ nhập ngoài khớp mã + hóa đơn mua gắn mã</b>. <b>Lợi nhuận = Doanh thu (GỒM VAT) − Tổng chi phí (gồm VAT)</b> — hai vế cùng cơ sở thuế. <b>📂 Dòng nhóm</b> = gom mọi mã cùng <b>gốc + tháng</b> (đơn bán tách -01/-02/-BT… và PO chỉ ghi mã gốc) — nhìn nhóm để biết lãi/lỗ thật của một công trình-tháng. Mã ⚠ = có chi phí nhưng chưa có đơn bán. Bấm vào <b>mã đơn hàng</b> để xem danh mục chi phí — tự lưu vào <b>📁 Kho tệp dùng chung</b>.</div>
     <div class="panel-b" style="overflow-x:auto"><table><thead><tr><th>Stt</th><th>Mã Đơn Hàng</th><th class="num">Doanh thu</th><th class="num">Tổng chi phí</th><th class="num">Lợi nhuận</th><th>Ghi chú</th></tr></thead>
@@ -12458,6 +12483,23 @@ async function nccKiemSoat(host){
         ||'<tr><td colspan="9" class="empty" style="padding:18px">Chưa có PO nào thanh toán đủ 100%.</td></tr>'}</tbody></table></div></div>`;
 }
 
+/* 📉 Bản kiểm soát lợi nhuận theo nhóm mã: xem trước → gửi nhóm Duyệt chi (app tự gửi mỗi thứ Hai 8h) */
+async function ksLnXem(){
+  let d; try{d=await api('/ncc/kiem-soat-ln/tuan');}catch(e){return toast(e.detail||e.message,"err");}
+  const e_=s=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;');
+  _ktModal("📉 Bản kiểm soát lợi nhuận theo mã",`
+    <div style="display:flex;gap:14px;flex-wrap:wrap;font-size:13px;margin-bottom:8px">
+      <span>🔴 Đang lỗ: <b>${d.so_lo}</b></span><span>🟠 Có chi phí chưa có doanh thu: <b>${d.so_chua_dt}</b></span><span>🟡 Biên dưới ${d.nguong}%: <b>${d.so_bien_thap}</b></span></div>
+    ${d.noi_dung?`<pre style="white-space:pre-wrap;font-size:12px;background:var(--surface);padding:8px 10px;border-radius:8px;max-height:52vh;overflow:auto">${e_(d.noi_dung)}</pre>`:'<div class="empty" style="padding:12px">Không có nhóm mã nào lỗ / chưa có doanh thu / biên thấp 🎉</div>'}
+    <div class="note" style="margin-top:8px;color:var(--muted)">Tính theo nhóm mã gốc + tháng (mã con -01/-02… gộp chung). Bỏ mã OP (chi phí vận hành), KHO, dự án đầu tư cho thuê; nhóm của tháng hiện tại chưa có doanh thu thì chưa tính. App tự gửi bản này vào nhóm Duyệt chi mỗi thứ Hai 8h.</div>
+    ${d.noi_dung?(d.co_webhook?`<button class="btn-sm" style="margin-top:10px" onclick="ksLnGui()">📣 Gửi ngay vào nhóm Duyệt chi</button>`:'<div class="note" style="margin-top:8px;color:#d97706">Chưa cấu hình webhook nhóm Duyệt chi (GCHAT_WEBHOOK_DUYET_CHI) nên chưa gửi được.</div>'):''}`);
+}
+async function ksLnGui(){
+  if(!confirm("Gửi bản kiểm soát lợi nhuận theo mã vào nhóm Duyệt chi ngay bây giờ?"))return;
+  let r; try{r=await api('/ncc/kiem-soat-ln/gui',{method:'POST'});}catch(e){return toast(e.detail||e.message,"err");}
+  document.getElementById('ktModal')?.remove();
+  toast(r.da_gui?"Đã gửi vào nhóm Duyệt chi":"Chưa gửi: "+(r.ly_do||r.loi||''),r.da_gui?"ok":"err");
+}
 /* ---------- KẾ TOÁN: quỹ tiền · phiếu thu–chi (duyệt nhiều cấp) · lãi/lỗ mã bán · cân đối ---------- */
 const KT_TT={NHAP:['Nháp','b-cho'],CHO_DUYET:['Chờ duyệt','b-cho'],DA_DUYET:['Đã duyệt','b-ok'],TU_CHOI:['Từ chối','b-tc'],HUY:['Đã hủy','b-tc'],DA_DAO:['↩ Đã đảo','b-tc']};
 function _ktInitDemo(){ if(!DEMO.ke_toan)DEMO.ke_toan={quy:[
