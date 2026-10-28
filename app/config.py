@@ -64,6 +64,7 @@ class Settings(BaseSettings):
     bg_bien_vat_tu: float = 25.0
     bg_bien_nhan_cong: float = 30.0
     bg_chi_phi_chung: float = 5.0        # % chi phí chung tính trên giá vốn trước khi tính biên
+    bg_ap_dung_tu: str = "2026-10-28"    # 📋 báo giá tạo TRƯỚC ngày này và đã duyệt / đã gửi khách → miễn bắt buộc dự toán (gửi lại được)
     gchat_service_account: str = ""      # dùng cho chế độ APP: DÁN NGUYÊN nội dung file JSON key
     nhac_viec_gui_khi_tao: bool = True   # gửi ngay khi vừa đặt lời nhắc
     nhac_viec_ban_tin: bool = True       # bản tin tổng hợp đầu ngày

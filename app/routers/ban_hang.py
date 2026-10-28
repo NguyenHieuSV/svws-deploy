@@ -1347,7 +1347,7 @@ def ds_bao_gia_form(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XE
 @router.get("/bao-gia-form/kiem-soat")
 def bao_gia_kiem_soat(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
     """📋 / 📉 của từng báo giá (200 mới nhất): dự toán gốc, thiếu gì, biên so với dự toán. Kèm biên gợi ý cho nút tạo."""
-    from ..bao_gia_ks import bien_goi_y, bien_toi_thieu, kiem_tra
+    from ..bao_gia_ks import bien_goi_y, bien_toi_thieu, kiem_tra, mien_truoc_moc
     out = {}
     for b in db.query(BaoGiaForm).order_by(BaoGiaForm.id.desc()).limit(200).all():
         if (b.noi_dung or {}).get("loai") == "HOP_DONG":
@@ -1358,13 +1358,29 @@ def bao_gia_kiem_soat(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "
             print(f"[BG_KS] {b.id}: {type(e).__name__}: {e}")
             continue
         dt = k["du_toan"] or {}
+        its_ = [it for it in (b.noi_dung or {}).get("items") or [] if str(it.get("ten") or "").strip()
+                and not it.get("khong_chao") and not it.get("tuy_chon") and float(it.get("so_luong") or 0) > 0]
         out[str(b.id)] = {"du_toan_ma": dt.get("ma"), "du_toan_loai": dt.get("loai"), "thieu": k["thieu_du_toan"],
                           "bien": k["bien"], "canh_bao_bien": k["canh_bao_bien"],
+                          "mien_truoc_moc": bool(k["thieu_du_toan"] and mien_truoc_moc(db, b)),
+                          "tao_nguoc_duoc": bool(k["thieu_du_toan"] and not dt and its_
+                                                 and all(float(it.get("don_gia") or 0) > 0 for it in its_)),
                           "ngoai_du_toan": len(k["ngoai_du_toan"]), "ngoai_chua_uoc": len(k["ngoai_chua_uoc"]),
                           "so_bo": k["so_bo"], "dt_doi_gia": len(k["dt_doi_gia"])}
     from ..bao_gia_ks import MAU_DIEU_KHOAN, la_qtv, san_bien
     return {"bao_gia": out, "bien_toi_thieu": bien_toi_thieu(), "bien_goi_y": bien_goi_y(),
             "san_bien": san_bien(), "duoc_duoi_san": la_qtv(_), "mau_dieu_khoan": MAU_DIEU_KHOAN}
+
+
+@router.post("/bao-gia-form/{bgf_id}/tao-du-toan")
+def bao_gia_tao_du_toan(bgf_id: int, db: Session = Depends(get_db),
+                        nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    """📋 Tạo DỰ TOÁN HÀNG BÁN ngược từ các dòng báo giá (giá vốn ước = giá bán − sàn biên), nối báo giá vào dự toán."""
+    from ..bao_gia_ks import tao_du_toan_tu_bao_gia
+    bgf = db.get(BaoGiaForm, bgf_id)
+    if bgf is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy báo giá")
+    return tao_du_toan_tu_bao_gia(db, bgf, nd)
 
 
 @router.get("/bao-gia-form/{bgf_id}/doi-chieu")

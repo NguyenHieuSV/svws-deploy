@@ -136,6 +136,73 @@ def so_sanh_lan_truoc(db: Session, bgf) -> dict | None:
             "them": them, "bot": bot, "doi_gia": doi, "so_phien_ban": len(ds)}
 
 
+def tao_du_toan_tu_bao_gia(db: Session, bgf, nd) -> dict:
+    """📋 Dựng DỰ TOÁN HÀNG BÁN từ chính các dòng báo giá (dọn 47 báo giá cũ thiếu dự toán, 28/10/2026).
+    Giá vốn tạm = giá bán × (1 − sàn biên nhóm) (nhân viên sửa lại sau); dòng tùy chọn / không chào bỏ qua.
+    Báo giá được nối du_toan_id + dt_muc_id + gia_von để từ đây tính biên như báo giá tạo từ dự toán."""
+    from datetime import date as _d
+    from decimal import Decimal
+    from fastapi import HTTPException, status
+    from sqlalchemy import func
+    from .audit import ghi_audit
+    from .ma_code import bat_buoc as _bb_ma
+    from .models import DuToanBan, DuToanBanMuc, HangHoa, KhachHang
+    nd_ = bgf.noi_dung or {}
+    ma = str(bgf.so or nd_.get("so") or "").strip()
+    if not ma:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Báo giá chưa có số — nhập số báo giá (mã) trước")
+    if tim_du_toan(db, bgf) is not None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Mã {ma} đã có dự toán — mở báo giá để nối / cập nhật")
+    its = [it for it in (nd_.get("items") or []) if str(it.get("ten") or "").strip() and not it.get("khong_chao")
+           and not it.get("tuy_chon") and float(it.get("so_luong") or 0) > 0]
+    if not its:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Báo giá không có dòng sản phẩm (báo giá theo file đính kèm) — lập dự toán tay ở Bán hàng → Dự toán hàng bán")
+    ma = _bb_ma(ma[:30], nd, True, nhan="Mã dự toán")
+    if db.query(DuToanBan).filter(func.lower(DuToanBan.ma) == ma.lower()).first():
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Mã hàng bán '{ma}' đã có dự toán")
+    kh_ten = db.query(KhachHang.ten).filter(KhachHang.id == bgf.khach_hang_id).scalar() if getattr(bgf, "khach_hang_id", None) else None
+    try:
+        ngay = _d.fromisoformat(str(nd_.get("ngay") or "")[:10])
+    except ValueError:
+        ngay = _d.today()
+    d = DuToanBan(ma=ma, khach_hang=(kh_ten or nd_.get("khach_ten") or None),
+                  mo_ta=(str(nd_.get("tieu_de") or "")[:300] or None) and f"Tạo ngược từ báo giá {ma} — {str(nd_.get('tieu_de') or '')[:200]}",
+                  ngay=ngay, nguoi_tao="Tạo ngược từ báo giá")
+    db.add(d); db.flush()
+    san = san_bien()
+    cpc = san["chi_phi_chung"] / 100
+    so_dong, co_von = 0, 0
+    for it in its:
+        ten = str(it.get("ten")).strip()[:250]
+        gia_ban = float(it.get("don_gia") or 0)
+        von = float(it.get("gia_von") or 0)
+        if von <= 0 and gia_ban > 0:
+            nhom = (it.get("nhom") or "VAT_TU").upper()
+            von = gia_ban * (1 - san.get(nhom, san["VAT_TU"]) / 100) / (1 + cpc)   # ước ngược từ sàn biên
+            von = round(von / 1000) * 1000
+        hh_id = db.query(HangHoa.id).filter(func.lower(func.trim(HangHoa.ten)) == ten.lower()).scalar()   # chỉ lấy id (không nạp quan hệ)
+        m = DuToanBanMuc(du_toan_id=d.id, ten=ten, quy_cach=(str(it.get("mo_ta") or "")[:2000] or None),
+                         don_vi=(str(it.get("don_vi") or "")[:40] or None), so_luong=Decimal(str(it.get("so_luong") or 1)),
+                         don_gia=Decimal(str(round(von))), hang_hoa_id=hh_id,
+                         ghi_chu="Giá vốn ƯỚC từ giá bán − sàn biên (tạo ngược từ báo giá) — cần rà lại" if von > 0 else None)
+        db.add(m); db.flush()
+        it["dt_muc_id"] = m.id
+        if float(it.get("gia_von") or 0) <= 0:
+            it["gia_von"] = round(von)
+        it.pop("ngoai_du_toan", None)
+        so_dong += 1
+        co_von += 1 if von > 0 else 0
+    nd_["du_toan_id"], nd_["du_toan_ma"] = d.id, d.ma
+    nd_.setdefault("bien_nhom", {k: san[k] for k in ("THIET_BI", "VAT_TU", "NHAN_CONG")})
+    nd_.setdefault("chi_phi_chung", san["chi_phi_chung"])
+    bgf.noi_dung = dict(nd_)
+    from sqlalchemy.orm.attributes import flag_modified
+    flag_modified(bgf, "noi_dung")                 # JSONB: báo rõ đã đổi để SQLAlchemy ghi xuống DB
+    ghi_audit(db, nd.id, "TAO_TU_BAO_GIA", "du_toan_ban", d.id, moi={"bao_gia": bgf.id, "ma": ma, "so_dong": so_dong})
+    db.commit()
+    return {"du_toan_id": d.id, "ma": d.ma, "so_dong": so_dong, "co_von": co_von}
+
+
 def dt_doi_gia(du_toan: dict | None, noi_dung: dict) -> list:
     """Dòng báo giá có dt_muc_id mà giá vốn / SL lưu trong báo giá khác dự toán HIỆN TẠI → [{ten, cu, moi, sl_cu, sl_moi}]
     (dự toán đổi sau khi lập báo giá — ví dụ mua được rẻ hơn)."""
@@ -271,12 +338,43 @@ def chan_duoi_san(noi_dung: dict, nd) -> None:
                             "Nhân viên chỉ chỉnh giá từ sàn trở lên — muốn thấp hơn, nhờ CEO / Admin sửa.")
 
 
+def ngay_ap_dung():
+    """Mốc bắt buộc dự toán (config bg_ap_dung_tu). Báo giá tạo trước mốc và đã DA_DUYET / DA_GUI → miễn cổng 📋
+    (không chặn gửi lại cho khách) — vẫn hiện nhãn trên danh sách để biết."""
+    from datetime import date as _d
+    try:
+        return _d.fromisoformat((settings.bg_ap_dung_tu or "").strip()) if (settings.bg_ap_dung_tu or "").strip() else None
+    except ValueError:
+        return None
+
+
+def mien_truoc_moc(db: Session, bgf) -> bool:
+    from datetime import date as _d
+    from .models import AuditLog
+    ad = ngay_ap_dung()
+    if ad is None or getattr(bgf, "trang_thai", None) not in ("DA_DUYET", "DA_GUI"):
+        return False
+    nd = bgf.noi_dung or {}
+    try:
+        ngay = _d.fromisoformat(str(nd.get("ngay") or "")[:10])
+    except ValueError:
+        ngay = None
+    if ngay is None:                                            # không có ngày trên báo giá → lấy ngày tạo trong audit
+        al = (db.query(AuditLog.thoi_gian).filter(AuditLog.bang == "bao_gia_form", AuditLog.ban_ghi_id == bgf.id,
+                                                   AuditLog.hanh_dong == "TAO").order_by(AuditLog.id).first())
+        ngay = al[0].date() if al and al[0] else None
+    return bool(ngay and ngay < ad)
+
+
 def cong(db: Session, bgf, nd, xac_nhan: bool, buoc: str, kiem_bien: bool = False) -> dict:
     """Cổng kiểm soát một bước (TRÌNH DUYỆT / DUYỆT / GỬI KHÁCH).
     Thiếu dự toán: người thường 400; CEO chưa xác nhận 409 (📋). Biên thấp (khi kiem_bien): người thường 403; CEO 409 (📉)."""
     from fastapi import HTTPException, status
     k = kiem_tra(db, bgf)
     van_de = []
+    if k["thieu_du_toan"] and mien_truoc_moc(db, bgf):         # báo giá cũ đã duyệt / đã gửi → miễn, chỉ ghi vết
+        k["mien_truoc_moc"] = True
+        k["thieu_du_toan"] = None
     if k["thieu_du_toan"]:
         if not la_ceo(nd):
             raise HTTPException(status.HTTP_400_BAD_REQUEST,

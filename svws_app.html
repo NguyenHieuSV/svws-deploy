@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="vi">
 <head>
-<!-- build: bao-gia-buoc3-2026-10-28 -->
+<!-- build: bao-gia-don-cu-2026-10-28 -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#0f2c44">
@@ -5819,8 +5819,11 @@ async function bhBaoGia(host){
   S._bgKsCfg=bgKs;
   drafts=drafts.filter(g=>!(g.noi_dung&&g.noi_dung.loai==='HOP_DONG'));
   // 📋 dự toán gốc + 📉 biên so với dự toán (cùng phép kiểm lúc trình duyệt / duyệt)
+  window._bgfTaoDtDs=Object.entries(bgKs.bao_gia||{}).filter(([id,k])=>k.tao_nguoc_duoc).map(([id])=>Number(id));
   const _bgKsNhan=id=>{const k=(bgKs.bao_gia||{})[id]; if(!k)return '';
-    if(k.thieu)return `<div><span class="badge b-tc" style="white-space:normal" title="${_bcEscA(k.thieu)} — người thường không trình duyệt / gửi được; CEO được vượt">📋 ${k.du_toan_ma?'dự toán thiếu giá':'chưa có dự toán'}</span></div>`;
+    if(k.thieu){
+      if(k.mien_truoc_moc)return `<div><span class="badge b-cho" style="white-space:normal" title="${_bcEscA(k.thieu)} — báo giá tạo trước 28/10/2026 và đã duyệt / đã gửi nên vẫn gửi lại được; lập dự toán để có kiểm soát biên">📋 thiếu dự toán (trước mốc — miễn)</span>${k.tao_nguoc_duoc?` <button class="btn-sm ghost" style="font-size:11px;padding:1px 6px" title="Tạo dự toán hàng bán từ chính các dòng báo giá này (giá vốn ước = giá bán − sàn biên, sửa lại sau) rồi nối báo giá vào" onclick="bgfTaoDuToan(${id})">➕ Tạo dự toán</button>`:''}</div>`;
+      return `<div><span class="badge b-tc" style="white-space:normal" title="${_bcEscA(k.thieu)} — người thường không trình duyệt / gửi được; CEO được vượt">📋 ${k.du_toan_ma?'dự toán thiếu giá':'chưa có dự toán'}</span>${k.tao_nguoc_duoc?` <button class="btn-sm ghost" style="font-size:11px;padding:1px 6px" title="Tạo dự toán hàng bán từ chính các dòng báo giá này (giá vốn ước = giá bán − sàn biên, sửa lại sau) rồi nối báo giá vào" onclick="bgfTaoDuToan(${id})">➕ Tạo dự toán</button>`:''}</div>`;}
     if(k.canh_bao_bien)return `<div><span class="badge b-cho" style="white-space:normal" title="${_bcEscA(k.canh_bao_bien)} — chỉ CEO duyệt">📉 ${k.bien!=null?'biên '+String(k.bien).replace('.',',')+'%':'chưa so được biên'} · ${_bcEscH(k.du_toan_ma||'')}</span></div>`;
     const them=(k.ngoai_chua_uoc?`<span class="badge b-tc" title="Dòng ngoài dự toán chưa ước chi phí — người thường không trình duyệt được">➕ ${k.ngoai_chua_uoc} chưa ước</span>`:(k.ngoai_du_toan?`<span class="badge b-cho" title="Dòng nhân viên thêm ngoài dự toán (đã ước chi phí)">➕ ${k.ngoai_du_toan} ngoài DT</span>`:''))+(k.dt_doi_gia?` <span class="badge b-cho" title="Dự toán đã đổi giá / SL sau khi lập báo giá — mở báo giá để cập nhật">🔄 ${k.dt_doi_gia} đổi giá</span>`:'')+(k.so_bo?` <span class="badge b-info" title="Dòng dự toán không chào">− ${k.so_bo} không chào</span>`:'');
     return `<div><span class="badge b-ok" title="Dự toán gốc ${_bcEscA(k.du_toan_ma||'')} (${k.du_toan_loai==='BOQ'?'BOQ dự án':'Dự toán hàng bán'})">📋 ${_bcEscH(k.du_toan_ma||'')}${k.bien!=null?' · biên '+String(k.bien).replace('.',',')+'%':''}</span> ${them}</div>`;};
@@ -5849,6 +5852,7 @@ async function bhBaoGia(host){
     <td>${_bgfBadge(st)}${_bgKsNhan(g.id)}${st==='TU_CHOI'&&g.ly_do_tu_choi?`<div style="font-size:11px;color:#dc2626;max-width:180px">${_bcEscH(g.ly_do_tu_choi)}</div>`:''}</td>
     <td style="white-space:nowrap">${act}</td></tr>`;}).join('');
   const draftPanel=`<div class="panel"><div class="panel-h"><h3>Báo giá gửi khách hàng</h3><div class="spacer"></div>
+      ${laQTV()&&(window._bgfTaoDtDs||[]).length?`<button class="btn-sm ghost" style="margin-right:8px" title="Tạo dự toán ngược cho mọi báo giá đủ dòng + giá đang thiếu dự toán (giá vốn ước = giá bán − sàn biên) — từng bản vẫn xem lại được ở Dự toán hàng bán" onclick="bgfTaoDuToanHangLoat()">📋 Tạo dự toán cho ${(window._bgfTaoDtDs||[]).length} báo giá thiếu</button>`:''}
       ${canOpBGF?(S.role==='CEO'?'<button class="btn-sm" title="Báo giá trống — chỉ CEO; người khác tạo từ Dự toán hàng bán → 📄 Tạo báo giá" onclick="bgfMoi()">+ Tạo báo giá trống</button>':'<span style="font-size:12px;color:var(--muted)" title="Báo giá phải lập từ dự toán có đủ dòng và đủ giá">📋 Tạo báo giá từ <b>Dự toán hàng bán → 📄 Tạo báo giá</b></span>'):''}</div>
     <div class="note">Soạn báo giá → <b>Lưu tạm</b> chỉnh sửa nhiều lần → <b>📤 Trình duyệt</b> → cấp có thẩm quyền <b>Duyệt</b> → mới <b>✉️ Gửi khách</b>. Sửa lại nội dung sau khi duyệt sẽ phải trình duyệt lại.</div>
     <div class="panel-b"><table><thead><tr><th>Số</th><th>Khách hàng</th><th>Tiêu đề</th><th class="num">Tổng (gồm VAT)</th><th>Trạng thái</th><th></th></tr></thead>
@@ -6211,6 +6215,22 @@ function bgfPdfTu(id){const g=(S._bgfList||[]).find(x=>x.id===id)||(DEMO.bgf||[]
       .then(()=>toast("Bản PDF cũng đã lưu vào 📁 Kho tệp (Overall Operation)","ok")).catch(()=>{});}
 
 /* --- Duyệt báo giá gửi khách: NHAP → trình duyệt → duyệt → gửi khách --- */
+/* 📋 Tạo dự toán ngược từ báo giá (dọn báo giá cũ thiếu dự toán) */
+async function bgfTaoDuToan(id){
+  const g=(S._bgfList||[]).find(x=>x.id===id); const so=g?(g.so||(g.noi_dung||{}).so):'#'+id;
+  if(!confirm(`Tạo dự toán hàng bán «${so}» từ các dòng báo giá này?\n\nGiá vốn sẽ ƯỚC = giá bán − sàn biên (ghi chú «cần rà lại»). Sau đó mở dự toán để điền giá vốn thật.`))return;
+  let r; try{r=await api(`/ban-hang/bao-gia-form/${id}/tao-du-toan`,{method:'POST'});}catch(e){return toast(e.detail||e.message,"err");}
+  toast(`Đã tạo dự toán ${r.ma} (${r.so_dong} dòng, ${r.co_von} dòng có giá vốn ước) và nối báo giá — rà lại giá vốn ở Dự toán hàng bán`,"ok");
+  viewBanHang($("#main"));
+}
+async function bgfTaoDuToanHangLoat(){
+  const ids=(window._bgfTaoDtDs||[]).slice(); if(!ids.length)return;
+  if(!confirm(`Tạo dự toán ngược cho ${ids.length} báo giá đang thiếu dự toán?\n\nGiá vốn ước = giá bán − sàn biên (ghi chú «cần rà lại»). Báo giá thiếu giá / theo file sẽ bị bỏ qua.`))return;
+  let ok=0; const loi=[];
+  for(const id of ids){try{await api(`/ban-hang/bao-gia-form/${id}/tao-du-toan`,{method:'POST'});ok++;}catch(e){const g=(S._bgfList||[]).find(x=>x.id===id);loi.push(((g&&g.so)||id)+': '+(e.detail||e.message));}}
+  toast(`Đã tạo ${ok}/${ids.length} dự toán`+(loi.length?` · lỗi ${loi.length}: ${loi.slice(0,2).join(' | ').slice(0,160)}`:''),loi.length?"err":"ok");
+  viewBanHang($("#main"));
+}
 /* ⚖ Bảng đối chiếu báo giá ↔ dự toán cho người duyệt */
 async function bgfDoiChieu(id){
   let r; try{r=await api(`/ban-hang/bao-gia-form/${id}/doi-chieu`);}catch(e){return toast(e.detail||e.message,"err");}
