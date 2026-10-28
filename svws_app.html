@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="vi">
 <head>
-<!-- build: dtb-nut-bao-gia-2026-10-28 -->
+<!-- build: po-xoa-dan-duong-2026-10-28 -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#0f2c44">
@@ -523,7 +523,7 @@ function toast(msg,type){const t=document.createElement('div');t.className='toas
 function _fmtLoi(detail,status){
   if(Array.isArray(detail))   // lỗi validate 422 của FastAPI: [{loc,msg,...},...]
     return detail.map(x=>((x.loc||[]).slice(1).join('.')||'dữ liệu')+': '+(x.msg||'')).join(' · ');
-  if(detail&&typeof detail==='object')return JSON.stringify(detail);
+  if(detail&&typeof detail==='object')return detail.msg||JSON.stringify(detail);   // lỗi có cấu trúc {ma,msg,…}: hiện msg, object giữ ở e.raw
   if(!detail&&(status===502||status===503||status===504))
     return 'Máy chủ đang bận hoặc khởi động lại (lỗi '+status+') — có thể AI đang đọc một file lớn. Chờ 1 phút rồi thử lại; file dự toán dài thì tách riêng phần bảng thành file nhỏ.';
   return detail||('Lỗi '+status);
@@ -535,7 +535,7 @@ async function api(path,opts={}){
   let r; try{ r=await fetch(S.api+path,Object.assign({},opts,{headers:h})); }
   catch(_){ const e=new Error(_LOI_MANG); e.detail=_LOI_MANG; throw e; }
   const txt=await r.text(); let data; try{data=JSON.parse(txt)}catch{data=txt}
-  if(!r.ok){const m=_fmtLoi(data&&data.detail,r.status);const e=new Error(m);e.status=r.status;e.detail=m;throw e;}
+  if(!r.ok){const m=_fmtLoi(data&&data.detail,r.status);const e=new Error(m);e.status=r.status;e.detail=m;e.raw=data&&data.detail;throw e;}
   return data;
 }
 async function apiUpload(path,formData){
@@ -9424,7 +9424,7 @@ async function dcXemPo(dmId){
 function _dcRaTrungHTML(r){
   const esc=v=>String(v==null?'':v).replace(/</g,'&lt;').replace(/"/g,'&quot;');
   const _dcSoLink=x=>x.loai==='PO'?`<a href="#" onclick="dcXemPo(${x.id});return false" title="Mở hồ sơ PO: đơn bán · dự án · hóa đơn · công nợ · lệnh chi" style="text-decoration:none;color:inherit"><b style="border-bottom:1px dashed currentColor">${esc(x.so)}</b></a>`:`<a href="#" onclick="ofNccTab('cong_no');return false" title="Mở tab Công nợ phải trả" style="text-decoration:none;color:inherit"><b style="border-bottom:1px dashed currentColor">${esc(x.so)}</b></a>`;const tt={CHUA_TRA:'chưa trả',TRA_MOT_PHAN:'trả một phần',DA_TRA:'đã trả',DA_DUYET:'đã duyệt',CHO_DUYET:'chờ duyệt',DA_CHI:'đã chi'};
-  const nutPo=x=>(laQTV()&&!x.nhan_du)?` <button class="btn-sm ghost" style="color:var(--red);padding:2px 6px" title="Xóa PO (hệ thống từ chối nếu đã nhận hàng / có hóa đơn)" onclick="poXoa(${x.id},'${esc(x.so).replace(/'/g,'')}')">🗑 PO</button>`:'';
+  const nutPo=x=>laQTV()?` <button class="btn-sm ghost" style="color:${x.nhan_du?'var(--muted)':'var(--red)'};padding:2px 6px" title="${x.nhan_du?'PO đã nhận hàng — bấm để xem chứng từ đang giữ PO và cách xử lý (xóa PO kia / ✅ Không trùng)':'Xóa PO — hệ thống kiểm tra trước: PO bị phiếu kho / hóa đơn / công nợ / tiền đã trả giữ thì mở hướng dẫn gỡ từng bước'}" onclick="poXoa(${x.id},'${esc(x.so).replace(/'/g,'')}')">${x.nhan_du?'🧭 Cách xử lý':'🗑 PO'}</button>`:'';
   const nutCn=x=>(laQTV()&&!x.don_mua_id&&!x.hoa_don_id&&!(x.da_tra>0))?` <button class="btn-sm ghost" style="color:var(--red);padding:2px 6px" title="Xóa công nợ nhập ngoài chưa trả" onclick="nccCongNoXoa(${x.id},'${esc(x.so).replace(/'/g,'')}')">🗑 CN</button>`:'';
   const dong=x=>`<tr><td>${_dcSoLink(x)} <span class="badge ${x.loai==='PO'?'b-info':'b-cho'}" style="font-size:10px">${x.loai==='PO'?'PO':(x.don_mua_id?'CN của PO':(x.hoa_don_id?'CN từ HĐ':'CN nhập ngoài'))}</span></td><td>${x.ngay||'—'}</td><td class="num">${vnd(x.tong)}</td><td class="num">${vnd(x.da_tra)}</td><td>${tt[x.trang_thai]||x.trang_thai||''}</td><td style="white-space:nowrap">${x.loai==='PO'?nutPo(x):nutCn(x)}</td></tr>`;
   const nutKT=(loai,g,moTa)=>S.role==='CEO'?` <button class="btn-sm ghost" style="padding:2px 8px;color:#16a34a" title="CEO xác nhận nhóm này KHÔNG trùng — hệ thống bỏ cảnh báo và bỏ chặn cho nhóm này (bật lại được)" onclick="dcKhongTrung('${loai}','${esc(g.khoa)}','${esc(moTa).replace(/'/g,'')}')">✅ Không trùng</button>`:'';
@@ -9434,7 +9434,7 @@ function _dcRaTrungHTML(r){
       <table style="font-size:12px;margin-top:4px"><thead><tr><th>PO</th><th>Ngày</th><th class="num">Tổng</th><th class="num">Đã trả</th><th>Trạng thái</th><th></th></tr></thead><tbody>${g.items.map(x=>`<tr><td>${_dcSoLink(x)}${x.so_hd?` <span style="color:var(--muted);font-size:11px">HĐ ${esc(x.so_hd)}</span>`:''}</td><td>${x.ngay||'—'}</td><td class="num">${vnd(x.tong)}</td><td class="num">${vnd(x.da_tra)}</td><td>${tt[x.trang_thai]||x.trang_thai||''}${x.nhan_du?' · đã nhận đủ':''}</td><td>${nutPo(x)}</td></tr>`).join('')}</tbody></table></div>`).join('');
   const s3=(r.lenh_cung_tien||[]).map(g=>`<div style="border:1px solid #d9770655;border-radius:8px;padding:8px 10px;margin:6px 0"><div style="font-size:12.5px;display:flex;flex-wrap:wrap;gap:6px;align-items:center"><span><b>${esc(g.ncc_ten||'?')}</b> · ${g.items.length} lệnh cùng đợt <b>${vnd(g.tien)}</b> ở chứng từ khác nhau trong ${r.so_ngay} ngày</span>${nutKT('LENH_TIEN',g,(g.ncc_ten||'')+' · lệnh cùng '+vnd(g.tien)+' · '+g.items.map(x=>x.so).join(' + '))}</div>
       <table style="font-size:12px;margin-top:4px"><thead><tr><th>Lệnh</th><th>Chứng từ</th><th>Số HĐ</th><th>Ngày</th><th>Trạng thái</th></tr></thead><tbody>${g.items.map(x=>`<tr><td><a href="#" onclick="dcXemLenh(${x.id});return false" title="Xem lệnh chi">#${x.id}</a></td><td>${(x.ct&&String(x.ct).startsWith('po'))?`<a href="#" onclick="dcXemPo(${Number(String(x.ct).slice(2))});return false" title="Mở hồ sơ PO" style="text-decoration:none;color:inherit"><b style="border-bottom:1px dashed currentColor">${esc(x.so)}</b></a>`:`<a href="#" onclick="ofNccTab('cong_no');return false" style="text-decoration:none;color:inherit"><b style="border-bottom:1px dashed currentColor">${esc(x.so)}</b></a>`}</td><td>${esc(x.so_hd)||'—'}</td><td>${x.ngay||'—'}</td><td>${tt[x.trang_thai]||x.trang_thai}</td></tr>`).join('')}</tbody></table></div>`).join('');
-  return `<div class="note" style="margin:0 0 8px;font-size:12px">① cùng nhà cung cấp + cùng <b>số hóa đơn</b> ở PO / công nợ khác nhau (trùng mạnh, thường là một hóa đơn nhập hai lần) · ② PO cùng NCC + cùng tổng tiền trong ${r.so_ngay} ngày · ③ lệnh chi đã duyệt / đã chi cùng số tiền đợt ở chứng từ khác trong ${r.so_ngay} ngày. Nút 🗑 dùng cơ chế xóa sẵn có (hệ thống tự từ chối nếu chứng từ đã nhận hàng / đã trả). Mua định kỳ cùng giá có thể xuất hiện ở ② ③ — cần xem xét, không phải lỗi.</div>
+  return `<div class="note" style="margin:0 0 8px;font-size:12px">① cùng nhà cung cấp + cùng <b>số hóa đơn</b> ở PO / công nợ khác nhau (trùng mạnh, thường là một hóa đơn nhập hai lần) · ② PO cùng NCC + cùng tổng tiền trong ${r.so_ngay} ngày · ③ lệnh chi đã duyệt / đã chi cùng số tiền đợt ở chứng từ khác trong ${r.so_ngay} ngày. Nút <b>🗑 PO</b> kiểm tra trước khi xóa: PO đang bị phiếu kho / hóa đơn / công nợ / tiền đã trả giữ thì mở hướng dẫn gỡ từng bước (kèm nút làm ngay) và liệt kê PO liên quan có thể là bản cần xóa thay; PO đã nhận hàng hiện <b>🧭 Cách xử lý</b>. Mua định kỳ cùng giá có thể xuất hiện ở ② ③ — cần xem xét, không phải lỗi.</div>
     <div style="font-weight:700;margin:6px 0 2px">① Cùng số hóa đơn <span class="badge ${r.tong.hoa_don?'b-tc':'b-ok'}">${r.tong.hoa_don}</span></div>${s1||'<div style="color:var(--muted);font-size:12px">Không có.</div>'}
     <div style="font-weight:700;margin:10px 0 2px">② PO cùng nhà cung cấp, cùng tổng tiền <span class="badge ${r.tong.po_cung_tien?'b-cho':'b-ok'}">${r.tong.po_cung_tien}</span></div>${s2||'<div style="color:var(--muted);font-size:12px">Không có.</div>'}
     <div style="font-weight:700;margin:10px 0 2px">③ Lệnh chi cùng số tiền đợt <span class="badge ${r.tong.lenh_cung_tien?'b-cho':'b-ok'}">${r.tong.lenh_cung_tien}</span></div>${s3||'<div style="color:var(--muted);font-size:12px">Không có.</div>'}
@@ -10825,19 +10825,74 @@ async function nccBgXoa(id){
   viewNCC($("#main"));
 }
 async function poXoa(id,so){
-  if(!confirm("Xóa đơn mua "+so+"?\n\nDòng hàng của PO sẽ bị xóa theo; đề xuất mua liên quan tự gỡ liên kết. PO đã nhận hàng hoặc có hóa đơn sẽ bị hệ thống từ chối để giữ vết kế toán. Không thể hoàn tác."))return;
   if(S.mode==="live"){
+    // 🧭 kiểm tra TRƯỚC (28/10/2026): PO đang bị chứng từ giữ → mở hướng dẫn gỡ từng bước thay vì chỉ báo lỗi
+    let kq=null;try{kq=await api("/ncc/don-mua/"+id+"/xoa-kiem-tra");}catch(_){kq=null;}
+    if(kq&&!kq.xoa_duoc)return _poXoaHuongDan(kq);
+    const gt=kq&&kq.go_theo;const TTL={CHO_DUYET:'chờ duyệt',DA_DUYET:'đã duyệt',TU_CHOI:'từ chối'};
+    const them=gt?("\n\nKhông có chứng từ nào giữ PO. Sẽ gỡ theo: "+gt.dong_hang+" dòng hàng"
+        +(gt.lenh_chi.length?" · "+gt.lenh_chi.length+" lệnh chi chưa chi tiền ("+gt.lenh_chi.map(l=>'#'+l.id+' '+(TTL[l.trang_thai]||l.trang_thai)).join(', ')+")":"")
+        +(gt.de_xuat?" · "+gt.de_xuat+" đề xuất mua quay về hàng đợi":"")+(gt.tep?" · "+gt.tep+" tệp đính kèm":"")+".")
+      :"\n\nDòng hàng của PO sẽ bị xóa theo; đề xuất mua liên quan tự gỡ liên kết. PO đã nhận hàng hoặc có hóa đơn sẽ bị hệ thống từ chối để giữ vết kế toán.";
+    if(!confirm("Xóa đơn mua "+so+"?"+them+"\n\nKhông thể hoàn tác."))return;
     try{await api("/ncc/don-mua/"+id,{method:'DELETE'});}
-    catch(e){return toast(e.detail||e.message,"err");}
+    catch(e){if(e.raw&&e.raw.ma==='PO_DANG_GAN')return _poXoaHuongDan({po:{id,so},xoa_duoc:false,chan:e.raw.chan||[],po_lien_quan:[]});return toast(e.detail||e.message,"err");}
   }else{
+    if(!confirm("Xóa đơn mua "+so+"?\n\nDòng hàng của PO sẽ bị xóa theo. Không thể hoàn tác."))return;
     const p=(DEMO.don_mua||[]).find(x=>x.id===id);
     if(p&&p.trang_thai_nhan&&p.trang_thai_nhan!=="CHUA")return toast("PO "+so+" đã nhận hàng — không thể xóa để giữ vết kế toán.","err");
     let i=(DEMO.don_mua||[]).findIndex(x=>x.id===id); if(i>=0)DEMO.don_mua.splice(i,1);
     i=(DEMO.ncc.don_mua||[]).findIndex(x=>x.id===id); if(i>=0)DEMO.ncc.don_mua.splice(i,1);
   }
+  const _m=document.getElementById('ktModal'); if(_m)_m.remove();
   toast("Đã xóa PO "+so+(S.mode==="demo"?" (demo)":""),"ok");
   viewNCC($("#main"));
 }
+/* 🧭 XÓA PO CÓ DẪN ĐƯỜNG (28/10/2026): hộp hướng dẫn gỡ từng bước — mỗi chứng từ giữ PO có nút làm ngay (hủy hóa đơn,
+   xóa công nợ, mở phiếu kho) hoặc nói rõ không gỡ được (tiền đã chi, hàng đã nhập) và liệt kê PO liên quan có thể xóa thay */
+function _poXoaHuongDan(kq){
+  const esc=v=>String(v==null?'':v).replace(/</g,'&lt;').replace(/"/g,'&quot;');
+  const po=kq.po||{}, chan=kq.chan||[], soPo=String(po.so||'').replace(/'/g,'');
+  const ICON={LENH_CHI:'🏦',DOT_TT:'💵',HOA_DON:'🧾',CONG_NO:'📒',PHIEU_KHO:'📦'};
+  const dong=(c,it)=>{
+    let act='';
+    if(c.loai==='HOA_DON')act=(it.hddt==='DA_PHAT_HANH'||it.da_tra>0)
+      ?`<span style="font-size:11px;color:var(--muted)">${it.hddt==='DA_PHAT_HANH'?'HĐĐT đã phát hành':'đã trả '+vnd(it.da_tra)} — không hủy được</span>`
+      :`<button class="btn-sm ghost" style="color:var(--red);padding:2px 6px" title="Hủy hóa đơn này — công nợ và bút toán của hóa đơn gỡ theo (hệ thống hỏi lại)" onclick="_poXoaGoHd(${it.id},'${esc(it.so).replace(/'/g,'')}',${po.id},'${soPo}')">🗑 Hủy hóa đơn</button>`;
+    else if(c.loai==='CONG_NO')act=`<button class="btn-sm ghost" style="color:var(--red);padding:2px 6px" title="Xóa dòng công nợ này (đã có tiền trả → CEO/ADMIN xóa ép, hệ thống hỏi lại)" onclick="_poXoaGoCn(${it.id},'${esc(po.ncc_ten).replace(/'/g,'')}',${po.id},'${soPo}')">🗑 Xóa công nợ</button>`;
+    else if(c.loai==='PHIEU_KHO')act=`<button class="btn-sm ghost" style="padding:2px 6px" title="Mở phiếu kho này ở Kho › Phiếu" onclick="_poXoaMoKho(${it.id})">📦 Mở phiếu</button>`;
+    return `<tr><td><b>${esc(it.so)}</b>${it.so_hd?` <span style="color:var(--muted);font-size:11px">HĐ ${esc(it.so_hd)}</span>`:''}${it.ghi_chu?` <span style="color:var(--muted);font-size:11px">${esc(it.ghi_chu)}</span>`:''}</td><td>${it.ngay||'—'}</td><td class="num">${it.so_tien!=null?vnd(it.so_tien):'—'}</td><td class="num">${it.da_tra!=null?vnd(it.da_tra):(it.loai?esc(it.loai):'—')}</td><td style="white-space:nowrap">${act}</td></tr>`;};
+  const dongHop=()=>{const m=document.getElementById('ktModal');if(m)m.remove();};
+  window._poXoaDongHop=dongHop;
+  const nutMo=c=>c.loai==='HOA_DON'?`<button class="btn-sm ghost" onclick="_poXoaDongHop();S.ktTab='hoadon';go('ke_toan')">📑 Mở Kế toán › Hóa đơn</button>`
+    :c.loai==='CONG_NO'?`<button class="btn-sm ghost" onclick="_poXoaDongHop();ofNccTab('cong_no')">📒 Mở Công nợ phải trả</button>`
+    :c.loai==='DOT_TT'?`<button class="btn-sm ghost" onclick="_poXoaDongHop();ofNccTab('thanh_toan_mua')">💳 Mở Thanh toán mua hàng</button>`
+    :`<button class="btn-sm ghost" onclick="dcXemPo(${po.id})">🔗 Hồ sơ PO (lệnh chi · đợt trả · phiếu)</button>`;
+  const buoc=chan.map((c,i)=>`<div style="border:1px solid ${c.xoa_duoc?'#d9770677':'#dc262677'};border-left-width:4px;border-radius:10px;padding:8px 12px;margin:8px 0">
+    <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center"><b>Bước ${i+1} · ${ICON[c.loai]||''} ${esc(c.ten)}</b> ${c.xoa_duoc?'<span class="badge b-cho">gỡ được</span>':'<span class="badge b-tc">không gỡ — giữ vết kế toán</span>'}</div>
+    <div style="font-size:12.5px;margin:4px 0 6px">${esc(c.cach)}</div>
+    <table style="font-size:12px"><thead><tr><th>Chứng từ</th><th>Ngày</th><th class="num">Số tiền</th><th class="num">Đã trả</th><th></th></tr></thead><tbody>${(c.items||[]).map(it=>dong(c,it)).join('')}</tbody></table>
+    <div style="margin-top:6px">${nutMo(c)}</div></div>`).join('');
+  const lq=kq.po_lien_quan||[];
+  const bangLq=lq.length?`<div style="font-weight:700;margin:12px 0 4px">🔁 PO liên quan của cùng nhà cung cấp (${lq.length}) — nếu PO này là bản thật, bản cần xóa có thể là một trong các PO dưới</div>
+    <table style="font-size:12px"><thead><tr><th>PO</th><th>Vì sao</th><th>Ngày</th><th class="num">Tổng</th><th class="num">Đã trả</th><th>Đang giữ bởi</th><th></th></tr></thead><tbody>${lq.map(p=>`<tr><td><a href="#" onclick="dcXemPo(${p.id});return false" title="Mở hồ sơ PO" style="text-decoration:none;color:inherit"><b style="border-bottom:1px dashed currentColor">${esc(p.so)}</b></a>${p.so_hoa_don?` <span style="color:var(--muted);font-size:11px">HĐ ${esc(p.so_hoa_don)}</span>`:''}</td><td>${esc(p.ly_do)}</td><td>${p.ngay||'—'}</td><td class="num">${vnd(p.tong_tien)}</td><td class="num">${vnd(p.da_tra)}</td><td style="font-size:11.5px">${p.xoa_duoc?'<span class="badge b-ok">không gì giữ</span>':esc((p.giu_boi||[]).join(', '))}${p.nhan_du?' · đã nhận đủ':''}</td><td style="white-space:nowrap">${p.xoa_duoc?`<button class="btn-sm ghost" style="color:var(--red);padding:2px 6px" title="PO này không bị chứng từ nào giữ — xóa được ngay (hệ thống hỏi lại)" onclick="poXoa(${p.id},'${esc(p.so).replace(/'/g,'')}')">🗑 Xóa PO này thay</button>`:`<button class="btn-sm ghost" style="padding:2px 6px" onclick="poXoa(${p.id},'${esc(p.so).replace(/'/g,'')}')">🧭 Cách gỡ</button>`}</td></tr>`).join('')}</tbody></table>`:'';
+  const khongGo=chan.filter(c=>!c.xoa_duoc);
+  const ketLuan=khongGo.length?`<div class="note" style="margin:10px 0 0;font-size:12.5px;border-color:#dc262677">⛔ PO <b>${esc(po.so)}</b> có ${esc(khongGo.map(c=>c.ten).join(' + '))} — đây là chứng từ thật, <b>không xóa PO này</b>. Nếu nghi trùng: xóa PO kia (bảng PO liên quan) hoặc bấm ✅ Không trùng ở panel Nghi trùng; nếu trả nhầm tiền: cấn trừ với nhà cung cấp.</div>`
+    :`<div class="note" style="margin:10px 0 0;font-size:12.5px">✅ Gỡ xong các bước trên rồi bấm <b>⟳ Kiểm tra lại</b> — khi không còn chứng từ giữ, hệ thống hỏi xác nhận và xóa PO.</div>`;
+  _ktModal(`🗑 Xóa PO ${esc(po.so)} — đang bị ${chan.length} loại chứng từ giữ`,`
+    <div style="font-size:13px;display:flex;flex-wrap:wrap;gap:6px 18px;margin-bottom:6px"><span>NCC: <b>${esc(po.ncc_ten)||'—'}</b></span><span>Ngày: <b>${po.ngay||'—'}</b></span><span>Tổng: <b>${po.tong_tien!=null?vnd(po.tong_tien):'—'}</b></span><span>Đã trả: <b style="color:#16a34a">${po.da_tra!=null?vnd(po.da_tra):'—'}</b></span>${po.so_hoa_don?`<span>HĐ: <b>${esc(po.so_hoa_don)}</b></span>`:''}</div>
+    <div style="font-size:12.5px;color:var(--muted)">Làm theo thứ tự từ trên xuống. Bước viền đỏ là chứng từ giữ vết kế toán, không gỡ được — PO đó phải giữ lại.</div>
+    ${buoc}${bangLq}${ketLuan}
+    <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap"><button class="btn-sm" onclick="poXoa(${po.id},'${soPo}')">⟳ Kiểm tra lại</button><button class="btn-sm ghost" onclick="dcXemPo(${po.id})">🔗 Hồ sơ PO</button><button class="btn-sm ghost" onclick="_poXoaDongHop()">Đóng</button></div>`);
+}
+async function _poXoaGoHd(hdId,so,poId,poSo){
+  if(!confirm("Hủy hóa đơn "+so+"?\n\nCông nợ và bút toán do hóa đơn sinh ra sẽ bị xóa theo. Hóa đơn đã phát hành HĐĐT hoặc công nợ đã trả một phần sẽ bị từ chối. Không thể hoàn tác."))return;
+  try{await api("/ke-toan/hoa-don/"+hdId,{method:'DELETE'});toast("Đã hủy hóa đơn "+so,"ok");}
+  catch(e){return toast(e.detail||e.message,"err");}
+  poXoa(poId,poSo);
+}
+async function _poXoaGoCn(cnId,ten,poId,poSo){ await nccCongNoXoa(cnId,ten); poXoa(poId,poSo); }
+function _poXoaMoKho(pkId){ const m=document.getElementById('ktModal'); if(m)m.remove(); S.khoTab='phieu'; S.khoSel=pkId; go('kho'); }
 async function nccBgFileAI(){
   if(S.mode!=="live"){toast("AI đọc file báo giá chạy ở bản kết nối backend","err");return;}
   const ncc=Number(gv('bga_ncc')), inp=document.getElementById('bga_file'), f=inp&&inp.files[0];

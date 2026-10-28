@@ -2802,36 +2802,84 @@ def sua_cho_nhap(dm_id: int, data: ChoNhapSuaVao, ep: bool = False, db: Session 
             "ngay_hen_giao": str(dm.ngay_hen_giao) if dm.ngay_hen_giao else None}
 
 
+def _po_chan_xoa(db: Session, dm: DonMua) -> list[dict]:
+    """🧭 Các chứng từ đang GIỮ PO (xóa PO sẽ mất vết kế toán), kèm CÁCH GỠ từng loại để giao diện dẫn người dùng
+    đi đúng chỗ (28/10/2026). Thứ tự trả về = thứ tự xử lý: tiền đã chi thật / đợt đã trả (dừng, không xóa PO này)
+    → hóa đơn → công nợ → phiếu kho (hàng đã nhập, không gỡ)."""
+    from ..models import PhieuKho as _PK, LenhChiBank as _LCB, HoaDon as _HD, DonMuaDotTt as _Dot
+    chan = []
+    lenh = db.query(_LCB).filter(_LCB.don_mua_id == dm.id, _LCB.trang_thai == "DA_CHI").order_by(_LCB.id).all()
+    if lenh:
+        chan.append({"loai": "LENH_CHI", "ten": f"{len(lenh)} lệnh chi ĐÃ CHI tiền thật", "xoa_duoc": False,
+                     "cach": "Ngân hàng đã chi tiền cho PO này nên PO là chứng từ thật — không xóa PO này. Nếu trả nhầm / "
+                             "trả hai lần: cấn trừ với nhà cung cấp ở đợt sau và ghi ở Công nợ phải trả. Nếu PO này lập trùng "
+                             "với PO khác: xóa PO KIA (bản chưa chi tiền) — xem bảng PO liên quan bên dưới.",
+                     "items": [{"id": l.id, "so": f"Lệnh #{l.id}", "ngay": str(l.chi_luc or l.duyet_luc or "")[:10] or None,
+                                "so_tien": float(l.so_tien_dot if l.so_tien_dot is not None else (l.so_tien or 0))} for l in lenh]})
+    dot = db.query(_Dot).filter(_Dot.don_mua_id == dm.id, _Dot.so_tien > 0).order_by(_Dot.id).all()
+    if dot:
+        chan.append({"loai": "DOT_TT", "ten": f"{len(dot)} đợt đã trả ghi ở Thanh toán mua hàng", "xoa_duoc": False,
+                     "cach": "Đã ghi tiền trả cho PO này (đợt / cọc ghi tay) — không xóa PO để giữ vết. Nếu ghi nhầm đợt, "
+                             "sửa ở Nhà cung cấp › Thanh toán mua hàng (✏️ trên PO) rồi bấm ⟳ Kiểm tra lại.",
+                     "items": [{"id": d.id, "so": f"Đợt #{d.id}", "ngay": str(d.ngay or "")[:10] or None,
+                                "so_tien": float(d.so_tien or 0), "ghi_chu": d.hinh_thuc or d.ghi_chu} for d in dot]})
+    cns = db.query(CongNo).filter(CongNo.don_mua_id == dm.id).order_by(CongNo.id).all()
+    hd_items = []
+    for c in cns:
+        if not c.hoa_don_id:
+            continue
+        h = db.get(_HD, c.hoa_don_id)
+        hd_items.append({"id": c.hoa_don_id, "so": (h.so if h and h.so else f"HĐ #{c.hoa_don_id}"),
+                         "ngay": str(h.ngay)[:10] if h is not None and h.ngay else None,
+                         "so_tien": float(h.tong_tien or 0) if h is not None else float(c.so_tien or 0),
+                         "da_tra": float(c.da_thanh_toan or 0), "hddt": (h.hddt_trang_thai if h is not None else None),
+                         "cong_no_id": c.id})
+    if hd_items:
+        chan.append({"loai": "HOA_DON", "ten": f"{len(hd_items)} hóa đơn mua", "xoa_duoc": True,
+                     "cach": "Hủy hóa đơn (nút 🗑 Hủy hóa đơn ngay dưới, hoặc Kế toán › Hóa đơn) — công nợ và bút toán của hóa đơn "
+                             "được gỡ theo. Hệ thống từ chối nếu hóa đơn đã phát hành HĐĐT hoặc công nợ đã trả một phần: khi đó PO "
+                             "là chứng từ thật, không xóa.",
+                     "items": hd_items})
+    cn_khac = [c for c in cns if not c.hoa_don_id]
+    if cn_khac:
+        chan.append({"loai": "CONG_NO", "ten": f"{len(cn_khac)} công nợ phải trả", "xoa_duoc": True,
+                     "cach": "Xóa dòng công nợ (nút 🗑 Xóa công nợ ngay dưới, hoặc Nhà cung cấp › Công nợ phải trả). Công nợ đã "
+                             "có tiền trả thật chỉ CEO / ADMIN xóa ép (gỡ kèm các lần trả đã ghi) — chỉ làm khi chắc là ghi nhầm.",
+                     "items": [{"id": c.id, "so": f"CN-{c.id}", "ngay": str(c.ngay_ct or c.han or "")[:10] or None,
+                                "so_tien": float(c.so_tien or 0), "da_tra": float(c.da_thanh_toan or 0), "so_hd": c.so_ct,
+                                "trang_thai": c.trang_thai} for c in cn_khac]})
+    pks = db.query(_PK).filter(_PK.don_mua_id == dm.id).order_by(_PK.id).all()
+    if pks:
+        chan.append({"loai": "PHIEU_KHO", "ten": f"{len(pks)} phiếu kho (đã nhận hàng)", "xoa_duoc": False,
+                     "cach": "Hàng đã nhập kho theo phiếu nên PO là chứng từ thật — phiếu kho không xóa được. PO lập trùng thì "
+                             "xóa PO KIA (bản chưa nhận hàng); nhận nhầm hàng thì lập phiếu xuất trả nhà cung cấp ở Kho và giữ "
+                             "PO này làm vết.",
+                     "items": [{"id": p.id, "so": p.so or f"PK-{p.id}", "ngay": str(p.ngay or "")[:10] or None, "loai": p.loai}
+                               for p in pks]})
+    return chan
+
+
+def _po_loi_dang_gan(dm: DonMua, chan: list[dict]) -> dict:
+    """Lỗi 400 có cấu trúc: FE đọc `chan` để mở hướng dẫn; client cũ đọc `msg`."""
+    so = dm.so or dm.id
+    return {"ma": "PO_DANG_GAN", "so": so, "chan": chan,
+            "msg": f"PO '{so}' đang gắn với {', '.join(c['ten'] for c in chan)} — không thể xóa để giữ vết kế toán. "
+                   "Bấm 🗑 lại để xem hướng dẫn gỡ từng chứng từ."}
+
+
 @router.delete("/don-mua/{dm_id}")
 def xoa_don_mua(dm_id: int, db: Session = Depends(get_db),
                 nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
-    """Xóa PO cùng dòng hàng; đề xuất mua liên quan tự gỡ liên kết. Chặn khi PO
-    đã nhận hàng (phiếu kho) hoặc đã có hóa đơn (giữ vết kế toán)."""
+    """Xóa PO cùng dòng hàng; đề xuất mua liên quan tự gỡ liên kết. Chặn khi PO đang bị chứng từ giữ
+    (lệnh đã chi, đợt đã trả, hóa đơn, công nợ, phiếu kho) — lỗi 400 mang danh sách + cách gỡ (`_po_chan_xoa`)."""
     from sqlalchemy import text as _sql
     from sqlalchemy.exc import IntegrityError
     dm = db.get(DonMua, dm_id)
     if dm is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đơn mua")
-    ban = []
-    from ..models import PhieuKho as _PK, LenhChiBank as _LCB
-    so_pk = db.query(func.count(_PK.id)).filter(_PK.don_mua_id == dm_id).scalar() or 0
-    if so_pk:
-        ban.append(f"{so_pk} phiếu kho (đã nhận hàng)")
-    so_hd = db.query(func.count(CongNo.id)).filter(CongNo.don_mua_id == dm_id,
-                                                   CongNo.hoa_don_id.isnot(None)).scalar() or 0
-    if so_hd:
-        ban.append(f"{so_hd} hóa đơn")
-    so_cn = db.query(func.count(CongNo.id)).filter(CongNo.don_mua_id == dm_id).scalar() or 0
-    if so_cn:
-        ban.append(f"{so_cn} công nợ phải trả")
-    so_chi = db.query(func.count(_LCB.id)).filter(_LCB.don_mua_id == dm_id,
-                                                  _LCB.trang_thai == "DA_CHI").scalar() or 0
-    if so_chi:
-        ban.append(f"{so_chi} lệnh chi ĐÃ CHI tiền thật")
-    if ban:
-        raise HTTPException(
-            status.HTTP_400_BAD_REQUEST,
-            f"PO '{dm.so or dm_id}' đang gắn với {', '.join(ban)} — không thể xóa để giữ vết kế toán.")
+    chan = _po_chan_xoa(db, dm)
+    if chan:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, _po_loi_dang_gan(dm, chan))
     so_cu = dm.so
     for t in db.query(TepDinhKem).filter_by(doi_tuong="DON_MUA", doi_tuong_id=dm_id).all():
         xoa_tep_chung(t.duong_dan)
@@ -2862,6 +2910,51 @@ def xoa_don_mua(dm_id: int, db: Session = Depends(get_db),
     ghi_audit(db, nd.id, "XOA", "don_mua", dm_id, cu={"so": so_cu})
     db.commit()
     return {"ok": True, "so": so_cu}
+
+
+@router.get("/don-mua/{dm_id}/xoa-kiem-tra")
+def kiem_tra_xoa_don_mua(dm_id: int, db: Session = Depends(get_db), _=Depends(chi_vai_tro("CEO", "ADMIN"))):
+    """🧭 Trước khi xóa PO (28/10/2026): chứng từ đang giữ PO + cách gỡ từng loại (FE mở hướng dẫn, nút làm ngay),
+    những gì sẽ bị gỡ theo nếu xóa, và PO liên quan cùng NCC (cùng số hóa đơn / cùng tổng) có thể là bản cần xóa thay."""
+    from ..lai_lo_ma import so_hd_chuan
+    from ..models import LenhChiBank as _LCB
+    dm = db.get(DonMua, dm_id)
+    if dm is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đơn mua")
+    ncc = db.get(NhaCungCap, dm.nha_cung_cap_id) if dm.nha_cung_cap_id else None
+    chan = _po_chan_xoa(db, dm)
+    nhan_lenh = {"CHO_DUYET": "chờ duyệt", "DA_DUYET": "đã duyệt", "TU_CHOI": "từ chối"}
+    lenh = [{"id": l.id, "trang_thai": l.trang_thai, "nhan": nhan_lenh.get(l.trang_thai, l.trang_thai),
+             "so_tien": float(l.so_tien_dot if l.so_tien_dot is not None else (l.so_tien or 0))}
+            for l in db.query(_LCB).filter(_LCB.don_mua_id == dm_id, _LCB.trang_thai != "DA_CHI").order_by(_LCB.id).all()]
+    go_theo = {"dong_hang": db.query(func.count(DonMuaCt.id)).filter(DonMuaCt.don_mua_id == dm_id).scalar() or 0,
+               "lenh_chi": lenh,
+               "de_xuat": db.query(func.count(YeuCauMua.id)).filter(YeuCauMua.don_mua_id == dm_id).scalar() or 0,
+               "tep": db.query(func.count(TepDinhKem.id)).filter(TepDinhKem.doi_tuong == "DON_MUA",
+                                                                 TepDinhKem.doi_tuong_id == dm_id).scalar() or 0}
+    sc = so_hd_chuan(dm.so_hoa_don)
+    tong = int(round(float(dm.tong_tien or 0)))
+    lien_quan = []
+    if dm.nha_cung_cap_id:
+        for p in db.query(DonMua).filter(DonMua.nha_cung_cap_id == dm.nha_cung_cap_id, DonMua.id != dm_id,
+                                         DonMua.trang_thai != "TU_CHOI").order_by(DonMua.id.desc()).all():
+            cung_hd = bool(sc) and so_hd_chuan(p.so_hoa_don) == sc
+            cung_tien = tong > 0 and int(round(float(p.tong_tien or 0))) == tong
+            if not (cung_hd or cung_tien):
+                continue
+            c2 = _po_chan_xoa(db, p)
+            lien_quan.append({"id": p.id, "so": p.so or f"PO-{p.id}", "ngay": str(p.ngay or "")[:10] or None,
+                              "tong_tien": float(p.tong_tien or 0), "da_tra": float(_da_tra_that(db, p)),
+                              "so_hoa_don": p.so_hoa_don, "trang_thai": p.trang_thai, "nhan_du": p.trang_thai_nhan == "DU",
+                              "ly_do": "cùng số hóa đơn" if cung_hd else "cùng tổng tiền",
+                              "xoa_duoc": not c2, "giu_boi": [c["ten"] for c in c2]})
+            if len(lien_quan) >= 10:
+                break
+    return {"po": {"id": dm.id, "so": dm.so or f"PO-{dm.id}", "ncc_ten": ncc.ten if ncc else None,
+                   "ngay": str(dm.ngay or "")[:10] or None, "tong_tien": float(dm.tong_tien or 0),
+                   "da_tra": float(_da_tra_that(db, dm)), "trang_thai": dm.trang_thai,
+                   "trang_thai_nhan": dm.trang_thai_nhan, "so_hoa_don": dm.so_hoa_don},
+            "xoa_duoc": not chan, "chan": chan, "go_theo": go_theo, "po_lien_quan": lien_quan}
 
 
 # ----- XEM: danh mục hàng hóa GẮN VỚI một NCC (phục vụ form Tạo PO) -----
