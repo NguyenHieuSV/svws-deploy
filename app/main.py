@@ -13,7 +13,7 @@ app = FastAPI(title="SVWS — Backend hợp nhất (9 module nghiệp vụ)")
 app.include_router(training_router)
 app.add_middleware(
     CORSMiddleware, allow_origins=["*"], allow_credentials=False,
-    allow_methods=["*"], allow_headers=["*"],
+    allow_methods=["*"], allow_headers=["*"], expose_headers=["X-SVWS-Build"],
 )
 for r in (auth, kho, ncc, du_an, ban_hang, ke_toan, tai_chinh, nhan_su, cho_thue, crm, ban_hang_ext, ke_toan_quy, vay, quy_trich_lap, cau_hinh, nhan_su_kpi, cho_thue_ops, dich_vu_kt, quet_mail,
                       doc_anh_bcvh, dao_tao):
@@ -65,6 +65,20 @@ _HUONG_DAN = os.path.join(os.path.dirname(__file__), "..", "huong_dan.html")
 _SO_TAY = os.path.join(os.path.dirname(__file__), "..", "so_tay_quy_che.docx")
 _QC_TOAN_VAN = os.path.join(os.path.dirname(__file__), "..", "quy_che_toan_van.json")   # sinh bằng scripts/tach_quy_che.py
 _qc_tv_nho = {"mtime": None, "data": {}}
+
+
+from .ban_dung import doc_build as _doc_build
+_BUILD = _doc_build(_HTML)          # dấu bản dựng ở dòng «<!-- build: … -->» đầu svws_app.html
+
+
+@app.middleware("http")
+async def _them_dau_build(request: Request, call_next):
+    """🔄 Gửi dấu bản dựng kèm MỌI phản hồi (X-SVWS-Build): tab app đang mở từ trước khi cập nhật so với dấu của
+    chính nó, khác thì hiện thanh «có bản mới — bấm tải lại» (28/10/2026: tab cũ trên iPad in nguyên JSON lỗi)."""
+    resp = await call_next(request)
+    if _BUILD:
+        resp.headers["X-SVWS-Build"] = _BUILD
+    return resp
 _CHUP_ANH = os.path.join(os.path.dirname(__file__), "..", "static", "chup-anh.html")
 
 

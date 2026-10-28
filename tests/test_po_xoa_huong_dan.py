@@ -128,3 +128,16 @@ def test_kiem_tra_neu_po_lien_quan(db):
     with pytest.raises(HTTPException) as e:
         ncc.kiem_tra_xoa_don_mua(999, db, None)
     assert e.value.status_code == 404
+
+
+def test_dau_build_doc_tu_html(tmp_path):
+    """Header X-SVWS-Build lấy từ dòng «<!-- build: … -->» của svws_app.html — tab cũ so dấu này để nhắc tải lại."""
+    import re
+    from app.ban_dung import DUONG_DAN_HTML, doc_build
+    b = doc_build()
+    assert b and re.fullmatch(r"[\w.-]+", b)
+    with open(DUONG_DAN_HTML, encoding="utf-8") as f:
+        assert f"<!-- build: {b} -->" in f.read(2000)
+    p = tmp_path / "x.html"
+    p.write_text("<!DOCTYPE html>\n<html>\n<head>\n<!-- build: abc-1 -->\n<meta charset=\"utf-8\">\n", encoding="utf-8")
+    assert doc_build(str(p)) == "abc-1" and doc_build(str(tmp_path / "khong_co.html")) == ""
