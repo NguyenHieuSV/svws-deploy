@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="vi">
 <head>
-<!-- build: ghi-lai-bien-chao-v3-2026-10-28 -->
+<!-- build: dtb-nut-bao-gia-2026-10-28 -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#0f2c44">
@@ -10058,6 +10058,12 @@ async function dtbRender(){
   const _ngayGui=d=>{const g=_bgGui(d);return g&&g.gui_luc?String(g.gui_luc).slice(0,10):'';};
   listGui.sort((a,b)=>(_ngayGui(b)||b.ngay||'').localeCompare(_ngayGui(a)||a.ngay||'')||(b.id-a.id));
   const canOpBG=can("ban_hang","THAO_TAC");
+  // 📄 nút báo giá ngay trên dòng (anh Hiếu 28/10/2026): chưa có → Tạo báo giá từ dự toán; đã có → Mở báo giá đó
+  const _dtbNutBG=(d,g,co)=>{if(!co||String(d.ma||'').toUpperCase().startsWith('OP'))return '';
+    const bg=g||_bgCua[String(d.ma||'').trim().toUpperCase()];
+    if(bg)return `<button class="btn-sm ghost" title="Mở báo giá số ${esc(d.ma)} (${esc(bg.trang_thai||'nháp')}) để xem / sửa" onclick="dtbMoBaoGia(${bg.id})">📄 Mở báo giá</button> `;
+    if(!(d.so_muc||0))return `<span style="font-size:11px;color:var(--muted)" title="Dự toán chưa có dòng sản phẩm — mở ▸ thêm dòng rồi mới tạo báo giá">📄 chưa có dòng</span> `;
+    return `<button class="btn-sm" title="Soạn báo giá gửi khách từ dự toán này — số báo giá = mã dự toán, các dòng và giá vốn điền sẵn, giá bán tính theo biên từng nhóm (sửa được trước khi lưu)" onclick="dtbTaoBaoGia(${d.id})">📄 Tạo báo giá</button> `;};
   // 📚 BẢNG LƯU DỰ TOÁN — mỗi dự toán là một dòng accordion: ▸ mở chi tiết ngay dưới dòng, ✏️ sửa, 🗑 xóa
   const _rowsFn=(ds,gui)=>(ds||[]).map(d=>{const mo=S._dtbOpen===d.id; const g=gui?_bgGui(d):null; const bgT=g?_bgfTinh(g.noi_dung||{}).tong:0;
     return `<tr data-ma="${esc(d.ma)}" data-tim="${esc([d.ma,d.khach_hang,d.mo_ta,d.nguoi_tao,d.ngay,_ngayGui(d)].join(' ')).toLowerCase()}"${mo?' style="background:var(--panel2,#f4f6f8)"':''}>
@@ -10068,7 +10074,7 @@ async function dtbRender(){
     <td style="white-space:nowrap">${d.ngay||'—'}</td><td>${esc(d.nguoi_tao)||'—'}</td>
     ${gui?`<td class="num" title="Tổng báo giá đã gửi (gồm VAT)"><b style="color:#0e7490">${vnd(bgT)}</b></td>`:''}
     <td class="num"><b>${vnd(d.tong||0)}</b></td><td class="num">${d.so_muc||0}</td>
-    <td style="white-space:nowrap">${gui?`<button class="btn-sm ghost" title="Xuất PDF báo giá đã gửi" onclick="bgfPdfTu(${g.id})">🖨</button> ${canOpBG?`<button class="btn-sm ghost" title="Gửi lại báo giá cho khách" onclick="bgfGuiMail(${g.id})">✉️ Gửi lại</button> `:''}`:''}${canOp?`<button class="btn-sm ghost" title="Sửa mã / khách hàng / mô tả / ngày" onclick="dtbSuaHdr(${d.id})">✏️ Sửa</button>`:''}
+    <td style="white-space:nowrap">${_dtbNutBG(d,gui?g:null,canOpBG)}${gui?`<button class="btn-sm ghost" title="Xuất PDF báo giá đã gửi" onclick="bgfPdfTu(${g.id})">🖨</button> ${canOpBG?`<button class="btn-sm ghost" title="Gửi lại báo giá cho khách" onclick="bgfGuiMail(${g.id})">✉️ Gửi lại</button> `:''}`:''}${canOp?`<button class="btn-sm ghost" title="Sửa mã / khách hàng / mô tả / ngày" onclick="dtbSuaHdr(${d.id})">✏️ Sửa</button>`:''}
       ${canXoa?` <button class="btn-sm ghost" style="color:var(--red)" title="Xóa dự toán và toàn bộ danh mục" onclick="dtbXoa(${d.id},'${esc(d.ma).replace(/'/g,'')}')">🗑 Xóa</button>`:''}</td></tr>`
     +(mo?`<tr class="dtb-ct" data-ct="${esc(d.ma)}"><td colspan="${gui?11:9}" style="padding:4px 10px 14px;background:var(--panel2,#f4f6f8)">${chiTiet}</td></tr>`:'');}).join('');
   let chiTiet='';
@@ -10125,7 +10131,7 @@ async function dtbRender(){
       <input id="dtbLuu_q" placeholder="🔍 Tìm mã · khách · mô tả…" oninput="dtbLuuLoc(this.value)" onclick="event.stopPropagation()" style="padding:5px 10px;border:1px solid var(--line);border-radius:7px;font-size:12.5px;max-width:220px"></div>
       <div class="panel-b${S._dtbLuuOpen?'':' hidden'}" id="dtbLuuWrap" style="overflow-x:auto"><table><thead><tr><th style="width:26px"></th><th>Mã hàng bán</th><th>Khách hàng</th><th>Mô tả yêu cầu</th><th>Ngày tạo</th><th>Người tạo</th><th class="num">Tổng dự toán</th><th class="num">Số mục</th><th>Thao tác</th></tr></thead>
       <tbody id="dtbLuuRows">${rows||'<tr><td colspan="9" class="empty">'+(listGui.length?'Mọi dự toán đều đã gửi báo giá — xem bảng ✉️ Báo giá đã gửi khách hàng bên dưới.':'Chưa có dự toán hàng bán nào — tạo mã đầu tiên ở form trên.')+'</td></tr>'}</tbody></table>
-      <div class="note" style="margin-top:6px;color:var(--muted)">Bấm <b>▸</b> hoặc <b>mã</b> để mở chi tiết ngay dưới dòng (thêm dòng sản phẩm, sửa SL/giá, <b>🔎 tìm giá theo tên</b> — gõ vài ký tự là thấy mặt hàng đã mua kèm giá, không cần nhớ mã — ⟳ cập nhật giá, 🔗 khớp kho, 🛒 tạo PO, 📄 tạo báo giá). <b>✏️ Sửa</b> đổi mã / khách / mô tả / ngày; <b>🗑 Xóa</b> xóa cả dự toán (không xóa được khi đã có dòng lập PO). Bảng này là <b>một nguồn</b> dùng cho Bán hàng → Báo giá và lập PO mua hàng (bước Đề xuất mua đã bỏ 10/10/2026). Dự toán đã <b>✉️ gửi báo giá</b> cho khách tự chuyển xuống bảng bên dưới.</div></div></div>
+      <div class="note" style="margin-top:6px;color:var(--muted)">Bấm <b>▸</b> hoặc <b>mã</b> để mở chi tiết ngay dưới dòng (thêm dòng sản phẩm, sửa SL/giá, <b>🔎 tìm giá theo tên</b> — gõ vài ký tự là thấy mặt hàng đã mua kèm giá, không cần nhớ mã — ⟳ cập nhật giá, 🔗 khớp kho, 🛒 tạo PO). <b>📄 Tạo báo giá</b> ngay trên dòng soạn báo giá gửi khách từ dự toán (mã đã có báo giá thì hiện <b>📄 Mở báo giá</b>); <b>✏️ Sửa</b> đổi mã / khách / mô tả / ngày; <b>🗑 Xóa</b> xóa cả dự toán (không xóa được khi đã có dòng lập PO). Bảng này là <b>một nguồn</b> dùng cho Bán hàng → Báo giá và lập PO mua hàng (bước Đề xuất mua đã bỏ 10/10/2026). Dự toán đã <b>✉️ gửi báo giá</b> cho khách tự chuyển xuống bảng bên dưới.</div></div></div>
     <div class="panel" style="margin-top:10px;border:1px solid #16a34a55"><div class="panel-h" style="cursor:pointer" onclick="if(event.target.tagName!=='INPUT')dtbGuiToggle()">
       <h3 data-gap="1"><span id="dtbGuiCaret">${S._dtbGuiOpen?'▾':'▸'}</span> ✉️ Báo giá đã gửi khách hàng <span class="badge b-ok">${listGui.length} mã · ${vnd(tongGui)}</span></h3><div class="spacer"></div>
       <span style="font-size:12px;color:var(--muted)">Mã đã ✉️ gửi báo giá — ngày gửi gần nhất lên trên · vẫn mở được chi tiết dự toán</span></div>
@@ -10348,6 +10354,15 @@ function bgfChonMauDK(loai){const d=S.bgfEdit.d; const mk=(S._bgKsCfg||{}).mau_d
   if(!confirm(`Áp mẫu điều khoản «${m.ten}»? Sẽ thay Hiệu lực · Thanh toán · Giao hàng · Địa điểm · Bảo hành đang có.`))return;
   Object.assign(d,{mau_dk:loai,hieu_luc:m.hieu_luc,tt:m.tt,giao:m.giao,dia_diem:m.dia_diem,bao_hanh:m.bao_hanh}); viewBanHang($("#main"));}
 function _bgBienGoiY(){const v=Number(((S._bgKsCfg||{}).bien_goi_y));return isFinite(v)&&v>=0?v:20;}
+function dtbMoBaoGia(bgfId){
+  const g=(S._bgfList||[]).find(x=>x.id===bgfId); if(!g)return toast("Không thấy báo giá","err");
+  S.bgfEdit={id:g.id,d:JSON.parse(JSON.stringify(g.noi_dung||{}))};
+  if(!S.bgfEdit.d.items||!S.bgfEdit.d.items.length)S.bgfEdit.d.items=[{ten:"",mo_ta:"",so_luong:1,don_vi:"Unit",don_gia:0,vat_pct:8}];
+  S.bgfEdit.d.items.forEach(it=>{if(it.vat_pct===undefined||it.vat_pct===null||it.vat_pct==='')it.vat_pct=S.bgfEdit.d.vat_pct??8;});
+  S.bhTab='bao_gia';
+  if(S.page!=='ban_hang'){if(!S.perm[pmod('ban_hang')])return toast("Bạn chưa có quyền vào Bán hàng","err");go('ban_hang');}
+  else viewBanHang($("#main"));
+}
 async function dtbTaoBaoGia(id){
   if(S.mode==="live"&&!S._bgKsCfg){try{S._bgKsCfg=await api("/ban-hang/bao-gia-form/kiem-soat");}catch(_){}}
   let d=null;
