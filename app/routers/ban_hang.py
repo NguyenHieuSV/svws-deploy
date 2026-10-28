@@ -7,6 +7,7 @@ from decimal import Decimal
 from datetime import date, timedelta
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 from ..database import get_db
 from ..rbac import yeu_cau, kiem_han_muc, chi_vai_tro, yeu_cau_bat_ky
