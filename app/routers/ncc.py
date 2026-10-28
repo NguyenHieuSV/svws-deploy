@@ -30,7 +30,7 @@ from ..email_gateway import lay_email_provider
 from ..po_pdf import tao_po_pdf
 import os
 from types import SimpleNamespace as _NS
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 
 router = APIRouter(prefix="/ncc", tags=["ncc"])
 MODULE = "ncc"
@@ -2860,11 +2860,12 @@ def _po_chan_xoa(db: Session, dm: DonMua) -> list[dict]:
 
 
 def _po_loi_dang_gan(dm: DonMua, chan: list[dict]) -> dict:
-    """Lỗi 400 có cấu trúc: FE đọc `chan` để mở hướng dẫn; client cũ đọc `msg`."""
+    """Thân lỗi 400: `detail` là CHUỖI (tab giao diện cũ đang mở vẫn đọc được — nếu là dict thì tab cũ in nguyên
+    JSON, anh Hiếu gặp trên iPad 28/10), kèm `ma` + `chan` để giao diện mới mở hộp hướng dẫn gỡ từng bước."""
     so = dm.so or dm.id
-    return {"ma": "PO_DANG_GAN", "so": so, "chan": chan,
-            "msg": f"PO '{so}' đang gắn với {', '.join(c['ten'] for c in chan)} — không thể xóa để giữ vết kế toán. "
-                   "Bấm 🗑 lại để xem hướng dẫn gỡ từng chứng từ."}
+    return {"detail": f"PO '{so}' đang gắn với {', '.join(c['ten'] for c in chan)} — không thể xóa để giữ vết kế toán. "
+                      "Tải lại trang (bản mới) rồi bấm 🗑 PO để xem hướng dẫn gỡ từng chứng từ.",
+            "ma": "PO_DANG_GAN", "so": so, "chan": chan}
 
 
 @router.delete("/don-mua/{dm_id}")
@@ -2878,8 +2879,8 @@ def xoa_don_mua(dm_id: int, db: Session = Depends(get_db),
     if dm is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đơn mua")
     chan = _po_chan_xoa(db, dm)
-    if chan:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, _po_loi_dang_gan(dm, chan))
+    if chan:                                                  # chưa ghi gì vào DB tới đây — trả lỗi là đủ
+        return JSONResponse(status_code=status.HTTP_400_BAD_REQUEST, content=_po_loi_dang_gan(dm, chan))
     so_cu = dm.so
     for t in db.query(TepDinhKem).filter_by(doi_tuong="DON_MUA", doi_tuong_id=dm_id).all():
         xoa_tep_chung(t.duong_dan)

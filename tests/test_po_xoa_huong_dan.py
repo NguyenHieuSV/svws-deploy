@@ -3,6 +3,7 @@
 (lệnh đã chi → đợt đã trả → hóa đơn → công nợ → phiếu kho); DELETE trả lỗi 400 có cấu trúc; GET xoa-kiem-tra nêu
 thứ sẽ gỡ theo và PO liên quan cùng NCC (cùng số hóa đơn / cùng tổng) kèm cờ xóa được. SQLite trong bộ nhớ.
 """
+import json
 from datetime import date, datetime
 
 import pytest
@@ -96,12 +97,13 @@ def test_chan_theo_thu_tu_xu_ly_va_cach_go(db):
     assert cn["items"][0]["so"] == "CN-41" and cn["items"][0]["da_tra"] == 5_000_000.0 and cn["items"][0]["so_hd"] == "4379"
     assert "xóa ép" in cn["cach"]
     assert pk["items"] == [{"id": 1, "so": "PN-0001", "ngay": "2026-10-21", "loai": "NHAP"}] and "phiếu xuất trả" in pk["cach"]
-    # DELETE: lỗi 400 có cấu trúc, PO còn nguyên
-    with pytest.raises(HTTPException) as e:
-        ncc.xoa_don_mua(102, db, _Nd())
-    d = e.value.detail
-    assert e.value.status_code == 400 and d["ma"] == "PO_DANG_GAN" and d["so"] == "PO-102" and len(d["chan"]) == 5
-    assert d["msg"].startswith("PO 'PO-102' đang gắn với 1 lệnh chi ĐÃ CHI tiền thật, 1 đợt đã trả")
+    # DELETE: lỗi 400 — `detail` là CHUỖI (tab giao diện cũ đọc được), kèm ma + chan cho giao diện mới; PO còn nguyên
+    r = ncc.xoa_don_mua(102, db, _Nd())
+    assert r.status_code == 400
+    d = json.loads(r.body)
+    assert d["ma"] == "PO_DANG_GAN" and d["so"] == "PO-102" and len(d["chan"]) == 5
+    assert isinstance(d["detail"], str)
+    assert d["detail"].startswith("PO 'PO-102' đang gắn với 1 lệnh chi ĐÃ CHI tiền thật, 1 đợt đã trả")
     assert db.get(m.DonMua, 102) is not None
 
 
