@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="vi">
 <head>
-<!-- build: bao-gia-du-toan-2026-10-28b -->
+<!-- build: bao-cao-tuan-2026-10-28 -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#0f2c44">
@@ -15899,7 +15899,7 @@ async function wtReport(host){
   if(!S.brNgay)S.brNgay=today;
   if(!S.wtRThang)S.wtRThang=today.slice(0,7);
   if(!S.wtRNgay)S.wtRNgay=today;
-  let my={danh_sach:[],nhan_vien_id:null}, ds={danh_sach:[]}, nvs=[], th=null, thieu={ngay:[]}, tyle=null, gvs=[], phai=null, maDs=null;
+  let my={danh_sach:[],nhan_vien_id:null}, ds={danh_sach:[]}, nvs=[], th=null, thieu={ngay:[]}, tyle=null, gvs=[], phai=null, maDs=null, tuan={danh_sach:[]};
   try{
     if(S.mode==="live"){
       my=await api("/nhan-su/bao-cao-ngay/cua-toi?thang="+S.wtRThang).catch(e=>({danh_sach:[],nhan_vien_id:null,_loi:e.detail||e.message}));
@@ -15908,7 +15908,14 @@ async function wtReport(host){
         api("/nhan-su/bao-cao-ngay/thieu-cua-toi").catch(()=>({ngay:[]})),
         api("/nhan-su/giao-viec").catch(()=>[]),
         api("/nhan-su/ma-du-an").catch(()=>[])]);}
-      if(canXem){[ds,nvs,tyle,phai]=await Promise.all([api("/nhan-su/bao-cao-ngay?ngay="+S.wtRNgay),
+      if(canXem){
+        // 📅 7 ngày gần nhất (bảng «Báo cáo tuần này») + ngày gần nhất có báo cáo
+        const tu7=new Date(Date.now()-6*86400000).toISOString().slice(0,10);
+        tuan=await api("/nhan-su/bao-cao-ngay?tu="+tu7+"&den="+today).catch(()=>({danh_sach:[]}));
+        // lần đầu mở (chưa tự chọn ngày): hôm nay chưa ai gửi → mở sẵn ngày gần nhất có báo cáo
+        if(!S._wtRNgayChon&&S.wtRNgay===today&&tuan.ngay_gan_nhat&&tuan.ngay_gan_nhat<today
+           &&!(tuan.danh_sach||[]).some(r=>r.ngay===today)){S.wtRNgay=tuan.ngay_gan_nhat;}
+        [ds,nvs,tyle,phai]=await Promise.all([api("/nhan-su/bao-cao-ngay?ngay="+S.wtRNgay),
         api("/nhan-su/ho-so").catch(()=>api("/nhan-su/danh-ba")),   // không có quyền xem hồ sơ lương → danh bạ tối giản (id · mã · tên · chức danh)
         api("/nhan-su/bao-cao-ngay/ty-le?thang="+S.wtRNgay.slice(0,7)).catch(()=>null),
         api("/nhan-su/bao-cao-ngay/phai-bao-cao?ngay="+S.wtRNgay).catch(()=>null)]);}
@@ -15992,13 +15999,32 @@ async function wtReport(host){
     mgr=`<div class="panel"><div class="panel-h"><h3>👥 Danh mục nhân sự — báo cáo theo ngày</h3><div class="spacer"></div>
        <span style="font-size:12px;color:var(--muted);margin-right:10px">${phai?'Người phải báo cáo đã gửi':'Đã báo cáo'}: <b style="color:#16a34a">${daBc}</b>/${tong}${tyle&&tyle.ty_le!=null?` · tỉ lệ tháng <b>${tyle.ty_le}%</b>`:''}</span>
        ${laQTV()?`<button class="btn-sm ghost" title="Xem ai thiếu báo cáo một ngày và gửi tin nhắc ngay (app cũng tự nhắc mỗi sáng)" onclick="brNhacForm()">📣 Nhắc chưa báo cáo</button>`:''}
-       <input type="date" id="wt_r_ngay" value="${S.wtRNgay}" max="${today}" onchange="S.wtRNgay=this.value;wtReport($('#wtBody'))" style="max-width:170px"></div>
+       <input type="date" id="wt_r_ngay" value="${S.wtRNgay}" max="${today}" onchange="S.wtRNgay=this.value;S._wtRNgayChon=1;wtReport($('#wtBody'))" style="max-width:170px">${S.wtRNgay!==today?` <span class="badge b-info" title="Hôm nay chưa ai gửi báo cáo nên trang mở sẵn ngày gần nhất có báo cáo — đổi ngày ở ô bên cạnh">đang xem ${_bcNgayVn(S.wtRNgay)}</span>`:''}</div>
       <div class="panel-b"><table><thead><tr><th>Mã</th><th>Nhân viên</th><th>Chức danh</th><th>Trạng thái</th><th class="num">Giờ</th><th>Công việc đã làm</th><th>Mã liên quan</th><th title="Tỉ lệ hoàn thành báo cáo trong tháng của ngày đang chọn">Tỉ lệ tháng</th><th></th></tr></thead>
        <tbody>${rows||`<tr><td colspan="9" class="empty">${phai?'Ngày này không ai phải báo cáo (chưa có việc được giao còn hiệu lực) và chưa ai gửi báo cáo.':'Chưa có nhân viên trong hồ sơ.'}</td></tr>`}</tbody></table>
        <div class="note" style="margin-top:8px;color:var(--muted)">Chỉ hiện người <b>phải báo cáo</b> ngày đã chọn (người nhận việc còn hiệu lực, không nghỉ, không phải Chủ nhật / lễ trừ khi tăng ca) và người đã tự gửi báo cáo. Dòng nền cam = <b>chưa gửi báo cáo</b>. Bấm “Xem” để đọc toàn văn báo cáo.</div></div></div>`;
   }
-  host.innerHTML=formMe+tongHop+myTable+(laQTV()&&S.mode==='live'?_gvPanel(nvs):'')+mgr;
+  host.innerHTML=formMe+tongHop+myTable+(laQTV()&&S.mode==='live'?_gvPanel(nvs):'')+(canXem&&S.mode==='live'?_brTuanPanel(tuan):'')+mgr;
 }
+/* 📅 Báo cáo 7 ngày gần nhất của mọi nhân viên — mới nhất lên trên, không phải chọn từng ngày */
+function _brTuanPanel(tuan){
+  const ds=(tuan&&tuan.danh_sach)||[]; window.__brTuan=ds;
+  const today=new Date().toISOString().slice(0,10);
+  const rows=ds.map(r=>`<tr><td style="white-space:nowrap">${_bcNgayVn(r.ngay)}${r.ngay===today?' <span class="badge b-ok">hôm nay</span>':''}</td>
+      <td><b>${_bcEscH(r.ho_ten||'')}</b>${r.ma_nv?`<div style="font-size:11px;color:var(--muted)">${_bcEscH(r.ma_nv)}</div>`:''}</td>
+      <td style="font-size:12px">${r.ten_cong_viec?`<b>${_bcEscH(r.ten_cong_viec)}</b>`:'<span style="color:var(--muted)">—</span>'}${r.ma_lien_quan?`<div style="color:var(--muted)">${_bcEscH(r.ma_lien_quan)}</div>`:''}</td>
+      <td class="num">${_num(r.so_gio,1)}h</td>
+      <td style="font-size:12px;max-width:380px;white-space:normal">${_bcEscH((r.da_lam||'').slice(0,160))}${(r.da_lam||'').length>160?'…':''}${_brTepLinks(r.tep)}</td>
+      <td style="white-space:nowrap"><button class="btn-sm ghost" onclick="brXemId(${r.id})">Xem</button>${laQTV()?` <button class="btn-sm ghost" title="Sửa báo cáo" onclick="brQlSuaTuan(${r.id})">✏️</button>`:''}</td></tr>`).join('');
+  const nguoi=new Set(ds.map(r=>r.nhan_vien_id)).size, ngay=new Set(ds.map(r=>r.ngay)).size;
+  return `<div class="panel"><div class="panel-h"><h3>📅 Báo cáo tuần này</h3><div class="spacer"></div>
+      <span style="font-size:12px;color:var(--muted)">7 ngày gần nhất · <b>${ds.length}</b> báo cáo · ${nguoi} người · ${ngay} ngày</span></div>
+    <div class="panel-b"><table><thead><tr><th>Ngày</th><th>Nhân viên</th><th>Việc được giao · mã</th><th class="num">Giờ</th><th>Công việc đã làm</th><th></th></tr></thead>
+      <tbody>${rows||'<tr><td colspan="6" class="empty">Chưa có báo cáo nào trong 7 ngày gần nhất.</td></tr>'}</tbody></table>
+      <div class="note" style="margin-top:8px;color:var(--muted)">Mới nhất lên trên. Bấm “Xem” để đọc toàn văn (kết quả, khó khăn, kế hoạch, tệp đính kèm). Ai PHẢI báo cáo mà chưa gửi: xem bảng theo ngày phía dưới.</div></div></div>`;
+}
+function brXemId(id){const r=(window.__brTuan||[]).find(x=>x.id===id); if(!r)return; const bk=window.__brDs; window.__brDs=[r]; try{brXem(r.nhan_vien_id);}finally{window.__brDs=bk;}}
+function brQlSuaTuan(id){const r=(window.__brTuan||[]).find(x=>x.id===id); if(!r)return; const bk=window.__brDs; window.__brDs=[r]; try{brQlSua(id);}finally{window.__brDs=bk;}}
 /* 📌 Giao việc — CHỈ CEO / ADMIN nhập / sửa: Người nhận việc (email) · Tên công việc · Ngày bắt đầu · Ngày kết thúc */
 function _gvPanel(nvs){
   const ds=window.__gvAll||[], hn=new Date().toISOString().slice(0,10), sua=ds.find(g=>g.id===S.gvSua)||{};

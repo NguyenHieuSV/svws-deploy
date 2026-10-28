@@ -1233,22 +1233,30 @@ def bao_cao_cua_toi(thang: str | None = None, db: Session = Depends(get_db),
 
 
 @router.get("/bao-cao-ngay")
-def ds_bao_cao_ngay(ngay: str | None = None, thang: str | None = None,
+def ds_bao_cao_ngay(ngay: str | None = None, thang: str | None = None, tu: str | None = None, den: str | None = None,
                     nhan_vien_id: int | None = None, db: Session = Depends(get_db),
                     _=Depends(yeu_cau(MODULE_WT, "XEM"))):
-    """Quản lý xem báo cáo của toàn công ty — lọc theo ngày/tháng/nhân viên."""
+    """Quản lý xem báo cáo của toàn công ty — lọc theo ngày / tháng / khoảng ngày (tu..den) / nhân viên.
+    Kèm ngay_gan_nhat = ngày gần nhất có báo cáo (để trang mở sẵn ngày đó khi hôm nay chưa ai gửi)."""
     q = db.query(BaoCaoNgay, NhanVien).join(NhanVien, BaoCaoNgay.nhan_vien_id == NhanVien.id)
     if nhan_vien_id:
         q = q.filter(BaoCaoNgay.nhan_vien_id == nhan_vien_id)
     if ngay:
         q = q.filter(BaoCaoNgay.ngay == ngay)
+    elif tu or den:
+        if tu:
+            q = q.filter(BaoCaoNgay.ngay >= tu)
+        if den:
+            q = q.filter(BaoCaoNgay.ngay <= den)
     elif thang and len(thang) == 7:
         q = q.filter(func.to_char(BaoCaoNgay.ngay, "YYYY-MM") == thang)
     else:
         q = q.filter(BaoCaoNgay.ngay == str(date.today()))
     rows = q.order_by(BaoCaoNgay.ngay.desc(), NhanVien.ma).all()
     tep = _bc_tep_map(db, [r.id for r, _ in rows])
-    return {"danh_sach": [dict(_bc_ra(r, nv), tep=tep.get(r.id, [])) for r, nv in rows]}
+    gan_nhat = db.query(func.max(BaoCaoNgay.ngay)).scalar()
+    return {"danh_sach": [dict(_bc_ra(r, nv), tep=tep.get(r.id, [])) for r, nv in rows],
+            "ngay_gan_nhat": str(gan_nhat) if gan_nhat else None}
 
 
 def _thang_khoang(thang: str | None, hom_nay: date):

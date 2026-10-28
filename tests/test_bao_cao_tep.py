@@ -86,3 +86,13 @@ def test_gioi_han_loai_so_luong_dung_luong(db):
     with pytest.raises(HTTPException):
         _tai(db, bc["id"], [_up("to.pdf", b"x" * (20 * 1024 * 1024 + 1))], an)
     assert db.query(m.TepDinhKem).count() == 0                   # lỗi thì không lưu tệp nào
+
+
+def test_ds_bao_cao_theo_khoang_ngay_va_ngay_gan_nhat(db, monkeypatch):
+    an = db.get(m.NguoiDung, 1)
+    assert ns.ds_bao_cao_ngay(None, None, "2026-10-20", "2026-10-28", None, db, None)["ngay_gan_nhat"] is None
+    for d in ("2026-10-26", "2026-10-27"):
+        ns.gui_bao_cao_ngay(ns.BaoCaoNgayVao(ngay=d, da_lam="x"), db, nd=an)
+    r = ns.ds_bao_cao_ngay(None, None, "2026-10-22", "2026-10-28", None, db, None)
+    assert [x["ngay"] for x in r["danh_sach"]] == ["2026-10-27", "2026-10-26"] and r["ngay_gan_nhat"] == "2026-10-27"
+    assert [x["ngay"] for x in ns.ds_bao_cao_ngay(None, None, "2026-10-27", None, None, db, None)["danh_sach"]] == ["2026-10-27"]
