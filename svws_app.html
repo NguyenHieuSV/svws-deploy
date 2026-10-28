@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="vi">
 <head>
-<!-- build: bao-gia-huong-dan-v2-2026-10-28 -->
+<!-- build: ks-ma-thieu-ve-2026-10-28 -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#0f2c44">
@@ -12850,11 +12850,43 @@ async function nccKiemSoat(host){
       <td class="num">${vnd(x.doanh_thu)}</td><td class="num">${vnd(x.tong_chi_phi)}</td>
       <td class="num"><b style="color:${ln>=0?'#16a34a':'#dc2626'}">${vnd(ln)}</b></td>
       <td>${gc}</td></tr>`;},_nhomMaTR);
+  // 🔎 MÃ THIẾU MỘT VẾ (anh Hiếu 28/10/2026): mã có chi phí mà chưa có doanh thu, hoặc có doanh thu mà chưa có chi phí.
+  //    Đánh giá theo cùng ĐƠN VỊ với bảng: nhóm gốc + tháng (≥ 2 mã) tính gộp, mã lẻ tính riêng — mã con -01/-02 không bị
+  //    báo thiếu khi nhóm đã đủ hai vế. Bỏ mã OP / KHO / đơn đầu tư cho thuê (vốn không có doanh thu).
+  const _ksDonVi=(()=>{const nh={};chiPhi.forEach(x=>{if(x.nhom)(nh[x.nhom]=nh[x.nhom]||[]).push(x);});const out=[],da=new Set();
+    chiPhi.forEach(x=>{if(da.has(x))return;const rs=x.nhom?nh[x.nhom]:null;
+      if(rs&&rs.length>=2){rs.forEach(r=>da.add(r));out.push({ma:x.nhom,so_ma:rs.length,rows:rs,dt:rs.reduce((s,r)=>s+Number(r.doanh_thu||0),0),cp:rs.reduce((s,r)=>s+Number(r.tong_chi_phi||0),0),dau_tu:rs.some(r=>r.la_dau_tu),chua_don:rs.every(r=>!r.don_hang_id),don_hang_id:null});}
+      else{da.add(x);out.push({ma:x.ma_ban,so_ma:1,rows:[x],dt:Number(x.doanh_thu||0),cp:Number(x.tong_chi_phi||0),dau_tu:!!x.la_dau_tu,chua_don:!x.don_hang_id,don_hang_id:x.don_hang_id||null});}});
+    return out;})();
+  const _ksBoQua=u=>u.dau_tu||/^(OP|KHO)(\b|-)/i.test(String(u.ma||''));
+  const thieuDT=_ksDonVi.filter(u=>u.cp>0&&u.dt<=0&&!_ksBoQua(u)).sort((a,b)=>b.cp-a.cp);
+  const thieuCP=_ksDonVi.filter(u=>u.dt>0&&u.cp<=0).sort((a,b)=>b.dt-a.dt);
+  const boQuaN=_ksDonVi.filter(u=>u.cp>0&&u.dt<=0&&_ksBoQua(u)).length;
+  const _ksThieuRow=(u,i,loai)=>{const e_=v=>String(v==null?'':v).replace(/</g,'&lt;').replace(/"/g,'&quot;');
+    const maHtml=u.so_ma>1?`<span class="badge b-info" title="Nhóm gốc + tháng gồm ${u.so_ma} mã: ${e_(u.rows.map(r=>r.ma_ban).join(' · '))} — mở dòng 📂 ở bảng dưới để xem từng mã">📂 ${e_(u.ma)} <span style="font-weight:400">${u.so_ma} mã</span></span>`
+      :(u.don_hang_id?`<a href="#" onclick="ksCpChiTiet(${u.don_hang_id});return false" title="Xem danh mục chi phí của mã (tự lưu vào Kho tệp)"><span class="badge b-info" style="cursor:pointer;border-bottom:1px dashed currentColor">${e_(u.ma)}</span></a>`
+        :`<span class="badge b-cho" title="PO / công nợ mang mã này nhưng chưa có đơn bán cùng số">${e_(u.ma)} ⚠</span>`);
+    const goiY=loai==='DT'
+      ?(u.chua_don?'Chưa có đơn bán cùng mã: lập đơn bán đúng mã (Bán hàng → Đơn hàng, hoặc → Tạo đơn hàng từ báo giá), hoặc sửa mã trên PO / công nợ nếu ghi nhầm.'
+                  :'Có đơn bán nhưng doanh thu 0: cập nhật giá trị đơn / xuất hóa đơn bán; đơn đã hủy thì chuyển PO sang mã đúng.')
+      :'Có doanh thu nhưng chưa PO / hóa đơn mua nào gắn mã: kiểm tra PO ghi mã khác, hóa đơn mua chưa gán mã (🧩 Chi phí chưa vào mã), hoặc bán hàng sẵn trong kho.';
+    const nutDon=(u.so_ma===1&&u.don_hang_id)?`<button class="btn-sm ghost" title="Mở đơn hàng bán" onclick="S.bhTab='don_hang';S.dhSel=${u.don_hang_id};go('ban_hang')">🧾 Đơn</button>`
+      :(u.so_ma>1?u.rows.filter(r=>r.don_hang_id).slice(0,3).map(r=>`<button class="btn-sm ghost" title="Mở đơn hàng bán ${e_(r.ma_ban)}" onclick="S.bhTab='don_hang';S.dhSel=${r.don_hang_id};go('ban_hang')">🧾 ${e_(r.ma_ban)}</button>`).join(' '):'');
+    return `<tr><td>${i+1}</td><td style="white-space:nowrap">${maHtml}</td><td class="num"><b>${vnd(loai==='DT'?u.cp:u.dt)}</b></td><td style="font-size:12px;color:var(--muted);min-width:220px;white-space:normal">${goiY}</td><td style="white-space:nowrap">${nutDon}</td></tr>`;};
+  const _ksThieuBang=(ds,loai,mau,nhan,cotTien)=>`<details open style="margin:6px 0"><summary style="cursor:pointer;font-weight:600;font-size:12.5px;color:${mau};padding:4px 0">${nhan} — ${ds.length} mã · ${vnd(ds.reduce((s,u)=>s+(loai==='DT'?u.cp:u.dt),0))}</summary>
+      <div style="overflow-x:auto"><table style="margin-top:4px"><thead><tr><th>Stt</th><th>Mã / nhóm</th><th class="num">${cotTien}</th><th>Gợi ý xử lý</th><th></th></tr></thead>
+      <tbody>${ds.map((u,i)=>_ksThieuRow(u,i,loai)).join('')||`<tr><td colspan="5" class="empty" style="padding:10px">Không có mã nào ✓</td></tr>`}</tbody></table></div></details>`;
+  const thieuHtml=`<details style="margin:8px 14px 4px;border:1px solid var(--line);border-radius:10px;padding:4px 12px;background:#fff">
+    <summary style="cursor:pointer;font-weight:650;font-size:13px;padding:7px 0" title="Mã mới có một vế (chỉ chi phí hoặc chỉ doanh thu) — bấm để mở danh sách và gợi ý xử lý">🔎 Mã thiếu một vế — <span style="color:#b45309">${thieuDT.length} có chi phí, chưa có doanh thu</span> · <span style="color:#0e7490">${thieuCP.length} có doanh thu, chưa có chi phí</span>${boQuaN?` <span style="color:var(--muted);font-weight:400;font-size:12px">(bỏ qua ${boQuaN} mã OP / KHO / đầu tư cho thuê — vốn không có doanh thu)</span>`:''}</summary>
+    <div class="note" style="margin-top:2px">Tính theo cùng đơn vị với bảng dưới: <b>nhóm gốc + tháng</b> (từ 2 mã) tính gộp, mã lẻ tính riêng — mã con -01/-02 không bị báo thiếu khi nhóm đã đủ hai vế. Đây là danh sách để rà: doanh thu chưa ghi, PO ghi nhầm mã, hóa đơn mua chưa gán mã. Bấm mã để xem danh mục chi phí, 🧾 để mở đơn bán.</div>
+    ${_ksThieuBang(thieuDT,'DT','#b45309','🟠 Có chi phí, chưa có doanh thu','Chi phí')}
+    ${_ksThieuBang(thieuCP,'CP','#0e7490','🔵 Có doanh thu, chưa có chi phí','Doanh thu')}</details>`;
   const chiPhiPanel=`<div class="panel"><div class="panel-h"><h3>💰 Chi phí theo Mã Đơn hàng</h3><div class="spacer"></div>
       ${laQTV()&&S.mode==="live"?`<button class="btn-sm ghost" style="margin-right:10px" title="Đơn hàng lập trước 28/10/2026 đã nối / trùng mã báo giá gửi khách nhưng chưa có số liệu lúc chào → ghi bổ sung theo nội dung báo giá hiện tại (dự toán · Rev · tổng · biên)" onclick="ksChotBaoGiaCu()">📝 Ghi biên chào cho đơn cũ</button>`:''}
       ${laQTV()&&S.mode==="live"?`<button class="btn-sm ghost" style="margin-right:10px" title="Nhóm mã đang lỗ · có chi phí chưa có doanh thu · biên thấp · tụt biên so với lúc chào — app tự gửi vào nhóm Duyệt chi mỗi thứ Hai 8h" onclick="ksLnXem()">📉 Bản kiểm soát lợi nhuận</button>`:''}
       <span class="num" style="font-weight:700">Doanh thu: ${vnd(cpTongDT)} · Chi phí: ${vnd(cpTongCP)} · Lợi nhuận: <span style="color:${cpTongLN>=0?'#16a34a':'#dc2626'}">${vnd(cpTongLN)}</span></span></div>
     <div class="note">Tổng hợp theo từng mã đơn hàng bán. <b>Tổng chi phí = Σ PO đã duyệt gắn mã</b> (nghĩa vụ — không đổi khi trả từng đợt) <b>+ công nợ nhập ngoài khớp mã + hóa đơn mua gắn mã</b>. <b>Lợi nhuận = Doanh thu (GỒM VAT) − Tổng chi phí (gồm VAT)</b> — hai vế cùng cơ sở thuế. <b>📂 Dòng nhóm</b> = gom mọi mã cùng <b>gốc + tháng</b> (đơn bán tách -01/-02/-BT… và PO chỉ ghi mã gốc) — nhìn nhóm để biết lãi/lỗ thật của một công trình-tháng. Mã ⚠ = có chi phí nhưng chưa có đơn bán. <b>chào x% → thực y%</b> = biên LÚC CHÀO theo báo giá gửi khách (đơn chốt từ báo giá, nhớ dự toán · Rev · tổng) so với biên thực — tụt ≥ ${LN_TUT_BIEN_DIEM} điểm tô đỏ, duyệt PO làm tụt từ mức này phải CEO xác nhận. Bấm vào <b>mã đơn hàng</b> để xem danh mục chi phí — tự lưu vào <b>📁 Kho tệp dùng chung</b>.</div>
+    ${thieuHtml}
     <div class="panel-b" style="overflow-x:auto"><table><thead><tr><th>Stt</th><th>Mã Đơn Hàng</th><th class="num">Doanh thu</th><th class="num">Tổng chi phí</th><th class="num">Lợi nhuận</th><th>Ghi chú</th></tr></thead>
     <tbody>${cpRows||'<tr><td colspan="6" class="empty" style="padding:18px">Chưa có dữ liệu chi phí theo đơn hàng.</td></tr>'}</tbody></table></div></div>`;
   const treRows=tre.map(x=>`<tr class="${x.so_ngay_tre>7?'qh':''}"><td><b>${x.so}</b></td><td>${x.ten_ncc||'—'}</td>
