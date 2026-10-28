@@ -3565,7 +3565,8 @@ def duyet_don_mua(dm_id: int, xac_nhan_ln: bool = False, db: Session = Depends(g
                             "(mã bán hàng · OP-… · KHO) rồi duyệt lại.")
     # ★ Tầng 1b: PO vượt/ngoài dự toán → chỉ CEO/ADMIN duyệt
     _chi_ceo_duyet_vuot(nd, getattr(dm, "vuot_du_toan", None), "PO")
-    # ★ Tầng 1c: 📉 KIỂM SOÁT LỢI NHUẬN theo nhóm mã (chi phí > doanh thu · biên < ngưỡng · chưa có doanh thu) → chỉ CEO
+    # ★ Tầng 1c: 📉 KIỂM SOÁT LỢI NHUẬN theo nhóm mã (chi phí > doanh thu · biên < ngưỡng · chưa có doanh thu
+    #   · biên tụt ≥ 5 điểm so với lúc chào, mig 158) → chỉ CEO
     canh_bao_ln = None
     try:
         from ..kiem_soat_ln import danh_gia_po

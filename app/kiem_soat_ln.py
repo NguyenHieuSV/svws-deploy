@@ -10,7 +10,8 @@
   ② Nhắc HẰNG TUẦN (thứ Hai) vào nhóm Google Chat Duyệt chi (nhóm hạn chế người xem): nhóm mã lỗ · có chi phí
      mà chưa có doanh thu · biên thấp.
   ③ (28/10/2026, mig 158) Đơn hàng chốt từ báo giá gửi khách nhớ BIÊN LÚC CHÀO → so với biên thực: cờ / bản tuần
-     ghi kèm «chào x%», nhóm có biên thực tụt ≥ TUT_BIEN_DIEM điểm so với lúc chào được liệt kê riêng (chỉ nhắc, không chặn).
+     ghi kèm «chào x%», nhóm có biên thực tụt ≥ TUT_BIEN_DIEM điểm so với lúc chào được liệt kê riêng trong bản tuần
+     VÀ duyệt PO làm nhóm tụt ≥ TUT_BIEN_DIEM điểm → cờ 📉 TUT_BIEN, chỉ CEO duyệt (anh Hiếu chốt 28/10/2026).
 """
 import re
 from datetime import date
@@ -128,9 +129,14 @@ def danh_gia(db: Session, ma: str, them_chi_phi: float = 0.0) -> dict | None:
         return {"muc": "CHUA_DT", "nhom": nh, "doanh_thu": 0.0, "chi_phi": cp, "bien": None, "nguong": ng, "bien_chao": bc,
                 "ly_do": f"Mã {nh} CHƯA CÓ DOANH THU — chi phí sẽ là {_tr(cp)} (tính cả đơn này).{them_chao}"}
     bien = round((dt - cp) / dt * 100, 1)
+    nguon_dt = f"doanh thu tháng trước ({tham_chieu}) {_tr(dt)}" if tham_chieu else f"doanh thu {_tr(dt)}"
+    if bien >= ng and bc is not None and bc - bien >= TUT_BIEN_DIEM:   # còn trên ngưỡng nhưng TỤT nhiều so với lúc chào → cờ
+        return {"muc": "TUT_BIEN", "nhom": nh, "doanh_thu": dt, "chi_phi": cp, "bien": bien, "nguong": ng, "bien_chao": bc,
+                "tham_chieu": tham_chieu,
+                "ly_do": (f"Mã {nh}: chi phí {_tr(cp)} (tính cả đơn này) so với {nguon_dt} → biên còn {_pt(bien)}%, "
+                          f"TỤT {_pt(bc - bien)} điểm so với lúc chào {_pt(bc)}% (ngưỡng tụt {TUT_BIEN_DIEM:g} điểm).")}
     if bien >= ng:
         return None
-    nguon_dt = f"doanh thu tháng trước ({tham_chieu}) {_tr(dt)}" if tham_chieu else f"doanh thu {_tr(dt)}"
     return {"muc": "LO" if bien < 0 else "BIEN_THAP", "nhom": nh, "doanh_thu": dt, "chi_phi": cp, "bien": bien,
             "nguong": ng, "tham_chieu": tham_chieu, "bien_chao": bc,
             "ly_do": (f"Mã {nh}: chi phí {_tr(cp)} (tính cả đơn này) so với {nguon_dt} → "

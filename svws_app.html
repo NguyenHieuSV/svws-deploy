@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="vi">
 <head>
-<!-- build: don-hang-chot-bao-gia-2026-10-28 -->
+<!-- build: po-cong-tut-bien-2026-10-28 -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#0f2c44">
@@ -561,7 +561,7 @@ async function apiKhoa(path,opts,st){
     return api(path+(path.includes('?')?'&':'?')+'xac_nhan_khoa=1',opts);
   }
 }
-/* 📉 Duyệt PO làm nhóm mã LỖ / biên thấp / chưa có doanh thu: máy chủ trả 409 cho CEO → hỏi rồi gửi lại ?xac_nhan_ln=1 */
+/* 📉 Duyệt PO làm nhóm mã LỖ / biên thấp / chưa có doanh thu / tụt ≥ 5 điểm so với biên lúc chào: máy chủ trả 409 cho CEO → hỏi rồi gửi lại ?xac_nhan_ln=1 */
 async function apiLn(path,opts){
   try{return await api(path,opts);}
   catch(e){
@@ -10966,7 +10966,7 @@ async function nccPO(host){
   else pos=DEMO.don_mua;
   // 📉 cờ kiểm soát lợi nhuận của PO chờ duyệt (cùng phép tính lúc duyệt) — chỉ CEO duyệt được PO mang cờ
   let lnMap={}; if(S.mode==="live"&&(pos||[]).some(p=>p.trang_thai==="CHO_DUYET")){try{lnMap=await api('/ncc/kiem-soat-ln/po-cho-duyet');}catch(_){lnMap={};}}
-  const _lnNhan={LO:'📉 Làm mã LỖ',BIEN_THAP:'📉 Biên lợi nhuận thấp',CHUA_DT:'📉 Mã chưa có doanh thu'};
+  const _lnNhan={LO:'📉 Làm mã LỖ',BIEN_THAP:'📉 Biên lợi nhuận thấp',CHUA_DT:'📉 Mã chưa có doanh thu',TUT_BIEN:'📉 Tụt biên so với lúc chào'};
   const hhName=id=>{const h=hhs.find(x=>x.id===id);return h?h.ten:("HH #"+id);};
   const supName=id=>{const s=sups.find(x=>x.id===id);return s?s.ten:("NCC #"+id);};
   const ordNo=id=>{if(!id)return '—';const o=orders.find(x=>x.id===id);return o?(o.so||('DH-'+id)):('Đơn #'+id);};
