@@ -113,18 +113,59 @@ def tao_bao_gia_pdf(path, d, cong_ty=None,
     head = ["No.", "Product Name", "Description", "Qty", "Unit", "Unit Price (VND)", "VAT", "Amount (VND)"]
     al = [TA_CENTER, TA_LEFT, TA_LEFT, TA_CENTER, TA_CENTER, TA_RIGHT, TA_CENTER, TA_RIGHT]
     rows = [[P(f"<b>{h}</b>", 8, FB, white, al[i]) for i, h in enumerate(head)]]
-    for i, it in enumerate((d.get("items") or []), 1):
-        if not (it.get("ten") or it.get("mo_ta")):
-            continue
-        sl = float(it.get("so_luong") or 0); gia = float(it.get("don_gia") or 0)
+    its = [it for it in (d.get("items") or []) if it.get("ten") or it.get("mo_ta")]
+
+    def _vat(it):
         p = it.get("vat_pct")
-        p = float(d.get("vat_pct") or 0) if p in (None, "") else float(p)
-        rows.append([P(str(i), 8, F, black, TA_CENTER), P(it.get("ten") or "", 8),
-                     P(it.get("mo_ta") or "", 8, F, GREY), P(f"{sl:g}", 8, F, black, TA_CENTER),
-                     P(it.get("don_vi") or "", 8, F, black, TA_CENTER),
-                     P(_money(gia), 8, F, black, TA_RIGHT),
-                     P(f"{p:g}%", 8, F, black, TA_CENTER),
-                     P(_money(sl * gia), 8, F, black, TA_RIGHT)])
+        return float(d.get("vat_pct") or 0) if p in (None, "") else float(p)
+
+    def _dong(it, i, an=False):
+        sl = float(it.get("so_luong") or 0); gia = float(it.get("don_gia") or 0)
+        return [P(str(i), 8, F, black, TA_CENTER), P(it.get("ten") or "", 8),
+                P(it.get("mo_ta") or "", 8, F, GREY), P(f"{sl:g}", 8, F, black, TA_CENTER),
+                P(it.get("don_vi") or "", 8, F, black, TA_CENTER),
+                P("—" if an else _money(gia), 8, F, black, TA_RIGHT),
+                P(f"{_vat(it):g}%", 8, F, black, TA_CENTER),
+                P("—" if an else _money(sl * gia), 8, F, black, TA_RIGHT)]
+
+    # 📦 CỤM trình bày cho khách (it["cum"]); d["cum_hien"][cụm] = DU | GON (chỉ tổng, chi tiết ở phụ lục) | TRON_GOI
+    cum_ds, styles, phu_luc = [], [], []
+    for it in its:
+        c = str(it.get("cum") or "").strip()
+        if c and c not in cum_ds:
+            cum_ds.append(c)
+    hien = d.get("cum_hien") or {}
+    n = 0
+    if cum_ds:
+        for k, c in enumerate(cum_ds, 1):
+            rs = [it for it in its if str(it.get("cum") or "").strip() == c]
+            mode = hien.get(c) or "DU"
+            tong = sum(float(it.get("so_luong") or 0) * float(it.get("don_gia") or 0) for it in rs)
+            r0 = len(rows)
+            if mode == "GON":
+                rows.append([P(f"<b>{chr(64 + k)}</b>", 8, FB, black, TA_CENTER),
+                             P(f"<b>{c}</b> <font color='#5B7186'>({len(rs)} items — see technical appendix)</font>", 8, FB),
+                             "", "", "", "", "", P(f"<b>{_money(tong)}</b>", 8, FB, black, TA_RIGHT)])
+                styles += [("SPAN", (1, r0), (6, r0)), ("BACKGROUND", (0, r0), (-1, r0), LIGHT)]
+                phu_luc.append((c, rs))
+            else:
+                rows.append([P(f"<b>{chr(64 + k)}</b>", 8, FB, black, TA_CENTER), P(f"<b>{c}</b>", 8, FB), "", "", "", "", "", ""])
+                styles += [("SPAN", (1, r0), (-1, r0)), ("BACKGROUND", (0, r0), (-1, r0), LIGHT)]
+                for it in rs:
+                    n += 1
+                    rows.append(_dong(it, n, an=(mode == "TRON_GOI")))
+                if mode == "TRON_GOI":
+                    r1 = len(rows)
+                    rows.append(["", P(f"<b>{c} — package price</b>", 8, FB, black, TA_RIGHT), "", "", "", "", "",
+                                 P(f"<b>{_money(tong)}</b>", 8, FB, black, TA_RIGHT)])
+                    styles.append(("SPAN", (1, r1), (6, r1)))
+        for it in its:
+            if not str(it.get("cum") or "").strip():
+                n += 1
+                rows.append(_dong(it, n))
+    else:
+        for i, it in enumerate(its, 1):
+            rows.append(_dong(it, i))
     colw = [W * x for x in (0.05, 0.21, 0.26, 0.06, 0.07, 0.14, 0.06, 0.15)]
     tbl = Table(rows, colWidths=colw, repeatRows=1)
     tbl.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, 0), TEAL),
@@ -132,7 +173,7 @@ def tao_bao_gia_pdf(path, d, cong_ty=None,
                              ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
                              ("TOPPADDING", (0, 0), (-1, -1), 4),
                              ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
-                             ("ROWBACKGROUNDS", (0, 1), (-1, -1), [white, LIGHT])]))
+                             ("ROWBACKGROUNDS", (0, 1), (-1, -1), [white, LIGHT])] + styles))
     story += [tbl, Spacer(1, 6)]
 
     sub, vat, tong = tinh_bao_gia(d)
@@ -159,6 +200,22 @@ def tao_bao_gia_pdf(path, d, cong_ty=None,
               P("Thank you for your interest in our products and services!", 8.5, F, GREY, TA_CENTER),
               P(f"Created on: {_ngay_vn(d.get('ngay'))} - Song Viet Technical Solutions", 8, F, GREY, TA_CENTER)]
 
+    # 📎 phụ lục kỹ thuật cho cụm chỉ in tổng (không giá)
+    if phu_luc:
+        from reportlab.platypus import PageBreak
+        story += [PageBreak(), P("<b>TECHNICAL APPENDIX — SCOPE OF SUPPLY</b>", 10, FB, TEAL), Spacer(1, 4)]
+        for c, rs in phu_luc:
+            story.append(P(f"<b>{c}</b>", 9, FB))
+            pr = [[P("<b>No.</b>", 8, FB, white, TA_CENTER), P("<b>Item</b>", 8, FB, white), P("<b>Description</b>", 8, FB, white),
+                   P("<b>Qty</b>", 8, FB, white, TA_CENTER), P("<b>Unit</b>", 8, FB, white, TA_CENTER)]]
+            for i, it in enumerate(rs, 1):
+                pr.append([P(str(i), 8, F, black, TA_CENTER), P(it.get("ten") or "", 8), P(it.get("mo_ta") or "", 8, F, GREY),
+                           P(f"{float(it.get('so_luong') or 0):g}", 8, F, black, TA_CENTER), P(it.get("don_vi") or "", 8, F, black, TA_CENTER)])
+            t2 = Table(pr, colWidths=[W * x for x in (0.06, 0.34, 0.44, 0.08, 0.08)], repeatRows=1)
+            t2.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, 0), TEAL), ("GRID", (0, 0), (-1, -1), 0.5, LINE),
+                                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"), ("TOPPADDING", (0, 0), (-1, -1), 3),
+                                    ("BOTTOMPADDING", (0, 0), (-1, -1), 3)]))
+            story += [t2, Spacer(1, 8)]
     SimpleDocTemplate(path, pagesize=A4, leftMargin=12 * mm, rightMargin=12 * mm,
                       topMargin=12 * mm, bottomMargin=12 * mm,
                       title=f"Quotation {d.get('so') or ''}").build(story)
