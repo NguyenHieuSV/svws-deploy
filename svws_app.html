@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="vi">
 <head>
-<!-- build: bao-gia-du-toan-2026-10-28 -->
+<!-- build: bao-gia-du-toan-2026-10-28b -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#0f2c44">
@@ -10113,6 +10113,8 @@ async function poNhanhGui(){
   try{if(cfg.sau)await cfg.sau(r);}catch(e){toast(e.detail||e.message,"err");}
 }
 /* 📄 Soạn báo giá gửi khách từ dự toán: số BG = mã dự toán, dòng + đơn giá điền sẵn */
+/* giá bán gợi ý = giá vốn × (1 + biên), làm tròn theo bậc giá (< 10.000: trăm · < 1 triệu: nghìn · còn lại: chục nghìn) */
+function _bgGiaBanGoiY(giaVon){const g=Number(giaVon||0)*(1+_bgBienGoiY()/100); if(g<=0)return 0; const b=g<10000?100:(g<1e6?1000:10000); return Math.round(g/b)*b;}
 function _bgBienGoiY(){const v=Number(((S._bgKsCfg||{}).bien_goi_y));return isFinite(v)&&v>=0?v:20;}
 async function dtbTaoBaoGia(id){
   if(S.mode==="live"&&!S._bgKsCfg){try{S._bgKsCfg=await api("/ban-hang/bao-gia-form/kiem-soat");}catch(_){}}
@@ -10138,14 +10140,14 @@ async function dtbTaoBaoGia(id){
       attn:khObj?(khObj.nguoi_lien_he||""):"",
       // 💡 đơn giá bán gợi ý = giá dự toán (giá vốn) × (1 + biên gợi ý), làm tròn nghìn — người lập chỉnh lại nếu cần
       items:its.map(x=>({ten:x.ten,mo_ta:x.quy_cach||"",so_luong:Number(x.so_luong||0),don_vi:x.don_vi||"Unit",
-        don_gia:Math.round(Number(x.don_gia||0)*(1+_bgBienGoiY()/100)/1000)*1000,gia_von:Number(x.don_gia||0),vat_pct:8})),
+        don_gia:_bgGiaBanGoiY(x.don_gia),gia_von:Number(x.don_gia||0),vat_pct:8})),
       du_toan_id:d.id, du_toan_ma:d.ma,
       vat_pct:8, tt:"40% deposit upon order, remaining 60% upon delivery notification",
       giao:"8-10 weeks after order placement", dia_diem:"As per agreement",
       nguoi_bg:"Nguyễn Thương", email_lh:"sv-sales@watersolutions.company"
     }};
     if(!khObj&&d.khach_hang)toast(`Khách "${d.khach_hang}" chưa có trong danh mục CRM — chọn lại khách ở form báo giá`,"err");
-    toast(`💡 Đơn giá bán đã điền = giá dự toán + ${_bgBienGoiY()}% (làm tròn nghìn) — kiểm tra và chỉnh lại trước khi trình duyệt`,"ok");
+    toast(`💡 Đơn giá bán đã điền = giá dự toán + ${_bgBienGoiY()}% (làm tròn theo bậc giá) — kiểm tra và chỉnh lại trước khi trình duyệt`,"ok");
   }
   S.bhTab='bao_gia';
   if(S.page!=='ban_hang'){if(!S.perm[pmod('ban_hang')]){return toast("Bạn chưa có quyền vào Bán hàng","err");}go('ban_hang');}
