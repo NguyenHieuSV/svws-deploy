@@ -1349,6 +1349,9 @@ def bao_gia_kiem_soat(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "
     """📋 / 📉 của từng báo giá (200 mới nhất): dự toán gốc, thiếu gì, biên so với dự toán. Kèm biên gợi ý cho nút tạo."""
     from ..bao_gia_ks import bien_goi_y, bien_toi_thieu, kiem_tra, mien_truoc_moc
     out = {}
+    dh_map = {}                                                  # báo giá → đơn hàng đã chốt (mig 158)
+    for i, so, bid in db.query(DonHang.id, DonHang.so, DonHang.bao_gia_form_id).filter(DonHang.bao_gia_form_id.isnot(None)).all():
+        dh_map.setdefault(bid, {"id": i, "so": so})
     for b in db.query(BaoGiaForm).order_by(BaoGiaForm.id.desc()).limit(200).all():
         if (b.noi_dung or {}).get("loai") == "HOP_DONG":
             continue
@@ -1366,7 +1369,7 @@ def bao_gia_kiem_soat(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "
                           "tao_nguoc_duoc": bool(k["thieu_du_toan"] and not dt and its_
                                                  and all(float(it.get("don_gia") or 0) > 0 for it in its_)),
                           "ngoai_du_toan": len(k["ngoai_du_toan"]), "ngoai_chua_uoc": len(k["ngoai_chua_uoc"]),
-                          "so_bo": k["so_bo"], "dt_doi_gia": len(k["dt_doi_gia"])}
+                          "so_bo": k["so_bo"], "dt_doi_gia": len(k["dt_doi_gia"]), "don_hang": dh_map.get(b.id)}
     from ..bao_gia_ks import MAU_DIEU_KHOAN, la_qtv, san_bien
     return {"bao_gia": out, "bien_toi_thieu": bien_toi_thieu(), "bien_goi_y": bien_goi_y(),
             "san_bien": san_bien(), "duoc_duoi_san": la_qtv(_), "mau_dieu_khoan": MAU_DIEU_KHOAN}
@@ -1381,6 +1384,52 @@ def bao_gia_tao_du_toan(bgf_id: int, db: Session = Depends(get_db),
     if bgf is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy báo giá")
     return tao_du_toan_tu_bao_gia(db, bgf, nd)
+
+
+@router.post("/bao-gia-form/{bgf_id}/tao-don")
+def bao_gia_form_tao_don(bgf_id: int, ep: bool = False, db: Session = Depends(get_db),
+                         nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    """🧾 Tạo ĐƠN HÀNG BÁN cùng mã từ báo giá gửi khách đã duyệt / đã gửi — ghi dự toán · Rev · tổng · biên lúc chào
+    lên đơn để Kiểm soát lợi nhuận so với biên thực. Đã có đơn cùng mã → chỉ nối. ep=true (CEO/ADMIN): báo giá mới xuất PDF."""
+    from ..bao_gia_ks import tao_don_tu_bao_gia_form
+    bgf = db.get(BaoGiaForm, bgf_id)
+    if bgf is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy báo giá")
+    return tao_don_tu_bao_gia_form(db, bgf, nd, ep)
+
+
+@router.get("/don-hang/chot-bao-gia-cu")
+def don_hang_chot_bao_gia_cu_dem(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
+    """Số đơn hàng đã nối báo giá (hoặc trùng mã báo giá gửi khách) nhưng CHƯA ghi số liệu lúc chào."""
+    from ..bao_gia_ks import TRANG_THAI_CHOT
+    so_bg = {str(s).strip().lower() for (s, nd_) in db.query(BaoGiaForm.so, BaoGiaForm.noi_dung)
+             .filter(BaoGiaForm.so.isnot(None), BaoGiaForm.trang_thai.in_(TRANG_THAI_CHOT)).all()
+             if (nd_ or {}).get("loai") != "HOP_DONG" and str(s or "").strip()}
+    n = 0
+    for dh in db.query(DonHang).filter(DonHang.chot_luc.is_(None)).all():
+        if dh.bao_gia_form_id or str(dh.so or "").strip().lower() in so_bg:
+            n += 1
+    return {"so_don": n}
+
+
+@router.post("/don-hang/chot-bao-gia-cu")
+def don_hang_chot_bao_gia_cu(db: Session = Depends(get_db), nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
+    """📝 Ghi BỔ SUNG số liệu lúc chào (dự toán · Rev · tổng · giá vốn · biên) cho đơn hàng lập trước 28/10/2026
+    đã nối / trùng mã báo giá gửi khách — theo nội dung báo giá HIỆN TẠI (nguồn BO_SUNG)."""
+    from ..bao_gia_ks import ghi_chot_len_don, tim_bgf_theo_ma
+    n, loi = 0, []
+    for dh in db.query(DonHang).filter(DonHang.chot_luc.is_(None)).order_by(DonHang.id).all():
+        bgf = db.get(BaoGiaForm, dh.bao_gia_form_id) if dh.bao_gia_form_id else tim_bgf_theo_ma(db, dh.so)
+        if bgf is None:
+            continue
+        try:
+            ghi_chot_len_don(db, dh, bgf, "BO_SUNG")
+            n += 1
+        except Exception as e:                                    # noqa: BLE001
+            loi.append(f"{dh.so}: {type(e).__name__}: {str(e)[:80]}")
+    ghi_audit(db, nd.id, "CHOT_BAO_GIA_CU", "don_hang", 0, moi={"so_don": n, "loi": loi[:10]})
+    db.commit()
+    return {"so_don": n, "loi": loi[:10]}
 
 
 @router.get("/bao-gia-form/{bgf_id}/doi-chieu")
@@ -2109,6 +2158,8 @@ def tao_don_hang_truc_tiep(data: DonHangTrucTiepVao, ep_ma: bool = False, db: Se
         dh.so = f"DH-{date.today():%Y%m%d}-{dh.id}"
     for hh_id, sl, dg, ts in lines:
         db.add(DonHangCt(don_hang_id=dh.id, hang_hoa_id=hh_id, so_luong=sl, don_gia=dg, thue_suat=ts))
+    from ..bao_gia_ks import noi_bao_gia_theo_ma
+    noi_bao_gia_theo_ma(db, dh)                               # mig 158: trùng mã báo giá gửi khách → nhớ biên lúc chào
     ghi_audit(db, nd.id, "TAO", "don_hang", dh.id,
               moi={"truc_tiep": True, "tong_tien": float(tien_hang),
                    "tien_thue": float(tien_thue), "so_dong": len(lines),
@@ -2187,6 +2238,8 @@ def tao_don_hang_tu_po_ai(file: UploadFile = File(...), db: Session = Depends(ge
         dh.so = f"DH-{date.today():%Y%m%d}-{dh.id}"
     for hh_id, sl, dg, ts in lines:
         db.add(DonHangCt(don_hang_id=dh.id, hang_hoa_id=hh_id, so_luong=sl, don_gia=dg, thue_suat=ts))
+    from ..bao_gia_ks import noi_bao_gia_theo_ma
+    noi_bao_gia_theo_ma(db, dh)                               # mig 158: trùng mã báo giá gửi khách → nhớ biên lúc chào
     # đính kèm chính file PO (loai=PO → đơn vào bảng "đã có PO/HĐ")
     duong_dan = _luu(raw, "don_hang", dh.id, file.filename or "PO", file.content_type)
     db.add(TepDinhKem(doi_tuong="DON_HANG", doi_tuong_id=dh.id, loai="PO",

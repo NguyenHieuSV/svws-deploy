@@ -203,6 +203,145 @@ def tao_du_toan_tu_bao_gia(db: Session, bgf, nd) -> dict:
     return {"du_toan_id": d.id, "ma": d.ma, "so_dong": so_dong, "co_von": co_von}
 
 
+# ---------------- 🧾 đơn hàng nhớ báo giá lúc chốt (28/10/2026) ----------------
+TRANG_THAI_CHOT = ("DA_GUI", "DA_DUYET", "DA_XUAT")      # báo giá được nối với đơn hàng cùng mã
+
+
+def so_lieu_chot(db: Session, bgf) -> dict:
+    """Số liệu báo giá để ghi lên đơn hàng lúc chốt: dự toán gốc, Rev gửi khách gần nhất, tổng chưa VAT, giá vốn, biên."""
+    from .bao_gia_pdf import tinh_bao_gia
+    from .models import BaoGiaPhienBan
+    k = kiem_tra(db, bgf)
+    dt = k["du_toan"] or {}
+    sub, _v, tong = tinh_bao_gia(bgf.noi_dung or {})
+    pb = (db.query(BaoGiaPhienBan.rev).filter(BaoGiaPhienBan.bao_gia_form_id == bgf.id)
+          .order_by(BaoGiaPhienBan.id.desc()).first())
+    return {"du_toan_ma": dt.get("ma"), "rev": pb[0] if pb else None, "tong_chao": round(float(sub)),
+            "tong_gom_vat": round(float(tong)), "gia_von_chao": round(float(dt.get("tong") or 0)) if dt else None,
+            "bien_chao": k["bien"]}
+
+
+def ghi_chot_len_don(db: Session, dh, bgf, nguon: str = "TAO_DON") -> dict:
+    """Ghi số liệu lúc chào lên đơn hàng (không commit)."""
+    from .nhac_viec_service import gio_hien_tai
+    s = so_lieu_chot(db, bgf)
+    dh.bao_gia_form_id = bgf.id
+    dh.du_toan_ma = (str(s["du_toan_ma"])[:50] if s["du_toan_ma"] else None)
+    dh.bao_gia_rev = s["rev"]
+    dh.tong_chao = s["tong_chao"]
+    dh.gia_von_chao = s["gia_von_chao"]
+    dh.bien_chao = s["bien_chao"]
+    dh.chot_luc = gio_hien_tai()
+    s["nguon"] = nguon
+    return s
+
+
+def tim_bgf_theo_ma(db: Session, ma, trang_thai=TRANG_THAI_CHOT):
+    """Báo giá gửi khách (không phải hợp đồng) cùng số — ưu tiên đã gửi khách > đã duyệt > đã xuất PDF, mới nhất."""
+    from sqlalchemy import func
+    from .models import BaoGiaForm
+    s = str(ma or "").strip()
+    if not s:
+        return None
+    uu = {"DA_GUI": 0, "DA_DUYET": 1, "DA_XUAT": 2, "CHO_DUYET": 3, "NHAP": 4, "TU_CHOI": 5}
+    ds = [b for b in db.query(BaoGiaForm).filter(func.lower(func.trim(BaoGiaForm.so)) == s.lower()).all()
+          if (b.noi_dung or {}).get("loai") != "HOP_DONG" and (not trang_thai or b.trang_thai in trang_thai)]
+    ds.sort(key=lambda b: (uu.get(b.trang_thai, 9), -b.id))
+    return ds[0] if ds else None
+
+
+def noi_bao_gia_theo_ma(db: Session, dh) -> dict | None:
+    """Đơn lập tay / AI đọc PO mang mã trùng số báo giá gửi khách → nối + ghi số liệu lúc chốt. Không ném lỗi."""
+    try:
+        if getattr(dh, "bao_gia_form_id", None):
+            return None
+        bgf = tim_bgf_theo_ma(db, dh.so)
+        if bgf is None:
+            return None
+        return ghi_chot_len_don(db, dh, bgf, "THEO_MA")
+    except Exception as e:                                               # noqa: BLE001
+        print(f"[BG_CHOT] đơn {getattr(dh, 'id', '?')}: {type(e).__name__}: {e}")
+        return None
+
+
+def tao_don_tu_bao_gia_form(db: Session, bgf, nd, ep: bool = False) -> dict:
+    """🧾 «→ Tạo đơn hàng» từ BÁO GIÁ GỬI KHÁCH đã duyệt / đã gửi: đơn bán cùng mã, dòng = dòng báo giá (bỏ không chào /
+    tùy chọn), hàng chưa có trong kho tự thêm (SAN_PHAM, tồn 0), VAT theo từng dòng; ghi dự toán · Rev · tổng · biên lúc chào.
+    Đã có đơn cùng mã lập tay → chỉ nối báo giá vào đơn đó (không tạo trùng). CEO/ADMIN ep=True cho báo giá mới xuất PDF."""
+    from datetime import date as _d
+    from decimal import Decimal
+    from fastapi import HTTPException, status
+    from sqlalchemy import func
+    from .audit import ghi_audit
+    from .models import DonHang, DonHangCt, HangHoa, KhachHang, TonKho
+    nd_ = bgf.noi_dung or {}
+    if nd_.get("loai") == "HOP_DONG":
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Đây là hợp đồng, không phải báo giá")
+    tt = bgf.trang_thai
+    if tt not in ("DA_DUYET", "DA_GUI") and not (ep and la_qtv(nd) and tt == "DA_XUAT"):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            f"Báo giá đang ở trạng thái {tt} — phải được DUYỆT (và gửi khách) trước khi tạo đơn hàng")
+    ma = str(bgf.so or nd_.get("so") or "").strip()
+    if not ma:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Báo giá chưa có số — nhập số báo giá (mã) trước")
+    cu = db.query(DonHang).filter(DonHang.bao_gia_form_id == bgf.id).first()
+    if cu is not None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Báo giá đã có đơn hàng {cu.so or ('#' + str(cu.id))}")
+    trung = db.query(DonHang).filter(func.lower(func.trim(DonHang.so)) == ma.lower()).first()
+    if trung is not None:                                   # đơn cùng mã lập tay trước đó → nối, không tạo trùng
+        s = ghi_chot_len_don(db, trung, bgf, "NOI_DON_CO_SAN")
+        ghi_audit(db, nd.id, "NOI_BAO_GIA", "don_hang", trung.id,
+                  moi={"bao_gia_form": bgf.id, "rev": s["rev"], "tong_chao": s["tong_chao"], "bien_chao": s["bien_chao"],
+                       "du_toan_ma": s["du_toan_ma"]})
+        db.commit()
+        return {"don_hang_id": trung.id, "so": trung.so, "da_co": True, "so_dong": 0, "hang_moi": [], **s}
+    kh_id = getattr(bgf, "khach_hang_id", None)
+    if not kh_id:
+        ten_kh = str(nd_.get("khach_ten") or "").strip()
+        kh = (db.query(KhachHang).filter(func.lower(func.trim(KhachHang.ten)) == ten_kh.lower()).first()
+              if ten_kh else None)
+        if kh is None:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                "Báo giá chưa gắn khách hàng trong danh mục — mở báo giá chọn khách rồi tạo lại")
+        kh_id = kh.id
+    its = [it for it in (nd_.get("items") or []) if str(it.get("ten") or "").strip() and not it.get("khong_chao")
+           and not it.get("tuy_chon") and float(it.get("so_luong") or 0) > 0]
+    if not its:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Báo giá không có dòng sản phẩm (báo giá theo file đính kèm) — lập đơn hàng tay ở tab Đơn hàng")
+    vat_md = nd_.get("vat_pct")
+    lines, hang_moi = [], []
+    th, tth = Decimal(0), Decimal(0)
+    for it in its:
+        ten = str(it.get("ten")).strip()[:200]
+        hh = db.query(HangHoa).filter(func.lower(func.trim(HangHoa.ten)) == ten.lower()).first()
+        if hh is None:
+            hh = HangHoa(ten=ten, loai="SAN_PHAM", don_vi=(str(it.get("don_vi") or "")[:20] or None),
+                         gia_ban=Decimal(str(it.get("don_gia") or 0)))
+            db.add(hh); db.flush()
+            if db.query(TonKho).filter_by(hang_hoa_id=hh.id).first() is None:
+                db.add(TonKho(hang_hoa_id=hh.id, so_luong=0))
+            hang_moi.append(ten)
+        sl, dg = Decimal(str(it.get("so_luong") or 1)), Decimal(str(it.get("don_gia") or 0))
+        p = it.get("vat_pct")
+        p = vat_md if p in (None, "") else p
+        ts = Decimal(str(p if p not in (None, "") else 8))
+        line = (sl * dg).quantize(Decimal(1))
+        th += line
+        tth += (line * ts / Decimal(100)).quantize(Decimal(1))     # VAT làm tròn từng dòng (như đơn lập tay)
+        lines.append((hh.id, sl, dg, ts))
+    dh = DonHang(so=ma[:30], khach_hang_id=kh_id, ngay=_d.today(), tong_tien=th, tien_thue=tth, trang_thai="MOI")
+    db.add(dh); db.flush()
+    for hh_id, sl, dg, ts in lines:
+        db.add(DonHangCt(don_hang_id=dh.id, hang_hoa_id=hh_id, so_luong=sl, don_gia=dg, thue_suat=ts))
+    s = ghi_chot_len_don(db, dh, bgf, "TAO_DON")
+    ghi_audit(db, nd.id, "TAO", "don_hang", dh.id,
+              moi={"tu_bao_gia_form": bgf.id, "so_dong": len(lines), "tong_tien": float(th), "tien_thue": float(tth),
+                   "hang_moi": hang_moi[:20], "rev": s["rev"], "bien_chao": s["bien_chao"], "du_toan_ma": s["du_toan_ma"]})
+    db.commit()
+    return {"don_hang_id": dh.id, "so": dh.so, "da_co": False, "so_dong": len(lines), "hang_moi": hang_moi[:10], **s}
+
+
 def dt_doi_gia(du_toan: dict | None, noi_dung: dict) -> list:
     """Dòng báo giá có dt_muc_id mà giá vốn / SL lưu trong báo giá khác dự toán HIỆN TẠI → [{ten, cu, moi, sl_cu, sl_moi}]
     (dự toán đổi sau khi lập báo giá — ví dụ mua được rẻ hơn)."""

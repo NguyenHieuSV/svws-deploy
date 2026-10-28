@@ -9,6 +9,8 @@
      Mã DV-… chưa ghi doanh thu tháng này → so với doanh thu THÁNG TRƯỚC cùng mã gốc (DV ghi doanh thu cuối tháng).
   ② Nhắc HẰNG TUẦN (thứ Hai) vào nhóm Google Chat Duyệt chi (nhóm hạn chế người xem): nhóm mã lỗ · có chi phí
      mà chưa có doanh thu · biên thấp.
+  ③ (28/10/2026, mig 158) Đơn hàng chốt từ báo giá gửi khách nhớ BIÊN LÚC CHÀO → so với biên thực: cờ / bản tuần
+     ghi kèm «chào x%», nhóm có biên thực tụt ≥ TUT_BIEN_DIEM điểm so với lúc chào được liệt kê riêng (chỉ nhắc, không chặn).
 """
 import re
 from datetime import date
@@ -18,6 +20,20 @@ from sqlalchemy.orm import Session
 from .config import settings
 
 _MMYY = re.compile(r"^(0[1-9]|1[0-2])(\d{2})$")
+TUT_BIEN_DIEM = 5.0          # biên thực thấp hơn biên lúc chào từ ngần này điểm % → nhắc «tụt biên»
+
+
+def bien_chao_gop(rows) -> float | None:
+    """Biên lúc chào của một nhóm = bình quân theo tổng chào của các đơn có số liệu (None khi không đơn nào có)."""
+    t = x = 0.0
+    for r in rows:
+        b = r.get("bien_chao") if isinstance(r, dict) else getattr(r, "bien_chao", None)
+        g = (r.get("tong_chao") if isinstance(r, dict) else getattr(r, "tong_chao", None)) or 0
+        if b is None or float(g) <= 0:
+            continue
+        t += float(g)
+        x += float(b) * float(g)
+    return round(x / t, 1) if t > 0 else None
 
 
 def nguong() -> float:
@@ -69,10 +85,10 @@ def so_lieu_nhom(db: Session, nh: str) -> dict:
     from .models import DonHang
     dt = cp = 0.0
     dau_tu = False
-    ma = []
+    ma, chao = [], []
     goc = str(nh or "").strip()
     if not goc:
-        return {"dt": 0.0, "cp": 0.0, "dau_tu": False, "ma": []}
+        return {"dt": 0.0, "cp": 0.0, "dau_tu": False, "ma": [], "bien_chao": None}
     for dh in db.query(DonHang).filter(DonHang.so.ilike(goc + "%")).all():
         if (nhom_ma(dh.so) or (dh.so or "").strip().upper()) != goc.upper():
             continue
@@ -81,11 +97,12 @@ def so_lieu_nhom(db: Session, nh: str) -> dict:
         cp += float(c.get("tong_chi_phi") or 0)
         dau_tu = dau_tu or bool(c.get("la_dau_tu"))
         ma.append(dh.so)
+        chao.append({"bien_chao": getattr(dh, "bien_chao", None), "tong_chao": getattr(dh, "tong_chao", None)})
     for g in chi_phi_ngoai_ma(db)["ma_le"].values():
         if (nhom_ma(g["ma"]) or str(g["ma"]).strip().upper()) == goc.upper():
             cp += float(g.get("chi") or 0)
             ma.append(g["ma"])
-    return {"dt": dt, "cp": cp, "dau_tu": dau_tu, "ma": ma}
+    return {"dt": dt, "cp": cp, "dau_tu": dau_tu, "ma": ma, "bien_chao": bien_chao_gop(chao)}
 
 
 def danh_gia(db: Session, ma: str, them_chi_phi: float = 0.0) -> dict | None:
@@ -105,18 +122,20 @@ def danh_gia(db: Session, ma: str, them_chi_phi: float = 0.0) -> dict | None:
             if s2["dt"] > 0:
                 dt, tham_chieu = s2["dt"], truoc
     ng = nguong()
+    bc = s.get("bien_chao")                                      # biên lúc chào (báo giá gửi khách) — None nếu chưa chốt
+    them_chao = f" Lúc chào biên {_pt(bc)}%." if bc is not None else ""
     if dt <= 0:
-        return {"muc": "CHUA_DT", "nhom": nh, "doanh_thu": 0.0, "chi_phi": cp, "bien": None, "nguong": ng,
-                "ly_do": f"Mã {nh} CHƯA CÓ DOANH THU — chi phí sẽ là {_tr(cp)} (tính cả đơn này)."}
+        return {"muc": "CHUA_DT", "nhom": nh, "doanh_thu": 0.0, "chi_phi": cp, "bien": None, "nguong": ng, "bien_chao": bc,
+                "ly_do": f"Mã {nh} CHƯA CÓ DOANH THU — chi phí sẽ là {_tr(cp)} (tính cả đơn này).{them_chao}"}
     bien = round((dt - cp) / dt * 100, 1)
     if bien >= ng:
         return None
     nguon_dt = f"doanh thu tháng trước ({tham_chieu}) {_tr(dt)}" if tham_chieu else f"doanh thu {_tr(dt)}"
     return {"muc": "LO" if bien < 0 else "BIEN_THAP", "nhom": nh, "doanh_thu": dt, "chi_phi": cp, "bien": bien,
-            "nguong": ng, "tham_chieu": tham_chieu,
+            "nguong": ng, "tham_chieu": tham_chieu, "bien_chao": bc,
             "ly_do": (f"Mã {nh}: chi phí {_tr(cp)} (tính cả đơn này) so với {nguon_dt} → "
                       + (f"LỖ {_tr(cp - dt)} (biên {_pt(bien)}%)" if bien < 0 else f"biên lợi nhuận chỉ {_pt(bien)}% < ngưỡng {ng:g}%")
-                      + ".")}
+                      + "." + them_chao)}
 
 
 def danh_gia_po(db: Session, dm) -> dict | None:
@@ -142,13 +161,15 @@ def bao_cao_tuan(db: Session, hom_nay: date | None = None) -> dict:
         if mien_kiem(ma):
             continue
         k = x.get("nhom") or str(ma).strip().upper()
-        o = g.setdefault(k, {"nhom": k, "dt": 0.0, "cp": 0.0, "dau_tu": False})
+        o = g.setdefault(k, {"nhom": k, "dt": 0.0, "cp": 0.0, "dau_tu": False, "_chao": []})
         o["dt"] += float(x.get("doanh_thu") or 0)
         o["cp"] += float(x.get("tong_chi_phi") or 0)
         o["dau_tu"] = o["dau_tu"] or bool(x.get("la_dau_tu"))
+        o["_chao"].append(x)
     ng = nguong()
-    lo, chua_dt, bien_thap = [], [], []
+    lo, chua_dt, bien_thap, tut_bien = [], [], [], []
     for o in g.values():
+        o["bien_chao"] = bien_chao_gop(o.pop("_chao", []))     # biên lúc chào gộp theo tổng chào (None nếu chưa có)
         if o["dau_tu"] or o["cp"] <= 0:
             continue
         if o["dt"] <= 0:
@@ -161,26 +182,35 @@ def bao_cao_tuan(db: Session, hom_nay: date | None = None) -> dict:
             lo.append(o)
         elif bien < ng:
             bien_thap.append(o)
+        elif o["bien_chao"] is not None and o["bien_chao"] - bien >= TUT_BIEN_DIEM:
+            tut_bien.append(o)                                   # còn trên ngưỡng nhưng tụt nhiều so với lúc chào
     lo.sort(key=lambda o: o["dt"] - o["cp"])
     chua_dt.sort(key=lambda o: -o["cp"])
     bien_thap.sort(key=lambda o: o["bien"])
-    return {"lo": lo, "chua_dt": chua_dt, "bien_thap": bien_thap, "nguong": ng}
+    tut_bien.sort(key=lambda o: o["bien"] - o["bien_chao"])
+    return {"lo": lo, "chua_dt": chua_dt, "bien_thap": bien_thap, "tut_bien": tut_bien, "nguong": ng,
+            "tut_bien_diem": TUT_BIEN_DIEM}
 
 
 def noi_dung_tuan(bc: dict, nhan: str = "") -> str | None:
-    lo, chua, thap = bc["lo"], bc["chua_dt"], bc["bien_thap"]
-    if not (lo or chua or thap):
+    lo, chua, thap, tut = bc["lo"], bc["chua_dt"], bc["bien_thap"], bc.get("tut_bien") or []
+    if not (lo or chua or thap or tut):
         return None
+    chao = lambda o: f" · chào {_pt(o['bien_chao'])}%" if o.get("bien_chao") is not None else ""   # noqa: E731
     l = [f"📉 *KIỂM SOÁT LỢI NHUẬN THEO MÃ* {nhan}".rstrip(), "(theo nhóm mã gốc + tháng · chi phí = PO đã duyệt + công nợ / hóa đơn gắn mã)"]
     if lo:
         l.append(f"\n🔴 *Đang lỗ* — {len(lo)} nhóm:")
-        l += [f"• {o['nhom']}: doanh thu {_tr(o['dt'])} · chi phí {_tr(o['cp'])} · lỗ {_tr(o['cp'] - o['dt'])}" for o in lo[:10]]
+        l += [f"• {o['nhom']}: doanh thu {_tr(o['dt'])} · chi phí {_tr(o['cp'])} · lỗ {_tr(o['cp'] - o['dt'])}{chao(o)}" for o in lo[:10]]
     if chua:
         l.append(f"\n🟠 *Có chi phí, CHƯA có doanh thu* — {len(chua)} nhóm (tổng {_tr(sum(o['cp'] for o in chua))}):")
-        l += [f"• {o['nhom']}: chi phí {_tr(o['cp'])}" for o in chua[:10]]
+        l += [f"• {o['nhom']}: chi phí {_tr(o['cp'])}{chao(o)}" for o in chua[:10]]
     if thap:
         l.append(f"\n🟡 *Biên lợi nhuận dưới {bc['nguong']:g}%* — {len(thap)} nhóm:")
-        l += [f"• {o['nhom']}: biên {_pt(o['bien'])}% (doanh thu {_tr(o['dt'])} · chi phí {_tr(o['cp'])})" for o in thap[:10]]
+        l += [f"• {o['nhom']}: biên {_pt(o['bien'])}% (doanh thu {_tr(o['dt'])} · chi phí {_tr(o['cp'])}){chao(o)}" for o in thap[:10]]
+    if tut:
+        l.append(f"\n🔵 *Biên thực tụt ≥ {bc.get('tut_bien_diem', TUT_BIEN_DIEM):g} điểm so với lúc chào* — {len(tut)} nhóm:")
+        l += [f"• {o['nhom']}: chào {_pt(o['bien_chao'])}% → thực {_pt(o['bien'])}% (doanh thu {_tr(o['dt'])} · chi phí {_tr(o['cp'])})"
+              for o in tut[:10]]
     l.append("\n👉 App SVWS → Nhà cung cấp → Kiểm soát (Chi phí theo mã) · Kế toán → Lãi/Lỗ mã bán")
     return "\n".join(l)
 

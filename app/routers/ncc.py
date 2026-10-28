@@ -3274,6 +3274,7 @@ def ksln_xem_tuan(db: Session = Depends(get_db), nd: NguoiDung = Depends(chi_vai
     from ..kiem_soat_ln import bao_cao_tuan, noi_dung_tuan
     bc = bao_cao_tuan(db)
     return {"so_lo": len(bc["lo"]), "so_chua_dt": len(bc["chua_dt"]), "so_bien_thap": len(bc["bien_thap"]),
+            "so_tut_bien": len(bc.get("tut_bien") or []), "tut_bien_diem": bc.get("tut_bien_diem"),
             "nguong": bc["nguong"], "noi_dung": noi_dung_tuan(bc) or "",
             "co_webhook": bool((settings.gchat_webhook_duyet_chi or "").strip())}
 
@@ -3865,6 +3866,10 @@ def chi_phi_theo_don(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "X
         out.append({"don_hang_id": dh.id, "ma_ban": dh.so or f"DH-{dh.id}", "nhom": nhom_ma(dh.so),
                     "la_dau_tu": bool(cp.get("la_dau_tu")), "von_dau_tu": cp.get("von_dau_tu") or 0,
                     "doanh_thu": cp["doanh_thu"],
+                    # mig 158: biên LÚC CHÀO (báo giá gửi khách) để so với biên thực
+                    "bien_chao": float(dh.bien_chao) if dh.bien_chao is not None else None,
+                    "tong_chao": float(dh.tong_chao) if dh.tong_chao is not None else None,
+                    "bao_gia_rev": dh.bao_gia_rev, "du_toan_ma": dh.du_toan_ma, "bao_gia_form_id": dh.bao_gia_form_id,
                     "gia_von_po": cp["gia_von_po"], "chi_phi_khac": cp["chi_phi_khac"],
                     "thanh_toan_mua": cp["da_tra_ncc"], "cong_no_phai_tra": cp["con_phai_tra"],
                     "tong_chi_phi": cp["tong_chi_phi"], "loi_nhuan": cp["loi_nhuan"],

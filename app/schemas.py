@@ -388,6 +388,14 @@ class DonHangRa(BaseModel):
     tam_ung: Decimal = Decimal(0)        # tạm ứng phiếu thu ĐÃ DUYỆT chưa cấn trừ (tiền thật vào quỹ)
     tra_truoc: Decimal = Decimal(0)      # = max(cọc, tạm ứng) — quy tắc chung
     nguon_tra_truoc: str | None = None   # cọc trên đơn · phiếu thu · cả hai
+    # mig 158: báo giá lúc chốt (so biên lúc chào với biên thực)
+    bao_gia_form_id: int | None = None
+    du_toan_ma: str | None = None
+    bao_gia_rev: str | None = None
+    tong_chao: Decimal | None = None
+    gia_von_chao: Decimal | None = None
+    bien_chao: Decimal | None = None
+    chot_luc: datetime | None = None
 
 
 # ---------- Kế toán & Tài chính ----------

@@ -467,6 +467,14 @@ class DonHang(Base):
     so_hoa_don: Mapped[str | None] = mapped_column(String(60), nullable=True)     # mig 108: số HĐ xuất cho khách
     loai_don: Mapped[str | None] = mapped_column(String(20), default="THUONG")    # mig 125: THUONG | DAU_TU (đầu tư – cho thuê)
     tai_san_cho_thue_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)   # mig 125: mã mẹ dự án cho thuê
+    # mig 158: số liệu BÁO GIÁ GỬI KHÁCH lúc chốt đơn — để Kiểm soát lợi nhuận so biên lúc chào với biên thực
+    bao_gia_form_id: Mapped[int | None] = mapped_column(ForeignKey("bao_gia_form.id", ondelete="SET NULL"), nullable=True)
+    du_toan_ma: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    bao_gia_rev: Mapped[str | None] = mapped_column(String(8), nullable=True)          # Rev đã gửi khách gần nhất
+    tong_chao: Mapped[Decimal | None] = mapped_column(Numeric(18, 0), nullable=True)   # tổng báo giá chưa VAT
+    gia_von_chao: Mapped[Decimal | None] = mapped_column(Numeric(18, 0), nullable=True)  # giá vốn dự toán lúc chào
+    bien_chao: Mapped[Decimal | None] = mapped_column(Numeric(6, 2), nullable=True)    # % trên giá bán
+    chot_luc: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     chi_tiet: Mapped[list["DonHangCt"]] = relationship(cascade="all, delete-orphan", lazy="selectin")
 
 
