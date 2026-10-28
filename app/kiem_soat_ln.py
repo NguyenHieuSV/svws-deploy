@@ -21,7 +21,8 @@ from sqlalchemy.orm import Session
 from .config import settings
 
 _MMYY = re.compile(r"^(0[1-9]|1[0-2])(\d{2})$")
-TUT_BIEN_DIEM = 5.0          # biên thực thấp hơn biên lúc chào từ ngần này điểm % → nhắc «tụt biên»
+TUT_BIEN_DIEM = 3.0          # biên thực thấp hơn biên lúc chào từ ngần này điểm % → nhắc «tụt biên» + cổng 📉 duyệt PO
+                             # (anh Hiếu chốt 3 điểm 28/10/2026; đổi thì sửa cả LN_TUT_BIEN_DIEM trong svws_app.html)
 
 
 def bien_chao_gop(rows) -> float | None:

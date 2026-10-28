@@ -122,6 +122,8 @@ def test_kiem_soat_so_bien_chao(monkeypatch):
     rows = [
         {"ma_ban": "TM-SAMIL-1026-HY", "nhom": "TM-SAMIL-1026", "doanh_thu": 130e6, "tong_chi_phi": 100e6,
          "bien_chao": 33.3, "tong_chao": 120e6},                                        # thực 23,1% ≥ 15 nhưng tụt 10 điểm
+        {"ma_ban": "TM-SIC-1026-A", "nhom": "TM-SIC-1026", "doanh_thu": 100e6, "tong_chi_phi": 75e6,
+         "bien_chao": 27.0, "tong_chao": 90e6},                                         # thực 25% — tụt 2 điểm < 3 → không nhắc
         {"ma_ban": "TM-SAMIL-1026-02", "nhom": "TM-SAMIL-1026", "doanh_thu": 0, "tong_chi_phi": 0},   # không có số chào
         {"ma_ban": "DV-D10-0826", "nhom": "DV-D10-0826", "doanh_thu": 61e6, "tong_chi_phi": 100e6, "bien_chao": 20.0, "tong_chao": 55e6},
         {"ma_ban": "TM-SIC-0726-UP", "nhom": "TM-SIC-0726", "doanh_thu": 100e6, "tong_chi_phi": 96e6},
@@ -129,7 +131,7 @@ def test_kiem_soat_so_bien_chao(monkeypatch):
     monkeypatch.setattr(ncc, "chi_phi_theo_don", lambda db, _: rows)
     monkeypatch.setattr(ks.settings, "po_bien_ln_toi_thieu", 15.0)
     bc = ks.bao_cao_tuan(None, date(2026, 10, 28))
-    assert [o["nhom"] for o in bc["tut_bien"]] == ["TM-SAMIL-1026"] and bc["tut_bien"][0]["bien_chao"] == 33.3
+    assert [o["nhom"] for o in bc["tut_bien"]] == ["TM-SAMIL-1026"] and bc["tut_bien"][0]["bien_chao"] == 33.3 and bc["tut_bien_diem"] == 3.0
     assert [o["nhom"] for o in bc["lo"]] == ["DV-D10-0826"] and bc["lo"][0]["bien_chao"] == 20.0
     assert bc["bien_thap"][0]["nhom"] == "TM-SIC-0726" and bc["bien_thap"][0]["bien_chao"] is None
     t = ks.noi_dung_tuan(bc)
@@ -138,11 +140,14 @@ def test_kiem_soat_so_bien_chao(monkeypatch):
     monkeypatch.setattr(ks, "so_lieu_nhom", lambda db, nh: {"dt": 100e6, "cp": 80e6, "dau_tu": False, "ma": [], "bien_chao": 30.0})
     k = ks.danh_gia(None, "TM-SIC-1026-01", 10e6)
     assert k["muc"] == "BIEN_THAP" and k["bien_chao"] == 30.0 and "Lúc chào biên 30,0%" in k["ly_do"]
-    # cổng TỤT BIÊN: còn trên ngưỡng 15% nhưng thấp hơn biên lúc chào ≥ 5 điểm → cờ 📉 (chỉ CEO, phải xác nhận)
+    # cổng TỤT BIÊN: còn trên ngưỡng 15% nhưng thấp hơn biên lúc chào ≥ 3 điểm (TUT_BIEN_DIEM) → cờ 📉 (chỉ CEO, phải xác nhận)
+    assert ks.TUT_BIEN_DIEM == 3.0
     monkeypatch.setattr(ks, "so_lieu_nhom", lambda db, nh: {"dt": 100e6, "cp": 70e6, "dau_tu": False, "ma": [], "bien_chao": 33.3})
     k = ks.danh_gia(None, "TM-SIC-1026-01", 5e6)                                  # 75/100 → biên 25% — tụt 8,3 điểm
-    assert k["muc"] == "TUT_BIEN" and k["bien"] == 25.0 and "TỤT 8,3 điểm so với lúc chào 33,3%" in k["ly_do"]
-    assert ks.danh_gia(None, "TM-SIC-1026-01", 0) is None                          # 70/100 → 30% — tụt 3,3 điểm < 5 → ổn
+    assert k["muc"] == "TUT_BIEN" and k["bien"] == 25.0 and "TỤT 8,3 điểm so với lúc chào 33,3% (ngưỡng tụt 3 điểm)" in k["ly_do"]
+    assert ks.danh_gia(None, "TM-SIC-1026-01", 0)["muc"] == "TUT_BIEN"            # 70/100 → 30% — tụt 3,3 điểm ≥ 3 → cờ
+    monkeypatch.setattr(ks, "so_lieu_nhom", lambda db, nh: {"dt": 100e6, "cp": 70e6, "dau_tu": False, "ma": [], "bien_chao": 32.0})
+    assert ks.danh_gia(None, "TM-SIC-1026-01", 0) is None                          # 30% — tụt 2,0 điểm < 3 → ổn
     monkeypatch.setattr(ks, "so_lieu_nhom", lambda db, nh: {"dt": 100e6, "cp": 70e6, "dau_tu": False, "ma": []})
     assert ks.danh_gia(None, "TM-SIC-1026-01", 5e6) is None                        # chưa có biên lúc chào → không cổng tụt
     assert ks.bien_chao_gop([{"bien_chao": 20, "tong_chao": 100}, {"bien_chao": 40, "tong_chao": 300}, {"bien_chao": None, "tong_chao": 5}]) == 35.0

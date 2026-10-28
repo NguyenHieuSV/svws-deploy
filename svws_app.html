@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="vi">
 <head>
-<!-- build: po-cong-tut-bien-2026-10-28 -->
+<!-- build: tut-bien-3-diem-2026-10-28 -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#0f2c44">
@@ -561,7 +561,7 @@ async function apiKhoa(path,opts,st){
     return api(path+(path.includes('?')?'&':'?')+'xac_nhan_khoa=1',opts);
   }
 }
-/* 📉 Duyệt PO làm nhóm mã LỖ / biên thấp / chưa có doanh thu / tụt ≥ 5 điểm so với biên lúc chào: máy chủ trả 409 cho CEO → hỏi rồi gửi lại ?xac_nhan_ln=1 */
+/* 📉 Duyệt PO làm nhóm mã LỖ / biên thấp / chưa có doanh thu / tụt ≥ 3 điểm so với biên lúc chào: máy chủ trả 409 cho CEO → hỏi rồi gửi lại ?xac_nhan_ln=1 */
 async function apiLn(path,opts){
   try{return await api(path,opts);}
   catch(e){
@@ -6229,17 +6229,18 @@ async function bgfTaoDon(id){
   S.bhTab='don_hang'; S.dhSel=r.don_hang_id; viewBanHang($("#main"));
 }
 /* dòng «Lúc chào» ở chi tiết đơn hàng + nhãn «chào x% → thực y%» ở Kiểm soát */
+const LN_TUT_BIEN_DIEM=3;   // biên thực thấp hơn biên lúc chào từ ngần này điểm → tô đỏ (khớp TUT_BIEN_DIEM ở app/kiem_soat_ln.py — cổng 📉 duyệt PO)
 function _dhChaoSpan(o,p){
   const pt=v=>v==null?'—':String(v).replace('.',',')+'%';
   if(o.chot_luc){const tut=(o.bien_chao!=null&&p&&p.doanh_thu)?(o.bien_chao-p.ty_suat_dukien):null;
-    return `<span title="Số liệu báo giá gửi khách lúc chốt đơn${o.bao_gia_rev?' (Rev.'+_bcEscA(o.bao_gia_rev)+')':''}${o.du_toan_ma?' · dự toán '+_bcEscA(o.du_toan_ma):''} — biên thực tính gồm VAT hai vế nên so gần đúng; tụt ≥ 5 điểm tô đỏ">🧾 Lúc chào: <b>${vnd(o.tong_chao)}</b> · biên <b>${pt(o.bien_chao)}</b>${o.bao_gia_rev?' · Rev.'+_bcEscH(o.bao_gia_rev):''}${tut!=null?` → thực <b style="color:${tut>=5?'#dc2626':'#16a34a'}">${p.ty_suat_dukien}%</b>`:''}</span>`;}
+    return `<span title="Số liệu báo giá gửi khách lúc chốt đơn${o.bao_gia_rev?' (Rev.'+_bcEscA(o.bao_gia_rev)+')':''}${o.du_toan_ma?' · dự toán '+_bcEscA(o.du_toan_ma):''} — biên thực tính gồm VAT hai vế nên so gần đúng; tụt ≥ ${LN_TUT_BIEN_DIEM} điểm tô đỏ">🧾 Lúc chào: <b>${vnd(o.tong_chao)}</b> · biên <b>${pt(o.bien_chao)}</b>${o.bao_gia_rev?' · Rev.'+_bcEscH(o.bao_gia_rev):''}${tut!=null?` → thực <b style="color:${tut>=LN_TUT_BIEN_DIEM?'#dc2626':'#16a34a'}">${p.ty_suat_dukien}%</b>`:''}</span>`;}
   if(o.bao_gia_form_id)return `<span style="color:var(--muted)" title="Đơn nối với báo giá gửi khách cùng mã nhưng chưa ghi số liệu lúc chào — CEO/Admin bấm «📝 Ghi biên chào cho đơn cũ» ở Nhà cung cấp → Kiểm soát">🧾 nối báo giá · chưa ghi biên chào</span>`;
   return '';
 }
 function _ksChaoBadge(x){
   if(x.bien_chao==null)return '';
   const pt=v=>String(v).replace('.',',')+'%'; const tut=x.ty_suat!=null?(Number(x.bien_chao)-Number(x.ty_suat)):null;
-  return ` <span class="badge ${tut!=null&&tut>=5?'b-tc':'b-info'}" title="Biên LÚC CHÀO theo báo giá gửi khách${x.bao_gia_rev?' Rev.'+_bcEscA(x.bao_gia_rev):''}${x.du_toan_ma?' · dự toán '+_bcEscA(x.du_toan_ma):''}${x.so_ma?' (bình quân theo tổng chào của '+x.so_ma+' mã)':''} so với biên thực hiện tại — tụt ≥ 5 điểm tô đỏ">chào ${pt(x.bien_chao)}${x.ty_suat!=null?' → thực '+pt(x.ty_suat):''}</span>`;
+  return ` <span class="badge ${tut!=null&&tut>=LN_TUT_BIEN_DIEM?'b-tc':'b-info'}" title="Biên LÚC CHÀO theo báo giá gửi khách${x.bao_gia_rev?' Rev.'+_bcEscA(x.bao_gia_rev):''}${x.du_toan_ma?' · dự toán '+_bcEscA(x.du_toan_ma):''}${x.so_ma?' (bình quân theo tổng chào của '+x.so_ma+' mã)':''} so với biên thực hiện tại — tụt ≥ ${LN_TUT_BIEN_DIEM} điểm tô đỏ (duyệt PO làm tụt từ mức này: cổng 📉 chỉ CEO)">chào ${pt(x.bien_chao)}${x.ty_suat!=null?' → thực '+pt(x.ty_suat):''}</span>`;
 }
 async function ksChotBaoGiaCu(){
   let d; try{d=await api('/ban-hang/don-hang/chot-bao-gia-cu');}catch(e){return toast(e.detail||e.message,"err");}
@@ -12705,7 +12706,7 @@ async function nccKiemSoat(host){
       ${laQTV()&&S.mode==="live"?`<button class="btn-sm ghost" style="margin-right:10px" title="Đơn hàng lập trước 28/10/2026 đã nối / trùng mã báo giá gửi khách nhưng chưa có số liệu lúc chào → ghi bổ sung theo nội dung báo giá hiện tại (dự toán · Rev · tổng · biên)" onclick="ksChotBaoGiaCu()">📝 Ghi biên chào cho đơn cũ</button>`:''}
       ${laQTV()&&S.mode==="live"?`<button class="btn-sm ghost" style="margin-right:10px" title="Nhóm mã đang lỗ · có chi phí chưa có doanh thu · biên thấp · tụt biên so với lúc chào — app tự gửi vào nhóm Duyệt chi mỗi thứ Hai 8h" onclick="ksLnXem()">📉 Bản kiểm soát lợi nhuận</button>`:''}
       <span class="num" style="font-weight:700">Doanh thu: ${vnd(cpTongDT)} · Chi phí: ${vnd(cpTongCP)} · Lợi nhuận: <span style="color:${cpTongLN>=0?'#16a34a':'#dc2626'}">${vnd(cpTongLN)}</span></span></div>
-    <div class="note">Tổng hợp theo từng mã đơn hàng bán. <b>Tổng chi phí = Σ PO đã duyệt gắn mã</b> (nghĩa vụ — không đổi khi trả từng đợt) <b>+ công nợ nhập ngoài khớp mã + hóa đơn mua gắn mã</b>. <b>Lợi nhuận = Doanh thu (GỒM VAT) − Tổng chi phí (gồm VAT)</b> — hai vế cùng cơ sở thuế. <b>📂 Dòng nhóm</b> = gom mọi mã cùng <b>gốc + tháng</b> (đơn bán tách -01/-02/-BT… và PO chỉ ghi mã gốc) — nhìn nhóm để biết lãi/lỗ thật của một công trình-tháng. Mã ⚠ = có chi phí nhưng chưa có đơn bán. <b>chào x% → thực y%</b> = biên LÚC CHÀO theo báo giá gửi khách (đơn chốt từ báo giá, nhớ dự toán · Rev · tổng) so với biên thực — tụt ≥ 5 điểm tô đỏ. Bấm vào <b>mã đơn hàng</b> để xem danh mục chi phí — tự lưu vào <b>📁 Kho tệp dùng chung</b>.</div>
+    <div class="note">Tổng hợp theo từng mã đơn hàng bán. <b>Tổng chi phí = Σ PO đã duyệt gắn mã</b> (nghĩa vụ — không đổi khi trả từng đợt) <b>+ công nợ nhập ngoài khớp mã + hóa đơn mua gắn mã</b>. <b>Lợi nhuận = Doanh thu (GỒM VAT) − Tổng chi phí (gồm VAT)</b> — hai vế cùng cơ sở thuế. <b>📂 Dòng nhóm</b> = gom mọi mã cùng <b>gốc + tháng</b> (đơn bán tách -01/-02/-BT… và PO chỉ ghi mã gốc) — nhìn nhóm để biết lãi/lỗ thật của một công trình-tháng. Mã ⚠ = có chi phí nhưng chưa có đơn bán. <b>chào x% → thực y%</b> = biên LÚC CHÀO theo báo giá gửi khách (đơn chốt từ báo giá, nhớ dự toán · Rev · tổng) so với biên thực — tụt ≥ ${LN_TUT_BIEN_DIEM} điểm tô đỏ, duyệt PO làm tụt từ mức này phải CEO xác nhận. Bấm vào <b>mã đơn hàng</b> để xem danh mục chi phí — tự lưu vào <b>📁 Kho tệp dùng chung</b>.</div>
     <div class="panel-b" style="overflow-x:auto"><table><thead><tr><th>Stt</th><th>Mã Đơn Hàng</th><th class="num">Doanh thu</th><th class="num">Tổng chi phí</th><th class="num">Lợi nhuận</th><th>Ghi chú</th></tr></thead>
     <tbody>${cpRows||'<tr><td colspan="6" class="empty" style="padding:18px">Chưa có dữ liệu chi phí theo đơn hàng.</td></tr>'}</tbody></table></div></div>`;
   const treRows=tre.map(x=>`<tr class="${x.so_ngay_tre>7?'qh':''}"><td><b>${x.so}</b></td><td>${x.ten_ncc||'—'}</td>
@@ -12746,7 +12747,7 @@ async function ksLnXem(){
   const e_=s=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;');
   _ktModal("📉 Bản kiểm soát lợi nhuận theo mã",`
     <div style="display:flex;gap:14px;flex-wrap:wrap;font-size:13px;margin-bottom:8px">
-      <span>🔴 Đang lỗ: <b>${d.so_lo}</b></span><span>🟠 Có chi phí chưa có doanh thu: <b>${d.so_chua_dt}</b></span><span>🟡 Biên dưới ${d.nguong}%: <b>${d.so_bien_thap}</b></span><span title="Nhóm còn trên ngưỡng nhưng biên thực thấp hơn biên lúc chào (báo giá gửi khách) từ ${d.tut_bien_diem||5} điểm">🔵 Tụt so với lúc chào: <b>${d.so_tut_bien||0}</b></span></div>
+      <span>🔴 Đang lỗ: <b>${d.so_lo}</b></span><span>🟠 Có chi phí chưa có doanh thu: <b>${d.so_chua_dt}</b></span><span>🟡 Biên dưới ${d.nguong}%: <b>${d.so_bien_thap}</b></span><span title="Nhóm còn trên ngưỡng nhưng biên thực thấp hơn biên lúc chào (báo giá gửi khách) từ ${d.tut_bien_diem||LN_TUT_BIEN_DIEM} điểm">🔵 Tụt so với lúc chào: <b>${d.so_tut_bien||0}</b></span></div>
     ${d.noi_dung?`<pre style="white-space:pre-wrap;font-size:12px;background:var(--surface);padding:8px 10px;border-radius:8px;max-height:52vh;overflow:auto">${e_(d.noi_dung)}</pre>`:'<div class="empty" style="padding:12px">Không có nhóm mã nào lỗ / chưa có doanh thu / biên thấp 🎉</div>'}
     <div class="note" style="margin-top:8px;color:var(--muted)">Tính theo nhóm mã gốc + tháng (mã con -01/-02… gộp chung). Bỏ mã OP (chi phí vận hành), KHO, dự án đầu tư cho thuê; nhóm của tháng hiện tại chưa có doanh thu thì chưa tính. App tự gửi bản này vào nhóm Duyệt chi mỗi thứ Hai 8h.</div>
     ${d.noi_dung?(d.co_webhook?`<button class="btn-sm" style="margin-top:10px" onclick="ksLnGui()">📣 Gửi ngay vào nhóm Duyệt chi</button>`:'<div class="note" style="margin-top:8px;color:#d97706">Chưa cấu hình webhook nhóm Duyệt chi (GCHAT_WEBHOOK_DUYET_CHI) nên chưa gửi được.</div>'):''}`);
