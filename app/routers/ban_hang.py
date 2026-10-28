@@ -1359,10 +1359,28 @@ def bao_gia_kiem_soat(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "
             continue
         dt = k["du_toan"] or {}
         out[str(b.id)] = {"du_toan_ma": dt.get("ma"), "du_toan_loai": dt.get("loai"), "thieu": k["thieu_du_toan"],
-                          "bien": k["bien"], "canh_bao_bien": k["canh_bao_bien"]}
-    from ..bao_gia_ks import la_qtv, san_bien
+                          "bien": k["bien"], "canh_bao_bien": k["canh_bao_bien"],
+                          "ngoai_du_toan": len(k["ngoai_du_toan"]), "ngoai_chua_uoc": len(k["ngoai_chua_uoc"]),
+                          "so_bo": k["so_bo"], "dt_doi_gia": len(k["dt_doi_gia"])}
+    from ..bao_gia_ks import MAU_DIEU_KHOAN, la_qtv, san_bien
     return {"bao_gia": out, "bien_toi_thieu": bien_toi_thieu(), "bien_goi_y": bien_goi_y(),
-            "san_bien": san_bien(), "duoc_duoi_san": la_qtv(_)}
+            "san_bien": san_bien(), "duoc_duoi_san": la_qtv(_), "mau_dieu_khoan": MAU_DIEU_KHOAN}
+
+
+@router.get("/bao-gia-form/{bgf_id}/doi-chieu")
+def bao_gia_doi_chieu(bgf_id: int, db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
+    """Bảng cho NGƯỜI DUYỆT / người soạn: dự toán gốc, dòng ngoài dự toán (+ chi phí dự kiến), dòng không chào,
+    dòng dự toán đã ĐỔI giá / SL sau khi lập báo giá, biên."""
+    from ..bao_gia_ks import kiem_tra
+    bgf = db.get(BaoGiaForm, bgf_id)
+    if bgf is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy báo giá")
+    k = kiem_tra(db, bgf)
+    dt = k["du_toan"] or {}
+    return {"du_toan_ma": dt.get("ma"), "du_toan_loai": dt.get("loai"), "tong_du_toan": dt.get("tong"),
+            "tong_bg": k["tong_bg"], "bien": k["bien"], "nguong": k["nguong"], "thieu": k["thieu_du_toan"],
+            "canh_bao_bien": k["canh_bao_bien"], "ngoai_du_toan": k["ngoai_du_toan"], "ngoai_chua_uoc": k["ngoai_chua_uoc"],
+            "so_bo": k["so_bo"], "dt_doi_gia": k["dt_doi_gia"]}
 
 
 @router.post("/bao-gia-form", response_model=BaoGiaFormRa, status_code=201)

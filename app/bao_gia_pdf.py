@@ -52,6 +52,8 @@ def _ngay_vn(iso):
 def tinh_bao_gia(d: dict):
     sub = 0.0; vat = 0.0
     for it in (d.get("items") or []):
+        if it.get("khong_chao"):                      # dòng dự toán không chào cho khách
+            continue
         tt = float(it.get("so_luong") or 0) * float(it.get("don_gia") or 0)
         sub += tt
         p = it.get("vat_pct")
@@ -113,7 +115,7 @@ def tao_bao_gia_pdf(path, d, cong_ty=None,
     head = ["No.", "Product Name", "Description", "Qty", "Unit", "Unit Price (VND)", "VAT", "Amount (VND)"]
     al = [TA_CENTER, TA_LEFT, TA_LEFT, TA_CENTER, TA_CENTER, TA_RIGHT, TA_CENTER, TA_RIGHT]
     rows = [[P(f"<b>{h}</b>", 8, FB, white, al[i]) for i, h in enumerate(head)]]
-    its = [it for it in (d.get("items") or []) if it.get("ten") or it.get("mo_ta")]
+    its = [it for it in (d.get("items") or []) if (it.get("ten") or it.get("mo_ta")) and not it.get("khong_chao")]
 
     def _vat(it):
         p = it.get("vat_pct")
@@ -190,7 +192,7 @@ def tao_bao_gia_pdf(path, d, cong_ty=None,
     # ADDITIONAL INFORMATION
     story += [P("<b>ADDITIONAL INFORMATION</b>", 10, FB, TEAL), Spacer(1, 3)]
     for lb, key in (("Payment terms", "tt"), ("Delivery time", "giao"),
-                    ("Delivery location", "dia_diem"), ("Quoted by", "nguoi_bg"),
+                    ("Delivery location", "dia_diem"), ("Warranty", "bao_hanh"), ("Quoted by", "nguoi_bg"),
                     ("For any inquiry", "email_lh")):
         if d.get(key):
             story.append(P(f"•  <b>{lb}:</b> {d[key]}", 9))
