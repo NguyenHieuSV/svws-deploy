@@ -1400,15 +1400,25 @@ def bao_gia_form_tao_don(bgf_id: int, ep: bool = False, db: Session = Depends(ge
 
 @router.get("/don-hang/chot-bao-gia-cu")
 def don_hang_chot_bao_gia_cu_dem(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
-    """Số đơn hàng đã nối báo giá (hoặc trùng mã báo giá gửi khách) nhưng CHƯA ghi số liệu lúc chào."""
-    from ..bao_gia_ks import TRANG_THAI_CHOT
+    """Số đơn hàng đã nối báo giá (hoặc trùng mã báo giá gửi khách) nhưng CHƯA ghi số liệu lúc chào,
+    hoặc đã ghi mà chưa có biên (lúc ghi báo giá chưa có dự toán — nay đã tạo ngược thì ghi lại được)."""
+    from ..bao_gia_ks import TRANG_THAI_CHOT, so_lieu_chot
     so_bg = {str(s).strip().lower() for (s, nd_) in db.query(BaoGiaForm.so, BaoGiaForm.noi_dung)
              .filter(BaoGiaForm.so.isnot(None), BaoGiaForm.trang_thai.in_(TRANG_THAI_CHOT)).all()
              if (nd_ or {}).get("loai") != "HOP_DONG" and str(s or "").strip()}
     n = 0
-    for dh in db.query(DonHang).filter(DonHang.chot_luc.is_(None)).all():
-        if dh.bao_gia_form_id or str(dh.so or "").strip().lower() in so_bg:
-            n += 1
+    for dh in db.query(DonHang).filter(or_(DonHang.chot_luc.is_(None), DonHang.bien_chao.is_(None))).all():
+        if not (dh.bao_gia_form_id or str(dh.so or "").strip().lower() in so_bg):
+            continue
+        if dh.chot_luc is not None:                               # đã ghi, thiếu biên: chỉ đếm khi nay tính ra biên được
+            bgf = db.get(BaoGiaForm, dh.bao_gia_form_id) if dh.bao_gia_form_id else None
+            try:
+                b = so_lieu_chot(db, bgf)["bien_chao"] if bgf is not None else None
+            except Exception:                                     # noqa: BLE001
+                b = None
+            if b is None or abs(float(b)) > 999:
+                continue
+        n += 1
     return {"so_don": n}
 
 
@@ -1418,13 +1428,16 @@ def don_hang_chot_bao_gia_cu(db: Session = Depends(get_db), nd: NguoiDung = Depe
     đã nối / trùng mã báo giá gửi khách — theo nội dung báo giá HIỆN TẠI (nguồn BO_SUNG)."""
     from ..bao_gia_ks import ghi_chot_len_don, tim_bgf_theo_ma
     n, loi, da_ghi, bo_qua_bien = 0, [], [], []
-    for dh in db.query(DonHang).filter(DonHang.chot_luc.is_(None)).order_by(DonHang.id).all():
+    for dh in db.query(DonHang).filter(or_(DonHang.chot_luc.is_(None), DonHang.bien_chao.is_(None))).order_by(DonHang.id).all():
         bgf = db.get(BaoGiaForm, dh.bao_gia_form_id) if dh.bao_gia_form_id else tim_bgf_theo_ma(db, dh.so)
         if bgf is None:
             continue
         sp = db.begin_nested()                                    # savepoint: một đơn lỗi không làm hỏng cả phiên
         try:
-            s = ghi_chot_len_don(db, dh, bgf, "BO_SUNG")
+            s = ghi_chot_len_don(db, dh, bgf, "BO_SUNG" if dh.chot_luc is None else "GHI_LAI")
+            if dh.chot_luc is not None and s["bien_chao"] is None:   # đã ghi, vẫn chưa tính được biên → giữ nguyên, không đếm
+                sp.rollback()
+                continue
             db.flush()
             sp.commit()
             n += 1
