@@ -117,6 +117,20 @@ def test_don_lap_tay_trung_ma_tu_noi(db):
     assert bk.tim_bgf_theo_ma(db, "TM-SAMIL-1026-E") is None
 
 
+def test_bien_chao_vo_ly_khong_ghi(db, monkeypatch):
+    """Báo giá 19.000 đ so dự toán 153 tr → biên −806.285% (DV-COA-REJ-0726 thật): cột NUMERIC(6,2) tràn → bỏ biên, vẫn nối."""
+    monkeypatch.setattr(bk, "tim_du_toan", lambda db_, bgf: {"loai": "DTB", "id": 1, "ma": "DV-COA-REJ-0726", "so_dong": 1,
+                                                             "dong_thieu_gia": [], "tong": 153213169.5, "so_bo": 0, "dong": [],
+                                                             "ngoai_du_toan": [], "ngoai_chua_uoc": []})
+    b = m.BaoGiaForm(so="DV-COA-REJ-0726", khach_hang_id=7, trang_thai="DA_XUAT",
+                     noi_dung={"so": "DV-COA-REJ-0726", "vat_pct": 8, "items": [{"ten": "Phí", "so_luong": 1, "don_gia": 19000}]})
+    dh = m.DonHang(so="DV-COA-REJ-0726", khach_hang_id=7, ngay=date.today(), tong_tien=19000, trang_thai="MOI")
+    db.add_all([b, dh]); db.commit()
+    s = bk.noi_bao_gia_theo_ma(db, dh); db.commit()
+    assert s["bien_chao"] is None and s["bien_bo_qua"] < -800000 and dh.bien_chao is None
+    assert dh.bao_gia_form_id == b.id and float(dh.tong_chao) == 19000 and dh.chot_luc is not None
+
+
 def test_kiem_soat_so_bien_chao(monkeypatch):
     from app.routers import ncc
     rows = [

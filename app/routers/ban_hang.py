@@ -1417,19 +1417,26 @@ def don_hang_chot_bao_gia_cu(db: Session = Depends(get_db), nd: NguoiDung = Depe
     """📝 Ghi BỔ SUNG số liệu lúc chào (dự toán · Rev · tổng · giá vốn · biên) cho đơn hàng lập trước 28/10/2026
     đã nối / trùng mã báo giá gửi khách — theo nội dung báo giá HIỆN TẠI (nguồn BO_SUNG)."""
     from ..bao_gia_ks import ghi_chot_len_don, tim_bgf_theo_ma
-    n, loi = 0, []
+    n, loi, da_ghi, bo_qua_bien = 0, [], [], []
     for dh in db.query(DonHang).filter(DonHang.chot_luc.is_(None)).order_by(DonHang.id).all():
         bgf = db.get(BaoGiaForm, dh.bao_gia_form_id) if dh.bao_gia_form_id else tim_bgf_theo_ma(db, dh.so)
         if bgf is None:
             continue
+        sp = db.begin_nested()                                    # savepoint: một đơn lỗi không làm hỏng cả phiên
         try:
-            ghi_chot_len_don(db, dh, bgf, "BO_SUNG")
+            s = ghi_chot_len_don(db, dh, bgf, "BO_SUNG")
+            db.flush()
+            sp.commit()
             n += 1
+            da_ghi.append({"so": dh.so, "rev": s["rev"], "bien_chao": s["bien_chao"], "tong_chao": s["tong_chao"]})
+            if s.get("bien_bo_qua") is not None:
+                bo_qua_bien.append(f"{dh.so}: biên {s['bien_bo_qua']}% vô lý — không ghi biên")
         except Exception as e:                                    # noqa: BLE001
+            sp.rollback()
             loi.append(f"{dh.so}: {type(e).__name__}: {str(e)[:80]}")
-    ghi_audit(db, nd.id, "CHOT_BAO_GIA_CU", "don_hang", 0, moi={"so_don": n, "loi": loi[:10]})
+    ghi_audit(db, nd.id, "CHOT_BAO_GIA_CU", "don_hang", 0, moi={"so_don": n, "loi": loi[:10], "bo_qua_bien": bo_qua_bien[:10]})
     db.commit()
-    return {"so_don": n, "loi": loi[:10]}
+    return {"so_don": n, "loi": loi[:10], "da_ghi": da_ghi[:50], "bo_qua_bien": bo_qua_bien[:10]}
 
 
 @router.get("/bao-gia-form/{bgf_id}/doi-chieu")

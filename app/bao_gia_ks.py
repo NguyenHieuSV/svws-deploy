@@ -221,10 +221,16 @@ def so_lieu_chot(db: Session, bgf) -> dict:
             "bien_chao": k["bien"]}
 
 
+BIEN_CHAO_TRAN = 999.0       # |biên| lớn hơn mức này (báo giá 19.000 đ so dự toán 153 tr…) = dữ liệu sai → không ghi biên
+
+
 def ghi_chot_len_don(db: Session, dh, bgf, nguon: str = "TAO_DON") -> dict:
-    """Ghi số liệu lúc chào lên đơn hàng (không commit)."""
+    """Ghi số liệu lúc chào lên đơn hàng (không commit). Biên vô lý (ngoài ±BIEN_CHAO_TRAN) → để trống, không so."""
     from .nhac_viec_service import gio_hien_tai
     s = so_lieu_chot(db, bgf)
+    b = s["bien_chao"]
+    if b is not None and abs(float(b)) > BIEN_CHAO_TRAN:
+        s["bien_chao"], s["bien_bo_qua"] = None, b             # cột NUMERIC(6,2) không chứa nổi, và số cũng vô nghĩa
     dh.bao_gia_form_id = bgf.id
     dh.du_toan_ma = (str(s["du_toan_ma"])[:50] if s["du_toan_ma"] else None)
     dh.bao_gia_rev = s["rev"]
