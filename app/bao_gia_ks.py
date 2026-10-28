@@ -66,11 +66,11 @@ def tim_du_toan(db: Session, bgf) -> dict | None:
     co_sl = [r for r in rows if r[2] > 0]
     # dòng báo giá đánh dấu «không chào» (khong_chao) → trừ khỏi tổng dự toán dùng để so biên
     bo = {int(it.get("dt_muc_id")) for it in (nd.get("items") or [])
-          if it.get("khong_chao") and it.get("dt_muc_id") not in (None, "")}
+          if (it.get("khong_chao") or it.get("tuy_chon")) and it.get("dt_muc_id") not in (None, "")}
     tong = sum(r[2] * r[3] for r in co_sl if r[0] not in bo)
     # dòng NGOÀI dự toán (nhân viên tự thêm) có chi phí dự kiến → cộng vào giá vốn khi so biên
     ngoai = [it for it in (nd.get("items") or []) if it.get("ngoai_du_toan") and not it.get("khong_chao")
-             and float(it.get("so_luong") or 0) > 0]
+             and not it.get("tuy_chon") and float(it.get("so_luong") or 0) > 0]
     tong += sum(float(it.get("so_luong") or 0) * float(it.get("gia_von") or 0) for it in ngoai)
     return {"loai": loai, "id": did, "ma": dma, "so_dong": len(co_sl),
             "dong_thieu_gia": [r[1] for r in co_sl if r[3] <= 0 and r[0] not in bo],
@@ -80,6 +80,60 @@ def tim_du_toan(db: Session, bgf) -> dict | None:
                                "gia_von": float(it.get("gia_von") or 0), "don_gia": float(it.get("don_gia") or 0)}
                               for it in ngoai],
             "ngoai_chua_uoc": [it.get("ten") or "" for it in ngoai if float(it.get("gia_von") or 0) <= 0]}
+
+
+def luu_phien_ban(db: Session, bgf, nd_id, gui_den: str | None) -> dict:
+    """Mỗi lần ✉️ gửi khách: lưu bản chụp Rev.A / B / C… kèm tổng chính, tổng tùy chọn, giá vốn, biên."""
+    from .bao_gia_pdf import tinh_bao_gia, tinh_tuy_chon
+    from .models import BaoGiaPhienBan
+    from .nhac_viec_service import gio_hien_tai
+    so_cu = db.query(BaoGiaPhienBan).filter(BaoGiaPhienBan.bao_gia_form_id == bgf.id).count()
+    rev = chr(65 + so_cu) if so_cu < 26 else f"Z{so_cu - 25}"
+    nd = bgf.noi_dung or {}
+    k = kiem_tra(db, bgf)
+    sub, _v, tong = tinh_bao_gia(nd)
+    von = float((k["du_toan"] or {}).get("tong") or 0)
+    pb = BaoGiaPhienBan(bao_gia_form_id=bgf.id, rev=rev, so=bgf.so or nd.get("so"), noi_dung=nd,
+                        tong_chua_vat=round(sub), tong_gom_vat=round(tong), tong_tuy_chon=round(tinh_tuy_chon(nd)),
+                        gia_von=round(von), bien=k["bien"], gui_den=(gui_den or "")[:300] or None, nguoi_gui=nd_id,
+                        gui_luc=gio_hien_tai())
+    db.add(pb); db.flush()
+    return {"rev": rev, "id": pb.id, "tong_chua_vat": float(pb.tong_chua_vat), "bien": k["bien"]}
+
+
+def ds_phien_ban(db: Session, bgf_id: int) -> list:
+    from .models import BaoGiaPhienBan
+    out = []
+    for p in db.query(BaoGiaPhienBan).filter(BaoGiaPhienBan.bao_gia_form_id == bgf_id).order_by(BaoGiaPhienBan.id).all():
+        out.append({"id": p.id, "rev": p.rev, "so": p.so, "tong_chua_vat": float(p.tong_chua_vat or 0),
+                    "tong_gom_vat": float(p.tong_gom_vat or 0), "tong_tuy_chon": float(p.tong_tuy_chon or 0),
+                    "gia_von": float(p.gia_von or 0), "bien": float(p.bien) if p.bien is not None else None,
+                    "gui_den": p.gui_den, "gui_luc": p.gui_luc.strftime("%d/%m/%Y %H:%M") if p.gui_luc else None,
+                    "so_dong": len([it for it in (p.noi_dung or {}).get("items") or [] if not it.get("khong_chao")])})
+    return out
+
+
+def so_sanh_lan_truoc(db: Session, bgf) -> dict | None:
+    """Bản hiện tại so với lần gửi khách gần nhất: chênh tổng, chênh biên, dòng thêm / bớt / đổi giá."""
+    from .bao_gia_pdf import tinh_bao_gia
+    ds = ds_phien_ban(db, bgf.id)
+    if not ds:
+        return None
+    from .models import BaoGiaPhienBan
+    p = db.get(BaoGiaPhienBan, ds[-1]["id"])
+    cu = {str(it.get("dt_muc_id") or ("#" + str(it.get("ten") or ""))): it
+          for it in (p.noi_dung or {}).get("items") or [] if not it.get("khong_chao")}
+    moi = {str(it.get("dt_muc_id") or ("#" + str(it.get("ten") or ""))): it
+           for it in (bgf.noi_dung or {}).get("items") or [] if not it.get("khong_chao")}
+    them = [moi[k].get("ten") or "" for k in moi if k not in cu]
+    bot = [cu[k].get("ten") or "" for k in cu if k not in moi]
+    doi = [{"ten": moi[k].get("ten") or "", "cu": float(cu[k].get("don_gia") or 0), "moi": float(moi[k].get("don_gia") or 0)}
+           for k in moi if k in cu and abs(float(cu[k].get("don_gia") or 0) - float(moi[k].get("don_gia") or 0)) > 0.5]
+    k = kiem_tra(db, bgf)
+    sub = float(tinh_bao_gia(bgf.noi_dung or {})[0])
+    return {"rev": ds[-1]["rev"], "gui_luc": ds[-1]["gui_luc"], "tong_truoc": ds[-1]["tong_chua_vat"], "tong_nay": sub,
+            "chenh_tong": sub - ds[-1]["tong_chua_vat"], "bien_truoc": ds[-1]["bien"], "bien_nay": k["bien"],
+            "them": them, "bot": bot, "doi_gia": doi, "so_phien_ban": len(ds)}
 
 
 def dt_doi_gia(du_toan: dict | None, noi_dung: dict) -> list:
@@ -122,7 +176,7 @@ def kiem_tra(db: Session, bgf) -> dict:
     try:
         nd_ = dict(bgf.noi_dung or {})
         nd_["items"] = [it for it in (nd_.get("items") or []) if not it.get("khong_chao")]
-        tong_bg = float(tinh_bao_gia(nd_)[0])
+        tong_bg = float(tinh_bao_gia(nd_)[0])             # tinh_bao_gia đã bỏ dòng tùy chọn
     except Exception:                                                    # noqa: BLE001
         tong_bg = 0.0
     bien, ly_do_bien = None, None

@@ -412,6 +412,24 @@ class BaoGiaForm(Base):
     ly_do_tu_choi: Mapped[str | None] = mapped_column(String(300), nullable=True)
 
 
+class BaoGiaPhienBan(Base):
+    """mig 157: bản chụp báo giá mỗi lần ✉️ gửi khách (Rev.A, B…) kèm tổng · giá vốn · biên."""
+    __tablename__ = "bao_gia_phien_ban"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    bao_gia_form_id: Mapped[int] = mapped_column(ForeignKey("bao_gia_form.id", ondelete="CASCADE"))
+    rev: Mapped[str] = mapped_column(String(8))
+    so: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    noi_dung: Mapped[dict] = mapped_column(JSONB)
+    tong_chua_vat: Mapped[Decimal] = mapped_column(Numeric(18, 0), default=0)
+    tong_gom_vat: Mapped[Decimal] = mapped_column(Numeric(18, 0), default=0)
+    tong_tuy_chon: Mapped[Decimal] = mapped_column(Numeric(18, 0), default=0)
+    gia_von: Mapped[Decimal] = mapped_column(Numeric(18, 0), default=0)
+    bien: Mapped[Decimal | None] = mapped_column(Numeric(6, 2), nullable=True)
+    gui_den: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    nguoi_gui: Mapped[int | None] = mapped_column(ForeignKey("nguoi_dung.id", ondelete="SET NULL"), nullable=True)
+    gui_luc: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
 class BaoGia(Base):
     __tablename__ = "bao_gia"
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)

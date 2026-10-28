@@ -49,10 +49,16 @@ def _ngay_vn(iso):
     return f"{p[2]}/{p[1]}/{p[0]}" if len(p) == 3 else (iso or "")
 
 
+def tinh_tuy_chon(d: dict) -> float:
+    """Tổng (chưa VAT) các dòng TÙY CHỌN — khách chọn thêm, KHÔNG tính vào tổng chính."""
+    return sum(float(it.get("so_luong") or 0) * float(it.get("don_gia") or 0)
+               for it in (d.get("items") or []) if it.get("tuy_chon") and not it.get("khong_chao"))
+
+
 def tinh_bao_gia(d: dict):
     sub = 0.0; vat = 0.0
     for it in (d.get("items") or []):
-        if it.get("khong_chao"):                      # dòng dự toán không chào cho khách
+        if it.get("khong_chao") or it.get("tuy_chon"):   # không chào · tùy chọn (optional) → ngoài tổng chính
             continue
         tt = float(it.get("so_luong") or 0) * float(it.get("don_gia") or 0)
         sub += tt
@@ -115,7 +121,9 @@ def tao_bao_gia_pdf(path, d, cong_ty=None,
     head = ["No.", "Product Name", "Description", "Qty", "Unit", "Unit Price (VND)", "VAT", "Amount (VND)"]
     al = [TA_CENTER, TA_LEFT, TA_LEFT, TA_CENTER, TA_CENTER, TA_RIGHT, TA_CENTER, TA_RIGHT]
     rows = [[P(f"<b>{h}</b>", 8, FB, white, al[i]) for i, h in enumerate(head)]]
-    its = [it for it in (d.get("items") or []) if (it.get("ten") or it.get("mo_ta")) and not it.get("khong_chao")]
+    its_all = [it for it in (d.get("items") or []) if (it.get("ten") or it.get("mo_ta")) and not it.get("khong_chao")]
+    its = [it for it in its_all if not it.get("tuy_chon")]
+    tuy_chon = [it for it in its_all if it.get("tuy_chon")]
 
     def _vat(it):
         p = it.get("vat_pct")
@@ -177,6 +185,17 @@ def tao_bao_gia_pdf(path, d, cong_ty=None,
                              ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
                              ("ROWBACKGROUNDS", (0, 1), (-1, -1), [white, LIGHT])] + styles))
     story += [tbl, Spacer(1, 6)]
+    # ⭐ OPTIONAL ITEMS — khách chọn thêm, không nằm trong Grand Total
+    if tuy_chon:
+        story += [P("<b>OPTIONAL ITEMS</b> <font color='#5B7186'>(not included in the total — available on request)</font>", 9, FB, TEAL), Spacer(1, 3)]
+        orows = [[P(f"<b>{h}</b>", 8, FB, white, al[i]) for i, h in enumerate(head)]]
+        for i, it in enumerate(tuy_chon, 1):
+            orows.append(_dong(it, f"O{i}"))
+        ot = Table(orows, colWidths=colw, repeatRows=1)
+        ot.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, 0), GREY), ("GRID", (0, 0), (-1, -1), 0.5, LINE),
+                                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"), ("TOPPADDING", (0, 0), (-1, -1), 4),
+                                ("BOTTOMPADDING", (0, 0), (-1, -1), 4)]))
+        story += [ot, Spacer(1, 6)]
 
     sub, vat, tong = tinh_bao_gia(d)
     tot = Table([[P("Subtotal (excl. VAT):", 9, F, black, TA_RIGHT), P(_money(sub) + " VND", 9, F, black, TA_RIGHT)],

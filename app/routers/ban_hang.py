@@ -1375,12 +1375,27 @@ def bao_gia_doi_chieu(bgf_id: int, db: Session = Depends(get_db), _=Depends(yeu_
     bgf = db.get(BaoGiaForm, bgf_id)
     if bgf is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy báo giá")
+    from ..bao_gia_ks import ds_phien_ban, so_sanh_lan_truoc
+    from ..bao_gia_pdf import tinh_tuy_chon
     k = kiem_tra(db, bgf)
     dt = k["du_toan"] or {}
     return {"du_toan_ma": dt.get("ma"), "du_toan_loai": dt.get("loai"), "tong_du_toan": dt.get("tong"),
             "tong_bg": k["tong_bg"], "bien": k["bien"], "nguong": k["nguong"], "thieu": k["thieu_du_toan"],
             "canh_bao_bien": k["canh_bao_bien"], "ngoai_du_toan": k["ngoai_du_toan"], "ngoai_chua_uoc": k["ngoai_chua_uoc"],
-            "so_bo": k["so_bo"], "dt_doi_gia": k["dt_doi_gia"]}
+            "so_bo": k["so_bo"], "dt_doi_gia": k["dt_doi_gia"],
+            "tong_tuy_chon": tinh_tuy_chon(bgf.noi_dung or {}),
+            "phien_ban": ds_phien_ban(db, bgf.id), "so_sanh": so_sanh_lan_truoc(db, bgf)}
+
+
+@router.get("/bao-gia-form/{bgf_id}/phien-ban/{pb_id}")
+def bao_gia_phien_ban_chi_tiet(bgf_id: int, pb_id: int, db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
+    """Nội dung một phiên bản đã gửi khách (để xem / in lại đúng bản đó)."""
+    from ..models import BaoGiaPhienBan
+    p = db.get(BaoGiaPhienBan, pb_id)
+    if p is None or p.bao_gia_form_id != bgf_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy phiên bản")
+    return {"id": p.id, "rev": p.rev, "so": p.so, "noi_dung": p.noi_dung,
+            "gui_luc": p.gui_luc.strftime("%d/%m/%Y %H:%M") if p.gui_luc else None, "gui_den": p.gui_den}
 
 
 @router.post("/bao-gia-form", response_model=BaoGiaFormRa, status_code=201)
@@ -1646,11 +1661,18 @@ def gui_bao_gia_email(bgf_id: int, data: GuiBaoGiaVao, xac_nhan_ks: bool = False
             _luu_pdf_bao_gia(db, nd, bgf)
         except Exception:
             pass
+    # 📑 lưu PHIÊN BẢN gửi khách (Rev.A / B…) — lỗi ở đây không được chặn việc gửi
+    pb = None
+    try:
+        from ..bao_gia_ks import luu_phien_ban
+        pb = luu_phien_ban(db, bgf, nd.id, data.den)
+    except Exception as _e:                                            # noqa: BLE001
+        print(f"[BG_PHIEN_BAN] {bgf.id}: {type(_e).__name__}: {_e}")
     ghi_audit(db, nd.id, "GUI", "bao_gia_form", bgf.id,
-              moi={"den": data.den, "gui_tu": kq.get("gui_tu"), "pdf": bool(dinh_kem)})
+              moi={"den": data.den, "gui_tu": kq.get("gui_tu"), "pdf": bool(dinh_kem), "rev": (pb or {}).get("rev")})
     db.commit()
     return {"gui_tu": kq.get("gui_tu"), "den": data.den, "cc": cc or None,
-            "pdf_dinh_kem": bool(dinh_kem),
+            "pdf_dinh_kem": bool(dinh_kem), "rev": (pb or {}).get("rev"),
             "trang_thai": kq.get("trang_thai"), "ghi_chu": kq.get("ghi_chu")}
 
 
