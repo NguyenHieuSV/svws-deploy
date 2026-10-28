@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="vi">
 <head>
-<!-- build: po-xoa-dan-duong-v3-2026-10-28 -->
+<!-- build: bao-gia-huong-dan-2026-10-28 -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#0f2c44">
@@ -5867,11 +5867,12 @@ async function bhBaoGia(host){
     <td>${_bgfBadge(st)}${_bgKsNhan(g.id)}${st==='TU_CHOI'&&g.ly_do_tu_choi?`<div style="font-size:11px;color:#dc2626;max-width:180px">${_bcEscH(g.ly_do_tu_choi)}</div>`:''}</td>
     <td style="white-space:nowrap">${act}</td></tr>`;}).join('');
   const draftPanel=`<div class="panel"><div class="panel-h"><h3>Báo giá gửi khách hàng</h3><div class="spacer"></div>
+      <button class="btn-sm ghost" style="margin-right:8px" title="Các bước lập báo giá: dự toán → tạo báo giá → định giá theo biên → trình duyệt → duyệt → gửi khách → chốt đơn" onclick="bgfHuongDan()">📖 Hướng dẫn</button>
       ${laQTV()&&(window._bgfTaoDtDs||[]).length?`<button class="btn-sm ghost" style="margin-right:8px" title="Tạo dự toán ngược cho mọi báo giá đủ dòng + giá đang thiếu dự toán (giá vốn ước = giá bán − sàn biên) — từng bản vẫn xem lại được ở Dự toán hàng bán" onclick="bgfTaoDuToanHangLoat()">📋 Tạo dự toán cho ${(window._bgfTaoDtDs||[]).length} báo giá thiếu</button>`:''}
       ${canOpBGF?(S.role==='CEO'?'<button class="btn-sm" title="Báo giá trống — chỉ CEO; người khác tạo từ Dự toán hàng bán → 📄 Tạo báo giá" onclick="bgfMoi()">+ Tạo báo giá trống</button>':'<span style="font-size:12px;color:var(--muted)" title="Báo giá phải lập từ dự toán có đủ dòng và đủ giá">📋 Tạo báo giá từ <b>Dự toán hàng bán → 📄 Tạo báo giá</b></span>'):''}</div>
     <div class="note">Soạn báo giá → <b>Lưu tạm</b> chỉnh sửa nhiều lần → <b>📤 Trình duyệt</b> → cấp có thẩm quyền <b>Duyệt</b> → mới <b>✉️ Gửi khách</b>. Sửa lại nội dung sau khi duyệt sẽ phải trình duyệt lại.</div>
     <div class="panel-b"><table><thead><tr><th>Số</th><th>Khách hàng</th><th>Tiêu đề</th><th class="num">Tổng (gồm VAT)</th><th>Trạng thái</th><th></th></tr></thead>
-    <tbody>${dRows||'<tr><td colspan="6" class="empty">Chưa có báo giá nào — bấm "+ Tạo báo giá" để soạn.</td></tr>'}</tbody></table></div></div>`;
+    <tbody>${dRows||'<tr><td colspan="6" class="empty">Chưa có báo giá nào — mở 🧾 Dự toán hàng bán → <b>📄 Tạo báo giá</b> để soạn (bấm <b>📖 Hướng dẫn</b> để xem các bước).</td></tr>'}</tbody></table></div></div>`;
   let rows=DEMO.bao_gia;
   if(S.mode==="live"){ try{const r=await api("/ban-hang/bao-gia");rows=r.map(b=>({id:b.id,so:b.so,khach:"KH #"+b.khach_hang_id,tong_tien:Number(b.tong_tien),trang_thai:b.trang_thai}));}catch(e){toast(e.detail||e.message,"err");} }
   const canApprove = can("ban_hang","XEM") && HANMUC.bao_gia[S.role]!==undefined;
@@ -5946,6 +5947,71 @@ function _bgfTinh(d){
   });
   return {sub,vat,tong:sub+vat};
 }
+/* 📖 Hướng dẫn lập báo giá gửi khách (anh Hiếu 28/10/2026) — nút ở đầu bảng «Báo giá gửi khách hàng» và trong form soạn.
+   Số liệu (sàn biên · ngưỡng · hạn mức · mẫu điều khoản) lấy từ cấu hình đang chạy nên luôn khớp với app. */
+function bgfHuongDan(){
+  const sn=_bgSan(), ng=Number(((S._bgKsCfg||{}).bien_toi_thieu))||15, qtv=_bgDuocDuoiSan();
+  const hm=HANMUC.bao_gia||{}, hmTp=hm.TP_KD!=null?vnd(hm.TP_KD):'—';
+  const mk=((S._bgKsCfg||{}).mau_dieu_khoan)||{};
+  const mkHtml=Object.keys(mk).length?Object.entries(mk).map(([k,m])=>`<b>${_bcEscH(k)}</b> = ${_bcEscH(m.ten||'')}`).join(' · '):'<b>TM</b> = Thương mại · <b>DA</b> = Dự án · <b>DV</b> = Dịch vụ';
+  const pt=v=>String(v).replace('.',',');
+  const B=t=>`<span class="badge b-cho" style="font-weight:600">${t}</span>`;
+  _ktModal("📖 Hướng dẫn lập báo giá gửi khách",`
+    <div style="font-size:13.5px;line-height:1.6">
+    <div style="background:#eef6ff;border-radius:10px;padding:10px 14px;margin-bottom:12px">
+      <b>Quy tắc vàng:</b> báo giá <b style="color:#1d4ed8">phải lập từ DỰ TOÁN cùng mã</b> (đủ dòng, đủ giá vốn) → giá bán tính theo <b>biên</b> → <b>trình duyệt</b> → <b>duyệt</b> → mới được <b>gửi khách</b>.<br>
+      Luồng: <b>🧾 Dự toán</b> → <b>📄 Tạo báo giá</b> → chỉnh giá → <b>💾 Lưu tạm</b> → <b>📤 Trình duyệt</b> → <b>✓ Duyệt</b> → <b>✉️ Gửi khách</b> (Rev.A, B…) → <b>→ Tạo đơn hàng</b>.</div>
+
+    <b>① Lập dự toán trước — panel 🧾 Dự toán hàng bán (đầu tab Báo giá)</b><br>
+    Nhập <b>Mã hàng bán</b> theo quy luật <b>LOẠI-KHÁCH-MMYY-SỐ</b> (VD <i>TM-ABC-1026-01</i>; đầu mã TM / DA / DV quyết định mẫu điều khoản), tên khách, mô tả → <b>+ Tạo dự toán</b>.
+    Mở dự toán (▸) rồi thêm từng dòng sản phẩm với <b>số lượng</b> và <b>đơn giá vốn</b> (app gợi ý giá theo lần mua gần nhất / 💡 giá mua cũ), hoặc nạp file theo <b>📥 mẫu BOQ</b>.<br>
+    <span style="color:var(--muted)">Dự toán thiếu dòng hoặc còn dòng chưa có giá thì báo giá bị chặn ở bước trình duyệt (CEO được vượt).</span><br><br>
+
+    <b>② Tạo báo giá từ dự toán</b><br>
+    Trên dòng dự toán bấm <b>📄 Tạo báo giá</b>: số báo giá = mã dự toán, các dòng + giá vốn điền sẵn, <b>giá bán tự tính theo biên từng nhóm</b>
+    (thiết bị ${pt(sn.THIET_BI)}% · vật tư ${pt(sn.VAT_TU)}% · nhân công ${pt(sn.NHAN_CONG)}% + chi phí chung ${pt(sn.chi_phi_chung)}%), khách và mẫu điều khoản tự chọn theo mã.
+    Dự toán đã có báo giá thì nút đổi thành <b>📄 Mở báo giá</b>.<br>
+    <span style="color:var(--muted)">«+ Tạo báo giá trống» (không từ dự toán) chỉ CEO dùng cho trường hợp đặc biệt.</span><br><br>
+
+    <b>③ Định giá trong form soạn</b><br>
+    • <b>Thanh định giá</b>: đổi <b>Biên (%)</b> từng nhóm rồi bấm <b>↻ Áp biên theo nhóm</b> để tính lại giá bán mọi dòng; hoặc gõ <b>🎯 Tổng mục tiêu (chưa VAT)</b> → <b>Chia về dòng</b> (app chia theo tỉ lệ giá vốn).<br>
+    • Sửa <b>Đơn giá bán</b> từng dòng được; cột <b>Biên</b> đổi màu: <span style="color:#16a34a;font-weight:600">xanh</span> đạt · <span style="color:#d97706;font-weight:600">cam</span> dưới ngưỡng ${pt(ng)}% · <span style="color:#dc2626;font-weight:600">đỏ</span> lỗ.<br>
+    • <b>🔒 Sàn biên</b>: nhân viên không đặt giá bán dưới sàn của nhóm (ô viền đỏ, app tự đưa về sàn); ${qtv?'<b>bạn là CEO / Admin nên được đặt dưới sàn</b>':'muốn thấp hơn nhờ CEO / Admin sửa'}.<br>
+    • Cột <b>Nhóm</b> (thiết bị / vật tư / nhân công) quyết định sàn biên của dòng — chọn đúng nhóm.<br>
+    • Tích ô <b>⭐</b> = dòng <b>tùy chọn</b>: in mục riêng cho khách chọn thêm, <u>không</u> tính vào tổng chính.<br>
+    • <b>Cụm</b>: gõ cùng tên cụm cho các dòng muốn gom khi in (VD «Hệ RO», «Lắp đặt»), rồi chọn hiện đủ dòng / chỉ tổng cụm / dòng + giá trọn gói.<br>
+    • <b>Bỏ</b> = không chào dòng đó (dòng vẫn ở dự toán, giá vốn trừ khỏi biên) — <b>↩ Chào lại</b> khi cần.<br>
+    • <b>+ Thêm dòng (ngoài dự toán)</b>: dòng tự thêm phải nhập <b>Giá vốn ước</b> để tính biên; thiếu thì không trình duyệt được, người duyệt thấy danh sách dòng này.<br>
+    • <b>📎 Đính kèm file</b> báo giá / proposal soạn sẵn (PDF, Word, Excel) → khi gửi khách, file này đi kèm thay cho bảng chi tiết.<br><br>
+
+    <b>④ Thông tin khách &amp; điều khoản</b><br>
+    Chọn <b>Khách hàng</b> từ danh bạ CRM (khách mới: thêm ở Bán hàng → Khách hàng trước), <b>Người nhận (ATTN)</b>, email, điện thoại.
+    <b>📜 Mẫu điều khoản</b>: ${mkHtml} — bấm mẫu là điền sẵn hiệu lực, thanh toán, giao hàng, bảo hành; sửa lại từng ô nếu cần. Ghi <b>Người báo giá</b> và <b>Email liên hệ</b> đúng người phụ trách.<br><br>
+
+    <b>⑤ Lưu &amp; trình duyệt</b><br>
+    <b>💾 Lưu tạm</b> = bản nháp, sửa nhiều lần. <b>🖨 Xuất PDF</b> để xem trước đúng mẫu in gửi khách. Xong bấm <b>📤 Lưu &amp; trình duyệt</b> (hoặc <b>📤 Trình duyệt</b> ở danh sách) — báo giá sang ${B('⏳ Chờ duyệt')}.<br>
+    <span style="color:var(--muted)">Bị chặn khi: thiếu dự toán cùng mã · dự toán còn dòng chưa có giá · dòng ngoài dự toán chưa ước chi phí · có dòng dưới sàn (nhân viên). Sửa theo thông báo rồi trình lại.</span><br><br>
+
+    <b>⑥ Duyệt</b><br>
+    Người có thẩm quyền bấm <b>✓ Duyệt</b> hoặc <b>✕ Từ chối</b> (ghi lý do; người soạn sửa rồi trình lại). Hạn mức: Trưởng phòng KD duyệt đến <b>${hmTp}</b>, vượt mức → Giám đốc.
+    Nút <b>⚖</b> mở bảng đối chiếu với dự toán: biên tổng, dòng ngoài dự toán, dòng không chào, dự toán đã đổi giá. Biên tổng dưới <b>${pt(ng)}%</b> hoặc lỗ → <b>chỉ CEO duyệt</b>.<br>
+    <span style="color:var(--muted)">Dự toán đổi giá / số lượng sau khi lập báo giá → form hiện khung 🔄, bấm <b>↻ Cập nhật</b> rồi áp biên lại nếu cần.</span><br><br>
+
+    <b>⑦ Gửi khách</b><br>
+    Báo giá <span class="badge b-ok" style="font-weight:600">✓ Đã duyệt</span> mới có nút <b>✉️ Gửi khách</b>: thư gửi từ sv-sales@watersolutions.company (tự CC Giám đốc), PDF báo giá hoặc file đính kèm đi cùng; xem trước và sửa nội dung thư trước khi gửi.
+    Mỗi lần gửi app lưu một <b>phiên bản Rev.A, Rev.B…</b> — xem lại, in lại và so sánh bản hiện tại với lần gửi trước ở nút <b>⚖</b>. Sửa nội dung sau khi duyệt → phải trình duyệt lại.<br><br>
+
+    <b>⑧ Khách đồng ý → chốt đơn</b><br>
+    Bấm <b>→ Tạo đơn hàng</b>: đơn hàng bán cùng mã được tạo, ghi nhớ dự toán · Rev · tổng · biên <b>lúc chào</b> để Kiểm soát lợi nhuận so với biên thực tế. <b>💾</b> lưu PDF vào Kho tệp; <b>🗑</b> xóa (CEO / Admin).
+    <div style="background:#fdf3e3;border-radius:10px;padding:10px 14px;margin:12px 0;color:#92620e">
+      ⚠ <b>Lỗi hay gặp:</b><br>
+      • «📋 CHƯA CÓ DỰ TOÁN cùng mã» → số báo giá phải trùng mã dự toán; lập dự toán đúng mã rồi tạo báo giá từ đó${qtv?' (hoặc dùng <b>📋 Tạo dự toán</b> ngược ở đầu bảng để dọn báo giá cũ)':''}.<br>
+      • «🔒 dòng có giá bán DƯỚI SÀN» → nâng giá về sàn hoặc nhờ CEO / Admin.<br>
+      • «➕ dòng ngoài dự toán chưa có chi phí dự kiến» → điền Giá vốn ước cho dòng tự thêm.<br>
+      • «Khách … chưa có trong danh mục CRM» → thêm khách ở Bán hàng → Khách hàng, quay lại chọn ở form.<br>
+      • Duyệt bị chặn vì vượt hạn mức → chuyển cấp cao hơn duyệt; biên thấp → chỉ CEO.</div>
+    </div>`);
+}
 async function bgfMoi(){
   const kh=await _crmKhList();
   const nay=new Date();
@@ -6015,6 +6081,7 @@ async function bgfEditor(host){
   <div style="margin-bottom:12px"><button class="btn-sm ghost" onclick="bgfDong()">← Quay lại danh sách</button></div>
   <datalist id="bgf_dl">${hhs.map(h=>`<option value="${esc(h.ten)}">`).join('')}</datalist>
   <div class="panel"><div class="panel-h"><h3>${S.bgfEdit.id?'Sửa báo giá':'Soạn báo giá mới'}</h3><div class="spacer"></div>
+    <button class="btn-sm ghost" title="Cách dùng form này: định giá theo biên, sàn biên, dòng tùy chọn / cụm / ngoài dự toán, điều khoản, trình duyệt, gửi khách" onclick="bgfHuongDan()">📖 Hướng dẫn</button>
     <button class="btn-sm ghost" onclick="bgfLuu()">💾 Lưu tạm</button>
     <button class="btn-sm ghost" onclick="bgfPdf()">🖨 Xuất PDF</button>
     <button class="btn-sm" title="Lưu và gửi duyệt — duyệt xong mới gửi được cho khách" onclick="bgfTrinhTuEditor()">📤 Lưu & trình duyệt</button></div>
