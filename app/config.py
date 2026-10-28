@@ -59,7 +59,11 @@ class Settings(BaseSettings):
     po_bien_ln_toi_thieu: float = 15.0   # 📉 duyệt PO làm biên lợi nhuận nhóm mã < ngưỡng (%) → chỉ CEO duyệt
     ln_nhac_tuan: bool = True            # 📉 thứ Hai 8h (VN): bản kiểm soát lợi nhuận theo mã vào nhóm Duyệt chi
     bg_bien_toi_thieu: float = 15.0      # 📉 duyệt báo giá: (tổng báo giá − tổng dự toán) / tổng báo giá < ngưỡng (%) → chỉ CEO
-    bg_bien_goi_y: float = 20.0          # 💡 tạo báo giá từ dự toán: đơn giá bán gợi ý = giá dự toán × (1 + %)
+    bg_bien_goi_y: float = 20.0          # 💡 (cũ) biên gợi ý chung — nay dùng sàn theo nhóm bên dưới
+    bg_bien_thiet_bi: float = 15.0       # 🔒 SÀN biên theo nhóm (anh Hiếu chốt 28/10/2026): nhân viên chỉnh ≥ sàn; CEO / Admin mới được dưới
+    bg_bien_vat_tu: float = 25.0
+    bg_bien_nhan_cong: float = 30.0
+    bg_chi_phi_chung: float = 5.0        # % chi phí chung tính trên giá vốn trước khi tính biên
     gchat_service_account: str = ""      # dùng cho chế độ APP: DÁN NGUYÊN nội dung file JSON key
     nhac_viec_gui_khi_tao: bool = True   # gửi ngay khi vừa đặt lời nhắc
     nhac_viec_ban_tin: bool = True       # bản tin tổng hợp đầu ngày

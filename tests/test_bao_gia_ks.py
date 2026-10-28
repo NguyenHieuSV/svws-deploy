@@ -70,3 +70,24 @@ def test_cong():
         bk.cong(None, thap, _Nd("CEO"), False, "duyệt", kiem_bien=True)
     assert e.value.status_code == 409
     assert bk.cong(None, thap, _Nd("CEO"), True, "duyệt", kiem_bien=True)["vuot"]
+
+
+def test_san_bien_theo_nhom(monkeypatch):
+    monkeypatch.setattr(settings, "bg_bien_thiet_bi", 15.0); monkeypatch.setattr(settings, "bg_bien_vat_tu", 25.0)
+    monkeypatch.setattr(settings, "bg_bien_nhan_cong", 30.0); monkeypatch.setattr(settings, "bg_chi_phi_chung", 5.0)
+    nd = {"chi_phi_chung": 5, "items": [
+        {"ten": "Bơm", "nhom": "THIET_BI", "so_luong": 1, "gia_von": 100e6, "don_gia": 124e6},     # vốn đầy 105 → biên 15,3% ✓
+        {"ten": "Ống", "nhom": "VAT_TU", "so_luong": 10, "gia_von": 1e6, "don_gia": 1.3e6},        # 1,05/1,3 → 19,2% < 25 ✗
+        {"ten": "Lắp", "nhom": "NHAN_CONG", "so_luong": 1, "gia_von": 0, "don_gia": 5e6},          # không giá vốn → không xét
+        {"ten": "Bỏ", "nhom": "VAT_TU", "so_luong": 0, "gia_von": 1e6, "don_gia": 1},             # SL 0 → không xét
+    ]}
+    ds = bk.dong_duoi_san(nd)
+    assert [x["ten"] for x in ds] == ["Ống"] and ds[0]["bien"] == 19.2 and ds[0]["san"] == 25.0
+    with pytest.raises(HTTPException) as e:
+        bk.chan_duoi_san(nd, _Nd("NV_KD"))
+    assert e.value.status_code == 403 and "DƯỚI SÀN" in e.value.detail and "19,2% < sàn 25%" in e.value.detail
+    bk.chan_duoi_san(nd, _Nd("ADMIN"))                 # CEO / Admin được dưới sàn
+    bk.chan_duoi_san(nd, _Nd("CEO"))
+    nd["items"][1]["don_gia"] = 1.4e6                  # 1,05/1,4 → 25% = sàn → đạt
+    assert bk.dong_duoi_san(nd) == []
+    bk.chan_duoi_san(nd, _Nd("NV_KD"))

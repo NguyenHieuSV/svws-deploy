@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="vi">
 <head>
-<!-- build: bao-gia-dinh-gia-2026-10-28 -->
+<!-- build: bao-gia-san-bien-2026-10-28 -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#0f2c44">
@@ -5890,6 +5890,11 @@ async function bhBaoGia(host){
    d.cum_hien      {tên cụm: 'DU' | 'GON' | 'TRON_GOI'}  — đủ dòng · chỉ tổng cụm · dòng + giá trọn gói  */
 const BG_NHOM={THIET_BI:'Thiết bị',VAT_TU:'Vật tư',NHAN_CONG:'Nhân công / dịch vụ'};
 const BG_BIEN_MAC_DINH={THIET_BI:15,VAT_TU:25,NHAN_CONG:30};
+/* 🔒 SÀN biên theo nhóm (máy chủ cấu hình; anh Hiếu 28/10/2026): nhân viên chỉnh từ sàn trở lên, CEO / Admin mới được dưới sàn */
+function _bgSan(){const c=(S._bgKsCfg||{}).san_bien||{};return {THIET_BI:Number(c.THIET_BI)||BG_BIEN_MAC_DINH.THIET_BI,VAT_TU:Number(c.VAT_TU)||BG_BIEN_MAC_DINH.VAT_TU,NHAN_CONG:Number(c.NHAN_CONG)||BG_BIEN_MAC_DINH.NHAN_CONG,chi_phi_chung:(c.chi_phi_chung!=null?Number(c.chi_phi_chung):5)};}
+function _bgDuocDuoiSan(){return laQTV();}
+function _bgGiaSan(d,it){const v=_bgVonDay(d,it); const sn=_bgSan()[it.nhom||'VAT_TU']; return sn>=100?0:_bgLamTron(v/(1-sn/100));}
+function _bgDuoiSan(d,it){if(!(Number(it.gia_von)>0))return false; const b=_bgBienDong(d,it); return b!=null&&b+1e-9<_bgSan()[it.nhom||'VAT_TU'];}
 function _bgNhomDoan(ten,quyCach){const t=((ten||'')+' '+(quyCach||'')).toLowerCase();
   if(/lắp đặt|lap dat|nhân công|nhan cong|vận hành|van hanh|thi công|thi cong|đào tạo|dao tao|chạy thử|chay thu|vận chuyển|van chuyen|bảo trì|bao tri|dịch vụ|dich vu|công tác|cong tac/.test(t))return 'NHAN_CONG';
   if(/bơm|bom\b|máy|may\b|tủ điện|tu dien|màng|mang\b|thiết bị|thiet bi|cảm biến|cam bien|đồng hồ|dong ho|van điện|motor|inverter|biến tần|bien tan|bồn|bon\b|tank|bình|binh\b|hệ |he\b/.test(t))return 'THIET_BI';
@@ -5948,7 +5953,7 @@ async function bgfEditor(host){
   if(!d.bien_nhom)d.bien_nhom={...BG_BIEN_MAC_DINH}; if(d.chi_phi_chung===undefined)d.chi_phi_chung=5;
   const bienNg=Number(((S._bgKsCfg||{}).bien_toi_thieu))||15;
   const itemRows=(d.items||[]).map((it,i)=>{const b=_bgBienDong(d,it); const mauB=b==null?'var(--muted)':(b<0?'#dc2626':(b<bienNg?'#d97706':'#16a34a'));
-    return `<tr${it.ngoai_du_toan?' style="background:#fffbeb"':''}>
+    return `<tr id="bgf_row_${i}"${it.ngoai_du_toan?' style="background:#fffbeb"':''}>
     <td style="color:var(--muted)">${i+1}</td>
     <td><input list="bgf_dl" value="${esc(it.ten)}" onchange="bgfHH(${i},this.value)" oninput="bgfSet(${i},'ten',this.value)" placeholder="Tên sản phẩm/dịch vụ" style="min-width:160px">${it.ngoai_du_toan?'<div style="font-size:10.5px;color:#b45309">ngoài dự toán</div>':''}</td>
     <td><input value="${esc(it.mo_ta)}" oninput="bgfSet(${i},'mo_ta',this.value)" placeholder="Mô tả - mã hàng - xuất xứ" style="min-width:170px"></td>
@@ -5957,7 +5962,7 @@ async function bgfEditor(host){
     <td><input type="number" min="0" step="any" value="${esc(it.so_luong)}" oninput="bgfSet(${i},'so_luong',this.value)" style="width:62px"></td>
     <td><input value="${esc(it.don_vi)}" oninput="bgfSet(${i},'don_vi',this.value)" style="width:56px"></td>
     <td><input type="number" min="0" step="any" value="${esc(it.gia_von)}" oninput="bgfSetVon(${i},this.value)" title="Giá vốn 1 đơn vị (từ dự toán; dòng ngoài dự toán tự ước)" style="width:104px;color:var(--muted)"></td>
-    <td><input type="number" min="0" step="any" value="${esc(it.don_gia)}" oninput="bgfSet(${i},'don_gia',this.value)" style="width:118px;font-weight:600"></td>
+    <td><input type="number" data-f="don_gia" min="0" step="any" value="${esc(it.don_gia)}" onchange="bgfSet(${i},'don_gia',this.value)" oninput="bgfSet(${i},'don_gia',this.value)" title="${_bgDuocDuoiSan()?'':'Sàn: '+vnd(_bgGiaSan(d,it))+' (biên '+_bgSan()[it.nhom||'VAT_TU']+'%)'}" style="width:118px;font-weight:600${_bgDuoiSan(d,it)?';border-color:#dc2626':''}"></td>
     <td class="num" id="bgf_b_${i}" style="color:${mauB};font-weight:600;white-space:nowrap">${b==null?'—':String(b).replace('.',',')+'%'}</td>
     <td><input type="number" min="0" max="100" step="any" value="${esc(it.vat_pct??d.vat_pct??8)}" oninput="bgfSet(${i},'vat_pct',this.value)" style="width:52px"></td>
     <td class="num" id="bgf_tt_${i}">${vnd((Number(it.so_luong)||0)*(Number(it.don_gia)||0))}</td>
@@ -5965,9 +5970,10 @@ async function bgfEditor(host){
   const bienTong=_bgBienTong(d), tongVon=_bgTongVon(d);
   const thanhGia=`<div style="background:var(--surface);border:1px solid var(--line,#e2e8f0);border-radius:10px;padding:10px 14px;margin-bottom:10px">
     <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:end">
-      ${Object.entries(BG_NHOM).map(([k,v])=>`<div><label style="font-size:11.5px">Biên ${v} (%)</label><input type="number" step="0.5" min="0" max="95" value="${esc(d.bien_nhom[k])}" oninput="bgfBienNhom('${k}',this.value)" style="width:76px"></div>`).join('')}
+      ${Object.entries(BG_NHOM).map(([k,v])=>`<div><label style="font-size:11.5px" title="Sàn ${_bgSan()[k]}% — ${_bgDuocDuoiSan()?'CEO / Admin được đặt dưới sàn':'nhân viên chỉ đặt từ sàn trở lên'}">Biên ${v} (%) <span style="color:var(--muted)">≥ ${_bgSan()[k]}</span></label><input type="number" step="0.5" min="${_bgDuocDuoiSan()?0:_bgSan()[k]}" max="95" value="${esc(d.bien_nhom[k])}" onchange="bgfBienNhom('${k}',this.value)" style="width:76px"></div>`).join('')}
       <div><label style="font-size:11.5px" title="Chi phí quản lý · dự phòng · vận chuyển… tính trên giá vốn trước khi tính biên">Chi phí chung (%)</label><input type="number" step="0.5" min="0" max="50" value="${esc(d.chi_phi_chung)}" oninput="bgfSetD('chi_phi_chung',Number(this.value)||0)" style="width:70px"></div>
       <button class="btn-sm" title="Tính lại GIÁ BÁN mọi dòng có giá vốn theo biên của nhóm (biên tính trên giá bán)" onclick="bgfApBien()">↻ Áp biên theo nhóm</button>
+      <span style="font-size:11.5px;color:var(--muted);align-self:center" title="Sàn do máy chủ cấu hình (BG_BIEN_THIET_BI / VAT_TU / NHAN_CONG)">${_bgDuocDuoiSan()?'CEO / Admin: được đặt dưới sàn':'🔒 chỉnh từ sàn trở lên; dưới sàn nhờ CEO / Admin'}</span>
       <div style="margin-left:auto;display:flex;gap:8px;align-items:end"><div><label style="font-size:11.5px" title="Gõ tổng muốn chào (chưa VAT) — app chia về từng dòng theo tỉ lệ giá vốn, làm tròn, lệch dồn vào dòng lớn nhất">🎯 Tổng mục tiêu (chưa VAT)</label><input type="number" id="bgf_muc_tieu" step="100000" min="0" placeholder="VD: 3500000000" style="width:170px"></div><button class="btn-sm" onclick="bgfChiaTong()">Chia về dòng</button></div>
     </div>
     <div id="bgf_bien_tong" style="margin-top:8px;font-size:13px">${_bgBienTongHtml(d,bienNg)}</div></div>`;
@@ -6030,12 +6036,19 @@ async function bgfEditor(host){
     </div>
   </div></div>`;
 }
-function bgfSet(i,f,v){const it=S.bgfEdit.d.items[i];if(!it)return;it[f]=v;if(f==='don_gia')it.khoa_gia=true;_bgfCapNhatTong(i);}
+function bgfSet(i,f,v){const d=S.bgfEdit.d,it=d.items[i];if(!it)return;it[f]=v;if(f==='don_gia')it.khoa_gia=true;
+  if(f==='don_gia'&&!_bgDuocDuoiSan()&&_bgDuoiSan(d,it)){const gs=_bgGiaSan(d,it);it.don_gia=gs;const el=document.querySelector(`#bgf_row_${i} input[data-f="don_gia"]`);if(el)el.value=gs;
+    toast(`🔒 Giá bán không được dưới sàn biên ${_bgSan()[it.nhom||'VAT_TU']}% (${BG_NHOM[it.nhom||'VAT_TU']}) — đã đặt về ${vnd(gs)}. Muốn thấp hơn, nhờ CEO / Admin.`,"err");}
+  _bgfCapNhatTong(i);}
 function bgfSetVon(i,v){const it=S.bgfEdit.d.items[i];if(!it)return;it.gia_von=Number(v)||0;_bgfCapNhatTong(i);}
 function bgfSetNhom(i,v){const d=S.bgfEdit.d,it=d.items[i];if(!it)return;it.nhom=v;if(Number(it.gia_von)>0&&!it.khoa_gia){it.don_gia=_bgGiaTheoBien(d,it);}viewBanHang($("#main"));}
-function bgfBienNhom(k,v){const d=S.bgfEdit.d;d.bien_nhom=d.bien_nhom||{...BG_BIEN_MAC_DINH};d.bien_nhom[k]=Number(v)||0;}
+function bgfBienNhom(k,v){const d=S.bgfEdit.d;d.bien_nhom=d.bien_nhom||{...BG_BIEN_MAC_DINH};let b=Number(v)||0;const sn=_bgSan()[k];
+  if(!_bgDuocDuoiSan()&&b<sn){b=sn;toast(`🔒 Biên ${BG_NHOM[k]} không được dưới sàn ${sn}% — đã đặt về ${sn}%`,"err");}
+  d.bien_nhom[k]=b;viewBanHang($("#main"));}
 function bgfApBien(){const d=S.bgfEdit.d;(d.items||[]).forEach(it=>{it.khoa_gia=false;});_bgApBien(d);toast("Đã tính lại giá bán theo biên từng nhóm","ok");viewBanHang($("#main"));}
 function bgfChiaTong(){const d=S.bgfEdit.d;const tong=Number(gv('bgf_muc_tieu'))||0;if(tong<=0)return toast("Nhập tổng mục tiêu (chưa VAT)","err");
+  if(!_bgDuocDuoiSan()){const toiThieu=(d.items||[]).reduce((s,it)=>s+(Number(it.so_luong)||0)*((Number(it.gia_von)>0)?_bgGiaSan(d,it):(Number(it.don_gia)||0)),0);
+    if(tong<toiThieu-1)return toast(`🔒 Tổng mục tiêu ${vnd(tong)} thấp hơn tổng theo sàn biên ${vnd(toiThieu)} — nhân viên không chia dưới sàn được; nhờ CEO / Admin.`,"err");}
   _bgChiaTong(d,tong);(d.items||[]).forEach(it=>{it.khoa_gia=true;});const t=_bgfTinh(d);
   toast("Đã chia "+vnd(tong)+" về từng dòng — tổng hiện tại "+vnd(t.sub),"ok");viewBanHang($("#main"));}
 function bgfCumDoi(){viewBanHang($("#main"));}
@@ -6043,7 +6056,8 @@ function bgfCumHien(c,v){const d=S.bgfEdit.d;d.cum_hien=d.cum_hien||{};d.cum_hie
 function _bgBienTongHtml(d,bienNg){const b=_bgBienTong(d),t=_bgfTinh(d),v=_bgTongVon(d);
   if(b==null)return '<span style="color:var(--muted)">Chưa có giá bán để tính biên.</span>';
   const mau=b<0?'#dc2626':(b<bienNg?'#d97706':'#16a34a');
-  return `Giá vốn (+ chi phí chung) <b>${vnd(v)}</b> · giá bán chưa VAT <b>${vnd(t.sub)}</b> · lợi nhuận <b style="color:${mau}">${vnd(t.sub-v)}</b> · biên <b style="color:${mau};font-size:15px">${String(b).replace('.',',')}%</b>${b<bienNg?` <span class="badge b-tc">dưới ngưỡng ${bienNg}% — chỉ CEO duyệt</span>`:' <span class="badge b-ok">đạt</span>'}`;}
+  const duoi=(d.items||[]).filter(it=>_bgDuoiSan(d,it)).length;
+  return `Giá vốn (+ chi phí chung) <b>${vnd(v)}</b> · giá bán chưa VAT <b>${vnd(t.sub)}</b> · lợi nhuận <b style="color:${mau}">${vnd(t.sub-v)}</b> · biên <b style="color:${mau};font-size:15px">${String(b).replace('.',',')}%</b>${b<bienNg?` <span class="badge b-tc">dưới ngưỡng ${bienNg}% — chỉ CEO duyệt</span>`:' <span class="badge b-ok">đạt</span>'}${duoi?` <span class="badge ${_bgDuocDuoiSan()?'b-cho':'b-tc'}" title="Dòng có biên dưới sàn của nhóm (TB ${_bgSan().THIET_BI}% · VT ${_bgSan().VAT_TU}% · NC ${_bgSan().NHAN_CONG}%)">🔒 ${duoi} dòng dưới sàn${_bgDuocDuoiSan()?' (CEO / Admin)':' — không lưu được'}</span>`:''}`;}
 function bgfSetD(f,v){S.bgfEdit.d[f]=v;if(f==='vat_pct')_bgfCapNhatTong();}
 function _khContacts(k){
   if(!k)return [];
@@ -10220,7 +10234,7 @@ async function dtbTaoBaoGia(id){
       items:its.map(x=>{const nh=_bgNhomDoan(x.ten,x.quy_cach); const m=/nhóm\s+(?:([A-Za-z]{1,2})\s+)?([^·]+)/.exec(String(x.ghi_chu||''));
         return {ten:x.ten,mo_ta:x.quy_cach||"",so_luong:Number(x.so_luong||0),don_vi:x.don_vi||"Unit",
         don_gia:0,gia_von:Number(x.don_gia||0),nhom:nh,cum:m?(((m[1]?m[1].toUpperCase()+' ':'')+(m[2]||'').trim()).trim().slice(0,60)):"",vat_pct:8};}),
-      du_toan_id:d.id, du_toan_ma:d.ma, bien_nhom:{...BG_BIEN_MAC_DINH}, chi_phi_chung:5,
+      du_toan_id:d.id, du_toan_ma:d.ma, bien_nhom:(()=>{const sn=_bgSan();return {THIET_BI:sn.THIET_BI,VAT_TU:sn.VAT_TU,NHAN_CONG:sn.NHAN_CONG};})(), chi_phi_chung:_bgSan().chi_phi_chung,
       vat_pct:8, tt:"40% deposit upon order, remaining 60% upon delivery notification",
       giao:"8-10 weeks after order placement", dia_diem:"As per agreement",
       nguoi_bg:"Nguyễn Thương", email_lh:"sv-sales@watersolutions.company"

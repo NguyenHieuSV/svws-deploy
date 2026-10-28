@@ -107,6 +107,57 @@ def la_ceo(nd) -> bool:
     return (getattr(getattr(nd, "vai_tro", None), "ma", None) or "").upper() == "CEO"
 
 
+def la_qtv(nd) -> bool:
+    """CEO / ADMIN — được chỉnh giá bán DƯỚI sàn biên (anh Hiếu 28/10/2026)."""
+    return (getattr(getattr(nd, "vai_tro", None), "ma", None) or "").upper() in ("CEO", "ADMIN")
+
+
+def san_bien() -> dict:
+    """Sàn biên theo nhóm (%) + chi phí chung — nhân viên không được đặt giá bán dưới sàn."""
+    def _f(v, mac):
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            return mac
+    return {"THIET_BI": _f(settings.bg_bien_thiet_bi, 15.0), "VAT_TU": _f(settings.bg_bien_vat_tu, 25.0),
+            "NHAN_CONG": _f(settings.bg_bien_nhan_cong, 30.0), "chi_phi_chung": _f(settings.bg_chi_phi_chung, 5.0)}
+
+
+def dong_duoi_san(noi_dung: dict) -> list:
+    """Các dòng có giá vốn mà biên (trên giá bán, sau chi phí chung) < sàn của nhóm → [{ten, nhom, bien, san}].
+    Dòng không có giá vốn (chưa ước) không xét."""
+    nd = noi_dung or {}
+    san = san_bien()
+    cpc = nd.get("chi_phi_chung")
+    cpc = san["chi_phi_chung"] if cpc in (None, "") else float(cpc)
+    out = []
+    for it in nd.get("items") or []:
+        von = float(it.get("gia_von") or 0)
+        gia = float(it.get("don_gia") or 0)
+        if von <= 0 or float(it.get("so_luong") or 0) <= 0:
+            continue
+        nhom = (it.get("nhom") or "VAT_TU").upper()
+        s = san.get(nhom, san["VAT_TU"])
+        v = von * (1 + cpc / 100)
+        bien = (gia - v) / gia * 100 if gia > 0 else -100.0
+        if bien + 1e-9 < s:
+            out.append({"ten": it.get("ten") or "", "nhom": nhom, "bien": round(bien, 1), "san": s})
+    return out
+
+
+def chan_duoi_san(noi_dung: dict, nd) -> None:
+    """Lưu / trình duyệt báo giá: có dòng dưới sàn mà không phải CEO / Admin → 403."""
+    from fastapi import HTTPException, status
+    if la_qtv(nd):
+        return
+    ds = dong_duoi_san(noi_dung)
+    if ds:
+        vd = "; ".join(f"«{x['ten'][:40]}» {_pt(x['bien'])}% < sàn {x['san']:g}%" for x in ds[:3])
+        raise HTTPException(status.HTTP_403_FORBIDDEN,
+                            f"🔒 {len(ds)} dòng có giá bán DƯỚI SÀN biên ({vd}{'…' if len(ds) > 3 else ''}). "
+                            "Nhân viên chỉ chỉnh giá từ sàn trở lên — muốn thấp hơn, nhờ CEO / Admin sửa.")
+
+
 def cong(db: Session, bgf, nd, xac_nhan: bool, buoc: str, kiem_bien: bool = False) -> dict:
     """Cổng kiểm soát một bước (TRÌNH DUYỆT / DUYỆT / GỬI KHÁCH).
     Thiếu dự toán: người thường 400; CEO chưa xác nhận 409 (📋). Biên thấp (khi kiem_bien): người thường 403; CEO 409 (📉)."""

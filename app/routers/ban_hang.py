@@ -1360,7 +1360,9 @@ def bao_gia_kiem_soat(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "
         dt = k["du_toan"] or {}
         out[str(b.id)] = {"du_toan_ma": dt.get("ma"), "du_toan_loai": dt.get("loai"), "thieu": k["thieu_du_toan"],
                           "bien": k["bien"], "canh_bao_bien": k["canh_bao_bien"]}
-    return {"bao_gia": out, "bien_toi_thieu": bien_toi_thieu(), "bien_goi_y": bien_goi_y()}
+    from ..bao_gia_ks import la_qtv, san_bien
+    return {"bao_gia": out, "bien_toi_thieu": bien_toi_thieu(), "bien_goi_y": bien_goi_y(),
+            "san_bien": san_bien(), "duoc_duoi_san": la_qtv(_)}
 
 
 @router.post("/bao-gia-form", response_model=BaoGiaFormRa, status_code=201)
@@ -1370,12 +1372,14 @@ def tao_bao_gia_form(data: BaoGiaFormVao, ep_ma: bool = False, db: Session = Dep
         from ..ma_code import bat_buoc as _bb_ma
         data.so = _bb_ma(data.so, nd, ep_ma, nhan="Số báo giá")
     # 📋 báo giá phải lập từ DỰ TOÁN cùng mã — báo giá trống / mã chưa có dự toán chỉ CEO tạo (hợp đồng không áp)
-    from ..bao_gia_ks import la_ceo, tim_du_toan
+    from ..bao_gia_ks import chan_duoi_san, la_ceo, tim_du_toan
     if not la_ceo(nd) and (data.noi_dung or {}).get("loai") != "HOP_DONG":
         if tim_du_toan(db, BaoGiaForm(so=data.so, noi_dung=data.noi_dung or {})) is None:
             raise HTTPException(status.HTTP_403_FORBIDDEN,
                                 f"📋 Mã «{data.so or ''}» chưa có dự toán — báo giá phải tạo từ dự toán "
                                 "(Bán hàng → Dự toán hàng bán → 📄 Tạo báo giá). Chỉ CEO được tạo báo giá trống.")
+    if (data.noi_dung or {}).get("loai") != "HOP_DONG":
+        chan_duoi_san(data.noi_dung or {}, nd)          # 🔒 giá bán dưới sàn biên: chỉ CEO / Admin
     bgf = BaoGiaForm(so=data.so, khach_hang_id=data.khach_hang_id,
                      noi_dung=data.noi_dung, trang_thai=data.trang_thai or "NHAP",
                      nguoi_tao=nhan_vien_id_cua(db, nd.id))
@@ -1394,6 +1398,9 @@ def sua_bao_gia_form(bgf_id: int, data: BaoGiaFormVao, ep_ma: bool = False, db: 
     if _re_ma_bg.match((data.so or "").strip().upper()) and (data.so or "").strip() != (bgf.so or "").strip():
         from ..ma_code import bat_buoc as _bb_ma
         data.so = _bb_ma(data.so, nd, ep_ma, nhan="Số báo giá")
+    if (data.noi_dung or {}).get("loai") != "HOP_DONG":
+        from ..bao_gia_ks import chan_duoi_san
+        chan_duoi_san(data.noi_dung or {}, nd)          # 🔒 giá bán dưới sàn biên: chỉ CEO / Admin
     bgf.so = data.so
     bgf.khach_hang_id = data.khach_hang_id
     bgf.noi_dung = data.noi_dung
