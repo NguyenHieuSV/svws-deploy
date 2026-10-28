@@ -1344,12 +1344,38 @@ def ds_bao_gia_form(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XE
     return rows
 
 
+@router.get("/bao-gia-form/kiem-soat")
+def bao_gia_kiem_soat(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
+    """📋 / 📉 của từng báo giá (200 mới nhất): dự toán gốc, thiếu gì, biên so với dự toán. Kèm biên gợi ý cho nút tạo."""
+    from ..bao_gia_ks import bien_goi_y, bien_toi_thieu, kiem_tra
+    out = {}
+    for b in db.query(BaoGiaForm).order_by(BaoGiaForm.id.desc()).limit(200).all():
+        if (b.noi_dung or {}).get("loai") == "HOP_DONG":
+            continue
+        try:
+            k = kiem_tra(db, b)
+        except Exception as e:                                    # noqa: BLE001
+            print(f"[BG_KS] {b.id}: {type(e).__name__}: {e}")
+            continue
+        dt = k["du_toan"] or {}
+        out[str(b.id)] = {"du_toan_ma": dt.get("ma"), "du_toan_loai": dt.get("loai"), "thieu": k["thieu_du_toan"],
+                          "bien": k["bien"], "canh_bao_bien": k["canh_bao_bien"]}
+    return {"bao_gia": out, "bien_toi_thieu": bien_toi_thieu(), "bien_goi_y": bien_goi_y()}
+
+
 @router.post("/bao-gia-form", response_model=BaoGiaFormRa, status_code=201)
 def tao_bao_gia_form(data: BaoGiaFormVao, ep_ma: bool = False, db: Session = Depends(get_db),
                      nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
     if _re_ma_bg.match((data.so or "").strip().upper()):   # số hợp đồng / số khác không áp quy luật
         from ..ma_code import bat_buoc as _bb_ma
         data.so = _bb_ma(data.so, nd, ep_ma, nhan="Số báo giá")
+    # 📋 báo giá phải lập từ DỰ TOÁN cùng mã — báo giá trống / mã chưa có dự toán chỉ CEO tạo (hợp đồng không áp)
+    from ..bao_gia_ks import la_ceo, tim_du_toan
+    if not la_ceo(nd) and (data.noi_dung or {}).get("loai") != "HOP_DONG":
+        if tim_du_toan(db, BaoGiaForm(so=data.so, noi_dung=data.noi_dung or {})) is None:
+            raise HTTPException(status.HTTP_403_FORBIDDEN,
+                                f"📋 Mã «{data.so or ''}» chưa có dự toán — báo giá phải tạo từ dự toán "
+                                "(Bán hàng → Dự toán hàng bán → 📄 Tạo báo giá). Chỉ CEO được tạo báo giá trống.")
     bgf = BaoGiaForm(so=data.so, khach_hang_id=data.khach_hang_id,
                      noi_dung=data.noi_dung, trang_thai=data.trang_thai or "NHAP",
                      nguoi_tao=nhan_vien_id_cua(db, nd.id))
@@ -1394,7 +1420,7 @@ def _bgf_tong(bgf: "BaoGiaForm") -> Decimal:
 
 
 @router.post("/bao-gia-form/{bgf_id}/trinh-duyet", response_model=BaoGiaFormRa)
-def trinh_duyet_bao_gia_form(bgf_id: int, db: Session = Depends(get_db),
+def trinh_duyet_bao_gia_form(bgf_id: int, xac_nhan_ks: bool = False, db: Session = Depends(get_db),
                              nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
     """Người soạn TRÌNH DUYỆT báo giá gửi khách — vào hàng chờ duyệt."""
     bgf = db.get(BaoGiaForm, bgf_id)
@@ -1403,15 +1429,17 @@ def trinh_duyet_bao_gia_form(bgf_id: int, db: Session = Depends(get_db),
     if bgf.trang_thai not in ("NHAP", "DA_XUAT", "TU_CHOI"):
         raise HTTPException(status.HTTP_400_BAD_REQUEST,
                             f"Báo giá đang ở trạng thái {bgf.trang_thai} — không trình duyệt được.")
+    from ..bao_gia_ks import cong as _bg_cong
+    ks = _bg_cong(db, bgf, nd, xac_nhan_ks, "trình duyệt") if (bgf.noi_dung or {}).get("loai") != "HOP_DONG" else {"vuot": []}
     bgf.trang_thai = "CHO_DUYET"
     bgf.ly_do_tu_choi = None
-    ghi_audit(db, nd.id, "TRINH_DUYET", "bao_gia_form", bgf.id, moi={"trang_thai": "CHO_DUYET"})
+    ghi_audit(db, nd.id, "TRINH_DUYET", "bao_gia_form", bgf.id, moi={"trang_thai": "CHO_DUYET", "ceo_vuot": ks.get("vuot")})
     db.commit(); db.refresh(bgf)
     return bgf
 
 
 @router.post("/bao-gia-form/{bgf_id}/duyet", response_model=BaoGiaFormRa)
-def duyet_bao_gia_form(bgf_id: int, db: Session = Depends(get_db),
+def duyet_bao_gia_form(bgf_id: int, xac_nhan_ks: bool = False, db: Session = Depends(get_db),
                        nd: NguoiDung = Depends(yeu_cau(MODULE, "XEM"))):
     """DUYỆT báo giá gửi khách — thẩm quyền theo hạn mức (như báo giá nội bộ)."""
     bgf = db.get(BaoGiaForm, bgf_id)
@@ -1420,11 +1448,16 @@ def duyet_bao_gia_form(bgf_id: int, db: Session = Depends(get_db),
     if bgf.trang_thai != "CHO_DUYET":
         raise HTTPException(status.HTTP_400_BAD_REQUEST,
                             f"Báo giá đang ở {bgf.trang_thai} — chỉ duyệt được khi đang chờ duyệt.")
+    # 📋 có dự toán đủ dòng + giá · 📉 biên (tổng báo giá vs tổng dự toán) ≥ ngưỡng — không đạt: chỉ CEO, phải xác nhận
+    from ..bao_gia_ks import cong as _bg_cong
+    ks = (_bg_cong(db, bgf, nd, xac_nhan_ks, "duyệt", kiem_bien=True)
+          if (bgf.noi_dung or {}).get("loai") != "HOP_DONG" else {"vuot": [], "bien": None})
     kiem_han_muc(db, nd, LOAI_DUYET, _bgf_tong(bgf))
     bgf.trang_thai = "DA_DUYET"
     bgf.nguoi_duyet = nhan_vien_id_cua(db, nd.id)
     bgf.ly_do_tu_choi = None
-    ghi_audit(db, nd.id, "DUYET", "bao_gia_form", bgf.id, moi={"trang_thai": "DA_DUYET"})
+    ghi_audit(db, nd.id, "DUYET", "bao_gia_form", bgf.id,
+              moi={"trang_thai": "DA_DUYET", "bien": ks.get("bien"), "ceo_vuot": ks.get("vuot")})
     db.commit(); db.refresh(bgf)
     return bgf
 
@@ -1511,7 +1544,7 @@ def _bgf_tinh(d: dict):
 
 
 @router.post("/bao-gia-form/{bgf_id}/gui-email")
-def gui_bao_gia_email(bgf_id: int, data: GuiBaoGiaVao, db: Session = Depends(get_db),
+def gui_bao_gia_email(bgf_id: int, data: GuiBaoGiaVao, xac_nhan_ks: bool = False, db: Session = Depends(get_db),
                       nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
     """Gửi báo giá cho khách: tự sinh PDF báo giá đính kèm, thư văn phong chuyên nghiệp.
     Gửi từ settings.email_from (sv-sales@watersolutions.company)."""
@@ -1528,6 +1561,9 @@ def gui_bao_gia_email(bgf_id: int, data: GuiBaoGiaVao, db: Session = Depends(get
                             "trước khi gửi cho khách.")
     if "@" not in (data.den or ""):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Email người nhận không hợp lệ")
+    if (bgf.noi_dung or {}).get("loai") != "HOP_DONG":           # 📋 báo giá duyệt trước 28/10 chưa có dự toán cũng chặn
+        from ..bao_gia_ks import cong as _bg_cong
+        _bg_cong(db, bgf, nd, xac_nhan_ks, "gửi khách")
     d = bgf.noi_dung or {}
     so = d.get("so") or bgf.so or f"BG-{bgf.id}"
 

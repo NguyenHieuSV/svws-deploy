@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="vi">
 <head>
-<!-- build: kiem-soat-ln-2026-10-27 -->
+<!-- build: bao-gia-du-toan-2026-10-28 -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#0f2c44">
@@ -568,6 +568,15 @@ async function apiLn(path,opts){
     if(e.status!==409||!/📉/.test(e.detail||''))throw e;
     if(!confirm((e.detail||'')+"\n\nAnh vẫn duyệt đơn mua này?")){const h=new Error("Đã hủy duyệt — đơn vẫn chờ duyệt");h.detail=h.message;h.huy=true;throw h;}
     return api(path+(path.includes('?')?'&':'?')+'xac_nhan_ln=1',opts);
+  }
+}
+/* 📋/📉 Báo giá thiếu dự toán hoặc biên thấp: máy chủ trả 409 cho CEO → hỏi rồi gửi lại ?xac_nhan_ks=1 */
+async function apiKs(path,opts){
+  try{return await api(path,opts);}
+  catch(e){
+    if(e.status!==409||!/📋|📉/.test(e.detail||''))throw e;
+    if(!confirm((e.detail||'')+"\n\nAnh (CEO) vẫn tiếp tục?")){const h=new Error("Đã hủy — báo giá giữ nguyên");h.detail=h.message;h.huy=true;throw h;}
+    return api(path+(path.includes('?')?'&':'?')+'xac_nhan_ks=1',opts);
   }
 }
 function can(mod,lvl){return RANK[S.perm[pmod(mod)]||"KHONG"]>=RANK[lvl];}
@@ -5805,8 +5814,15 @@ async function bhBaoGia(host){
   if(S.bgfEdit) return bgfEditor(host);
   if(S.bgnEdit) return bgnEditor(host);
   let drafts=DEMO.bgf||[];
-  if(S.mode==="live"){ try{drafts=await api("/ban-hang/bao-gia-form");}catch(e){} }
+  let bgKs={bao_gia:{}};
+  if(S.mode==="live"){ try{[drafts,bgKs]=await Promise.all([api("/ban-hang/bao-gia-form"),api("/ban-hang/bao-gia-form/kiem-soat").catch(()=>({bao_gia:{}}))]);}catch(e){} }
+  S._bgKsCfg=bgKs;
   drafts=drafts.filter(g=>!(g.noi_dung&&g.noi_dung.loai==='HOP_DONG'));
+  // 📋 dự toán gốc + 📉 biên so với dự toán (cùng phép kiểm lúc trình duyệt / duyệt)
+  const _bgKsNhan=id=>{const k=(bgKs.bao_gia||{})[id]; if(!k)return '';
+    if(k.thieu)return `<div><span class="badge b-tc" style="white-space:normal" title="${_bcEscA(k.thieu)} — người thường không trình duyệt / gửi được; CEO được vượt">📋 ${k.du_toan_ma?'dự toán thiếu giá':'chưa có dự toán'}</span></div>`;
+    if(k.canh_bao_bien)return `<div><span class="badge b-cho" style="white-space:normal" title="${_bcEscA(k.canh_bao_bien)} — chỉ CEO duyệt">📉 ${k.bien!=null?'biên '+String(k.bien).replace('.',',')+'%':'chưa so được biên'} · ${_bcEscH(k.du_toan_ma||'')}</span></div>`;
+    return `<div><span class="badge b-ok" title="Dự toán gốc ${_bcEscA(k.du_toan_ma||'')} (${k.du_toan_loai==='BOQ'?'BOQ dự án':'Dự toán hàng bán'})">📋 ${_bcEscH(k.du_toan_ma||'')}${k.bien!=null?' · biên '+String(k.bien).replace('.',',')+'%':''}</span></div>`;};
   S._bgfList=drafts;
   const canOpBGF=can("ban_hang","THAO_TAC");
   const canApproveBGF=can("ban_hang","XEM") && HANMUC.bao_gia[S.role]!==undefined;
@@ -5828,10 +5844,10 @@ async function bhBaoGia(host){
     return `<tr><td><b>${g.so||d.so||'—'}</b></td><td>${d.khach_ten||'—'}</td>
     <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${d.tieu_de||'—'}</td>
     <td class="num">${d.dinh_kem_ten?'<span class="badge b-info" title="'+String(d.dinh_kem_ten).replace(/"/g,'')+'">📎 theo file</span>':vnd(t.tong)}</td>
-    <td>${_bgfBadge(st)}${st==='TU_CHOI'&&g.ly_do_tu_choi?`<div style="font-size:11px;color:#dc2626;max-width:180px">${_bcEscH(g.ly_do_tu_choi)}</div>`:''}</td>
+    <td>${_bgfBadge(st)}${_bgKsNhan(g.id)}${st==='TU_CHOI'&&g.ly_do_tu_choi?`<div style="font-size:11px;color:#dc2626;max-width:180px">${_bcEscH(g.ly_do_tu_choi)}</div>`:''}</td>
     <td style="white-space:nowrap">${act}</td></tr>`;}).join('');
   const draftPanel=`<div class="panel"><div class="panel-h"><h3>Báo giá gửi khách hàng</h3><div class="spacer"></div>
-      ${canOpBGF?'<button class="btn-sm" onclick="bgfMoi()">+ Tạo báo giá</button>':''}</div>
+      ${canOpBGF?(S.role==='CEO'?'<button class="btn-sm" title="Báo giá trống — chỉ CEO; người khác tạo từ Dự toán hàng bán → 📄 Tạo báo giá" onclick="bgfMoi()">+ Tạo báo giá trống</button>':'<span style="font-size:12px;color:var(--muted)" title="Báo giá phải lập từ dự toán có đủ dòng và đủ giá">📋 Tạo báo giá từ <b>Dự toán hàng bán → 📄 Tạo báo giá</b></span>'):''}</div>
     <div class="note">Soạn báo giá → <b>Lưu tạm</b> chỉnh sửa nhiều lần → <b>📤 Trình duyệt</b> → cấp có thẩm quyền <b>Duyệt</b> → mới <b>✉️ Gửi khách</b>. Sửa lại nội dung sau khi duyệt sẽ phải trình duyệt lại.</div>
     <div class="panel-b"><table><thead><tr><th>Số</th><th>Khách hàng</th><th>Tiêu đề</th><th class="num">Tổng (gồm VAT)</th><th>Trạng thái</th><th></th></tr></thead>
     <tbody>${dRows||'<tr><td colspan="6" class="empty">Chưa có báo giá nào — bấm "+ Tạo báo giá" để soạn.</td></tr>'}</tbody></table></div></div>`;
@@ -6094,19 +6110,19 @@ function bgfPdfTu(id){const g=(S._bgfList||[]).find(x=>x.id===id)||(DEMO.bgf||[]
 async function bgfTrinhTuEditor(){
   const ok=await bgfLuu("NHAP"); if(!ok)return;
   const id=S.bgfEdit.id;
-  if(S.mode==="live"){ try{await api(`/ban-hang/bao-gia-form/${id}/trinh-duyet`,{method:'POST'});}catch(e){return toast(e.detail||e.message,"err");} }
+  if(S.mode==="live"){ try{await apiKs(`/ban-hang/bao-gia-form/${id}/trinh-duyet`,{method:'POST'});}catch(e){return toast(e.detail||e.message,"err");} }
   else { const g=(DEMO.bgf||[]).find(x=>x.id===id); if(g)g.trang_thai="CHO_DUYET"; }
   S.bgfEdit=null;
   toast("Đã lưu & trình duyệt — chờ cấp có thẩm quyền duyệt trước khi gửi khách","ok");
   viewBanHang($("#main"));
 }
 async function bgfTrinhDuyet(id){
-  if(S.mode==="live"){ try{await api(`/ban-hang/bao-gia-form/${id}/trinh-duyet`,{method:'POST'});}catch(e){return toast(e.detail||e.message,"err");} }
+  if(S.mode==="live"){ try{await apiKs(`/ban-hang/bao-gia-form/${id}/trinh-duyet`,{method:'POST'});}catch(e){return toast(e.detail||e.message,"err");} }
   else { const g=(DEMO.bgf||[]).find(x=>x.id===id); if(g)g.trang_thai="CHO_DUYET"; }
   toast("Đã trình duyệt — chờ cấp có thẩm quyền duyệt","ok"); viewBanHang($("#main"));
 }
 async function bgfDuyet(id){
-  if(S.mode==="live"){ try{await api(`/ban-hang/bao-gia-form/${id}/duyet`,{method:'POST'});}catch(e){return toast(e.status===403?("Bị chặn: "+(e.detail||"vượt hạn mức duyệt — cần trình cấp cao hơn")):(e.detail||e.message),"err");} }
+  if(S.mode==="live"){ try{await apiKs(`/ban-hang/bao-gia-form/${id}/duyet`,{method:'POST'});}catch(e){return toast(e.status===403?("Bị chặn: "+(e.detail||"vượt hạn mức duyệt — cần trình cấp cao hơn")):(e.detail||e.message),"err");} }
   else { const g=(DEMO.bgf||[]).find(x=>x.id===id); if(g)g.trang_thai="DA_DUYET"; }
   toast("Đã duyệt báo giá — có thể gửi cho khách","ok"); viewBanHang($("#main"));
 }
@@ -6154,7 +6170,7 @@ async function bgfGuiMailXacNhan(){
   const id=S._bgfMailId;
   if(S.mode==="live"){
     try{
-      const r=await api(`/ban-hang/bao-gia-form/${id}/gui-email`,{method:'POST',
+      const r=await apiKs(`/ban-hang/bao-gia-form/${id}/gui-email`,{method:'POST',
         body:JSON.stringify({den,tieu_de:gv('bgm_td')||null,loi_nhan:gv('bgm_ln')||null,noi_dung:gv('bgm_nd')||null})});
       document.getElementById('ktModal')?.remove();
       if((r.ghi_chu||'').includes('demo'))
@@ -10097,7 +10113,9 @@ async function poNhanhGui(){
   try{if(cfg.sau)await cfg.sau(r);}catch(e){toast(e.detail||e.message,"err");}
 }
 /* 📄 Soạn báo giá gửi khách từ dự toán: số BG = mã dự toán, dòng + đơn giá điền sẵn */
+function _bgBienGoiY(){const v=Number(((S._bgKsCfg||{}).bien_goi_y));return isFinite(v)&&v>=0?v:20;}
 async function dtbTaoBaoGia(id){
+  if(S.mode==="live"&&!S._bgKsCfg){try{S._bgKsCfg=await api("/ban-hang/bao-gia-form/kiem-soat");}catch(_){}}
   let d=null;
   if(S.mode==="live"){try{d=await api(`/ncc/du-toan-ban/${id}`);}catch(e){return toast(e.detail||e.message,"err");}}
   else d=_dtbDemo().list.find(x=>x.id===id);
@@ -10118,12 +10136,16 @@ async function dtbTaoBaoGia(id){
       tieu_de:d.mo_ta?String(d.mo_ta).slice(0,120):"QUOTATION FOR WATER TREATMENT EQUIPMENT AND CONSUMABLES",
       khach_hang_id:khObj?khObj.id:(kh.length?kh[0].id:null), khach_ten:khObj?khObj.ten:(d.khach_hang||(kh.length?kh[0].ten:"")),
       attn:khObj?(khObj.nguoi_lien_he||""):"",
-      items:its.map(x=>({ten:x.ten,mo_ta:x.quy_cach||"",so_luong:Number(x.so_luong||0),don_vi:x.don_vi||"Unit",don_gia:Number(x.don_gia||0),vat_pct:8})),
+      // 💡 đơn giá bán gợi ý = giá dự toán (giá vốn) × (1 + biên gợi ý), làm tròn nghìn — người lập chỉnh lại nếu cần
+      items:its.map(x=>({ten:x.ten,mo_ta:x.quy_cach||"",so_luong:Number(x.so_luong||0),don_vi:x.don_vi||"Unit",
+        don_gia:Math.round(Number(x.don_gia||0)*(1+_bgBienGoiY()/100)/1000)*1000,gia_von:Number(x.don_gia||0),vat_pct:8})),
+      du_toan_id:d.id, du_toan_ma:d.ma,
       vat_pct:8, tt:"40% deposit upon order, remaining 60% upon delivery notification",
       giao:"8-10 weeks after order placement", dia_diem:"As per agreement",
       nguoi_bg:"Nguyễn Thương", email_lh:"sv-sales@watersolutions.company"
     }};
     if(!khObj&&d.khach_hang)toast(`Khách "${d.khach_hang}" chưa có trong danh mục CRM — chọn lại khách ở form báo giá`,"err");
+    toast(`💡 Đơn giá bán đã điền = giá dự toán + ${_bgBienGoiY()}% (làm tròn nghìn) — kiểm tra và chỉnh lại trước khi trình duyệt`,"ok");
   }
   S.bhTab='bao_gia';
   if(S.page!=='ban_hang'){if(!S.perm[pmod('ban_hang')]){return toast("Bạn chưa có quyền vào Bán hàng","err");}go('ban_hang');}

@@ -58,6 +58,8 @@ class Settings(BaseSettings):
     gchat_webhook_purchasing: str = ""   # webhook nhóm "Purchasing Team" — báo mỗi ĐƠN MUA mới (PO · mã dự án · sản phẩm)
     po_bien_ln_toi_thieu: float = 15.0   # 📉 duyệt PO làm biên lợi nhuận nhóm mã < ngưỡng (%) → chỉ CEO duyệt
     ln_nhac_tuan: bool = True            # 📉 thứ Hai 8h (VN): bản kiểm soát lợi nhuận theo mã vào nhóm Duyệt chi
+    bg_bien_toi_thieu: float = 15.0      # 📉 duyệt báo giá: (tổng báo giá − tổng dự toán) / tổng báo giá < ngưỡng (%) → chỉ CEO
+    bg_bien_goi_y: float = 20.0          # 💡 tạo báo giá từ dự toán: đơn giá bán gợi ý = giá dự toán × (1 + %)
     gchat_service_account: str = ""      # dùng cho chế độ APP: DÁN NGUYÊN nội dung file JSON key
     nhac_viec_gui_khi_tao: bool = True   # gửi ngay khi vừa đặt lời nhắc
     nhac_viec_ban_tin: bool = True       # bản tin tổng hợp đầu ngày
