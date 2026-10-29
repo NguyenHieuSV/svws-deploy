@@ -72,6 +72,8 @@ class Settings(BaseSettings):
     bao_cao_nhac_tu_dong: bool = True    # sáng hôm sau nhắc người chưa hoàn thành báo cáo ngày (Working time & Report)
     bao_cao_nhac_gio: int = 9            # từ giờ này (GIỜ VIỆT NAM) mới nhắc
     bao_cao_tinh_tu: str = "2026-10-26"  # ngày bắt đầu áp dụng báo cáo ngày: trước ngày này KHÔNG tính thiếu / tỉ lệ / nhắc
+    tien_do_lech_diem: int = 20          # ⏱ % tiến độ báo cáo thấp hơn % theo thời gian từ ngần này điểm → «chậm» (cảnh báo + nhắc)
+    tien_do_nhac_tu_dong: bool = True    # mỗi sáng (từ bao_cao_nhac_gio, trừ CN) nhắc người nhận việc đang chậm tiến độ
     # Máy chủ Render chạy giờ UTC nhưng người dùng nhập giờ Việt Nam, và cột
     # thoi_diem/han_hoan_thanh lưu giờ địa phương -> phải quy đổi khi so sánh.
     tz_offset_gio: int = 7               # UTC+7

@@ -119,7 +119,8 @@ def tong_hop_nv(nv: NhanVien, bc, ot, nghi, viec, tu: date, den: date, hom_nay: 
         ngay_ds.append({
             "ngay": str(d), "thu": THU[d.weekday()], "trang_thai": tt, "bat_buoc": bat_buoc, "ly_do": ly_do,
             "ket_qua": ((r.ket_qua or "").strip() or (r.da_lam or "").strip()) if r is not None else "",
-            "ten_cong_viec": r.ten_cong_viec if r is not None else None})
+            "ten_cong_viec": r.ten_cong_viec if r is not None else None,
+            "tien_do": float(r.tien_do) if (r is not None and r.tien_do is not None) else None})
         d += timedelta(days=1)
     return {"ngay": ngay_ds, "can": can, "xong": xong, "thieu": sum(1 for x in ngay_ds if x["trang_thai"] == "THIEU"),
             "ty_le": round(100.0 * xong / can, 1) if can else None}

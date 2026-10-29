@@ -662,6 +662,7 @@ class BaoCaoNgay(Base):
     cv_bat_dau: Mapped[date | None] = mapped_column(Date, nullable=True)
     cv_ket_thuc: Mapped[date | None] = mapped_column(Date, nullable=True)
     giao_viec_id: Mapped[int | None] = mapped_column(ForeignKey("giao_viec.id", ondelete="SET NULL"), nullable=True)  # mig 155
+    tien_do: Mapped[Decimal | None] = mapped_column(Numeric(5, 1), nullable=True)    # mig 159: % tiến độ công việc (0–100), bắt buộc
 
 
 class GiaoViec(Base):
@@ -677,6 +678,10 @@ class GiaoViec(Base):
     nguoi_giao: Mapped[int | None] = mapped_column(ForeignKey("nguoi_dung.id", ondelete="SET NULL"), nullable=True)
     tao_luc: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     cap_nhat_luc: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # mig 159: % mới nhất theo báo cáo gắn việc · lúc đạt 100% lần đầu (đã nhắn người giao) · ngày đã nhắc chậm tiến độ
+    tien_do: Mapped[Decimal | None] = mapped_column(Numeric(5, 1), nullable=True)
+    hoan_thanh_luc: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    nhac_lech_ngay: Mapped[date | None] = mapped_column(Date, nullable=True)
 
 
 class BaoCaoNhac(Base):

@@ -58,7 +58,7 @@ def _tai(db, bc_id, files, nd):
 
 def test_dinh_kem_xem_xoa(db):
     an, binh, ceo = (db.get(m.NguoiDung, i) for i in (1, 2, 3))
-    bc = ns.gui_bao_cao_ngay(ns.BaoCaoNgayVao(ngay="2026-10-27", da_lam="lắp bơm"), db, nd=an)
+    bc = ns.gui_bao_cao_ngay(ns.BaoCaoNgayVao(tien_do=50, ngay="2026-10-27", da_lam="lắp bơm"), db, nd=an)
     kq = _tai(db, bc["id"], [_up("anh hien truong.jpg"), _up("bien-ban.pdf")], an)
     assert [t["ten_file"] for t in kq["tep"]] == ["anh hien truong.jpg", "bien-ban.pdf"]
     ds = ns.bao_cao_cua_toi("2026-10", db, nd=an)["danh_sach"]
@@ -78,7 +78,7 @@ def test_dinh_kem_xem_xoa(db):
 
 def test_gioi_han_loai_so_luong_dung_luong(db):
     an = db.get(m.NguoiDung, 1)
-    bc = ns.gui_bao_cao_ngay(ns.BaoCaoNgayVao(ngay="2026-10-27", da_lam="x"), db, nd=an)
+    bc = ns.gui_bao_cao_ngay(ns.BaoCaoNgayVao(tien_do=50, ngay="2026-10-27", da_lam="x"), db, nd=an)
     with pytest.raises(HTTPException):
         _tai(db, bc["id"], [_up("virus.exe")], an)
     with pytest.raises(HTTPException):
@@ -92,7 +92,7 @@ def test_ds_bao_cao_theo_khoang_ngay_va_ngay_gan_nhat(db, monkeypatch):
     an = db.get(m.NguoiDung, 1)
     assert ns.ds_bao_cao_ngay(None, None, "2026-10-20", "2026-10-28", None, db, None)["ngay_gan_nhat"] is None
     for d in ("2026-10-26", "2026-10-27"):
-        ns.gui_bao_cao_ngay(ns.BaoCaoNgayVao(ngay=d, da_lam="x"), db, nd=an)
+        ns.gui_bao_cao_ngay(ns.BaoCaoNgayVao(tien_do=50, ngay=d, da_lam="x"), db, nd=an)
     r = ns.ds_bao_cao_ngay(None, None, "2026-10-22", "2026-10-28", None, db, None)
     assert [x["ngay"] for x in r["danh_sach"]] == ["2026-10-27", "2026-10-26"] and r["ngay_gan_nhat"] == "2026-10-27"
     assert [x["ngay"] for x in ns.ds_bao_cao_ngay(None, None, "2026-10-27", None, None, db, None)["danh_sach"]] == ["2026-10-27"]

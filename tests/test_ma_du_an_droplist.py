@@ -60,9 +60,9 @@ def test_giao_viec_co_ma_du_an_tu_dien_vao_bao_cao(db):
     ceo, an = db.get(m.NguoiDung, 1), db.get(m.NguoiDung, 2)
     g = ns.tao_giao_viec(ns.GiaoViecVao(email="an@x.vn", ten_cong_viec="Lắp bơm", ma_du_an="dv-coa-nt-1026"), db, nd=ceo)
     assert g["ma_du_an"] == "DV-COA-NT-1026"
-    ok = ns.gui_bao_cao_ngay(ns.BaoCaoNgayVao(ngay="2026-10-27", da_lam="lắp", giao_viec_id=g["id"]), db, nd=an)
+    ok = ns.gui_bao_cao_ngay(ns.BaoCaoNgayVao(tien_do=50, ngay="2026-10-27", da_lam="lắp", giao_viec_id=g["id"]), db, nd=an)
     assert db.get(m.BaoCaoNgay, ok["id"]).ma_lien_quan == "DV-COA-NT-1026"          # trống → lấy mã của việc
-    ok2 = ns.gui_bao_cao_ngay(ns.BaoCaoNgayVao(ngay="2026-10-28", da_lam="x", giao_viec_id=g["id"], ma_lien_quan="DA-REJ-1026"),
+    ok2 = ns.gui_bao_cao_ngay(ns.BaoCaoNgayVao(tien_do=50, ngay="2026-10-28", da_lam="x", giao_viec_id=g["id"], ma_lien_quan="DA-REJ-1026"),
                               db, nd=an)
     assert db.get(m.BaoCaoNgay, ok2["id"]).ma_lien_quan == "DA-REJ-1026"           # đã chọn mã khác → giữ
     r = ns.sua_giao_viec(g["id"], ns.GiaoViecVao(email="an@x.vn", ten_cong_viec="Lắp bơm", ma_du_an="DA-REJ-1026"), db, nd=ceo)

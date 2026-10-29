@@ -1115,6 +1115,7 @@ class BaoCaoNgayVao(_NVBase):
     cv_bat_dau: str | None = None
     cv_ket_thuc: str | None = None
     giao_viec_id: int | None = None
+    tien_do: float | None = None                # mig 159: % tiến độ công việc (0–100) — BẮT BUỘC
 
 
 def _la_ceo(nd) -> bool:
@@ -1158,6 +1159,7 @@ def _bc_ra(r: BaoCaoNgay, nv: NhanVien | None = None) -> dict:
             "cv_bat_dau": str(r.cv_bat_dau) if r.cv_bat_dau else None,
             "cv_ket_thuc": str(r.cv_ket_thuc) if r.cv_ket_thuc else None,
             "giao_viec_id": r.giao_viec_id,
+            "tien_do": _f(r.tien_do) if getattr(r, "tien_do", None) is not None else None,
             "ho_ten": (nv.ho_ten if nv else None), "ma_nv": (nv.ma if nv else None)}
 
 
@@ -1173,6 +1175,7 @@ def gui_bao_cao_ngay(data: BaoCaoNgayVao, db: Session = Depends(get_db),
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Ngày không hợp lệ (YYYY-MM-DD)")
     if not (data.da_lam or "").strip():
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Vui lòng nhập nội dung công việc đã làm")
+    td = _bc_tien_do_bat_buoc(data.tien_do)
     from ..models import GiaoViec
     gv_id = None
     if data.giao_viec_id:
@@ -1194,9 +1197,11 @@ def gui_bao_cao_ngay(data: BaoCaoNgayVao, db: Session = Depends(get_db),
     r = db.query(BaoCaoNgay).filter(BaoCaoNgay.nhan_vien_id == nv_id,
                                     BaoCaoNgay.ngay == ng).first()
     moi = r is None
+    gv_cu = None if moi else r.giao_viec_id
     if moi:
         r = BaoCaoNgay(nhan_vien_id=nv_id, ngay=ng)
         db.add(r)
+    r.tien_do = _Dec(str(td))
     r.da_lam = (data.da_lam or "").strip()
     r.ket_qua = (data.ket_qua or "").strip()
     r.kho_khan = (data.kho_khan or "").strip() or None
@@ -1212,10 +1217,37 @@ def gui_bao_cao_ngay(data: BaoCaoNgayVao, db: Session = Depends(get_db),
             setattr(r, k, v)
     r.giao_viec_id = gv_id
     db.flush()
+    # ⏱ mig 159: việc gắn báo cáo nhớ % mới nhất; đổi việc thì tính lại cả việc cũ; so với thời gian → cảnh báo ngay
+    from ..tien_do_service import cap_nhat_giao_viec, canh_bao_khi_gui, thong_bao_hoan_thanh
+    from ..nhac_viec_service import gio_hien_tai as _gio_td
+    g_moi = db.get(GiaoViec, gv_id) if gv_id else None
+    kq_td = cap_nhat_giao_viec(db, g_moi, _gio_td()) if g_moi is not None else {}
+    if gv_cu and gv_cu != gv_id:
+        g_cu = db.get(GiaoViec, gv_cu)
+        if g_cu is not None:
+            cap_nhat_giao_viec(db, g_cu, _gio_td())
+    canh_bao = canh_bao_khi_gui(r, g_moi)
     ghi_audit(db, nd.id, "TAO" if moi else "SUA", "bao_cao_ngay", r.id,
-              moi={"ngay": str(ng), "so_gio": _f(r.so_gio)})
+              moi={"ngay": str(ng), "so_gio": _f(r.so_gio), "tien_do": td})
     db.commit()
-    return {"ok": True, "id": r.id, "moi": moi}
+    out = {"ok": True, "id": r.id, "moi": moi, "tien_do": td, "canh_bao_tien_do": canh_bao,
+           "hoan_thanh": bool(kq_td.get("vua_100"))}
+    if kq_td.get("vua_100"):
+        out["thong_bao"] = thong_bao_hoan_thanh(db, g_moi, db.get(NhanVien, nv_id), ng)
+    return out
+
+
+def _bc_tien_do_bat_buoc(v) -> float:
+    """% tiến độ công việc: bắt buộc, 0–100, làm tròn 1 chữ số."""
+    if v is None or (isinstance(v, str) and not v.strip()):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Vui lòng nhập % tiến độ công việc (0–100)")
+    try:
+        td = float(v)
+    except (TypeError, ValueError):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "% tiến độ công việc không hợp lệ")
+    if not (0 <= td <= 100):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "% tiến độ công việc phải từ 0 đến 100")
+    return round(td, 1)
 
 
 @router.get("/bao-cao-ngay/cua-toi")
@@ -1229,7 +1261,9 @@ def bao_cao_cua_toi(thang: str | None = None, db: Session = Depends(get_db),
         q = q.filter(func.to_char(BaoCaoNgay.ngay, "YYYY-MM") == thang)
     rows = q.order_by(BaoCaoNgay.ngay.desc()).all()
     tep = _bc_tep_map(db, [r.id for r in rows])
-    return {"danh_sach": [dict(_bc_ra(r), tep=tep.get(r.id, [])) for r in rows], "nhan_vien_id": nv_id, "thang": thang}
+    from ..tien_do_service import nguong_lech
+    return {"danh_sach": [dict(_bc_ra(r), tep=tep.get(r.id, [])) for r in rows], "nhan_vien_id": nv_id, "thang": thang,
+            "tien_do_lech_diem": nguong_lech()}
 
 
 @router.get("/bao-cao-ngay")
@@ -1413,9 +1447,41 @@ def _gv_ra(g, nv=None) -> dict:
     return {"id": g.id, "nhan_vien_id": g.nhan_vien_id, "email": g.email, "ten_cong_viec": g.ten_cong_viec,
             "bat_dau": str(g.bat_dau) if g.bat_dau else None, "ket_thuc": str(g.ket_thuc) if g.ket_thuc else None,
             "ma_du_an": g.ma_du_an,
+            # mig 159: % mới nhất theo báo cáo + so với thời gian (hôm nay)
+            "tien_do": float(g.tien_do) if getattr(g, "tien_do", None) is not None else None,
+            "hoan_thanh_luc": str(g.hoan_thanh_luc)[:16] if getattr(g, "hoan_thanh_luc", None) else None,
+            "danh_gia": _gv_danh_gia(g),
             # người nhận chưa gắn tài khoản đăng nhập → không vào app báo cáo được, không bị tính / nhắc
             "co_tai_khoan": bool(nv.nguoi_dung_id) if nv is not None else None,
             "ho_ten": nv.ho_ten if nv is not None else None, "ma_nv": nv.ma if nv is not None else None}
+
+
+def _gv_danh_gia(g) -> dict:
+    from ..tien_do_service import danh_gia
+    from ..nhac_viec_service import ngay_hien_tai
+    try:
+        return danh_gia(getattr(g, "tien_do", None), g.bat_dau, g.ket_thuc, ngay_hien_tai())
+    except Exception:                                                   # noqa: BLE001
+        return {}
+
+
+@router.get("/giao-viec/cham-tien-do")
+def ds_giao_viec_cham_tien_do(db: Session = Depends(get_db), _=Depends(chi_vai_tro("CEO", "ADMIN"))):
+    """⏳ Việc đang chậm tiến độ so với thời gian (xem trước trước khi nhắc; app cũng tự nhắc mỗi sáng)."""
+    from ..tien_do_service import ds_cham_tien_do, nguong_lech, noi_dung_cham_chung
+    from ..nhac_viec_service import ngay_hien_tai
+    hn = ngay_hien_tai()
+    ds = ds_cham_tien_do(db, hn)
+    return {"ngay": str(hn), "nguong": nguong_lech(), "danh_sach": ds,
+            "se_gui": sum(1 for x in ds if not x["da_nhac_hom_nay"] and x["co_tai_khoan"]),
+            "noi_dung": noi_dung_cham_chung(ds) if ds else None}
+
+
+@router.post("/giao-viec/nhac-cham-tien-do")
+def nhac_giao_viec_cham_tien_do(db: Session = Depends(get_db), nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
+    """⏳ Gửi nhắc ngay cho người nhận việc đang chậm tiến độ (mỗi việc mỗi ngày một tin)."""
+    from ..tien_do_service import nhac_cham_tien_do
+    return nhac_cham_tien_do(db, nguon="TAY")
 
 
 def _ten_nguoi_giao(db: Session, nd) -> str:
@@ -1546,6 +1612,7 @@ class BcNgaySuaVao(_NVBase):
     ten_cong_viec: str | None = None
     cv_bat_dau: str | None = None
     cv_ket_thuc: str | None = None
+    tien_do: Decimal | None = None              # mig 159
 
 
 @router.put("/bao-cao-ngay/{bc_id}")
@@ -1560,6 +1627,9 @@ def sua_bao_cao_ngay(bc_id: int, data: BcNgaySuaVao, db: Session = Depends(get_d
     if r.nhan_vien_id != nv_id and not la_qtv:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Chỉ được sửa báo cáo của chính mình")
     cu = {"ngay": str(r.ngay), "so_gio": _f(r.so_gio), "ma_lien_quan": r.ma_lien_quan}
+    gv_cu = r.giao_viec_id
+    if data.tien_do is not None:
+        r.tien_do = _Dec(str(_bc_tien_do_bat_buoc(data.tien_do)))
     if data.da_lam is not None:
         r.da_lam = data.da_lam.strip()
     if data.ket_qua is not None:
@@ -1579,10 +1649,26 @@ def sua_bao_cao_ngay(bc_id: int, data: BcNgaySuaVao, db: Session = Depends(get_d
         for k, v in _bc_giao_viec(data).items():
             setattr(r, k, v)
         r.giao_viec_id = None
+    # ⏱ mig 159: tính lại % mới nhất của việc đang gắn (và việc vừa bỏ gắn)
+    from ..models import GiaoViec
+    from ..tien_do_service import cap_nhat_giao_viec, thong_bao_hoan_thanh
+    from ..nhac_viec_service import gio_hien_tai as _gio_td
+    kq_td, g_td = {}, None
+    for gid in {gv_cu, r.giao_viec_id} - {None}:
+        g_ = db.get(GiaoViec, gid)
+        if g_ is None:
+            continue
+        k_ = cap_nhat_giao_viec(db, g_, _gio_td())
+        if gid == r.giao_viec_id:
+            kq_td, g_td = k_, g_
     ghi_audit(db, nd.id, "SUA", "bao_cao_ngay", bc_id, cu=cu,
               moi=data.model_dump(exclude_none=True, mode="json"))
     db.commit()
-    return _bc_ra(r)
+    out = _bc_ra(r)
+    if kq_td.get("vua_100") and g_td is not None:
+        out["hoan_thanh"] = True
+        out["thong_bao"] = thong_bao_hoan_thanh(db, g_td, db.get(NhanVien, r.nhan_vien_id), r.ngay)
+    return out
 
 
 @router.delete("/bao-cao-ngay/{bc_id}")
@@ -1598,7 +1684,16 @@ def xoa_bao_cao_ngay(bc_id: int, db: Session = Depends(get_db),
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Chỉ được xóa báo cáo của chính mình")
     ghi_audit(db, nd.id, "XOA", "bao_cao_ngay", bc_id, cu={"ngay": str(r.ngay)})
     _bc_xoa_tep(db, [bc_id])
-    db.delete(r); db.commit()
+    gv_id = r.giao_viec_id
+    db.delete(r); db.flush()
+    if gv_id:                                                           # ⏱ mig 159: % của việc lùi về báo cáo còn lại
+        from ..models import GiaoViec
+        from ..tien_do_service import cap_nhat_giao_viec
+        from ..nhac_viec_service import gio_hien_tai as _gio_td
+        g_ = db.get(GiaoViec, gv_id)
+        if g_ is not None:
+            cap_nhat_giao_viec(db, g_, _gio_td())
+    db.commit()
     return {"da_xoa": True}
 
 

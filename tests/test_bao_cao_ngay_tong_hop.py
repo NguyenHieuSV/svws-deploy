@@ -159,9 +159,9 @@ def test_chi_ceo_nhap_tay_4_truong(db):
     from fastapi import HTTPException
     nv_u = db.get(m.NguoiDung, 1)
     with pytest.raises(HTTPException) as e:          # nhân viên tự gõ người nhận / tên việc → bị chặn
-        ns.gui_bao_cao_ngay(ns.BaoCaoNgayVao(ngay="2026-10-23", da_lam="x", ten_cong_viec="Tự đặt"), db, nd=nv_u)
+        ns.gui_bao_cao_ngay(ns.BaoCaoNgayVao(tien_do=50, ngay="2026-10-23", da_lam="x", ten_cong_viec="Tự đặt"), db, nd=nv_u)
     assert e.value.status_code == 403
-    ok = ns.gui_bao_cao_ngay(ns.BaoCaoNgayVao(ngay="2026-10-23", da_lam="x"), db, nd=nv_u)   # không gõ thì vẫn gửi được
+    ok = ns.gui_bao_cao_ngay(ns.BaoCaoNgayVao(tien_do=50, ngay="2026-10-23", da_lam="x"), db, nd=nv_u)   # không gõ thì vẫn gửi được
     with pytest.raises(HTTPException) as e:
         ns.sua_bao_cao_ngay(ok["id"], ns.BcNgaySuaVao(cv_ket_thuc="2026-10-30"), db, nd=nv_u)
     assert e.value.status_code == 403
@@ -170,7 +170,7 @@ def test_chi_ceo_nhap_tay_4_truong(db):
                                                   cv_bat_dau="2026-10-23", cv_ket_thuc="2026-10-25"), db, nd=ceo)
     r = db.get(m.BaoCaoNgay, ok["id"])
     assert (r.giao_viec_email, r.ten_cong_viec, r.cv_ket_thuc) == ("a@x.vn", "Lắp bơm", date(2026, 10, 25))
-    ns.gui_bao_cao_ngay(ns.BaoCaoNgayVao(ngay="2026-10-23", da_lam="sửa lại"), db, nd=nv_u)   # NV gửi lại: giữ thông tin CEO nhập
+    ns.gui_bao_cao_ngay(ns.BaoCaoNgayVao(tien_do=50, ngay="2026-10-23", da_lam="sửa lại"), db, nd=nv_u)   # NV gửi lại: giữ thông tin CEO nhập
     assert db.get(m.BaoCaoNgay, ok["id"]).ten_cong_viec == "Lắp bơm"
 
 
@@ -186,14 +186,14 @@ def test_ceo_giao_viec_nhan_vien_chon_khi_bao_cao(db):
     assert [x["id"] for x in ns.ds_giao_viec(None, db, nd=an)] == [g["id"]]       # An thấy việc của mình
     assert ns.ds_giao_viec(None, db, nd=binh) == []                               # Bình không thấy việc của An
     assert ns.ds_giao_viec("2026-10-26", db, nd=an) == []                         # hết hạn thì không còn hiệu lực
-    ok = ns.gui_bao_cao_ngay(ns.BaoCaoNgayVao(ngay="2026-10-23", da_lam="lắp", giao_viec_id=g["id"]), db, nd=an)
+    ok = ns.gui_bao_cao_ngay(ns.BaoCaoNgayVao(tien_do=50, ngay="2026-10-23", da_lam="lắp", giao_viec_id=g["id"]), db, nd=an)
     r = db.get(m.BaoCaoNgay, ok["id"])
     assert (r.giao_viec_id, r.ten_cong_viec, r.giao_viec_email, r.cv_bat_dau) == (g["id"], "Lắp bơm", "a@x.vn", date(2026, 10, 20))
     with pytest.raises(HTTPException):               # Bình không gắn được việc của An
-        ns.gui_bao_cao_ngay(ns.BaoCaoNgayVao(ngay="2026-10-23", da_lam="x", giao_viec_id=g["id"]), db, nd=binh)
+        ns.gui_bao_cao_ngay(ns.BaoCaoNgayVao(tien_do=50, ngay="2026-10-23", da_lam="x", giao_viec_id=g["id"]), db, nd=binh)
     ns.sua_giao_viec(g["id"], ns.GiaoViecVao(email="a@x.vn", ten_cong_viec="Lắp bơm + chạy thử", bat_dau="2026-10-20", ket_thuc="2026-10-27"), db, nd=ceo)
     assert db.get(m.BaoCaoNgay, ok["id"]).ten_cong_viec == "Lắp bơm + chạy thử"   # báo cáo đã gắn cập nhật theo
-    ns.gui_bao_cao_ngay(ns.BaoCaoNgayVao(ngay="2026-10-23", da_lam="lắp"), db, nd=an)  # bỏ chọn việc → xóa bản chụp
+    ns.gui_bao_cao_ngay(ns.BaoCaoNgayVao(tien_do=50, ngay="2026-10-23", da_lam="lắp"), db, nd=an)  # bỏ chọn việc → xóa bản chụp
     r = db.get(m.BaoCaoNgay, ok["id"])
     assert r.giao_viec_id is None and r.ten_cong_viec is None
     ns.xoa_giao_viec(g["id"], db, nd=ceo)

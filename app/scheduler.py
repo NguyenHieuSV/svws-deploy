@@ -18,6 +18,7 @@ _TUAN_BCVH = ""        # tuần đã gửi nhắc Báo cáo vận hành (thứ B
 _THANG_SAO_KE = ""     # tháng đã kiểm tra nhắc tải sao kê (ngày 7 hàng tháng)
 _NGAY_NHAC_TRN = ""    # ngày đã chạy nhắc thi Training (8h–17h VN, trừ Chủ nhật)
 _NGAY_NHAC_BC = ""     # ngày đã chạy nhắc «chưa hoàn thành báo cáo ngày» (sáng hôm sau, giờ VN)
+_NGAY_NHAC_TD = ""     # ngày đã chạy nhắc ⏳ việc chậm tiến độ so với thời gian (mốc bền: giao_viec.nhac_lech_ngay)
 _TUAN_LN = ""          # tuần đã gửi 📉 bản kiểm soát lợi nhuận theo mã (thứ Hai từ 8h VN; mốc bền nằm trong audit_log)
 
 
@@ -103,6 +104,22 @@ def _vong_lap():
                     kq5 = _nhac_bc(db)
                     if kq5.get("da_gui") or kq5.get("loi"):
                         print(f"[SCHEDULER] 📝 Nhắc báo cáo ngày: {kq5}")
+                finally:
+                    db.close()
+            # ⏳ Nhắc việc CHẬM TIẾN ĐỘ so với thời gian (anh Hiếu 29/10/2026): mỗi ngày 1 lần từ bao_cao_nhac_gio, trừ Chủ nhật.
+            #    Mỗi việc mỗi ngày một tin — mốc nằm ở giao_viec.nhac_lech_ngay nên khởi động lại không nhắn trùng.
+            global _NGAY_NHAC_TD
+            g5b = gio_hien_tai()
+            ngay5b = g5b.strftime("%Y-%m-%d")
+            if (settings.tien_do_nhac_tu_dong and g5b.hour >= settings.bao_cao_nhac_gio and g5b.weekday() != 6
+                    and _NGAY_NHAC_TD != ngay5b):
+                _NGAY_NHAC_TD = ngay5b
+                db = SessionLocal()
+                try:
+                    from .tien_do_service import nhac_cham_tien_do as _nhac_td
+                    kq5b = _nhac_td(db)
+                    if kq5b.get("da_gui") or kq5b.get("loi"):
+                        print(f"[SCHEDULER] ⏳ Nhắc chậm tiến độ: {kq5b}")
                 finally:
                     db.close()
             # 📉 Bản KIỂM SOÁT LỢI NHUẬN THEO MÃ: thứ Hai từ 8h (VN) → nhóm Duyệt chi, mỗi tuần một lần.
