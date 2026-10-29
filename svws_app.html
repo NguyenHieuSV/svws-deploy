@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="vi">
 <head>
-<!-- build: nhac-viec-kpi-2026-10-29 -->
+<!-- build: boq-ncc-2026-10-29 -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#0f2c44">
@@ -10128,7 +10128,7 @@ async function dtbRender(){
       <div class="f" style="flex:2"><label>Mô tả yêu cầu</label><input id="dtb_mota" placeholder="VD: Hệ RO 500 L/h cho nhà máy dệt"></div>
       <div class="f" style="max-width:150px"><label>Ngày tạo</label><input id="dtb_ngay" type="date" value="${homNay}"></div>
       <div class="f" style="max-width:180px"><label>Người tạo</label><input value="tự ghi theo tài khoản" disabled title="Hệ thống tự ghi tên người đang đăng nhập"></div>
-      <div class="f" style="max-width:300px"><label>📎 File dự toán / BOQ <span style="font-weight:400;color:var(--muted)">(tùy chọn)</span> · <a href="#" onclick="tepTaiVe('/ncc/du-toan-ban/mau-boq','Mau-BOQ-du-toan.xlsx');return false" title="Tải file Excel mẫu BOQ (Mã · Hạng mục · Quy cách · ĐVT · KL · Nhà sản xuất · Nguồn · Đơn giá · Thành tiền · Căn cứ) — điền rồi chọn ở ô này, máy đọc thẳng không qua AI">📥 Tải mẫu BOQ</a></label><input type="file" id="dtb_file" accept=".pdf,.png,.jpg,.jpeg,.webp,.csv,.txt,.xlsx,.xlsm" title="File theo MẪU BOQ (Excel / CSV): máy đọc thẳng, đủ dòng · file khác (PDF · ảnh · Excel tự do): AI đọc rồi điền danh mục"></div>
+      <div class="f" style="max-width:300px"><label>📎 File dự toán / BOQ <span style="font-weight:400;color:var(--muted)">(tùy chọn)</span> · <a href="#" onclick="tepTaiVe('/ncc/du-toan-ban/mau-boq','Mau-BOQ-du-toan.xlsx');return false" title="Tải file Excel mẫu BOQ (Mã · Hạng mục · Quy cách · ĐVT · KL · Nhà sản xuất · Nhà cung cấp · Mã SP · Nguồn · Đơn giá · Thành tiền · Căn cứ) — điền rồi chọn ở ô này, máy đọc thẳng không qua AI; Nhà cung cấp ghi đúng tên hồ sơ thì dòng tự nối danh mục Sản phẩm NCC">📥 Tải mẫu BOQ</a></label><input type="file" id="dtb_file" accept=".pdf,.png,.jpg,.jpeg,.webp,.csv,.txt,.xlsx,.xlsm" title="File theo MẪU BOQ (Excel / CSV): máy đọc thẳng, đủ dòng · file khác (PDF · ảnh · Excel tự do): AI đọc rồi điền danh mục"></div>
       <div class="f" style="max-width:130px"><label>&nbsp;</label><button class="btn-sm" id="dtb_tao_btn" onclick="dtbTao()">+ Tạo dự toán</button></div></div>`:'';
   // ✉️ Dự toán ĐÃ GỬI BÁO GIÁ cho khách → rời Bảng lưu dự toán, sang bảng «Báo giá đã gửi khách hàng» (ngày gửi gần nhất lên trên)
   const _bgGui=d=>{const g=_bgCua[String(d.ma||'').trim().toUpperCase()];return (g&&g.trang_thai==='DA_GUI')?g:null;};
@@ -10280,7 +10280,7 @@ function _dtbTheoDoiViec(vid,dtId,tenFile){
   if(!vid||S._dtbViec[vid])return; S._dtbViec[vid]=true; let dem=0;
   const tick=async()=>{dem++; let v=null; try{v=await api('/ncc/viec-nen/'+vid);}catch(e){}
     if(v&&v.trang_thai==='XONG'){delete S._dtbViec[vid];const k=v.ket_qua||{};
-      toast(`📎 AI đọc xong ${tenFile||v.ten_file||'file'}: thêm ${k.them||0} mục`+(k.bo_qua?` · ${k.bo_qua} dòng trùng tên bỏ qua`:'')+` — kiểm tra SL / đơn giá.`,"ok");
+      toast(`📎 AI đọc xong ${tenFile||v.ten_file||'file'}: thêm ${k.them||0} mục`+(k.bo_qua?` · ${k.bo_qua} dòng trùng tên bỏ qua`:'')+_dtbNapNccTxt(k)+` — kiểm tra SL / đơn giá.`,"ok");
       if(S._dtbOpen===dtId&&document.getElementById('dtbBody'))dtbRender(); return;}
     if(v&&v.trang_thai==='LOI'){delete S._dtbViec[vid];toast(`⚠ AI không đọc được ${tenFile||v.ten_file||'file'}: ${(v.ket_qua||{}).loi||'lỗi'}`,"err");
       if(S._dtbOpen===dtId&&document.getElementById('dtbBody'))dtbRender(); return;}
@@ -10296,8 +10296,9 @@ function _dtbViecNenHTML(det){
   return '';
 }
 /* ---- 📎 NẠP DỰ TOÁN TỪ FILE ĐÍNH KÈM (AI đọc PDF · ảnh · Excel · CSV) — lúc tạo mã hoặc nạp thêm vào dự toán đang mở ---- */
+function _dtbNapNccTxt(k){k=k||{};let s='';if(k.ncc_gan)s+=` · gắn NCC ${k.ncc_gan} dòng${(k.dm_noi||k.dm_tao)?` (nối danh mục ${k.dm_noi||0} · thêm mới ${k.dm_tao||0})`:''}`;if(k.ncc_la&&k.ncc_la.length)s+=` · NCC không có trong hồ sơ: ${k.ncc_la.join(', ')}`;return s;}
 function dtbNapFile(id){
-  _ktModal('📎 Nạp dự toán từ file',`<div class="note" style="margin-bottom:8px"><b>File theo MẪU BOQ</b> (Excel / CSV có dòng tiêu đề Mã · Hạng mục · Quy cách · ĐVT · KL · Nhà sản xuất · Nguồn · Đơn giá · Thành tiền · Căn cứ) → <b>máy đọc thẳng</b>, đủ mọi dòng, nhóm A/B/C giữ trong ghi chú, xong ngay. <a href="#" onclick="tepTaiVe('/ncc/du-toan-ban/mau-boq?dt_id=${id}','Mau-BOQ.xlsx');return false">📥 Tải mẫu / xuất dự toán này ra mẫu</a>.<br>File khác (PDF · ảnh · Excel tự do · báo giá NCC) → <b>AI đọc ở nền</b>, xong tự thêm mục và báo. Dòng <b>trùng tên</b> với mục đã có sẽ bỏ qua (không ghi đè SL / giá). File gốc lưu vào Kho tệp.</div>
+  _ktModal('📎 Nạp dự toán từ file',`<div class="note" style="margin-bottom:8px"><b>File theo MẪU BOQ</b> (Excel / CSV có dòng tiêu đề Mã · Hạng mục · Quy cách · ĐVT · KL · Nhà sản xuất · Nhà cung cấp · Mã SP · Nguồn · Đơn giá · Thành tiền · Căn cứ) → <b>máy đọc thẳng</b>, đủ mọi dòng, nhóm A/B/C giữ trong ghi chú, xong ngay. Cột <b>Nhà cung cấp</b> ghi đúng tên trong hồ sơ NCC → máy gắn NCC cho dòng và tự nối / thêm vào danh mục Sản phẩm NCC (có <b>Mã SP</b> thì khớp đúng sản phẩm hơn); tên NCC lạ thì dòng vẫn vào, app báo tên để sửa. <a href="#" onclick="tepTaiVe('/ncc/du-toan-ban/mau-boq?dt_id=${id}','Mau-BOQ.xlsx');return false">📥 Tải mẫu / xuất dự toán này ra mẫu</a>.<br>File khác (PDF · ảnh · Excel tự do · báo giá NCC) → <b>AI đọc ở nền</b>, xong tự thêm mục và báo. Dòng <b>trùng tên</b> với mục đã có sẽ bỏ qua (không ghi đè SL / giá). File gốc lưu vào Kho tệp.</div>
     <input type="file" id="dtbnf_file" accept=".pdf,.png,.jpg,.jpeg,.webp,.csv,.txt,.xlsx,.xlsm" style="width:100%">
     <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px"><button class="btn-sm ghost" onclick="document.getElementById('ktModal').remove()">Đóng</button><button class="btn-sm" id="dtbnf_btn" onclick="dtbNapFileChay(${id})">📎 Nạp &amp; thêm mục</button></div>`);
 }
@@ -10307,7 +10308,7 @@ async function dtbNapFileChay(id){
   const btn=document.getElementById('dtbnf_btn'); if(btn){btn.disabled=true;btn.textContent="⏳ Đang đọc file…";}
   try{const fd=new FormData(); fd.append('file',file); const r=await apiUpload(`/ncc/du-toan-ban/${id}/nhap-file`,fd);
     document.getElementById('ktModal')?.remove();
-    if(r.dang_chay===false){toast(`✅ Nạp theo mẫu BOQ: thêm ${r.them} dòng (${r.so_nhom||0} nhóm)${r.bo_qua?` · bỏ qua ${r.bo_qua} dòng trùng tên`:''} vào ${r.ma}`,"ok"); S._dtbOpen=id; dtbRender(); return;}
+    if(r.dang_chay===false){toast(`✅ Nạp theo mẫu BOQ: thêm ${r.them} dòng (${r.so_nhom||0} nhóm)${r.bo_qua?` · bỏ qua ${r.bo_qua} dòng trùng tên`:''}${_dtbNapNccTxt(r)} vào ${r.ma}`,"ok"); S._dtbOpen=id; dtbRender(); return;}
     toast(`⏳ Đã nhận ${r.ten_file||'file'} — AI đang đọc ở nền, xong sẽ tự thêm mục vào ${r.ma} và báo.`,"ok");
     S._dtbOpen=id; _dtbTheoDoiViec(r.viec_id,id,r.ten_file); dtbRender();
   }catch(e){toast(e.detail||e.message,"err"); if(btn){btn.disabled=false;btn.textContent="📎 Nạp & thêm mục";}}
@@ -10327,7 +10328,7 @@ async function dtbTao(){
         const fd=new FormData(); fd.append('ma',ma||body.ma); fd.append('khach_hang',body.khach_hang||''); fd.append('mo_ta',body.mo_ta||''); fd.append('ngay',body.ngay||''); fd.append('ep_ma',ep?'true':'false'); fd.append('file',file);
         const r=await apiUpload("/ncc/du-toan-ban/tu-file",fd);
         S._dtbOpen=r.id;
-        if(r.dang_chay===false){toast(`✅ Đã tạo dự toán ${r.ma} và nạp theo mẫu BOQ: ${r.them} dòng (${r.so_nhom||0} nhóm)${r.bo_qua?` · bỏ qua ${r.bo_qua} trùng tên`:''}`,"ok"); dtbRender(); return;}
+        if(r.dang_chay===false){toast(`✅ Đã tạo dự toán ${r.ma} và nạp theo mẫu BOQ: ${r.them} dòng (${r.so_nhom||0} nhóm)${r.bo_qua?` · bỏ qua ${r.bo_qua} trùng tên`:''}${_dtbNapNccTxt(r)}`,"ok"); dtbRender(); return;}
         toast(`Đã tạo dự toán ${r.ma} — AI đang đọc ${r.ten_file||'file'} ở nền, xong sẽ tự điền danh mục và báo.`,"ok"); _dtbTheoDoiViec(r.viec_id,r.id,r.ten_file); dtbRender();
       }finally{if(btn){btn.disabled=false;btn.textContent="+ Tạo dự toán";}}
       return;

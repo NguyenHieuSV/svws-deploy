@@ -300,7 +300,7 @@ def doc_thong_tin_ncc(data: bytes, content_type: str, filename: str) -> list[dic
 
 def doc_bao_gia_file(data: bytes, content_type: str, filename: str) -> list[dict]:
     """Đọc file báo giá của NCC (PDF/ảnh/text-CSV) bằng Claude, trích danh sách sản phẩm.
-    Trả list các dict {ten, ma_sp, mo_ta, nha_san_xuat, don_vi, don_gia, so_luong}.
+    Trả list các dict {ten, ma_sp, mo_ta, nha_san_xuat, nha_cung_cap, don_vi, don_gia, so_luong, thue_suat, spec}.
     Ném ValueError nếu chưa bật AI / định dạng không hỗ trợ / đọc thất bại."""
     if settings.ai_provider.upper() != "ANTHROPIC" or not settings.anthropic_api_key:
         raise ValueError("Chưa bật AI — cần AI_PROVIDER=ANTHROPIC và ANTHROPIC_API_KEY trên máy chủ.")
@@ -314,6 +314,8 @@ def doc_bao_gia_file(data: bytes, content_type: str, filename: str) -> list[dict
            '"nha_san_xuat":"<hãng sản xuất/xuất xứ hoặc null>","don_vi":"<đơn vị tính hoặc null>",'
            '"don_gia":<đơn giá VND dạng số, hoặc null>,"so_luong":<số lượng trong báo giá dạng số, hoặc null>,'
            '"thue_suat":<% thuế VAT của dòng dạng số (ví dụ 8 hoặc 10), hoặc null>,'
+           '"nha_cung_cap":"<tên NHÀ CUNG CẤP / đơn vị bán của dòng này: lấy từ cột nhà cung cấp nếu bảng có cột đó, '
+           'nếu không thì tên công ty phát hành báo giá; null nếu file không ghi>",'
            '"spec":"<THÔNG SỐ KỸ THUẬT của sản phẩm: công suất, lưu lượng, áp suất, cột áp, kích thước, vật liệu, '
            'điện áp, công nghệ, dải đo, độ chính xác, tiêu chuẩn… viết gọn 1–4 dòng, các thông số cách nhau bằng dấu «; », '
            'hoặc null nếu file không ghi>"}. '
@@ -370,6 +372,8 @@ def doc_bao_gia_file(data: bytes, content_type: str, filename: str) -> list[dict
                     "nha_san_xuat": (str(it.get("nha_san_xuat")).strip()[:150] if it.get("nha_san_xuat") else None),
                     "don_vi": (str(it.get("don_vi")).strip()[:30] if it.get("don_vi") else None),
                     "don_gia": gia, "thue_suat": ts,
+                    "nha_cung_cap": (str(it.get("nha_cung_cap")).strip()[:200]
+                                     if it.get("nha_cung_cap") and str(it.get("nha_cung_cap")).strip().lower() not in ("null", "none") else None),
                     "spec": (str(it.get("spec")).strip()[:2000] if it.get("spec") and str(it.get("spec")).strip().lower() not in ("null", "none") else None)})
     return out
 

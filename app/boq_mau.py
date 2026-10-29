@@ -1,6 +1,8 @@
 """📋 MẪU BOQ dự toán (theo file «Tab 12 - BOQ-MTO.xlsx» của anh Hiếu, 10/10/2026):
 3 dòng đầu (công ty · tên dự toán · tiêu đề bảng), dòng tiêu đề cột
-  Mã | Hạng mục | Quy cách | ĐVT | KL | Nhà sản xuất | Nguồn | Đơn giá (VND) | Thành tiền (VND) | Căn cứ tính
+  Mã | Hạng mục | Quy cách | ĐVT | KL | Nhà sản xuất | Nhà cung cấp | Mã SP | Nguồn | Đơn giá (VND) | Thành tiền (VND) | Căn cứ tính
+  (Nhà cung cấp + Mã SP thêm 29/10/2026 — ghi ĐÚNG tên NCC trong hồ sơ → nạp vào là gắn NCC và nối / thêm danh mục Sản phẩm NCC;
+   file mẫu cũ 10 cột vẫn đọc được, bộ đọc nhận cột theo TIÊU ĐỀ chứ không theo vị trí)
 dòng NHÓM (Mã một chữ cái, Hạng mục = tên nhóm, không KL), dòng hạng mục (Mã A01…), cuối bảng CỘNG TRƯỚC THUẾ · VAT · TỔNG CỘNG.
  · tao_mau(): sinh file mẫu (trống hoặc điền sẵn các dòng của một dự toán → xuất ra sửa rồi nạp lại)
  · doc_boq(): đọc file theo mẫu THẲNG bằng máy (không AI) → (nhom, items); không đúng mẫu → None để nơi gọi nhờ AI."""
@@ -9,8 +11,12 @@ import re
 import unicodedata
 from datetime import date
 
-COT = ["Mã", "Hạng mục", "Quy cách", "ĐVT", "KL", "Nhà sản xuất", "Nguồn", "Đơn giá (VND)", "Thành tiền (VND)", "Căn cứ tính"]
-RONG = [6, 36, 30, 7, 6, 26, 10, 15, 17, 32]
+COT = ["Mã", "Hạng mục", "Quy cách", "ĐVT", "KL", "Nhà sản xuất", "Nhà cung cấp", "Mã SP", "Nguồn", "Đơn giá (VND)",
+       "Thành tiền (VND)", "Căn cứ tính"]
+RONG = [6, 36, 30, 7, 6, 22, 26, 14, 10, 15, 17, 30]
+SO_COT = len(COT)                                   # 12
+C_GIA, C_TIEN = 10, 11                              # cột Đơn giá · Thành tiền (số thứ tự)
+L_KL, L_GIA, L_TIEN = "E", "J", "K"                 # chữ cột KL · Đơn giá · Thành tiền — công thức thành tiền / tổng
 _MAU_TIEU_DE = "E3EDF6"
 _MAU_NHOM = "F0F5FA"
 TU_KHOA = {
@@ -181,8 +187,8 @@ def _tach_ghi_chu(gc: str) -> dict:
 
 
 def tao_mau(cong_ty: str, tieu_de: str, ma: str | None = None, items: list | None = None) -> bytes:
-    """Sinh file mẫu. items (tùy chọn) = các dòng dự toán hiện có [{ten, quy_cach, don_vi, so_luong, nha_san_xuat, don_gia,
-    ghi_chu}] → điền sẵn theo nhóm lưu trong ghi chú (dòng không có nhóm → nhóm «Z HẠNG MỤC KHÁC»)."""
+    """Sinh file mẫu. items (tùy chọn) = các dòng dự toán hiện có [{ten, quy_cach, don_vi, so_luong, nha_san_xuat, ncc_ten,
+    ma_sp, don_gia, ghi_chu}] → điền sẵn theo nhóm lưu trong ghi chú (dòng không có nhóm → nhóm «Z HẠNG MỤC KHÁC»)."""
     from openpyxl import Workbook
     from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
     from openpyxl.utils import get_column_letter
@@ -235,8 +241,8 @@ def tao_mau(cong_ty: str, tieu_de: str, ma: str | None = None, items: list | Non
     for g in nhoms:
         ws.cell(row=r, column=1, value=g["ma"]).font = Font(bold=True)
         ws.cell(row=r, column=2, value=g["ten"]).font = Font(bold=True)
-        ws.merge_cells(start_row=r, start_column=2, end_row=r, end_column=8)
-        for j in range(1, 11):
+        ws.merge_cells(start_row=r, start_column=2, end_row=r, end_column=C_GIA)
+        for j in range(1, SO_COT + 1):
             ws.cell(row=r, column=j).fill = PatternFill("solid", fgColor=_MAU_NHOM)
             ws.cell(row=r, column=j).border = khung
         r += 1
@@ -244,35 +250,37 @@ def tao_mau(cong_ty: str, tieu_de: str, ma: str | None = None, items: list | Non
             t = t or _tach_ghi_chu(it.get("ghi_chu") or "")
             ma_dong = t.get("ma") or f"{g['ma']}{k:02d}"
             vals = [ma_dong, it.get("ten") or "", it.get("quy_cach") or "", it.get("don_vi") or "",
-                    float(it.get("so_luong") or 0), it.get("nha_san_xuat") or "", t.get("nguon") or "",
-                    float(it.get("don_gia") or 0), f"=E{r}*H{r}", t.get("can_cu") or ""]
+                    float(it.get("so_luong") or 0), it.get("nha_san_xuat") or "", it.get("ncc_ten") or "", it.get("ma_sp") or "",
+                    t.get("nguon") or "", float(it.get("don_gia") or 0), f"={L_KL}{r}*{L_GIA}{r}", t.get("can_cu") or ""]
             for j, v in enumerate(vals, 1):
                 c = ws.cell(row=r, column=j, value=v)
                 c.border = khung
-                c.alignment = Alignment(vertical="top", wrap_text=(j in (2, 3, 6, 10)))
-            ws.cell(row=r, column=8).number_format = "#,##0"
-            ws.cell(row=r, column=9).number_format = "#,##0"
+                c.alignment = Alignment(vertical="top", wrap_text=(j in (2, 3, 6, 7, SO_COT)))
+            ws.cell(row=r, column=C_GIA).number_format = "#,##0"
+            ws.cell(row=r, column=C_TIEN).number_format = "#,##0"
             r += 1
         if not g["rows"] and not items:
-            for j in range(1, 11):
+            for j in range(1, SO_COT + 1):
                 ws.cell(row=r, column=j).border = khung
             ws.cell(row=r, column=1, value=f"{g['ma']}01")
-            ws.cell(row=r, column=9, value=f"=E{r}*H{r}").number_format = "#,##0"
+            ws.cell(row=r, column=C_TIEN, value=f"={L_KL}{r}*{L_GIA}{r}").number_format = "#,##0"
             r += 1
     cuoi_hang = r - 1
     for nhan in ("CỘNG TRƯỚC THUẾ", "VAT 8%", "TỔNG CỘNG"):
-        ct = (f"=SUM(I{dau_hang}:I{cuoi_hang})" if nhan.startswith("CỘNG") else
-              (f"=I{r - 1}*0.08" if nhan.startswith("VAT") else f"=I{r - 2}+I{r - 1}"))   # công thức theo đúng hàng hiện tại
+        ct = (f"=SUM({L_TIEN}{dau_hang}:{L_TIEN}{cuoi_hang})" if nhan.startswith("CỘNG") else
+              (f"={L_TIEN}{r - 1}*0.08" if nhan.startswith("VAT") else f"={L_TIEN}{r - 2}+{L_TIEN}{r - 1}"))   # theo đúng hàng hiện tại
         ws.cell(row=r, column=2, value=nhan).font = Font(bold=True)
-        ws.merge_cells(start_row=r, start_column=2, end_row=r, end_column=8)
-        c = ws.cell(row=r, column=9, value=ct)
+        ws.merge_cells(start_row=r, start_column=2, end_row=r, end_column=C_GIA)
+        c = ws.cell(row=r, column=C_TIEN, value=ct)
         c.font = Font(bold=True)
         c.number_format = "#,##0"
-        for j in range(1, 11):
+        for j in range(1, SO_COT + 1):
             ws.cell(row=r, column=j).border = khung
         r += 1
     ws.cell(row=r + 1, column=1, value="Hướng dẫn: giữ nguyên dòng tiêu đề cột (dòng 4). Dòng NHÓM: cột Mã một chữ cái (A, B…), "
                                          "Hạng mục = tên nhóm, để trống KL. Dòng hạng mục: Mã A01, A02…; Thành tiền tự tính. "
+                                         "Nhà cung cấp: ghi ĐÚNG tên trong hồ sơ Nhà cung cấp trên app → khi nạp, máy gắn NCC cho dòng và "
+                                         "tự nối / thêm vào danh mục Sản phẩm NCC (Mã SP giúp khớp đúng sản phẩm; để trống nếu chưa biết). "
                                          "Nạp lại vào app: Bán hàng › Dự toán › 📎 Nạp thêm từ file (máy đọc thẳng, không qua AI).")
     ws.cell(row=r + 1, column=1).font = Font(italic=True, color="5E7178")
     ws.freeze_panes = "A5"

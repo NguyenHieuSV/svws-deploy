@@ -5595,10 +5595,35 @@ def _viec_nen_dict(v):
             "ket_thuc": str(v.ket_thuc)[:16] if v.ket_thuc else None, "ket_qua": v.ket_qua or {}}
 
 
-def _dtb_them_muc_tu_items(db, dt_id: int, items: list, ten_file: str) -> dict:
-    """Thêm các dòng AI trích vào dự toán (trùng TÊN bỏ qua; tên khớp hàng kho → gắn hang_hoa_id)."""
+class _DtbNapThongKe:
+    """Đếm kết quả gắn NCC / ghi ngược danh mục Sản phẩm NCC khi nạp file vào dự toán (mẫu BOQ hoặc AI) — trả cho giao diện báo.
+    ncc_gan: số dòng gắn được NCC trong hồ sơ · dm_tao / dm_noi: tạo mới / nối sản phẩm danh mục · ncc_la: tên NCC không có trong hồ sơ."""
+
+    def __init__(self):
+        self.ncc_gan, self.dm_tao, self.dm_noi, self.ncc_la = 0, 0, 0, []
+
+    def ghi(self, db, m, nd, ma_dt, ncc_ten, ncc_id):
+        if ncc_id:
+            self.ncc_gan += 1
+            if nd is not None:
+                r = _dtb_ghi_danh_muc(db, m, nd, ma_dt, doi_gia=True)
+                if r["hanh_dong"] == "TAO_MOI":
+                    self.dm_tao += 1
+                elif r["hanh_dong"]:
+                    self.dm_noi += 1
+        elif ncc_ten and ncc_ten not in self.ncc_la:
+            self.ncc_la.append(ncc_ten)
+
+    def kq(self) -> dict:
+        return {"ncc_gan": self.ncc_gan, "dm_tao": self.dm_tao, "dm_noi": self.dm_noi, "ncc_la": self.ncc_la[:10]}
+
+
+def _dtb_them_muc_tu_items(db, dt_id: int, items: list, ten_file: str, nd=None, ma_dt=None) -> dict:
+    """Thêm các dòng AI trích vào dự toán (trùng TÊN bỏ qua; tên khớp hàng kho → gắn hang_hoa_id). 29/10/2026: AI trích được
+    NHÀ CUNG CẤP trùng hồ sơ → gắn NCC và ghi ngược danh mục Sản phẩm NCC có kiểm soát; mã SP · nhà sản xuất · spec vào cột riêng."""
     da_co = {(m.ten or "").strip().lower() for m in db.query(DuToanBanMuc).filter_by(du_toan_id=dt_id).all()}
     them, bo_qua = [], []
+    tk = _DtbNapThongKe()
     for it in items[:150]:
         ten = str(it.get("ten") or "").strip()
         if not ten:
@@ -5607,16 +5632,25 @@ def _dtb_them_muc_tu_items(db, dt_id: int, items: list, ten_file: str) -> dict:
             bo_qua.append(ten)
             continue
         hh = db.query(HangHoa).filter(func.lower(func.trim(HangHoa.ten)) == ten.lower()).first()
-        qc = " — ".join([str(p) for p in (it.get("mo_ta"), it.get("nha_san_xuat"), it.get("spec")) if p])
         dvi = (str(it.get("don_vi"))[:40] if it.get("don_vi") else (getattr(hh, "don_vi", None) if hh is not None else None))
-        db.add(DuToanBanMuc(du_toan_id=dt_id, ten=ten[:250], hang_hoa_id=(hh.id if hh is not None else None),
-                            quy_cach=(qc[:2000] or None), don_vi=dvi,
-                            so_luong=Decimal(str(it.get("so_luong") or 1)),
-                            don_gia=Decimal(str(it.get("don_gia") or 0)),
-                            ghi_chu=(f"AI nhập từ file {ten_file}")[:300]))
+        ncc_ten = str(it.get("nha_cung_cap") or "").strip()[:200]
+        ncc_id = _dtb_ncc_theo_ten(db, ncc_ten) if ncc_ten else None
+        m = DuToanBanMuc(du_toan_id=dt_id, ten=ten[:250], hang_hoa_id=(hh.id if hh is not None else None),
+                         quy_cach=(str(it.get("mo_ta") or "").strip()[:2000] or None), don_vi=dvi,
+                         spec=(str(it.get("spec") or "").strip()[:2000] or None),
+                         nha_san_xuat=(str(it.get("nha_san_xuat") or "").strip()[:150] or None),
+                         ma_sp=(str(it.get("ma_sp") or "").strip()[:60] or None),
+                         nha_cung_cap_id=ncc_id, ncc_ten=(ncc_ten or None),
+                         so_luong=Decimal(str(it.get("so_luong") or 1)),
+                         don_gia=Decimal(str(it.get("don_gia") or 0)),
+                         ghi_chu=(f"AI nhập từ file {ten_file}")[:300])
+        db.add(m)
+        db.flush()
+        tk.ghi(db, m, nd, ma_dt, ncc_ten, ncc_id)
         da_co.add(ten.lower())
         them.append(ten)
-    return {"so_doc": len(items), "them": len(them), "bo_qua": len(bo_qua), "ds_them": them[:15], "ds_bo_qua": bo_qua[:15]}
+    return {"so_doc": len(items), "them": len(them), "bo_qua": len(bo_qua), "ds_them": them[:15], "ds_bo_qua": bo_qua[:15],
+            **tk.kq()}
 
 
 def _dtb_nen_chay(viec_id: int, dt_id: int, nd_id, data: bytes, content_type, ten_file: str):
@@ -5632,7 +5666,8 @@ def _dtb_nen_chay(viec_id: int, dt_id: int, nd_id, data: bytes, content_type, te
             if not items:
                 raise ValueError("AI không tìm thấy dòng sản phẩm / hạng mục nào trong file — kiểm tra file có bảng "
                                  "tên · số lượng · đơn giá rõ ràng.")
-            kq = _dtb_them_muc_tu_items(db, dt_id, items, ten_file)
+            _dt = db.get(DuToanBan, dt_id)
+            kq = _dtb_them_muc_tu_items(db, dt_id, items, ten_file, nd=db.get(NguoiDung, nd_id), ma_dt=(_dt.ma if _dt else None))
             if v is not None:
                 v.trang_thai, v.ket_thuc, v.ket_qua = "XONG", gio_hien_tai(), kq
             ghi_audit(db, nd_id, "AI_NHAP_DU_TOAN", "du_toan_ban", dt_id,
@@ -5655,6 +5690,7 @@ def _dtb_them_muc_boq(db, nd, dt, items: list, ten_file: str) -> dict:
     from ..boq_mau import ghi_chu_boq
     da_co = {(m.ten or "").strip().lower() for m in db.query(DuToanBanMuc).filter_by(du_toan_id=dt.id).all()}
     them, bo_qua = [], []
+    tk = _DtbNapThongKe()
     for it in items[:400]:
         ten = str(it.get("ten") or "").strip()
         if not ten or ten.lower() in da_co:
@@ -5671,11 +5707,11 @@ def _dtb_them_muc_boq(db, nd, dt, items: list, ten_file: str) -> dict:
                          ghi_chu=(ghi_chu_boq(it) or f"Nạp từ mẫu BOQ {ten_file}")[:300])
         db.add(m)
         db.flush()
-        if ncc_id:
-            _dtb_ghi_danh_muc(db, m, nd, dt.ma, doi_gia=True)
+        tk.ghi(db, m, nd, dt.ma, str(it.get("ncc_ten") or "").strip(), ncc_id)
         da_co.add(ten.lower())
         them.append(ten)
-    return {"so_doc": len(items), "them": len(them), "bo_qua": len(bo_qua), "ds_them": them[:15], "ds_bo_qua": bo_qua[:15]}
+    return {"so_doc": len(items), "them": len(them), "bo_qua": len(bo_qua), "ds_them": them[:15], "ds_bo_qua": bo_qua[:15],
+            **tk.kq()}
 
 
 def _dtb_nap_file(db, nd, dt, data: bytes, content_type, ten_file: str) -> dict:
@@ -6114,8 +6150,8 @@ def dtb_them_muc(dt_id: int, data: DtbMucVao, db: Session = Depends(get_db),
 @router.get("/du-toan-ban/mau-boq")
 def dtb_mau_boq(dt_id: int | None = None, db: Session = Depends(get_db),
                 _=Depends(yeu_cau_bat_ky(("ncc", "XEM"), ("ban_hang", "XEM")))):
-    """📥 File Excel MẪU BOQ (theo Tab 12 - BOQ-MTO): dt_id trống → mẫu trống có ví dụ; có dt_id → điền sẵn các dòng của
-    dự toán đó (xuất ra sửa trong Excel rồi 📎 nạp lại — máy đọc thẳng)."""
+    """📥 File Excel MẪU BOQ (theo Tab 12 - BOQ-MTO, 12 cột từ 29/10/2026 có Nhà cung cấp · Mã SP): dt_id trống → mẫu trống
+    có ví dụ; có dt_id → điền sẵn các dòng của dự toán đó (xuất ra sửa trong Excel rồi 📎 nạp lại — máy đọc thẳng)."""
     from fastapi.responses import Response
     from urllib.parse import quote
     from ..boq_mau import tao_mau
@@ -6125,8 +6161,10 @@ def dtb_mau_boq(dt_id: int | None = None, db: Session = Depends(get_db),
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy dự toán")
     items = None
     if d is not None:
+        ten_ncc = {n.id: n.ten for n in db.query(NhaCungCap).all()}
         items = [{"ten": m.ten, "quy_cach": m.quy_cach, "don_vi": m.don_vi, "so_luong": float(m.so_luong or 0),
-                  "nha_san_xuat": m.nha_san_xuat, "don_gia": float(m.don_gia or 0), "ghi_chu": m.ghi_chu}
+                  "nha_san_xuat": m.nha_san_xuat, "ncc_ten": (ten_ncc.get(m.nha_cung_cap_id) or m.ncc_ten), "ma_sp": m.ma_sp,
+                  "don_gia": float(m.don_gia or 0), "ghi_chu": m.ghi_chu}
                  for m in db.query(DuToanBanMuc).filter_by(du_toan_id=d.id).order_by(DuToanBanMuc.id).all()]
         tieu_de = " — ".join(x for x in (d.ma, d.khach_hang, d.mo_ta) if x)
     else:
