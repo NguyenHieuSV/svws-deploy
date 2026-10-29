@@ -1867,13 +1867,26 @@ def _nv_ra(r: NhacViec, ten: dict) -> dict:
             "muc_do": r.muc_do, "trang_thai": r.trang_thai, "ghi_chu": r.ghi_chu,
             "xong_luc": r.xong_luc.isoformat(timespec="minutes") if r.xong_luc else None,
             "nguoi_tao_ten": ten.get(r.nguoi_tao), "nhan_vien_ten": ten.get(r.nhan_vien_id),
-            "ho_tro_ten": ten.get(r.nguoi_ho_tro_id)}
+            "ho_tro_ten": ten.get(r.nguoi_ho_tro_id),
+            # mig 160: ⭐ kết quả đã chấm + KPI (50% thời gian tự chấm + 50% kết quả)
+            "ket_qua_diem": getattr(r, "ket_qua_diem", None), "ket_qua_ghi_chu": getattr(r, "ket_qua_ghi_chu", None),
+            "danh_gia_boi": getattr(r, "danh_gia_boi", None), "danh_gia_ten": ten.get(getattr(r, "danh_gia_boi", None)),
+            "danh_gia_luc": (r.danh_gia_luc.isoformat(timespec="minutes") if getattr(r, "danh_gia_luc", None) else None),
+            "kpi": _kpi_nv(r)}
+
+
+def _kpi_nv(r) -> dict:
+    from ..kpi_nhac_viec import tinh_kpi
+    try:
+        return tinh_kpi(r, _gio_vn())
+    except Exception:                                                   # noqa: BLE001
+        return {"tinh": False, "nhan": "—", "kpi": None}
 
 
 def _nv_ten_map(db, rows) -> dict:
     ids = set()
     for r in rows:
-        ids.update([r.nguoi_tao, r.nhan_vien_id, r.nguoi_ho_tro_id])
+        ids.update([r.nguoi_tao, r.nhan_vien_id, r.nguoi_ho_tro_id, getattr(r, "danh_gia_boi", None)])
     ids.discard(None)
     if not ids:
         return {}
@@ -1999,8 +2012,11 @@ def sua_nhac_viec(nv_id: int, data: NhacViecVao, db: Session = Depends(get_db),
     if data.muc_do in _NV_MUC_DO:
         r.muc_do = data.muc_do
     if data.trang_thai in _NV_TRANG_THAI:
-        r.trang_thai = data.trang_thai
-        r.xong_luc = _gio_vn() if data.trang_thai == "XONG" else None
+        if data.trang_thai != r.trang_thai:                 # giữ giờ xong cũ nếu trạng thái không đổi
+            r.trang_thai = data.trang_thai
+            r.xong_luc = _gio_vn() if data.trang_thai == "XONG" else None
+        if data.trang_thai != "XONG":
+            _nv_bo_cham(r)
     ghi_audit(db, nd.id, "SUA", "nhac_viec", nv_id, moi={"tieu_de": r.tieu_de})
     db.commit()
     return {"ok": True}
@@ -2020,9 +2036,55 @@ def doi_trang_thai_nhac_viec(nv_id: int, trang_thai: str, db: Session = Depends(
                             "Chỉ người tạo, người được nhắc hoặc CEO/Admin mới đổi được trạng thái")
     r.trang_thai = trang_thai
     r.xong_luc = _gio_vn() if trang_thai == "XONG" else None
+    if trang_thai != "XONG":
+        _nv_bo_cham(r)                                       # mở lại / hủy → điểm kết quả cũ không còn ý nghĩa
     ghi_audit(db, nd.id, "SUA", "nhac_viec", nv_id, moi={"trang_thai": trang_thai})
     db.commit()
-    return {"ok": True, "trang_thai": trang_thai}
+    return {"ok": True, "trang_thai": trang_thai, "kpi": _kpi_nv(r)}
+
+
+def _nv_bo_cham(r: NhacViec) -> None:
+    r.ket_qua_diem = None
+    r.ket_qua_ghi_chu = None
+    r.danh_gia_boi = None
+    r.danh_gia_luc = None
+
+
+class NhacViecDanhGiaVao(_NVBase):
+    diem: int
+    ghi_chu: str | None = None
+
+
+@router.post("/nhac-viec/{nv_id}/danh-gia")
+def danh_gia_nhac_viec(nv_id: int, data: NhacViecDanhGiaVao, db: Session = Depends(get_db),
+                       nd: NguoiDung = Depends(lay_nguoi_dung_hien_tai)):
+    """⭐ Chấm KẾT QUẢ việc đã XONG (1–5 sao) — người đặt lời nhắc (khi nhắc người khác) hoặc CEO/Admin;
+    tự nhắc mình thì chỉ CEO/Admin chấm. KPI = 50% thời gian (tự chấm) + 50% kết quả (mig 160, anh Hiếu 29/10/2026)."""
+    from ..kpi_nhac_viec import duoc_cham
+    r = db.get(NhacViec, nv_id)
+    if r is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy lời nhắc")
+    if r.trang_thai != "XONG":
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Chỉ chấm kết quả khi việc đã đánh dấu ✓ xong")
+    me = nhan_vien_id_cua(db, nd.id)
+    la_qtv = (nd.vai_tro.ma if nd.vai_tro else "").upper() in ("CEO", "ADMIN")
+    if not duoc_cham(r, me, la_qtv):
+        raise HTTPException(status.HTTP_403_FORBIDDEN,
+                            "Chỉ người đặt lời nhắc (nhắc người khác) hoặc CEO/Admin mới chấm kết quả; tự nhắc mình thì CEO/Admin chấm")
+    try:
+        diem = int(data.diem)
+    except (TypeError, ValueError):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Điểm kết quả phải là số 1–5")
+    if not 1 <= diem <= 5:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Điểm kết quả phải từ 1 đến 5 sao")
+    cu = {"ket_qua_diem": r.ket_qua_diem}
+    r.ket_qua_diem = diem
+    r.ket_qua_ghi_chu = (data.ghi_chu or "").strip()[:500] or None
+    r.danh_gia_boi = me
+    r.danh_gia_luc = _gio_vn()
+    ghi_audit(db, nd.id, "DANH_GIA", "nhac_viec", nv_id, cu=cu, moi={"ket_qua_diem": diem, "ghi_chu": r.ket_qua_ghi_chu})
+    db.commit()
+    return {"ok": True, "kpi": _kpi_nv(r)}
 
 
 @router.delete("/nhac-viec/{nv_id}")

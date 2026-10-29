@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="vi">
 <head>
-<!-- build: bao-cao-tien-do-2026-10-29 -->
+<!-- build: nhac-viec-kpi-2026-10-29 -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#0f2c44">
@@ -16750,12 +16750,54 @@ function _wrRow(r,kieu){
     <td style="font-size:12px;max-width:210px">${r.ho_tro_ten?`<b>${_bcEscH(r.ho_tro_ten)}</b>`:'—'}${r.ho_tro_gi?`<div style="color:var(--muted)">${_bcEscH(r.ho_tro_gi)}</div>`:''}</td>
     <td><span class="badge ${md[1]}">${md[0]}</span></td>
     <td><span class="badge ${tt[1]}">${tt[0]}</span></td>
+    <td>${_wrKpiCell(r)}</td>
     <td style="white-space:nowrap">
       ${r.trang_thai!=='XONG'?`<button class="btn-sm ghost" title="Đánh dấu đã xong" onclick="wrTT(${r.id},'XONG')">✓</button>`:`<button class="btn-sm ghost" title="Mở lại việc" onclick="wrTT(${r.id},'CHO_LAM')">↺</button>`}
       <button class="btn-sm ghost" title="Sửa lời nhắc" onclick="wrSua(${r.id})">✏️</button>
       <button class="btn-sm ghost" style="color:var(--red)" title="Xóa lời nhắc" onclick="wrXoa(${r.id})">🗑</button></td></tr>`;
 }
-function _wrThead(c3){return `<thead><tr><th>Nhắc lúc</th><th>Hạn hoàn thành</th><th>Việc cần làm</th><th>${c3}</th><th>Mã liên quan</th><th>Chuẩn bị</th><th>Người hỗ trợ</th><th>Mức độ</th><th>Trạng thái</th><th></th></tr></thead>`;}
+function _wrThead(c3){return `<thead><tr><th>Nhắc lúc</th><th>Hạn hoàn thành</th><th>Việc cần làm</th><th>${c3}</th><th>Mã liên quan</th><th>Chuẩn bị</th><th>Người hỗ trợ</th><th>Mức độ</th><th>Trạng thái</th><th title="KPI = 50% thời gian (tự chấm theo lúc xong so với hạn) + 50% kết quả (người nhắc / CEO chấm 1–5 sao sau khi xong)">⭐ KPI</th><th></th></tr></thead>`;}
+/* ⭐ KPI lời nhắc (anh Hiếu 29/10/2026) — máy chủ tính (r.kpi, app/kpi_nhac_viec.py); bản demo tính tại chỗ cùng quy tắc:
+   thời gian 0–5 (đúng hạn 5 · trễ ≤4h 4 · ≤24h 3 · ≤72h 2 · hơn 1 · chưa xong quá hạn 0) · kết quả 1–5 sao · KPI% = 50/50 */
+function _wrGioNhan(h){h=Math.abs(h);const f=v=>String(Math.round(v*10)/10).replace('.',',');return h<1?Math.round(h*60)+' phút':(h<24?f(h)+' giờ':f(h/24)+' ngày');}
+function _wrKpiTinh(r){
+  if(r.kpi)return r.kpi;
+  if(r.trang_thai==='HUY')return {tinh:false,nhan:'hủy — không tính',kpi:null};
+  const moc=_wrMoc(r); if(!moc)return {tinh:false,nhan:'—',kpi:null};
+  const d=v=>new Date(String(v).replace(' ','T')); const now=new Date(), mocD=d(moc);
+  const kq=Number(r.ket_qua_diem)||null; let tg=null,nhan='chưa đến hạn',tre=null;
+  if(r.trang_thai==='XONG'&&r.xong_luc){tre=(d(r.xong_luc)-mocD)/36e5;
+    if(tre<=0){tg=5;nhan=tre>-1?'đúng hạn':'sớm '+_wrGioNhan(tre);}else if(tre<=4){tg=4;nhan='trễ '+_wrGioNhan(tre);}else if(tre<=24){tg=3;nhan='trễ '+_wrGioNhan(tre);}else if(tre<=72){tg=2;nhan='trễ '+_wrGioNhan(tre);}else{tg=1;nhan='trễ '+_wrGioNhan(tre);}}
+  else if(r.trang_thai==='XONG'){nhan='xong — không ghi giờ';}
+  else if(mocD<now){tg=0;nhan='đang trễ '+_wrGioNhan((now-mocD)/36e5);}
+  const kpi=tg==null?(kq?Math.round(kq/5*100):null):Math.round(tg/5*50+(kq?kq/5*50:tg/5*50));
+  return {tinh:true,tg_diem:tg,tg_nhan:nhan,tre_gio:tre,kq_diem:kq,kpi,tam:!kq,xong:r.trang_thai==='XONG'};}
+function _wrKpiMau(k){return k==null?'var(--muted)':(k>=80?'#16a34a':(k>=60?'#d97706':'#dc2626'));}
+function _wrDuocCham(r){const me=window.__wrMe;return r.trang_thai==='XONG'&&(laQTV()||(me!=null&&r.nguoi_tao===me&&r.nhan_vien_id!==me));}
+function _wrKpiCell(r){const k=_wrKpiTinh(r);
+  if(!k.tinh)return `<span style="color:var(--muted);font-size:11px">${_bcEscH(k.nhan||'—')}</span>`;
+  const sao=k.kq_diem?`<span title="${_bcEscA(r.ket_qua_ghi_chu||'')}${r.danh_gia_ten?' — '+_bcEscA(r.danh_gia_ten)+' chấm':''}">${'⭐'.repeat(k.kq_diem)} <span style="color:var(--muted)">${k.kq_diem}/5</span></span>`:(k.xong?'<span style="color:var(--muted)">chờ chấm kết quả</span>':'');
+  return `<div style="font-size:11.5px;line-height:1.35;white-space:nowrap">${k.kpi!=null?`<b style="color:${_wrKpiMau(k.kpi)};font-size:13.5px" title="${k.tam?'KPI tạm theo thời gian — chưa chấm kết quả':'50% thời gian + 50% kết quả'}">${k.kpi}%${k.tam?'<span style="font-weight:400;color:var(--muted)">*</span>':''}</b>`:'<span style="color:var(--muted)">—</span>'}
+    <div>⏱ ${_bcEscH(k.tg_nhan||'')}${k.tg_diem!=null?` <span style="color:var(--muted)">${k.tg_diem}/5</span>`:''}</div>
+    ${sao?`<div>${sao}</div>`:''}${_wrDuocCham(r)?`<button class="btn-sm ghost" style="padding:1px 6px;font-size:11px;margin-top:2px" title="Chấm kết quả việc này (1–5 sao)" onclick="wrDanhGia(${r.id})">${k.kq_diem?'✏️ chấm lại':'⭐ Chấm kết quả'}</button>`:''}</div>`;}
+function _wrKpiNhom(ds){const ks=(ds||[]).map(_wrKpiTinh).filter(k=>k.tinh&&k.kpi!=null);
+  if(!ks.length)return '<span style="color:var(--muted);font-size:11px">—</span>';
+  const tb=Math.round(ks.reduce((s,k)=>s+k.kpi,0)/ks.length), tam=ks.some(k=>k.tam);
+  return `<b style="color:${_wrKpiMau(tb)};font-size:13.5px" title="KPI trung bình của ${ks.length} người đã chấm được${tam?' (có người chưa chấm kết quả)':''}">${tb}%${tam?'<span style="font-weight:400;color:var(--muted)">*</span>':''}</b><div style="font-size:11px;color:var(--muted)">TB ${ks.length} người — 👁 chấm từng người</div>`;}
+function wrDanhGia(id){const r=(window.__wrAll||[]).find(x=>x.id===id); if(!r)return; const k=_wrKpiTinh(r);
+  const NHAN=['Không đạt','Yếu','Đạt','Tốt','Xuất sắc'];
+  _ktModal(`⭐ Chấm kết quả — ${_bcEscH(r.tieu_de)}`,`
+    <div style="font-size:12.5px;color:var(--muted);margin-bottom:8px">Người làm: <b>${_bcEscH(r.nhan_vien_ten||'')}</b> · hạn ${_wrGio(_wrMoc(r))} · xong ${_wrGio(r.xong_luc)} · ⏱ ${_bcEscH(k.tg_nhan||'')} (${k.tg_diem!=null?k.tg_diem:'—'}/5)</div>
+    <label>Kết quả công việc</label>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin:4px 0 8px">${[1,2,3,4,5].map(n=>`<label style="border:1px solid var(--line);border-radius:8px;padding:6px 10px;cursor:pointer;font-size:12.5px"><input type="radio" name="wrd_diem" value="${n}" ${(Number(r.ket_qua_diem)||0)===n?'checked':''} style="width:auto;margin-right:4px">${'⭐'.repeat(n)} ${NHAN[n-1]}</label>`).join('')}</div>
+    <label>Nhận xét (tùy chọn)</label><textarea id="wrd_gc" rows="2" style="width:100%" placeholder="VD: đúng yêu cầu, khách hài lòng / thiếu biên bản…">${_bcEscH(r.ket_qua_ghi_chu)}</textarea>
+    <div class="note" style="margin-top:8px;color:var(--muted)">KPI = 50% thời gian (tự chấm: đúng hạn 5 · trễ ≤ 4h 4 · ≤ 24h 3 · ≤ 3 ngày 2 · hơn 1) + 50% kết quả (mỗi sao 10%). Mở lại việc thì điểm kết quả bị bỏ.</div>
+    <div style="text-align:right;margin-top:10px"><button class="btn-sm" onclick="wrDanhGiaLuu(${id})">💾 Lưu chấm</button></div>`);}
+async function wrDanhGiaLuu(id){const el=document.querySelector('input[name="wrd_diem"]:checked'); if(!el)return toast("Chọn số sao kết quả","err");
+  const body={diem:Number(el.value),ghi_chu:gv('wrd_gc')||null};
+  if(S.mode==="live"){try{await api(`/nhan-su/nhac-viec/${id}/danh-gia`,{method:'POST',body:JSON.stringify(body)});}catch(e){return toast(e.detail||e.message,"err");}}
+  else{const r=(DEMO.wr||[]).find(x=>x.id===id); if(r){r.ket_qua_diem=body.diem;r.ket_qua_ghi_chu=body.ghi_chu;}}
+  document.getElementById('ktModal')?.remove(); toast("Đã chấm kết quả "+body.diem+"/5","ok"); wtRemind($("#wtBody"));}
 // Gom các dòng cùng lô "Nhắc tất cả" thành 1 dòng tổng hợp
 function _wrGom(list){const out=[],seen={};
   (list||[]).forEach(r=>{
@@ -16788,6 +16830,7 @@ function _wrNhomRow(g){
     <td style="font-size:12px;max-width:210px">${r.ho_tro_ten?`<b>${_bcEscH(r.ho_tro_ten)}</b>`:'—'}${r.ho_tro_gi?`<div style="color:var(--muted)">${_bcEscH(r.ho_tro_gi)}</div>`:''}</td>
     <td><span class="badge ${md[1]}">${md[0]}</span></td>
     <td><span class="badge ${xong===tong?'b-ok':'b-cho'}">${xong}/${tong} đã xong</span></td>
+    <td>${_wrKpiNhom(full)}</td>
     <td style="white-space:nowrap">
       <button class="btn-sm ghost" title="Xem từng người" onclick="wrNhomXem('${g.nhom}')">👁</button>
       <button class="btn-sm ghost" title="Sửa cả lô nhắc" onclick="wrNhomSua('${g.nhom}')">✏️</button>
@@ -16804,10 +16847,11 @@ function wrNhomXem(nhom){
     return `<tr><td>${_bcEscH(r.nhan_vien_ten)||r.nhan_vien_id}</td>
       <td><span class="badge ${tt[1]}">${tt[0]}</span></td>
       <td style="font-size:12px">${r.xong_luc?_wrGio(r.xong_luc):'—'}</td>
+      <td>${_wrKpiCell(r)}</td>
       <td>${r.trang_thai!=='XONG'?`<button class="btn-sm ghost" title="Đánh dấu đã xong" onclick="wrNhomTT(${r.id},'XONG','${nhom}')">✓</button>`:`<button class="btn-sm ghost" title="Mở lại việc" onclick="wrNhomTT(${r.id},'CHO_LAM','${nhom}')">↺</button>`}</td></tr>`;}).join('');
   _ktModal(`👥 ${ds[0].tieu_de} — tiến độ từng người`,
     `<div class="note" style="margin:0 0 8px">Cả <b>người nhắc</b> lẫn <b>người được nhắc</b> đều tick ✓ hoàn thành được; CEO/Admin tick được cho mọi người.</div>
-     <table><thead><tr><th>Nhân viên</th><th>Trạng thái</th><th>Xong lúc</th><th>Hoàn thành</th></tr></thead><tbody>${rows}</tbody></table>`);
+     <table><thead><tr><th>Nhân viên</th><th>Trạng thái</th><th>Xong lúc</th><th>⭐ KPI</th><th>Hoàn thành</th></tr></thead><tbody>${rows}</tbody></table>`);
 }
 async function wrNhomTT(id,tt,nhom){
   if(S.mode==="live"){
@@ -16885,7 +16929,7 @@ async function wtRemind(host){
     }
   }catch(e){host.innerHTML=`<div class="empty" style="color:#dc2626;padding:24px">${e.detail||e.message}</div>`;return;}
   window.__wrAll=(my.nhac_toi||[]).concat(my.toi_nhac||[],ds.danh_sach||[]);
-  window.__wrNvs=nvs;
+  window.__wrNvs=nvs; window.__wrMe=my.nhan_vien_id;
   // Bảng điều khiển kết nối Google Chat (chỉ CEO/Admin)
   let chatPanel='';
   if(laQTV()){
@@ -16952,11 +16996,11 @@ async function wtRemind(host){
   const bangToi=my._loi?'':`<div class="panel"><div class="panel-h"><h3>🔔 Việc nhắc tôi (${dsToi.length})</h3><div class="spacer"></div>
      ${quaHan?`<span class="badge b-tc">${quaHan} việc quá hạn</span>`:'<span style="font-size:12px;color:var(--muted)">Không có việc quá hạn</span>'}</div>
     <div class="panel-b"><table>${_wrThead('Người nhắc')}
-     <tbody>${dsToi.map(r=>_wrRow(r,'toi')).join('')||'<tr><td colspan="10" class="empty">Chưa có lời nhắc nào cho bạn.</td></tr>'}</tbody></table>
-     <div class="note" style="margin-top:8px;color:var(--muted)">Dòng <b style="color:#dc2626">đỏ</b> = đã quá <b>hạn hoàn thành</b> · <b>vàng</b> = còn dưới 24 giờ. Việc không đặt hạn thì tính theo thời điểm nhắc.</div></div></div>`;
+     <tbody>${dsToi.map(r=>_wrRow(r,'toi')).join('')||'<tr><td colspan="11" class="empty">Chưa có lời nhắc nào cho bạn.</td></tr>'}</tbody></table>
+     <div class="note" style="margin-top:8px;color:var(--muted)">Dòng <b style="color:#dc2626">đỏ</b> = đã quá <b>hạn hoàn thành</b> · <b>vàng</b> = còn dưới 24 giờ. Việc không đặt hạn thì tính theo thời điểm nhắc. <b>⭐ KPI</b> = 50% <b>thời gian</b> (tự chấm theo lúc ✓ xong so với hạn: đúng hạn 5 · trễ ≤ 4h 4 · ≤ 24h 3 · ≤ 3 ngày 2 · hơn 1 · chưa xong quá hạn 0) + 50% <b>kết quả</b> (người nhắc hoặc CEO/Admin chấm 1–5 sao sau khi xong; tự nhắc mình thì CEO/Admin chấm). Dấu <b>*</b> = tạm tính theo thời gian, chưa chấm kết quả.</div></div></div>`;
   const bangNguoi=my._loi?'':`<div class="panel"><div class="panel-h"><h3>📤 Việc tôi nhắc người khác (${dsNguoi.length})</h3></div>
     <div class="panel-b"><table>${_wrThead('Nhắc ai')}
-     <tbody>${_wrBody(dsNguoi,'nguoi')||'<tr><td colspan="10" class="empty">Bạn chưa nhắc việc cho ai.</td></tr>'}</tbody></table></div></div>`;
+     <tbody>${_wrBody(dsNguoi,'nguoi')||'<tr><td colspan="11" class="empty">Bạn chưa nhắc việc cho ai.</td></tr>'}</tbody></table></div></div>`;
   let mgr='';
   if(canXem){
     const all=ds.danh_sach||[];
@@ -16965,7 +17009,7 @@ async function wtRemind(host){
          <option value="">— Tất cả trạng thái —</option>
          ${Object.keys(WR_TT).map(k=>`<option value="${k}" ${S.wrLoc===k?'selected':''}>${WR_TT[k][0]}</option>`).join('')}</select></div>
       <div class="panel-b"><table>${_wrThead('Người được nhắc')}
-       <tbody>${_wrBody(all,'all')||'<tr><td colspan="10" class="empty">Chưa có lời nhắc nào.</td></tr>'}</tbody></table></div></div>`;
+       <tbody>${_wrBody(all,'all')||'<tr><td colspan="11" class="empty">Chưa có lời nhắc nào.</td></tr>'}</tbody></table></div></div>`;
   }
   host.innerHTML=form+bangToi+bangNguoi+mgr+chatPanel;
 }

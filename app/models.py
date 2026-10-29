@@ -716,6 +716,11 @@ class NhacViec(Base):
     ghi_chu: Mapped[str | None] = mapped_column(Text, nullable=True)
     xong_luc: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     da_gui_tao: Mapped[bool] = mapped_column(Boolean, default=False)
+    # mig 160: ⭐ chấm KẾT QUẢ (1–5 sao) sau khi xong — người đặt lời nhắc (nhắc người khác) hoặc CEO/Admin
+    ket_qua_diem: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    ket_qua_ghi_chu: Mapped[str | None] = mapped_column(Text, nullable=True)
+    danh_gia_boi: Mapped[int | None] = mapped_column(ForeignKey("nhan_vien.id", ondelete="SET NULL"), nullable=True)
+    danh_gia_luc: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
 class NhacViecBanTin(Base):
