@@ -1820,6 +1820,12 @@ class SaoKeKhop(Base):
     tao_luc: Mapped[datetime | None] = mapped_column(DateTime, server_default=func.now(), nullable=True)
 
 
+def _gio_vn():
+    """Giờ Việt Nam (naive) — nhập muộn để tránh vòng import với nhac_viec_service."""
+    from .nhac_viec_service import gio_hien_tai
+    return gio_hien_tai()
+
+
 class DuToanBan(Base):
     """Dự toán hàng bán — nơi MÃ HÀNG BÁN được tạo đầu tiên (mig 114)."""
     __tablename__ = "du_toan_ban"
@@ -1829,6 +1835,9 @@ class DuToanBan(Base):
     mo_ta: Mapped[str | None] = mapped_column(Text, nullable=True)
     ngay: Mapped[date | None] = mapped_column(Date, nullable=True)
     nguoi_tao: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    # mig 161 (29/10/2026): giờ tạo · giờ sửa gần nhất (máy tự ghi ở before_flush cuối file) — Bảng lưu dự toán xếp theo đây
+    tao_luc: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, default=lambda: _gio_vn())
+    cap_nhat_luc: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, default=lambda: _gio_vn())
 
 
 class DuToanBanMuc(Base):
@@ -1916,3 +1925,30 @@ class TrnKetQua(Base):
     thoi_gian_giay: Mapped[int | None] = mapped_column(Integer, nullable=True)
     chi_tiet: Mapped[dict | list | None] = mapped_column(JSONB, nullable=True)
     nop_luc: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+# ---------- 🕒 mig 161: dấu vết lần sửa gần nhất của Dự toán hàng bán (anh Hiếu 29/10/2026) ----------
+from sqlalchemy import event as _sa_event
+from sqlalchemy.orm import Session as _SaSession
+
+
+@_sa_event.listens_for(_SaSession, "before_flush")
+def _dtb_danh_dau_cap_nhat(session, _ctx, _instances):
+    """Thêm / sửa / xóa dòng dự toán hoặc sửa tiêu đề → du_toan_ban.cap_nhat_luc = giờ VN, dù đi đường nào (API, nạp file,
+    bổ sung từ PO, tạo ngược từ báo giá…). Chỉ đọc thì không ghi. Lỗi ở đây không được chặn flush."""
+    ids = set()
+    try:
+        for o in list(session.new) + list(session.dirty) + list(session.deleted):
+            if isinstance(o, DuToanBanMuc) and o.du_toan_id:
+                ids.add(int(o.du_toan_id))
+            elif (isinstance(o, DuToanBan) and o.id and o in session.dirty
+                  and session.is_modified(o, include_collections=False)):
+                ids.add(int(o.id))
+        if not ids:
+            return
+        luc = _gio_vn()
+        for i in ids:
+            d = session.get(DuToanBan, i)
+            if d is not None and d not in session.deleted:
+                d.cap_nhat_luc = luc
+    except Exception as e:                                                   # noqa: BLE001
+        print(f"[DTB_CAP_NHAT] {type(e).__name__}: {e}")

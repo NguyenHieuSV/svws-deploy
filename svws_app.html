@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="vi">
 <head>
-<!-- build: bg-sp-2026-10-29 -->
+<!-- build: dtb-capnhat-2026-10-29 -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#0f2c44">
@@ -10181,6 +10181,13 @@ async function dtbRender(){
   const listGui=list.filter(d=>_bgGui(d)), listLuu=list.filter(d=>!_bgGui(d));
   const _ngayGui=d=>{const g=_bgGui(d);return g&&g.gui_luc?String(g.gui_luc).slice(0,10):'';};
   listGui.sort((a,b)=>(_ngayGui(b)||b.ngay||'').localeCompare(_ngayGui(a)||a.ngay||'')||(b.id-a.id));
+  // 🕒 Bảng lưu dự toán: dự toán vừa làm (sửa dòng / tiêu đề gần nhất) lên trên — anh Hiếu 29/10/2026
+  const _capNhatKey=d=>String(d.cap_nhat_luc||d.tao_luc||d.ngay||'');
+  listLuu.sort((a,b)=>_capNhatKey(b).localeCompare(_capNhatKey(a))||(b.id-a.id));
+  const _dtbCapNhat=d=>{const v=d.cap_nhat_luc||d.tao_luc; if(!v)return '—'; const s=String(v); const ng=s.slice(0,10), gio=s.slice(11,16);
+    const moi=(Date.now()-new Date(ng+'T00:00:00').getTime())<3*86400000;   // trong 3 ngày → tô xanh
+    const nhan=`${ng.slice(8,10)}/${ng.slice(5,7)}/${ng.slice(2,4)}${gio?' '+gio:''}`;
+    return moi?`<b style="color:#16a34a">${nhan}</b>`:nhan;};
   const canOpBG=can("ban_hang","THAO_TAC");
   // 📄 nút báo giá ngay trên dòng (anh Hiếu 28/10/2026): chưa có → Tạo báo giá từ dự toán; đã có → Mở báo giá đó
   const _dtbNutBG=(d,g,co)=>{if(!co||String(d.ma||'').toUpperCase().startsWith('OP'))return '';
@@ -10195,12 +10202,12 @@ async function dtbRender(){
     <td><a href="#" onclick="dtbMo(${d.id});return false" style="font-weight:700;text-decoration:none;border-bottom:1px dashed currentColor">${esc(d.ma)}</a>${String(d.ma||'').toUpperCase().startsWith('OP')?' <span class="badge b-cho" title="Chi phí vận hành doanh nghiệp — không có đơn bán">⚙️ OP</span>':''}${_bgNhan(d.ma)}</td>
     <td>${esc(d.khach_hang)||'—'}</td><td style="font-size:12px">${esc(d.mo_ta)||'—'}</td>
     ${gui?`<td style="white-space:nowrap" title="Ngày ✉️ gửi báo giá cho khách (từ nhật ký gửi)">${_ngayGui(d)||'—'}</td>`:''}
-    <td style="white-space:nowrap">${d.ngay||'—'}</td><td>${esc(d.nguoi_tao)||'—'}</td>
+    <td style="white-space:nowrap">${d.ngay||'—'}</td><td style="white-space:nowrap" title="Lần sửa gần nhất${d.tao_luc?' · tạo lúc '+esc(String(d.tao_luc)):''}">${_dtbCapNhat(d)}</td><td>${esc(d.nguoi_tao)||'—'}</td>
     ${gui?`<td class="num" title="Tổng báo giá đã gửi (gồm VAT)"><b style="color:#0e7490">${vnd(bgT)}</b></td>`:''}
     <td class="num"><b>${vnd(d.tong||0)}</b></td><td class="num">${d.so_muc||0}</td>
     <td style="white-space:nowrap">${_dtbNutBG(d,gui?g:null,canOpBG)}${gui?`<button class="btn-sm ghost" title="Xuất PDF báo giá đã gửi" onclick="bgfPdfTu(${g.id})">🖨</button> ${canOpBG?`<button class="btn-sm ghost" title="Gửi lại báo giá cho khách" onclick="bgfGuiMail(${g.id})">✉️ Gửi lại</button> `:''}`:''}${canOp?`<button class="btn-sm ghost" title="Sửa mã / khách hàng / mô tả / ngày" onclick="dtbSuaHdr(${d.id})">✏️ Sửa</button>`:''}
       ${canXoa?` <button class="btn-sm ghost" style="color:var(--red)" title="Xóa dự toán và toàn bộ danh mục" onclick="dtbXoa(${d.id},'${esc(d.ma).replace(/'/g,'')}')">🗑 Xóa</button>`:''}</td></tr>`
-    +(mo?`<tr class="dtb-ct" data-ct="${esc(d.ma)}"><td colspan="${gui?11:9}" style="padding:4px 10px 14px;background:var(--panel2,#f4f6f8)">${chiTiet}</td></tr>`:'');}).join('');
+    +(mo?`<tr class="dtb-ct" data-ct="${esc(d.ma)}"><td colspan="${gui?12:10}" style="padding:4px 10px 14px;background:var(--panel2,#f4f6f8)">${chiTiet}</td></tr>`:'');}).join('');
   let chiTiet='';
   if(S._dtbOpen&&list.some(x=>x.id===S._dtbOpen)){
     let det=list.find(x=>x.id===S._dtbOpen);
@@ -10232,7 +10239,7 @@ async function dtbRender(){
     chiTiet=`<div style="padding-top:4px">
       <div style="display:flex;flex-wrap:wrap;gap:6px 22px;font-size:13px;margin-bottom:6px">
         <div>Mã: <b>${esc(det.ma)}</b></div><div>Khách hàng: <b>${esc(det.khach_hang)||'—'}</b></div>
-        <div>Ngày tạo: <b>${det.ngay||'—'}</b></div><div>Người tạo: <b>${esc(det.nguoi_tao)||'—'}</b></div>
+        <div>Ngày tạo: <b>${det.ngay||'—'}</b></div><div title="Lần sửa gần nhất">🕒 Cập nhật: <b>${det.cap_nhat_luc?esc(String(det.cap_nhat_luc)):'—'}</b></div><div>Người tạo: <b>${esc(det.nguoi_tao)||'—'}</b></div>
         <div>Tổng dự toán: <b style="color:#0e7490">${vnd(tong)}</b></div>
         ${det.so_dong_thuc?`<div title="Σ giá mua thật × SL dự toán của các dòng đã có PO">Đã mua thật: <b style="color:${(det.tong_thuc||0)>tong?'#dc2626':'#16a34a'}">${vnd(det.tong_thuc||0)}</b> <span style="color:var(--muted)">(${det.so_dong_thuc}/${its.length} dòng)</span></div>`:''}
         ${canOp?`<div><button class="btn-sm" title="File theo MẪU BOQ: máy đọc thẳng (đủ dòng, không AI) · file khác: AI đọc — thêm mục vào dự toán này, trùng tên bỏ qua" onclick="dtbNapFile(${det.id})">📎 Nạp thêm từ file</button> <button class="btn-sm ghost" title="Xuất dự toán này ra Excel đúng MẪU BOQ (theo nhóm, có công thức thành tiền / VAT / tổng) — sửa trong Excel rồi 📎 nạp lại" onclick="tepTaiVe('/ncc/du-toan-ban/mau-boq?dt_id=${det.id}','Mau-BOQ-${esc(det.ma).replace(/[^A-Za-z0-9_-]/g,'-')}.xlsx')">📥 Xuất mẫu BOQ</button> <button class="btn-sm ghost" title="Đổi đơn giá các dòng theo PO đã duyệt gần nhất / báo giá còn hiệu lực — có bảng xem trước" onclick="dtbCapNhatGia()">⟳ Cập nhật giá theo mua thực tế</button> <button class="btn-sm ghost" title="Dòng gõ tay chưa liên kết kho (🆕) → chọn mặt hàng kho gần giống để nhận giá đầu vào" onclick="dtbKhopKho()">🔗 Khớp tên với kho</button> <button class="btn-sm ghost" title="Đưa các dòng dự toán chưa liên kết vào danh mục Sản phẩm NCC: đủ NCC + tên + giá thì tạo mới, danh mục đã có thì nối; dòng thiếu NCC chọn NCC rồi đưa vào — có bảng xem trước" onclick="dtbDanhMuc(${det.id})">🏷 Đưa vào danh mục NCC</button>${can("ban_hang","THAO_TAC")&&!String(det.ma||'').toUpperCase().startsWith('OP')?` <button class="btn-sm" title="Soạn báo giá gửi khách từ danh mục dự toán này — số báo giá = mã dự toán, các dòng và đơn giá điền sẵn (sửa được trước khi lưu)" onclick="dtbTaoBaoGia(${det.id})">📄 Tạo báo giá từ dự toán</button>`:''}</div>`:''}</div>
@@ -10253,14 +10260,14 @@ async function dtbRender(){
       <h3 data-gap="1"><span id="dtbLuuCaret">${S._dtbLuuOpen?'▾':'▸'}</span> 📚 Bảng lưu dự toán <span class="badge b-info">${listLuu.length} dự toán · ${vnd(tongLuu)}</span>${listGui.length?` <span class="badge b-ok" title="Dự toán đã gửi báo giá nằm ở bảng ✉️ Báo giá đã gửi khách hàng bên dưới">+ ${listGui.length} đã gửi báo giá</span>`:''}</h3><div class="spacer"></div>
       ${canOp?`<button class="btn-sm ghost" style="margin-right:8px" title="Rà mọi dự toán: dòng chưa liên kết danh mục Sản phẩm NCC → tạo mới / nối sản phẩm có sẵn (có bảng xem trước, dòng thiếu NCC chọn NCC)" onclick="event.stopPropagation();dtbDanhMuc(null)">🏷 Dự toán → danh mục NCC</button>`:''}
       <input id="dtbLuu_q" placeholder="🔍 Tìm mã · khách · mô tả…" oninput="dtbLuuLoc(this.value)" onclick="event.stopPropagation()" style="padding:5px 10px;border:1px solid var(--line);border-radius:7px;font-size:12.5px;max-width:220px"></div>
-      <div class="panel-b${S._dtbLuuOpen?'':' hidden'}" id="dtbLuuWrap" style="overflow-x:auto"><table><thead><tr><th style="width:26px"></th><th>Mã hàng bán</th><th>Khách hàng</th><th>Mô tả yêu cầu</th><th>Ngày tạo</th><th>Người tạo</th><th class="num">Tổng dự toán</th><th class="num">Số mục</th><th>Thao tác</th></tr></thead>
-      <tbody id="dtbLuuRows">${rows||'<tr><td colspan="9" class="empty">'+(listGui.length?'Mọi dự toán đều đã gửi báo giá — xem bảng ✉️ Báo giá đã gửi khách hàng bên dưới.':'Chưa có dự toán hàng bán nào — tạo mã đầu tiên ở form trên.')+'</td></tr>'}</tbody></table>
-      <div class="note" style="margin-top:6px;color:var(--muted)">Bấm <b>▸</b> hoặc <b>mã</b> để mở chi tiết ngay dưới dòng (thêm dòng sản phẩm, sửa SL/giá, <b>🔎 tìm giá theo tên</b> — gõ vài ký tự là thấy mặt hàng đã mua kèm giá, không cần nhớ mã — ⟳ cập nhật giá, 🔗 khớp kho, 🛒 tạo PO). <b>📄 Tạo báo giá</b> ngay trên dòng soạn báo giá gửi khách từ dự toán (mã đã có báo giá thì hiện <b>📄 Mở báo giá</b>); <b>✏️ Sửa</b> đổi mã / khách / mô tả / ngày; <b>🗑 Xóa</b> xóa cả dự toán (không xóa được khi đã có dòng lập PO). Bảng này là <b>một nguồn</b> dùng cho Bán hàng → Báo giá và lập PO mua hàng (bước Đề xuất mua đã bỏ 10/10/2026). Dự toán đã <b>✉️ gửi báo giá</b> cho khách tự chuyển xuống bảng bên dưới.</div></div></div>
+      <div class="panel-b${S._dtbLuuOpen?'':' hidden'}" id="dtbLuuWrap" style="overflow-x:auto"><table><thead><tr><th style="width:26px"></th><th>Mã hàng bán</th><th>Khách hàng</th><th>Mô tả yêu cầu</th><th>Ngày tạo</th><th title="Lần sửa gần nhất (thêm / sửa / xóa dòng, sửa tiêu đề, nạp file, tạo PO…) — bảng xếp theo cột này, mới nhất lên trên; chữ xanh = trong 3 ngày">🕒 Cập nhật ▾</th><th>Người tạo</th><th class="num">Tổng dự toán</th><th class="num">Số mục</th><th>Thao tác</th></tr></thead>
+      <tbody id="dtbLuuRows">${rows||'<tr><td colspan="10" class="empty">'+(listGui.length?'Mọi dự toán đều đã gửi báo giá — xem bảng ✉️ Báo giá đã gửi khách hàng bên dưới.':'Chưa có dự toán hàng bán nào — tạo mã đầu tiên ở form trên.')+'</td></tr>'}</tbody></table>
+      <div class="note" style="margin-top:6px;color:var(--muted)">Bấm <b>▸</b> hoặc <b>mã</b> để mở chi tiết ngay dưới dòng (thêm dòng sản phẩm, sửa SL/giá, <b>🔎 tìm giá theo tên</b> — gõ vài ký tự là thấy mặt hàng đã mua kèm giá, không cần nhớ mã — ⟳ cập nhật giá, 🔗 khớp kho, 🛒 tạo PO). <b>📄 Tạo báo giá</b> ngay trên dòng soạn báo giá gửi khách từ dự toán (mã đã có báo giá thì hiện <b>📄 Mở báo giá</b>); <b>✏️ Sửa</b> đổi mã / khách / mô tả / ngày; <b>🗑 Xóa</b> xóa cả dự toán (không xóa được khi đã có dòng lập PO). Bảng xếp theo <b>🕒 Cập nhật</b> (lần sửa gần nhất) — dự toán vừa làm lên trên. Bảng này là <b>một nguồn</b> dùng cho Bán hàng → Báo giá và lập PO mua hàng (bước Đề xuất mua đã bỏ 10/10/2026). Dự toán đã <b>✉️ gửi báo giá</b> cho khách tự chuyển xuống bảng bên dưới.</div></div></div>
     <div class="panel" style="margin-top:10px;border:1px solid #16a34a55"><div class="panel-h" style="cursor:pointer" onclick="if(event.target.tagName!=='INPUT')dtbGuiToggle()">
       <h3 data-gap="1"><span id="dtbGuiCaret">${S._dtbGuiOpen?'▾':'▸'}</span> ✉️ Báo giá đã gửi khách hàng <span class="badge b-ok">${listGui.length} mã · ${vnd(tongGui)}</span></h3><div class="spacer"></div>
       <span style="font-size:12px;color:var(--muted)">Mã đã ✉️ gửi báo giá — ngày gửi gần nhất lên trên · vẫn mở được chi tiết dự toán</span></div>
-      <div class="panel-b${S._dtbGuiOpen?'':' hidden'}" id="dtbGuiWrap" style="overflow-x:auto"><table><thead><tr><th style="width:26px"></th><th>Mã hàng bán</th><th>Khách hàng</th><th>Mô tả yêu cầu</th><th>Ngày gửi BG</th><th>Ngày tạo</th><th>Người tạo</th><th class="num">Tổng báo giá</th><th class="num">Tổng dự toán</th><th class="num">Số mục</th><th>Thao tác</th></tr></thead>
-      <tbody id="dtbGuiRows">${rowsGui||'<tr><td colspan="11" class="empty">Chưa có mã nào gửi báo giá cho khách — soạn ở 📄 Tạo báo giá từ dự toán, trình duyệt, duyệt rồi ✉️ Gửi khách.</td></tr>'}</tbody></table></div></div>`;
+      <div class="panel-b${S._dtbGuiOpen?'':' hidden'}" id="dtbGuiWrap" style="overflow-x:auto"><table><thead><tr><th style="width:26px"></th><th>Mã hàng bán</th><th>Khách hàng</th><th>Mô tả yêu cầu</th><th>Ngày gửi BG</th><th>Ngày tạo</th><th title="Lần sửa dự toán gần nhất">🕒 Cập nhật</th><th>Người tạo</th><th class="num">Tổng báo giá</th><th class="num">Tổng dự toán</th><th class="num">Số mục</th><th>Thao tác</th></tr></thead>
+      <tbody id="dtbGuiRows">${rowsGui||'<tr><td colspan="12" class="empty">Chưa có mã nào gửi báo giá cho khách — soạn ở 📄 Tạo báo giá từ dự toán, trình duyệt, duyệt rồi ✉️ Gửi khách.</td></tr>'}</tbody></table></div></div>`;
   const q=S._dtbLuuQ||''; if(q){const i=document.getElementById('dtbLuu_q'); if(i){i.value=q;} dtbLuuLoc(q);}
 }
 function dtbLuuToggle(){

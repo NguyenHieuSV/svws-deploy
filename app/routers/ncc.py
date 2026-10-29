@@ -5559,10 +5559,14 @@ def dtb_danh_sach(db: Session = Depends(get_db), _=Depends(yeu_cau_bat_ky(("ncc"
         t, n = tong_map.get(dt_id, (0.0, 0))
         tong_map[dt_id] = (t + float(sl or 0) * float(dg or 0), n + 1)
     out = []
-    for d in db.query(DuToanBan).order_by(DuToanBan.id.desc()).all():
+    # 🕒 mig 161: dự toán vừa làm (sửa dòng / tiêu đề gần nhất) lên trên; chưa có giờ (dữ liệu rất cũ) xuống cuối
+    moi_nhat = func.coalesce(DuToanBan.cap_nhat_luc, DuToanBan.tao_luc)
+    for d in db.query(DuToanBan).order_by(moi_nhat.desc().nulls_last(), DuToanBan.id.desc()).all():
         t, n = tong_map.get(d.id, (0.0, 0))
         out.append({"id": d.id, "ma": d.ma, "khach_hang": d.khach_hang, "mo_ta": d.mo_ta,
                     "ngay": str(d.ngay) if d.ngay else None, "nguoi_tao": d.nguoi_tao,
+                    "tao_luc": str(d.tao_luc)[:16] if d.tao_luc else None,
+                    "cap_nhat_luc": str(d.cap_nhat_luc)[:16] if d.cap_nhat_luc else None,
                     "tong": t, "so_muc": n})
     return out
 
@@ -6251,6 +6255,8 @@ def dtb_chi_tiet(dt_id: int, db: Session = Depends(get_db), _=Depends(yeu_cau_ba
         db.commit()                               # lưu liên kết sản phẩm ↔ file vừa dò bù
     return {"id": d.id, "ma": d.ma, "khach_hang": d.khach_hang, "mo_ta": d.mo_ta,
             "ngay": str(d.ngay) if d.ngay else None, "nguoi_tao": d.nguoi_tao, "viec_nen": viec,
+            "tao_luc": str(d.tao_luc)[:16] if d.tao_luc else None,
+            "cap_nhat_luc": str(d.cap_nhat_luc)[:16] if d.cap_nhat_luc else None,
             "items": items, "tong": sum(x["thanh_tien"] for x in items),
             "tong_thuc": sum((x["gia_thuc"] or 0) * x["so_luong"] for x in items if x["gia_thuc"] is not None),
             "so_dong_thuc": sum(1 for x in items if x["gia_thuc"] is not None)}
