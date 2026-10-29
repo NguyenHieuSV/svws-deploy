@@ -146,7 +146,7 @@ def tao_du_toan_tu_bao_gia(db: Session, bgf, nd) -> dict:
     from sqlalchemy import func
     from .audit import ghi_audit
     from .ma_code import bat_buoc as _bb_ma
-    from .models import DuToanBan, DuToanBanMuc, HangHoa, KhachHang
+    from .models import DuToanBan, DuToanBanMuc, HangHoa, KhachHang, NhaCungCap, SanPhamNcc
     nd_ = bgf.noi_dung or {}
     ma = str(bgf.so or nd_.get("so") or "").strip()
     if not ma:
@@ -181,9 +181,17 @@ def tao_du_toan_tu_bao_gia(db: Session, bgf, nd) -> dict:
             von = gia_ban * (1 - san.get(nhom, san["VAT_TU"]) / 100) / (1 + cpc)   # ước ngược từ sàn biên
             von = round(von / 1000) * 1000
         hh_id = db.query(HangHoa.id).filter(func.lower(func.trim(HangHoa.ten)) == ten.lower()).scalar()   # chỉ lấy id (không nạp quan hệ)
+        # 29/10/2026: mang theo thông tin sản phẩm của dòng báo giá (mã SP · spec · NSX · NCC · liên kết danh mục nếu còn)
+        ncc_id = (int(it["nha_cung_cap_id"]) if str(it.get("nha_cung_cap_id") or "").isdigit()
+                  and db.get(NhaCungCap, int(it["nha_cung_cap_id"])) is not None else None)
+        sp_id = (int(it["san_pham_ncc_id"]) if str(it.get("san_pham_ncc_id") or "").isdigit()
+                 and db.get(SanPhamNcc, int(it["san_pham_ncc_id"])) is not None else None)
         m = DuToanBanMuc(du_toan_id=d.id, ten=ten, quy_cach=(str(it.get("mo_ta") or "")[:2000] or None),
                          don_vi=(str(it.get("don_vi") or "")[:40] or None), so_luong=Decimal(str(it.get("so_luong") or 1)),
                          don_gia=Decimal(str(round(von))), hang_hoa_id=hh_id,
+                         ma_sp=(str(it.get("ma_sp") or "").strip()[:60] or None), spec=(str(it.get("spec") or "").strip()[:2000] or None),
+                         nha_san_xuat=(str(it.get("nha_san_xuat") or "").strip()[:150] or None),
+                         ncc_ten=(str(it.get("ncc_ten") or "").strip()[:200] or None), nha_cung_cap_id=ncc_id, san_pham_ncc_id=sp_id,
                          ghi_chu="Giá vốn ƯỚC từ giá bán − sàn biên (tạo ngược từ báo giá) — cần rà lại" if von > 0 else None)
         db.add(m); db.flush()
         it["dt_muc_id"] = m.id

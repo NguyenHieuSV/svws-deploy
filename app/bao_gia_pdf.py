@@ -68,6 +68,22 @@ def tinh_bao_gia(d: dict):
     return sub, vat, sub + vat
 
 
+def mo_ta_day_du(it: dict) -> str:
+    """Ô Description in cho khách (29/10/2026): mô tả + «Code: mã SP · Brand: nhà sản xuất» + spec (chữ nhỏ).
+    KHÔNG in nhà cung cấp (nội bộ). Trả markup Paragraph đã escape."""
+    from xml.sax.saxutils import escape
+    phan = []
+    if str(it.get("mo_ta") or "").strip():
+        phan.append(escape(str(it["mo_ta"]).strip()))
+    nhan = " · ".join(f"{k}: {escape(str(it[f]).strip())}" for k, f in (("Code", "ma_sp"), ("Brand", "nha_san_xuat"))
+                      if str(it.get(f) or "").strip())
+    if nhan:
+        phan.append(f"<font size='7' color='#5B7186'>{nhan}</font>")
+    if str(it.get("spec") or "").strip():
+        phan.append(f"<font size='7'>{escape(str(it['spec']).strip())}</font>")
+    return "<br/>".join(phan)
+
+
 def tao_bao_gia_pdf(path, d, cong_ty=None,
                     font_path="/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
                     font_bold_path="/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"):
@@ -132,7 +148,7 @@ def tao_bao_gia_pdf(path, d, cong_ty=None,
     def _dong(it, i, an=False):
         sl = float(it.get("so_luong") or 0); gia = float(it.get("don_gia") or 0)
         return [P(str(i), 8, F, black, TA_CENTER), P(it.get("ten") or "", 8),
-                P(it.get("mo_ta") or "", 8, F, GREY), P(f"{sl:g}", 8, F, black, TA_CENTER),
+                P(mo_ta_day_du(it), 8, F, GREY), P(f"{sl:g}", 8, F, black, TA_CENTER),
                 P(it.get("don_vi") or "", 8, F, black, TA_CENTER),
                 P("—" if an else _money(gia), 8, F, black, TA_RIGHT),
                 P(f"{_vat(it):g}%", 8, F, black, TA_CENTER),
@@ -230,7 +246,7 @@ def tao_bao_gia_pdf(path, d, cong_ty=None,
             pr = [[P("<b>No.</b>", 8, FB, white, TA_CENTER), P("<b>Item</b>", 8, FB, white), P("<b>Description</b>", 8, FB, white),
                    P("<b>Qty</b>", 8, FB, white, TA_CENTER), P("<b>Unit</b>", 8, FB, white, TA_CENTER)]]
             for i, it in enumerate(rs, 1):
-                pr.append([P(str(i), 8, F, black, TA_CENTER), P(it.get("ten") or "", 8), P(it.get("mo_ta") or "", 8, F, GREY),
+                pr.append([P(str(i), 8, F, black, TA_CENTER), P(it.get("ten") or "", 8), P(mo_ta_day_du(it), 8, F, GREY),
                            P(f"{float(it.get('so_luong') or 0):g}", 8, F, black, TA_CENTER), P(it.get("don_vi") or "", 8, F, black, TA_CENTER)])
             t2 = Table(pr, colWidths=[W * x for x in (0.06, 0.34, 0.44, 0.08, 0.08)], repeatRows=1)
             t2.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, 0), TEAL), ("GRID", (0, 0), (-1, -1), 0.5, LINE),

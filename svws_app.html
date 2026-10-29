@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="vi">
 <head>
-<!-- build: boq-ncc-2026-10-29 -->
+<!-- build: bg-sp-2026-10-29 -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#0f2c44">
@@ -5982,6 +5982,7 @@ function bgfHuongDan(){
     • <b>Cụm</b>: gõ cùng tên cụm cho các dòng muốn gom khi in (VD «Hệ RO», «Lắp đặt»), rồi chọn hiện đủ dòng / chỉ tổng cụm / dòng + giá trọn gói.<br>
     • <b>Bỏ</b> = không chào dòng đó (dòng vẫn ở dự toán, giá vốn trừ khỏi biên) — <b>↩ Chào lại</b> khi cần.<br>
     • <b>+ Thêm dòng (ngoài dự toán)</b>: dòng tự thêm phải nhập <b>Giá vốn ước</b> để tính biên; thiếu thì không trình duyệt được, người duyệt thấy danh sách dòng này.<br>
+    • <b>Thông tin sản phẩm</b> (từ 29/10/2026): dưới mỗi dòng có ô <b>Mã SP · Nhà sản xuất · Spec</b> — lấy sẵn từ dự toán; gõ vào tên / mã / mô tả / spec / NSX là tìm trong <b>danh mục Sản phẩm NCC</b>, bấm dòng gợi ý để điền cả hàng. Ba thông tin này <b>in cho khách</b> ngay dưới Mô tả (bản in và PDF đính kèm email), còn <b>🏷 NCC</b> chỉ xem nội bộ. Báo giá cũ thiếu thông tin → khung 🔄 có nút ↻ lấy từ dự toán.<br>
     • <b>📎 Đính kèm file</b> báo giá / proposal soạn sẵn (PDF, Word, Excel) → khi gửi khách, file này đi kèm thay cho bảng chi tiết.<br><br>
 
     <b>④ Thông tin khách &amp; điều khoản</b><br>
@@ -6033,6 +6034,7 @@ async function bgfMoi(){
 async function bgfEditor(host){
   const kh=await _crmKhList(); S._bgfKh=kh;
   const hhs=S.mode==="live"?await api("/kho/hang-hoa").catch(()=>[]):DEMO.hang_hoa; S._bgfHh=hhs;
+  if(S.mode==="live")await _dtbSpLoad();          // 🏷 danh mục Sản phẩm NCC — tìm & điền thông tin sản phẩm cho dòng báo giá
   const d=S.bgfEdit.d, t=_bgfTinh(d);
   const esc=v=>(v===null||v===undefined?'':String(v)).replace(/"/g,'&quot;');
   const curKh=(kh||[]).find(x=>x.id===d.khach_hang_id);
@@ -6045,8 +6047,8 @@ async function bgfEditor(host){
       <td><button class="btn-sm ghost" title="Đưa dòng này trở lại báo giá" onclick="bgfChaoLai(${i})">↩ Chào lại</button></td></tr>`;
     return `<tr id="bgf_row_${i}"${it.tuy_chon?' style="background:#f5f3ff"':(it.ngoai_du_toan?' style="background:#fffbeb"':'')}>
     <td style="color:var(--muted)">${i+1}<br><input type="checkbox" ${it.tuy_chon?'checked':''} onchange="bgfTuyChon(${i},this.checked)" title="⭐ Tùy chọn — khách chọn thêm, in mục riêng, KHÔNG tính vào tổng chính" style="width:auto"></td>
-    <td><input list="bgf_dl" value="${esc(it.ten)}" onchange="bgfHH(${i},this.value)" oninput="bgfSet(${i},'ten',this.value)" placeholder="Tên sản phẩm/dịch vụ" style="min-width:160px">${it.ngoai_du_toan?`<div style="font-size:10.5px;color:#b45309" title="Dòng nhân viên tự thêm, không có trong dự toán — phải nhập Giá vốn ước để tính biên; người duyệt sẽ thấy danh sách này">➕ ngoài dự toán${Number(it.gia_von)>0?'':' · <b>chưa ước chi phí</b>'}</div>`:''}</td>
-    <td><input value="${esc(it.mo_ta)}" oninput="bgfSet(${i},'mo_ta',this.value)" placeholder="Mô tả - mã hàng - xuất xứ" style="min-width:170px"></td>
+    <td><input list="bgf_dl" value="${esc(it.ten)}" onchange="bgfHH(${i},this.value)" oninput="bgfSet(${i},'ten',this.value);bgfSpTim(${i},'ten')" placeholder="Tên sản phẩm/dịch vụ — gõ để tìm danh mục Sản phẩm NCC" style="min-width:160px">${it.ngoai_du_toan?`<div style="font-size:10.5px;color:#b45309" title="Dòng nhân viên tự thêm, không có trong dự toán — phải nhập Giá vốn ước để tính biên; người duyệt sẽ thấy danh sách này">➕ ngoài dự toán${Number(it.gia_von)>0?'':' · <b>chưa ước chi phí</b>'}</div>`:''}</td>
+    <td><input value="${esc(it.mo_ta)}" oninput="bgfSet(${i},'mo_ta',this.value);bgfSpTim(${i},'mo_ta')" placeholder="Mô tả in cho khách" style="min-width:170px"></td>
     <td><select data-nocbx onchange="bgfSetNhom(${i},this.value)" style="width:96px;padding:3px 4px;font-size:12px">${Object.entries(BG_NHOM).map(([k,v])=>`<option value="${k}" ${(it.nhom||'VAT_TU')===k?'selected':''}>${v}</option>`).join('')}</select></td>
     <td><input list="bgf_cum_dl" value="${esc(it.cum)}" oninput="bgfSet(${i},'cum',this.value)" onchange="bgfCumDoi()" placeholder="— không gom —" style="width:130px;font-size:12px"></td>
     <td><input type="number" min="0" step="any" value="${esc(it.so_luong)}" oninput="bgfSet(${i},'so_luong',this.value)" style="width:62px"></td>
@@ -6056,17 +6058,20 @@ async function bgfEditor(host){
     <td class="num" id="bgf_b_${i}" style="color:${mauB};font-weight:600;white-space:nowrap">${b==null?'—':String(b).replace('.',',')+'%'}</td>
     <td><input type="number" min="0" max="100" step="any" value="${esc(it.vat_pct??d.vat_pct??8)}" oninput="bgfSet(${i},'vat_pct',this.value)" style="width:52px"></td>
     <td class="num" id="bgf_tt_${i}">${vnd((Number(it.so_luong)||0)*(Number(it.don_gia)||0))}</td>
-    <td style="white-space:nowrap">${it.dt_muc_id?`<button class="btn-sm ghost" title="Không chào dòng này cho khách — dòng vẫn ở dự toán, giá vốn trừ khỏi phép tính biên" onclick="bgfBoDong(${i})">Bỏ</button>`:`<button class="btn-sm ghost" style="color:var(--red)" onclick="bgfXoaDong(${i})">✕</button>`}</td></tr>`;}).join('');
+    <td style="white-space:nowrap">${it.dt_muc_id?`<button class="btn-sm ghost" title="Không chào dòng này cho khách — dòng vẫn ở dự toán, giá vốn trừ khỏi phép tính biên" onclick="bgfBoDong(${i})">Bỏ</button>`:`<button class="btn-sm ghost" style="color:var(--red)" onclick="bgfXoaDong(${i})">✕</button>`}</td></tr>`+_bgfInfoRow(it,i,esc);}).join('');
   const bienTong=_bgBienTong(d), tongVon=_bgTongVon(d);
   // 🔄 dự toán đã đổi giá / SL sau khi lập báo giá? (so dt_muc_id với dự toán hiện tại)
   let dtDoi=[]; if(S.mode==="live"&&d.du_toan_id){try{const cur=await api(`/ncc/du-toan-ban/${d.du_toan_id}`);const map={};(cur.items||[]).forEach(x=>map[x.id]=x);
       dtDoi=(d.items||[]).filter(it=>it.dt_muc_id&&!it.khong_chao).map(it=>{const x=map[it.dt_muc_id];if(!x)return {it,mat:true};const g=Number(x.don_gia||0),sl=Number(x.so_luong||0);
-        return (Math.abs(g-Number(it.gia_von||0))>0.5||Math.abs(sl-Number(it.so_luong||0))>1e-6)?{it,g,sl}:null;}).filter(Boolean);}catch(_){dtDoi=[];}}
+        const sp={ma_sp:x.ma_sp||'',spec:x.spec||'',nha_san_xuat:x.nha_san_xuat||'',ncc_ten:x.ncc_ten||'',nha_cung_cap_id:x.nha_cung_cap_id||null,san_pham_ncc_id:x.san_pham_ncc_id||null};
+        const thieuTT=['ma_sp','spec','nha_san_xuat','ncc_ten'].some(f=>sp[f]&&!String(it[f]||'').trim());
+        if(Math.abs(g-Number(it.gia_von||0))>0.5||Math.abs(sl-Number(it.so_luong||0))>1e-6)return {it,g,sl,sp};
+        return thieuTT?{it,g,sl,sp,tt:true}:null;}).filter(Boolean);}catch(_){dtDoi=[];}}
   window.__bgDtDoi=dtDoi;
   const canhBaoDoi=dtDoi.length?`<div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:10px;padding:10px 14px;margin-bottom:10px;font-size:12.5px">
-      <b style="color:#9a3412">🔄 Dự toán ${esc(d.du_toan_ma||'')} đã đổi sau khi lập báo giá — ${dtDoi.length} dòng lệch giá vốn / số lượng:</b>
-      <div style="margin:4px 0">${dtDoi.slice(0,6).map(x=>x.mat?`• <s>${esc(x.it.ten)}</s> — dòng không còn trong dự toán`:`• ${esc(x.it.ten)}: giá vốn ${vnd(x.it.gia_von)} → <b>${vnd(x.g)}</b>${Math.abs(x.sl-Number(x.it.so_luong||0))>1e-6?` · SL ${esc(x.it.so_luong)} → <b>${x.sl}</b>`:''}`).join('<br>')}${dtDoi.length>6?'<br>…':''}</div>
-      <button class="btn-sm" onclick="bgfCapNhatTuDT()">↻ Cập nhật giá vốn / SL theo dự toán</button> <span style="color:var(--muted)">(giá bán giữ nguyên; bấm «↻ Áp biên» nếu muốn tính lại giá bán)</span></div>`:'';
+      <b style="color:#9a3412">🔄 Dự toán ${esc(d.du_toan_ma||'')} khác báo giá — ${dtDoi.length} dòng lệch giá vốn / số lượng hoặc thiếu thông tin sản phẩm:</b>
+      <div style="margin:4px 0">${dtDoi.slice(0,6).map(x=>x.mat?`• <s>${esc(x.it.ten)}</s> — dòng không còn trong dự toán`:(x.tt?`• ${esc(x.it.ten)}: <span style="color:#0e7490">thiếu mã SP / nhà sản xuất / spec / NCC — dự toán có sẵn</span>`:`• ${esc(x.it.ten)}: giá vốn ${vnd(x.it.gia_von)} → <b>${vnd(x.g)}</b>${Math.abs(x.sl-Number(x.it.so_luong||0))>1e-6?` · SL ${esc(x.it.so_luong)} → <b>${x.sl}</b>`:''}`)).join('<br>')}${dtDoi.length>6?'<br>…':''}</div>
+      <button class="btn-sm" onclick="bgfCapNhatTuDT()">↻ Cập nhật giá vốn / SL / thông tin SP theo dự toán</button> <span style="color:var(--muted)">(giá bán giữ nguyên; bấm «↻ Áp biên» nếu muốn tính lại giá bán; thông tin sản phẩm chỉ điền vào ô còn trống)</span></div>`:'';
   const thanhGia=`<div style="background:var(--surface);border:1px solid var(--line,#e2e8f0);border-radius:10px;padding:10px 14px;margin-bottom:10px">
     <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:end">
       ${Object.entries(BG_NHOM).map(([k,v])=>`<div><label style="font-size:11.5px" title="Sàn ${_bgSan()[k]}% — ${_bgDuocDuoiSan()?'CEO / Admin được đặt dưới sàn':'nhân viên chỉ đặt từ sàn trở lên'}">Biên ${v} (%) <span style="color:var(--muted)">≥ ${_bgSan()[k]}</span></label><input type="number" step="0.5" min="${_bgDuocDuoiSan()?0:_bgSan()[k]}" max="95" value="${esc(d.bien_nhom[k])}" onchange="bgfBienNhom('${k}',this.value)" style="width:76px"></div>`).join('')}
@@ -6140,6 +6145,46 @@ async function bgfEditor(host){
     </div>
   </div></div>`;
 }
+/* ---- 🏷 Thông tin sản phẩm trên dòng báo giá (29/10/2026) — giống form dự toán: mã SP · nhà sản xuất · spec IN cho khách,
+        NCC chỉ xem nội bộ; gõ tên / mã / mô tả / spec / NSX là tìm trong danh mục Sản phẩm NCC, bấm dòng gợi ý để điền cả hàng ---- */
+function _bgfInfoRow(it,i,esc){
+  return `<tr id="bgf_info_${i}"><td style="border-top:0"></td><td colspan="12" style="padding:0 6px 8px;border-top:0">
+    <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;font-size:11.5px">
+      <input value="${esc(it.ma_sp)}" placeholder="Mã SP / model" title="Mã sản phẩm / model — in cho khách (Code)" oninput="bgfSetTT(${i},'ma_sp',this.value)" style="width:125px;font-size:11.5px;padding:3px 6px">
+      <input value="${esc(it.nha_san_xuat)}" placeholder="Nhà sản xuất / hãng" title="Nhà sản xuất — in cho khách (Brand)" oninput="bgfSetTT(${i},'nha_san_xuat',this.value)" style="width:150px;font-size:11.5px;padding:3px 6px">
+      <input value="${esc(it.spec)}" placeholder="Spec (thông số kỹ thuật) — in cho khách dưới mô tả" title="Thông số kỹ thuật — in cho khách dưới Mô tả" oninput="bgfSetTT(${i},'spec',this.value)" style="flex:1;min-width:220px;font-size:11.5px;padding:3px 6px">
+      <span style="color:var(--muted);white-space:nowrap;max-width:260px;overflow:hidden;text-overflow:ellipsis" title="Nhà cung cấp — chỉ xem nội bộ, KHÔNG in cho khách${it.san_pham_ncc_id?' · đã nối danh mục Sản phẩm NCC':''}">🏷 NCC: <b>${esc(it.ncc_ten)||'—'}</b></span>
+    </div><div id="bgf_sp_${i}"></div></td></tr>`;
+}
+function bgfSetTT(i,f,v){const it=S.bgfEdit.d.items[i];if(!it)return;it[f]=v;bgfSpTim(i,f);}
+let _bgfSpTimer=null;
+function bgfSpTim(i,k){
+  clearTimeout(_bgfSpTimer);
+  _bgfSpTimer=setTimeout(()=>{
+    const box=document.getElementById('bgf_sp_'+i), it=((S.bgfEdit||{}).d||{}).items?.[i]; if(!box||!it)return;
+    const raw=String(it[k]||''), q=_dtbKD(raw).trim();
+    if(q.length<2||!(S._dtbSp||[]).length){box.innerHTML='';return;}
+    const toks=q.split(/\s+/).filter(Boolean);
+    const cot={ten:'ten',ma_sp:'ma_sp',mo_ta:'mo_ta',spec:'spec',nha_san_xuat:'nha_san_xuat'}[k];
+    const kq=[];for(const x of S._dtbSp){if(toks.every(t=>x._kd.includes(t))){kq.push([cot&&_dtbKD(x[cot]).includes(toks[0])?0:1,x]);if(kq.length>=80)break;}}
+    kq.sort((a,b)=>a[0]-b[0]); S._bgfSpKq=kq.slice(0,10).map(a=>a[1]);
+    const ec=v=>String(v==null?'':v).replace(/</g,'&lt;');
+    if(!S._bgfSpKq.length){box.innerHTML='';return;}
+    box.innerHTML=`<div style="border:1px solid var(--line);border-radius:8px;background:#fff;box-shadow:0 6px 18px rgba(0,0,0,.08);max-height:240px;overflow:auto;margin-top:4px">
+      <div style="font-size:11px;color:var(--muted);padding:4px 8px 0">🏷 Sản phẩm NCC khớp «${ec(raw)}» — bấm để điền mã SP · mô tả · spec · nhà sản xuất · ĐVT · NCC${it.dt_muc_id?' (tên và giá vốn giữ theo dự toán)':' (giá vốn nếu dòng chưa có)'}</div>
+      <table style="font-size:12px;width:100%"><thead><tr><th>Nhà cung cấp</th><th>Tên sản phẩm</th><th>Mã SP</th><th>Mô tả · spec</th><th>NSX</th><th>ĐVT</th><th class="num">Giá NCC</th></tr></thead><tbody>
+      ${S._bgfSpKq.map((x,j)=>`<tr onclick="bgfSpChon(${i},${j})" style="cursor:pointer" title="Bấm để điền"><td style="font-size:11.5px;max-width:170px;white-space:normal">${ec(x.ten_ncc)}</td><td><b>${ec(x.ten)}</b></td><td style="white-space:nowrap">${ec(x.ma_sp)||'—'}</td><td style="font-size:11px;color:var(--muted);max-width:280px;white-space:normal">${ec(((x.mo_ta||'')+(x.spec?' · '+x.spec:'')).slice(0,150))}</td><td>${ec(x.nha_san_xuat)||'—'}</td><td>${ec(x.don_vi)||'—'}</td><td class="num"><b style="color:#0e7490">${x.don_gia?vnd(x.don_gia):'—'}</b></td></tr>`).join('')}</tbody></table></div>`;
+  },200);
+}
+function bgfSpChon(i,j){
+  const x=(S._bgfSpKq||[])[j], it=S.bgfEdit.d.items[i]; if(!x||!it)return;
+  if(!it.dt_muc_id||!(it.ten||'').trim())it.ten=x.ten;                       // dòng từ dự toán giữ tên dự toán
+  it.ma_sp=x.ma_sp||''; it.spec=x.spec||''; it.nha_san_xuat=x.nha_san_xuat||'';
+  if(!(it.mo_ta||'').trim())it.mo_ta=x.mo_ta||''; if(!(it.don_vi||'').trim()||it.don_vi==='Unit')it.don_vi=x.don_vi||it.don_vi;
+  it.ncc_ten=x.ten_ncc||''; it.nha_cung_cap_id=x.nha_cung_cap_id||null; it.san_pham_ncc_id=x.id||null;
+  if(!it.dt_muc_id&&!(Number(it.gia_von)>0)&&Number(x.don_gia)>0){it.gia_von=Math.round(x.don_gia); if(!it.khoa_gia)it.don_gia=_bgGiaTheoBien(S.bgfEdit.d,it);}
+  S._bgfSpKq=[]; viewBanHang($("#main"));
+}
 function bgfSet(i,f,v){const d=S.bgfEdit.d,it=d.items[i];if(!it)return;it[f]=v;if(f==='don_gia')it.khoa_gia=true;
   if(f==='don_gia'&&!_bgDuocDuoiSan()&&_bgDuoiSan(d,it)){const gs=_bgGiaSan(d,it);it.don_gia=gs;const el=document.querySelector(`#bgf_row_${i} input[data-f="don_gia"]`);if(el)el.value=gs;
     toast(`🔒 Giá bán không được dưới sàn biên ${_bgSan()[it.nhom||'VAT_TU']}% (${BG_NHOM[it.nhom||'VAT_TU']}) — đã đặt về ${vnd(gs)}. Muốn thấp hơn, nhờ CEO / Admin.`,"err");}
@@ -6196,10 +6241,10 @@ function _bgfCapNhatTong(i){
 }
 function bgfThemDong(){const its=S.bgfEdit.d.items;
   const vatCuoi=its.length?its[its.length-1].vat_pct:(S.bgfEdit.d.vat_pct??8);
-  its.push({ten:"",mo_ta:"",so_luong:1,don_vi:"Unit",don_gia:0,gia_von:0,nhom:"VAT_TU",cum:"",vat_pct:vatCuoi??8,ngoai_du_toan:!!S.bgfEdit.d.du_toan_id});viewBanHang($("#main"));}
+  its.push({ten:"",mo_ta:"",ma_sp:"",spec:"",nha_san_xuat:"",ncc_ten:"",so_luong:1,don_vi:"Unit",don_gia:0,gia_von:0,nhom:"VAT_TU",cum:"",vat_pct:vatCuoi??8,ngoai_du_toan:!!S.bgfEdit.d.du_toan_id});viewBanHang($("#main"));}
 function bgfCapNhatTuDT(){const d=S.bgfEdit.d; const ds=window.__bgDtDoi||[]; let n=0;
-  ds.forEach(x=>{if(x.mat)return; x.it.gia_von=x.g; x.it.so_luong=x.sl; n++;});
-  toast(`Đã cập nhật ${n} dòng theo dự toán — giá bán giữ nguyên, biên tính lại`,"ok"); viewBanHang($("#main"));}
+  ds.forEach(x=>{if(x.mat)return; x.it.gia_von=x.g; x.it.so_luong=x.sl; if(x.sp)for(const f in x.sp){if(x.sp[f]&&!String(x.it[f]||'').trim())x.it[f]=x.sp[f];} n++;});
+  toast(`Đã cập nhật ${n} dòng theo dự toán (giá vốn / SL / thông tin sản phẩm) — giá bán giữ nguyên, biên tính lại`,"ok"); viewBanHang($("#main"));}
 function bgfTuyChon(i,v){const it=S.bgfEdit.d.items[i];if(!it)return;it.tuy_chon=!!v;viewBanHang($("#main"));}
 function bgfBoDong(i){const it=S.bgfEdit.d.items[i];if(!it)return;it.khong_chao=true;viewBanHang($("#main"));}
 function bgfChaoLai(i){const it=S.bgfEdit.d.items[i];if(!it)return;it.khong_chao=false;viewBanHang($("#main"));}
@@ -6473,11 +6518,12 @@ async function bgfXoa(id){
   toast("Đã xóa báo giá","ok");viewBanHang($("#main"));
 }
 /* In bảng sản phẩm THEO CỤM: DU = đủ dòng · GON = chỉ tổng cụm (chi tiết ở phụ lục) · TRON_GOI = dòng không giá + giá trọn gói */
+function _bgMoTaIn(it,e){const p=[];if(String(it.mo_ta||'').trim())p.push(e(it.mo_ta));const nh=[['Code',it.ma_sp],['Brand',it.nha_san_xuat]].filter(a=>String(a[1]||'').trim()).map(a=>`${a[0]}: ${e(a[1])}`).join(' · ');if(nh)p.push(`<span style="font-size:10.5px;color:#5B7186">${nh}</span>`);if(String(it.spec||'').trim())p.push(`<span style="font-size:10.5px">${e(it.spec)}</span>`);return p.join('<br>');}
 function _bgInDong(d,money){
   const e=v=>String(v==null?'':v).replace(/&/g,'&amp;').replace(/</g,'&lt;');
   const its=(d.items||[]).filter(it=>(it.ten||it.mo_ta)&&!it.khong_chao&&!it.tuy_chon); const vat=it=>(it.vat_pct===undefined||it.vat_pct===null||it.vat_pct==='')?(Number(d.vat_pct)||0):Number(it.vat_pct);
   const tt=it=>(Number(it.so_luong)||0)*(Number(it.don_gia)||0);
-  const dong=(it,i,an)=>`<tr><td style="text-align:center">${i}</td><td>${e(it.ten)}</td><td>${e(it.mo_ta)}</td><td style="text-align:center">${e(it.so_luong)}</td><td style="text-align:center">${e(it.don_vi)}</td>
+  const dong=(it,i,an)=>`<tr><td style="text-align:center">${i}</td><td>${e(it.ten)}</td><td>${_bgMoTaIn(it,e)}</td><td style="text-align:center">${e(it.so_luong)}</td><td style="text-align:center">${e(it.don_vi)}</td>
     <td style="text-align:right">${an?'—':money(Number(it.don_gia)||0)}</td><td style="text-align:center">${vat(it)||0}%</td><td style="text-align:right">${an?'—':money(tt(it))}</td></tr>`;
   const cumDs=_bgCumDs(d); if(!cumDs.length)return its.map((it,i)=>dong(it,i+1,false)).join('');
   let html='', n=0, k=0; const hien=d.cum_hien||{};
@@ -6493,11 +6539,11 @@ function _bgTuyChonIn(d,money){
   const vat=it=>(it.vat_pct===undefined||it.vat_pct===null||it.vat_pct==='')?(Number(d.vat_pct)||0):Number(it.vat_pct);
   return `<div class="ttl" style="font-size:12px;margin-top:10px">Optional items <span style="font-weight:400;color:#5B7186">(not included in the total — available on request)</span></div>
   <table class="it"><thead><tr><th style="width:26px">No.</th><th>Product Name</th><th>Description</th><th style="width:38px">Qty</th><th style="width:44px">Unit</th><th style="width:88px;text-align:right">Unit Price (VND)</th><th style="width:42px;text-align:center">VAT</th><th style="width:96px;text-align:right">Amount (VND)</th></tr></thead>
-  <tbody>${tc.map((it,i)=>`<tr><td style="text-align:center">O${i+1}</td><td>${e(it.ten)}</td><td>${e(it.mo_ta)}</td><td style="text-align:center">${e(it.so_luong)}</td><td style="text-align:center">${e(it.don_vi)}</td><td style="text-align:right">${money(Number(it.don_gia)||0)}</td><td style="text-align:center">${vat(it)||0}%</td><td style="text-align:right">${money((Number(it.so_luong)||0)*(Number(it.don_gia)||0))}</td></tr>`).join('')}</tbody></table>`;
+  <tbody>${tc.map((it,i)=>`<tr><td style="text-align:center">O${i+1}</td><td>${e(it.ten)}</td><td>${_bgMoTaIn(it,e)}</td><td style="text-align:center">${e(it.so_luong)}</td><td style="text-align:center">${e(it.don_vi)}</td><td style="text-align:right">${money(Number(it.don_gia)||0)}</td><td style="text-align:center">${vat(it)||0}%</td><td style="text-align:right">${money((Number(it.so_luong)||0)*(Number(it.don_gia)||0))}</td></tr>`).join('')}</tbody></table>`;
 }
 function _bgPhuLuc(d){const hien=d.cum_hien||{}; const cs=_bgCumDs(d).filter(c=>hien[c]==='GON'); if(!cs.length)return '';
   const e=v=>String(v==null?'':v).replace(/&/g,'&amp;').replace(/</g,'&lt;'); const its=(d.items||[]).filter(it=>(it.ten||it.mo_ta)&&!it.khong_chao);
-  return `<div class="add" style="page-break-before:always"><div class="h">Technical appendix — scope of supply</div>${cs.map(c=>`<div style="font-weight:700;margin-top:8px">${e(c)}</div><table class="it"><thead><tr><th style="width:26px">No.</th><th>Item</th><th>Description</th><th style="width:38px">Qty</th><th style="width:44px">Unit</th></tr></thead><tbody>${its.filter(it=>(it.cum||'').trim()===c).map((it,i)=>`<tr><td style="text-align:center">${i+1}</td><td>${e(it.ten)}</td><td>${e(it.mo_ta)}</td><td style="text-align:center">${e(it.so_luong)}</td><td style="text-align:center">${e(it.don_vi)}</td></tr>`).join('')}</tbody></table>`).join('')}</div>`;}
+  return `<div class="add" style="page-break-before:always"><div class="h">Technical appendix — scope of supply</div>${cs.map(c=>`<div style="font-weight:700;margin-top:8px">${e(c)}</div><table class="it"><thead><tr><th style="width:26px">No.</th><th>Item</th><th>Description</th><th style="width:38px">Qty</th><th style="width:44px">Unit</th></tr></thead><tbody>${its.filter(it=>(it.cum||'').trim()===c).map((it,i)=>`<tr><td style="text-align:center">${i+1}</td><td>${e(it.ten)}</td><td>${_bgMoTaIn(it,e)}</td><td style="text-align:center">${e(it.so_luong)}</td><td style="text-align:center">${e(it.don_vi)}</td></tr>`).join('')}</tbody></table>`).join('')}</div>`;}
 function _bgfPrint(d){
   const t=_bgfTinh(d);
   const money=n=>Math.round(n).toLocaleString('en-US');
@@ -10466,7 +10512,7 @@ async function dtbTaoBaoGia(id){
       attn:khObj?(khObj.nguoi_lien_he||""):"",
       // 💡 đơn giá bán gợi ý = giá dự toán (giá vốn) × (1 + biên gợi ý), làm tròn nghìn — người lập chỉnh lại nếu cần
       items:its.map(x=>{const nh=_bgNhomDoan(x.ten,x.quy_cach); const m=/nhóm\s+(?:([A-Za-z]{1,2})\s+)?([^·]+)/.exec(String(x.ghi_chu||''));
-        return {dt_muc_id:x.id,ten:x.ten,mo_ta:x.quy_cach||"",so_luong:Number(x.so_luong||0),don_vi:x.don_vi||"Unit",
+        return {dt_muc_id:x.id,ten:x.ten,mo_ta:x.quy_cach||"",ma_sp:x.ma_sp||"",spec:x.spec||"",nha_san_xuat:x.nha_san_xuat||"",ncc_ten:x.ncc_ten||"",nha_cung_cap_id:x.nha_cung_cap_id||null,san_pham_ncc_id:x.san_pham_ncc_id||null,so_luong:Number(x.so_luong||0),don_vi:x.don_vi||"Unit",
         don_gia:0,gia_von:Number(x.don_gia||0),nhom:nh,cum:m?(((m[1]?m[1].toUpperCase()+' ':'')+(m[2]||'').trim()).trim().slice(0,60)):"",vat_pct:8};}),
       du_toan_id:d.id, du_toan_ma:d.ma, bien_nhom:(()=>{const sn=_bgSan();return {THIET_BI:sn.THIET_BI,VAT_TU:sn.VAT_TU,NHAN_CONG:sn.NHAN_CONG};})(), chi_phi_chung:_bgSan().chi_phi_chung,
       vat_pct:8, ...(_bgMauDK(d.ma)),
