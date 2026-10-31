@@ -425,11 +425,43 @@ def ds_chi_tieu(ts_id: int, loai: str | None = None, db: Session = Depends(get_d
             for c in q.order_by(CtBcvhChiTieu.thu_tu, CtBcvhChiTieu.id).all()]
 
 
+def _kiem_he_thong_kl(db, ts, ten: str, tinh_tien: bool | None = None, trong_danh_muc: bool = False) -> None:
+    """🚫 Quy tắc đồng hồ khối lượng (anh Hiếu 31/10/2026): dự án NƯỚC THẢI (loai_he_thong NUOC_THAI) không nhận đồng hồ RO
+    TÍNH TIỀN — nước RO ghi ở dự án tái sử dụng (NUOC_TAI_SU_DUNG) cùng khách, vd DV-COA-NT-2024 ↔ DV-COA-RO-2024; đồng hồ RO
+    chỉ THAM KHẢO («RO vào DAF»…) vẫn được. trong_danh_muc=True: hệ thống ghi chỉ số phải có trong danh mục khối lượng của dự án
+    (dự án chưa có danh mục thì không ràng buộc)."""
+    import re
+    from ..boq_mau import _kd
+    ten_s = str(ten or "").strip()
+    if trong_danh_muc:
+        dm = {(c.chi_tieu or "").strip().lower(): (c.tinh_tien is not False)
+              for c in db.query(CtBcvhChiTieu).filter_by(tai_san_id=ts.id, loai="KHOI_LUONG").all()}
+        if dm and ten_s.lower() not in dm:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                f"Hệ thống «{ten_s}» không có trong danh mục khối lượng của dự án {ts.ma} — nếu đúng là đồng hồ "
+                                "của dự án này, thêm bằng ➕ Thêm hệ thống trước.")
+        if tinh_tien is None:
+            tinh_tien = dm.get(ten_s.lower(), True)
+    if ((ts.loai_he_thong or "").upper() == "NUOC_THAI" and tinh_tien is not False
+            and re.search(r"(^|[^a-z0-9])ro([^a-z0-9]|$)", _kd(ten_s))):
+        goi_y = None
+        if ts.khach_hang_id:
+            goi_y = (db.query(TaiSanChoThue).filter(TaiSanChoThue.khach_hang_id == ts.khach_hang_id, TaiSanChoThue.id != ts.id,
+                                                    TaiSanChoThue.loai_he_thong == "NUOC_TAI_SU_DUNG").first())
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            f"🚫 Dự án nước thải {ts.ma} chỉ tính chỉ số nước thải — không nhận đồng hồ RO tính tiền («{ten_s}»). "
+                            f"Nước RO ghi ở dự án tái sử dụng{(' ' + goi_y.ma) if goi_y else ''}. "
+                            "(Đồng hồ RO chỉ để tham khảo thì bỏ tick Tính tiền.)")
+
+
 @router.post("/tai-san/{ts_id}/chi-tieu", status_code=201)
 def them_chi_tieu(ts_id: int, data: CtChiTieuVao, db: Session = Depends(get_db),
                   nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
-    if db.get(TaiSanChoThue, ts_id) is None:
+    ts = db.get(TaiSanChoThue, ts_id)
+    if ts is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy dự án cho thuê")
+    if data.loai == "KHOI_LUONG":
+        _kiem_he_thong_kl(db, ts, data.chi_tieu, tinh_tien=data.tinh_tien)
     c = CtBcvhChiTieu(tai_san_id=ts_id, loai=data.loai, vi_tri=(data.vi_tri or "").strip()[:150] or None,
                       chi_tieu=data.chi_tieu.strip()[:250], don_vi=(data.don_vi or "").strip()[:20] or None,
                       tinh_tien=data.tinh_tien)
@@ -455,6 +487,10 @@ def sua_chi_tieu(ct_id: int, data: CtChiTieuSua, db: Session = Depends(get_db),
     if c is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy chỉ tiêu")
     cu = {"vi_tri": c.vi_tri, "chi_tieu": c.chi_tieu, "don_vi": c.don_vi}
+    if (c.loai or "") == "KHOI_LUONG":
+        _kiem_he_thong_kl(db, db.get(TaiSanChoThue, c.tai_san_id),
+                          (data.chi_tieu.strip() if (data.chi_tieu or "").strip() else c.chi_tieu),
+                          tinh_tien=(data.tinh_tien if data.tinh_tien is not None else (c.tinh_tien is not False)))
     if data.chi_tieu is not None and data.chi_tieu.strip():
         c.chi_tieu = data.chi_tieu.strip()[:250]
     if data.vi_tri is not None:
@@ -678,7 +714,8 @@ def luu_bao_cao_kl(ts_id: int, data: BcKlBatch, cho_phep_giam: bool = False,
     """Báo cáo khối lượng: ghi CHỈ SỐ NƯỚC theo từng hệ thống của dự án.
     Chỉ số NHỎ HƠN lần ghi trước bị chặn (khối lượng sẽ âm) trừ khi xác nhận
     cho_phep_giam=true (thay đồng hồ / reset)."""
-    if db.get(TaiSanChoThue, ts_id) is None:
+    ts = db.get(TaiSanChoThue, ts_id)
+    if ts is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy dự án cho thuê")
     ng = data.ngay or date.today()
     nv_id = nhan_vien_id_cua(db, nd.id)
@@ -686,6 +723,7 @@ def luu_bao_cao_kl(ts_id: int, data: BcKlBatch, cho_phep_giam: bool = False,
     for d in data.dong:
         if d.chi_so is None:
             continue
+        _kiem_he_thong_kl(db, ts, d.he_thong, trong_danh_muc=True)     # 🚫 31/10/2026: đúng danh mục · nước thải không nhận RO
         if not cho_phep_giam:
             truoc_kl = (db.query(CtBaoCaoVh)
                         .filter_by(tai_san_id=ts_id, loai="KHOI_LUONG", noi_dung=d.he_thong)
@@ -732,10 +770,11 @@ def chuyen_he_thong_kl(ts_id: int, data: ChuyenKlVao, db: Session = Depends(get_
                                         func.lower(func.trim(CtBaoCaoVh.noi_dung)) == ten.lower()).all())
     if not rows:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Hệ thống '{ten}' chưa có chỉ số nào ở dự án này")
-    for r in rows:
-        r.tai_san_id, r.noi_dung = den.id, ten_moi
     nguon = [c for c in db.query(CtBcvhChiTieu).filter_by(tai_san_id=ts_id, loai="KHOI_LUONG").all()
              if (c.chi_tieu or "").strip().lower() == ten.lower()]
+    _kiem_he_thong_kl(db, den, ten_moi, tinh_tien=((nguon[0].tinh_tien is not False) if nguon else True))   # dự án nhận — kiểm TRƯỚC khi đổi
+    for r in rows:
+        r.tai_san_id, r.noi_dung = den.id, ten_moi
     co_dich = any((c.chi_tieu or "").strip().lower() == ten_moi.lower() for c in
                   db.query(CtBcvhChiTieu).filter_by(tai_san_id=den.id, loai="KHOI_LUONG").all())
     if not co_dich:

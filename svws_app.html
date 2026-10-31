@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="vi">
 <head>
-<!-- build: boq-ngang-audit-2026-10-31 -->
+<!-- build: kl-ro-nt-2026-10-31 -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#0f2c44">
@@ -3741,7 +3741,7 @@ function ctKlThemModal(){
     <div class="formrow" style="padding-top:0">
       <div class="f"><label>Chỉ số nước (tùy chọn)</label><input id="klm_cs" type="number" step="any" placeholder="nhập để lưu luôn 1 dòng"></div>
       <div class="f" style="flex:2"><label>Ghi chú</label><input id="klm_gc"></div></div>
-    <div class="note" style="margin:2px 0 8px">Hệ thống được <b>lưu theo dự án</b> — các lần báo cáo sau tự hiện sẵn, chỉ cần nhập chỉ số. <b>NVVH</b> tự ghi theo người đăng nhập.</div>
+    <div class="note" style="margin:2px 0 8px">Hệ thống được <b>lưu theo dự án</b> — các lần báo cáo sau tự hiện sẵn, chỉ cần nhập chỉ số. <b>NVVH</b> tự ghi theo người đăng nhập. <b>Quy tắc (31/10/2026):</b> dự án <b>nước thải</b> chỉ tính chỉ số nước thải, <u>không nhận đồng hồ RO tính tiền</u> — nước RO ghi ở dự án tái sử dụng cùng khách (VD DV-COA-NT-2024 ↔ DV-COA-RO-2024); chỉ số chỉ ghi được cho hệ thống có trong danh mục của dự án.</div>
     <button class="btn-sm" onclick="ctKlLuu()">💾 Lưu</button>`);
 }
 async function ctKlPost(tsId,body){
