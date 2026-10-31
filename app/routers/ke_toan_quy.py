@@ -2495,7 +2495,7 @@ def _lai_lo_1(db, dh: DonHang):
     # CÔNG THỨC CHUNG (app/lai_lo_ma.py) — cùng con số với Kiểm soát, Overall Financial, Bán hàng
     from ..lai_lo_ma import chi_phi_ma
     cp = chi_phi_ma(db, dh)
-    doanh_thu = cp["doanh_thu"]          # GỒM VAT — cùng cơ sở với chi phí
+    doanh_thu = cp["doanh_thu"]          # CHƯA VAT (31/10/2026) — cùng cơ sở với chi phí
     gia_von = cp["gia_von_po"]           # Σ tổng PO đã duyệt (nghĩa vụ cam kết)
     chi_phi = cp["chi_phi_khac"]         # nhập ngoài + hóa đơn mua ngoài PO gắn mã
     da_thu = cp["da_thu"]

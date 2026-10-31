@@ -710,7 +710,7 @@ def _tinh_lai_lo_tong(db: Session) -> dict:
     theo_ma, tong_dt, tong_cp = [], 0.0, 0.0
     for dh in db.query(DonHang).order_by(DonHang.id.desc()).all():
         cp = chi_phi_ma(db, dh)
-        doanh_thu = cp["doanh_thu"]          # GỒM VAT — cùng cơ sở với chi phí
+        doanh_thu = cp["doanh_thu"]          # CHƯA VAT (31/10/2026) — cùng cơ sở với chi phí
         chi_phi = cp["tong_chi_phi"]         # PO đã duyệt + nhập ngoài + hóa đơn mua ngoài PO gắn mã
         if cp.get("la_dau_tu"):              # 🏗 đơn ĐẦU TƯ – cho thuê: vốn đầu tư, không vào doanh thu / chi phí theo mã
             theo_ma.append({"don_hang_id": dh.id, "ma_ban": dh.so or f"DH-{dh.id}", "nhom": nhom_ma(dh.so),

@@ -396,6 +396,7 @@ class DonHangRa(BaseModel):
     gia_von_chao: Decimal | None = None
     bien_chao: Decimal | None = None
     chot_luc: datetime | None = None
+    gia_von_chao_uoc: bool | None = None       # mig 162
 
 
 # ---------- Kế toán & Tài chính ----------

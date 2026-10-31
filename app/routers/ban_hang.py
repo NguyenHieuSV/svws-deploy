@@ -1348,7 +1348,7 @@ def ds_bao_gia_form(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XE
 @router.get("/bao-gia-form/kiem-soat")
 def bao_gia_kiem_soat(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
     """📋 / 📉 của từng báo giá (200 mới nhất): dự toán gốc, thiếu gì, biên so với dự toán. Kèm biên gợi ý cho nút tạo."""
-    from ..bao_gia_ks import bien_goi_y, bien_toi_thieu, kiem_tra, mien_truoc_moc
+    from ..bao_gia_ks import ban_nhap, bien_goi_y, bien_toi_thieu, kiem_tra, mien_truoc_moc, ngay_ap_dung
     out = {}
     dh_map = {}                                                  # báo giá → đơn hàng đã chốt (mig 158)
     for i, so, bid in db.query(DonHang.id, DonHang.so, DonHang.bao_gia_form_id).filter(DonHang.bao_gia_form_id.isnot(None)).all():
@@ -1370,10 +1370,12 @@ def bao_gia_kiem_soat(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "
                           "tao_nguoc_duoc": bool(k["thieu_du_toan"] and not dt and its_
                                                  and all(float(it.get("don_gia") or 0) > 0 for it in its_)),
                           "ngoai_du_toan": len(k["ngoai_du_toan"]), "ngoai_chua_uoc": len(k["ngoai_chua_uoc"]),
-                          "so_bo": k["so_bo"], "dt_doi_gia": len(k["dt_doi_gia"]), "don_hang": dh_map.get(b.id)}
+                          "so_bo": k["so_bo"], "dt_doi_gia": len(k["dt_doi_gia"]), "don_hang": dh_map.get(b.id),
+                          "gia_uoc": bool(k.get("gia_uoc")), "ban_nhap": ban_nhap(b)}
     from ..bao_gia_ks import MAU_DIEU_KHOAN, la_qtv, san_bien
     return {"bao_gia": out, "bien_toi_thieu": bien_toi_thieu(), "bien_goi_y": bien_goi_y(),
-            "san_bien": san_bien(), "duoc_duoi_san": la_qtv(_), "mau_dieu_khoan": MAU_DIEU_KHOAN}
+            "san_bien": san_bien(), "duoc_duoi_san": la_qtv(_), "mau_dieu_khoan": MAU_DIEU_KHOAN,
+            "ap_dung_tu": str(ngay_ap_dung() or "")}
 
 
 @router.post("/bao-gia-form/{bgf_id}/tao-du-toan")
@@ -1468,6 +1470,7 @@ def bao_gia_doi_chieu(bgf_id: int, db: Session = Depends(get_db), _=Depends(yeu_
     return {"du_toan_ma": dt.get("ma"), "du_toan_loai": dt.get("loai"), "tong_du_toan": dt.get("tong"),
             "tong_bg": k["tong_bg"], "bien": k["bien"], "nguong": k["nguong"], "thieu": k["thieu_du_toan"],
             "canh_bao_bien": k["canh_bao_bien"], "ngoai_du_toan": k["ngoai_du_toan"], "ngoai_chua_uoc": k["ngoai_chua_uoc"],
+            "gia_uoc": bool(k.get("gia_uoc")), "canh_bao_uoc": k.get("canh_bao_uoc"),
             "so_bo": k["so_bo"], "dt_doi_gia": k["dt_doi_gia"],
             "tong_tuy_chon": tinh_tuy_chon(bgf.noi_dung or {}),
             "phien_ban": ds_phien_ban(db, bgf.id), "so_sanh": so_sanh_lan_truoc(db, bgf)}
@@ -1798,8 +1801,9 @@ def _luu_pdf_bao_gia(db: Session, nd: NguoiDung, bgf: BaoGiaForm):
     so = d.get("so") or bgf.so or f"BG-{bgf.id}"
     ten_file = "Bao_gia_" + _re.sub(r"[^A-Za-z0-9._-]", "-", so) + ".pdf"
     pdf_path = _os.path.join(_tmp.gettempdir(), f"kho_{bgf.id}_{ten_file}")
-    tao_bao_gia_pdf(pdf_path, d,
-                    font_path=_st.pdf_font_path, font_bold_path=_st.pdf_font_bold_path)
+    from ..bao_gia_ks import ban_nhap
+    tao_bao_gia_pdf(pdf_path, d, font_path=_st.pdf_font_path, font_bold_path=_st.pdf_font_bold_path,
+                    nhap=ban_nhap(bgf))                      # 31/10/2026: chưa duyệt → PDF đóng dấu BẢN NHÁP
     with open(pdf_path, "rb") as f:
         data = f.read()
     try:

@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="vi">
 <head>
-<!-- build: dtb-capnhat-2026-10-29 -->
+<!-- build: bg-nhap-uoc-vat-2026-10-31 -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#0f2c44">
@@ -1284,7 +1284,7 @@ function _ghepNhomMa(rows,veDong,veNhom){
     const rs=x.nhom?nh[x.nhom]:null;
     if(rs&&rs.length>=2){
       const dt=rs.reduce((s,r)=>s+Number(r.doanh_thu||0),0), cp=rs.reduce((s,r)=>s+Number(r.tong_chi_phi||0),0);
-      let ct=0,cx=0; rs.forEach(r=>{if(r.bien_chao!=null&&Number(r.tong_chao)>0){ct+=Number(r.tong_chao);cx+=Number(r.bien_chao)*Number(r.tong_chao);}});   // biên lúc chào gộp theo tổng chào
+      let ct=0,cx=0; rs.forEach(r=>{if(r.bien_chao!=null&&!r.gia_von_chao_uoc&&Number(r.tong_chao)>0){ct+=Number(r.tong_chao);cx+=Number(r.bien_chao)*Number(r.tong_chao);}});   // biên lúc chào gộp theo tổng chào
       html+=veNhom({nhom:x.nhom,so_ma:rs.length,doanh_thu:dt,tong_chi_phi:cp,loi_nhuan:dt-cp,ty_suat:dt?Math.round((dt-cp)/dt*1000)/10:null,bien_chao:ct?Math.round(cx/ct*10)/10:null});
       // mã con THU GỌN mặc định (bấm dòng 📂 để mở) — tránh «lỗ ảo» khi chi phí dồn một mã con, doanh thu chia -01/-02…
       rs.forEach(r=>{daVe.add(r);html+=veDong(r,++stt,true).replace(/^\s*<tr/,'<tr data-con="1" hidden');});
@@ -1460,7 +1460,7 @@ async function _renderOverallFinancial(m){
       <td class="num"><b style="color:${mauLL(t.lai_lo)}">${vnd(t.lai_lo)}</b></td></tr>`).join('');
     m.innerHTML+=`<div class="panel" style="margin-top:14px;border:1px solid #7c3aed55"><div class="panel-h"><h3>📈 Lãi/Lỗ Record</h3><div class="spacer"></div>
         <span class="num" style="font-weight:700">LÃI/LỖ hiện tại: <span style="color:${mauLL(T.lai_lo)};font-size:15px">${vnd(T.lai_lo)}</span></span></div>
-      <div class="note"><b>Công thức:</b> Lãi gộp = Tổng giá trị đơn hàng bán <b>(GỒM VAT)</b> − Tổng chi phí các đơn (thanh toán mua + công nợ phải trả, gồm VAT) — hai vế cùng cơ sở thuế. <b>👥 Chi phí nhân sự</b> = bảng lương từng tháng (tổng thu nhập + BHXH/BHYT/BHTN + KPCĐ phần doanh nghiệp, <b>kể cả bảng lương chờ duyệt — tạm tính</b>) + nhân sự thuê ngoài đã chi; tháng chưa có bảng lương lấy khoản Chi cố định «Lương» làm dự phòng. <b>Chi phí khác</b> (vận hành, thuê văn phòng…) = Tổng <b>Chi cố định/tháng</b> không gồm khoản lương (hiện ${vnd(T.chi_thang)}/tháng — khai ở 📅 Lịch dòng tiền → Chi cố định hàng tháng) × số tháng từ đầu năm. <b>LÃI/LỖ = Lãi gộp − 👥 Chi phí nhân sự − Chi phí khác − Chi phí hóa đơn MUA ngoài PO − Chi phí vận hành OP − 🧩 Chi phí chưa phân mã</b> (mọi khoản chi đều được trừ, kể cả khoản chưa gắn mã; riêng <b>mua dự trữ KHO</b> là tồn kho nên chưa tính chi phí). Hệ thống tự ghi record <b>mỗi ngày</b>; bản ghi <b>ngày cuối tháng</b> chính là record chốt tháng.</div>
+      <div class="note"><b>Công thức:</b> Lãi gộp = Tổng giá trị đơn hàng bán <b>(CHƯA VAT)</b> − Tổng chi phí các đơn (PO đã duyệt + công nợ / hóa đơn gắn mã, <b>chưa VAT</b>) — VAT bán là thu hộ, VAT mua được khấu trừ nên không tính vào lãi (đổi từ 31/10/2026; trước đó hai vế đều gồm VAT nên số cũ cao hơn khoảng 8–10%). <b>👥 Chi phí nhân sự</b> = bảng lương từng tháng (tổng thu nhập + BHXH/BHYT/BHTN + KPCĐ phần doanh nghiệp, <b>kể cả bảng lương chờ duyệt — tạm tính</b>) + nhân sự thuê ngoài đã chi; tháng chưa có bảng lương lấy khoản Chi cố định «Lương» làm dự phòng. <b>Chi phí khác</b> (vận hành, thuê văn phòng…) = Tổng <b>Chi cố định/tháng</b> không gồm khoản lương (hiện ${vnd(T.chi_thang)}/tháng — khai ở 📅 Lịch dòng tiền → Chi cố định hàng tháng) × số tháng từ đầu năm. <b>LÃI/LỖ = Lãi gộp − 👥 Chi phí nhân sự − Chi phí khác − Chi phí hóa đơn MUA ngoài PO − Chi phí vận hành OP − 🧩 Chi phí chưa phân mã</b> (mọi khoản chi đều được trừ, kể cả khoản chưa gắn mã; riêng <b>mua dự trữ KHO</b> là tồn kho nên chưa tính chi phí). Hệ thống tự ghi record <b>mỗi ngày</b>; bản ghi <b>ngày cuối tháng</b> chính là record chốt tháng.</div>
       <div class="panel-b">
         <div class="cards" style="margin-bottom:10px">
           ${_o('Tổng giá trị đơn hàng bán',T.doanh_thu)}${_o('Tổng chi phí các đơn',T.chi_phi_don)}
@@ -1848,7 +1848,7 @@ async function _ofMang(host){
   const tops=ds.map(s=>`<details style="margin:4px 0"><summary style="cursor:pointer;font-weight:600;padding:4px 0"><span style="color:${mau(s.ma)}">■</span> ${esc(s.ten)} — ${s.so_ma} mã, top ${s.top.length} theo doanh thu</summary>
       <table style="width:100%"><thead><tr><th>Mã</th><th class="num">Doanh thu</th><th class="num">Chi phí</th><th class="num">Lãi/lỗ</th></tr></thead><tbody>${s.top.map(x=>`<tr><td><b>${esc(x.ma)}</b></td><td class="num">${vnd(x.doanh_thu)}</td><td class="num">${vnd(x.chi_phi)}</td><td class="num">${lai(x.lai)}</td></tr>`).join('')||'<tr><td colspan="4" class="empty">Chưa có mã</td></tr>'}</tbody></table></details>`).join('');
   const namOpt=(r.nam_co||[r.nam]).map(y=>`<option value="${y}" ${y===r.nam?'selected':''}>Năm ${y}</option>`).join('');
-  host.innerHTML=`<div class="note" style="padding:0 0 10px;display:flex;align-items:center;gap:10px;flex-wrap:wrap"><span style="flex:1">Phân mảng theo <b>tiền tố mã đơn hàng</b>: <b style="color:#0284c7">TM-</b> thương mại · <b style="color:#ea580c">DV-</b> dịch vụ · <b style="color:#7c3aed">DA-</b> dự án; mã OP- và mã không theo chuẩn gom vào <b>Khác</b>. Doanh thu, chi phí, lãi/lỗ lấy cùng công thức <b>Lãi/Lỗ Record</b> (lũy kế, gồm VAT); <b>Đã thu / Đã chi</b> là tiền thật theo sổ công nợ; <b>còn phải thu / trả</b> là công nợ đang mở. Tổng các mảng = tổng Lãi/Lỗ Record.</span>
+  host.innerHTML=`<div class="note" style="padding:0 0 10px;display:flex;align-items:center;gap:10px;flex-wrap:wrap"><span style="flex:1">Phân mảng theo <b>tiền tố mã đơn hàng</b>: <b style="color:#0284c7">TM-</b> thương mại · <b style="color:#ea580c">DV-</b> dịch vụ · <b style="color:#7c3aed">DA-</b> dự án; mã OP- và mã không theo chuẩn gom vào <b>Khác</b>. Doanh thu, chi phí, lãi/lỗ lấy cùng công thức <b>Lãi/Lỗ Record</b> (lũy kế, chưa VAT từ 31/10/2026); <b>Đã thu / Đã chi</b> là tiền thật theo sổ công nợ; <b>còn phải thu / trả</b> là công nợ đang mở. Tổng các mảng = tổng Lãi/Lỗ Record.</span>
       <select onchange="S.ofNam=Number(this.value);_ofMang(document.getElementById('ofBody'))" style="width:auto">${namOpt}</select></div>
     <div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:14px">${cards||'<div class="empty">Chưa có dữ liệu</div>'}</div>
     <div class="panel"><div class="panel-h"><h3>📊 So sánh các mảng — lũy kế đến ${r.ngay_tinh}</h3></div>
@@ -1879,7 +1879,7 @@ async function _ofDauTu(host){
     ${card('🏗 Đầu tư thực tế trong kỳ (chứng từ)',tg.dau_tu_ky||0,`tổng vốn các mã ${_vndGon(tg.dau_tu_tong||0)} (gồm trước kỳ)`,OF_DT_MAU.dau_tu)}
     ${card('💸 Thực chi trong kỳ (tiền thật)',tg.thuc_chi_ky||0,`lũy kế đã trả ${_vndGon(tg.thuc_chi_tong||0)} · còn nợ NCC ${_vndGon(tg.con_no||0)}${tg.thuc_chi_ky_po?` · gồm ${_vndGon(tg.thuc_chi_ky_po)} ngày theo PO`:''}${tg.khong_theo_doi?` · ${_vndGon(tg.khong_theo_doi)} không theo dõi được`:''}`,OF_DT_MAU.thuc_chi)}
     ${card('📉 Khấu hao trong kỳ',tg.kh_ky||0,`khấu hao lũy kế từ đầu hợp đồng ${_vndGon(tg.kh_luy_ke||0)}`,OF_DT_MAU.khau_hao)}
-    ${card('💰 Doanh thu thực tế trong kỳ',tg.dt_ky||0,'các đơn tháng của mã, gồm VAT',OF_DT_MAU.doanh_thu)}
+    ${card('💰 Doanh thu thực tế trong kỳ',tg.dt_ky||0,'các đơn tháng của mã, chưa VAT',OF_DT_MAU.doanh_thu)}
     ${card('⚙️ Chi phí vận hành trong kỳ',tg.cp_vh_ky||0,'PO · công nợ · hóa đơn · chi phí vận hành của đơn tháng')}
     ${card('Doanh thu − khấu hao',(tg.dt_ky||0)-(tg.kh_ky||0),'chưa trừ chi phí vận hành',((tg.dt_ky||0)-(tg.kh_ky||0))>=0?'#0f766e':'#b91c1c')}
     ${card('📈 Lãi sau khấu hao trong kỳ',tg.lai_ky||0,'= doanh thu − vận hành − khấu hao',(tg.lai_ky||0)>=0?'#0f766e':'#b91c1c')}</div>`;
@@ -1922,7 +1922,7 @@ async function _ofDauTu(host){
   const chart=n?`<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:0 0 6px"><b>📈 Đầu tư · thực chi · khấu hao · doanh thu theo tháng (${ky})</b>${legend}</div><svg viewBox="0 0 ${W} ${H}" width="100%" style="display:block;max-height:270px">${grid}${xl}${paths}</svg>`:'';
   const trT=(r.theo_thang||[]).map(t=>`<tr><td><b>${mm(t.thang)}</b></td><td class="num" style="color:${OF_DT_MAU.dau_tu}">${t.dau_tu?vnd(t.dau_tu):'—'}</td><td class="num" style="color:${OF_DT_MAU.thuc_chi}">${t.thuc_chi?vnd(t.thuc_chi):'—'}${poTag(t)}</td><td class="num" style="color:${OF_DT_MAU.khau_hao}">${t.khau_hao?vnd(t.khau_hao):'—'}</td><td class="num" style="color:${OF_DT_MAU.doanh_thu}">${t.doanh_thu?vnd(t.doanh_thu):'—'}</td><td class="num">${t.cp_vh?vnd(t.cp_vh):'—'}</td><td class="num">${lai(t.doanh_thu-t.khau_hao)}</td><td class="num">${lai(t.lai)}</td></tr>`).join('');
   const canhBao=[(r.don_dau_tu_chua_noi||[]).length?`<b>${r.don_dau_tu_chua_noi.length} đơn đầu tư chưa nối dự án</b> (vốn chưa vào mã nào)`:'',(r.nghi_dau_tu||[]).length?`<b>${r.nghi_dau_tu.length} mã DV nghi là đơn đầu tư</b> đang bị tính như chi phí tháng`:''].filter(Boolean).join(' · ');
-  host.innerHTML=`<div class="note" style="padding:0 0 10px;display:flex;align-items:center;gap:10px;flex-wrap:wrap"><span style="flex:1">Theo <b>mã dự án cho thuê</b> (mã mẹ): <b style="color:${OF_DT_MAU.dau_tu}">Đầu tư thực tế</b> = PO đã duyệt · công nợ · hóa đơn của <b>đơn đầu tư</b> + PO / công nợ mang mã mẹ + nguyên giá, xếp theo ngày chứng từ phát sinh trong kỳ (<b>chưa phải tiền đã trả</b>); <b style="color:${OF_DT_MAU.thuc_chi}">Thực chi</b> = tiền thật đã trả nhà cung cấp cho các khoản đó (sổ công nợ: lệnh chi ✔ Đã chi, phiếu chi đã duyệt, khớp sao kê), xếp theo ngày trả; khoản ghi thẳng trên PO chưa có dòng sổ thanh toán thì xếp theo <b style="color:#b45309">ngày ghi trên PO</b> — nguyên giá nhập tay và chi phí vận hành không theo dõi được; <b style="color:${OF_DT_MAU.khau_hao}">Khấu hao</b> = tổng vốn ÷ số tháng hợp đồng, tính từng tháng từ tháng bắt đầu hợp đồng (chỉ cộng các tháng nằm trong kỳ); <b style="color:${OF_DT_MAU.doanh_thu}">Doanh thu thực tế</b> = giá trị các <b>đơn tháng</b> của mã (GỐC-MMYY, gồm VAT), cùng công thức Lãi/Lỗ Record. Lãi sau khấu hao = doanh thu − chi phí vận hành − khấu hao. Thông số hợp đồng (số tháng, ngày bắt đầu, khấu hao nhập tay) sửa ở <b>Cho thuê → Đầu tư – cho thuê</b>.</span>
+  host.innerHTML=`<div class="note" style="padding:0 0 10px;display:flex;align-items:center;gap:10px;flex-wrap:wrap"><span style="flex:1">Theo <b>mã dự án cho thuê</b> (mã mẹ): <b style="color:${OF_DT_MAU.dau_tu}">Đầu tư thực tế</b> = PO đã duyệt · công nợ · hóa đơn của <b>đơn đầu tư</b> + PO / công nợ mang mã mẹ + nguyên giá, xếp theo ngày chứng từ phát sinh trong kỳ (<b>chưa phải tiền đã trả</b>); <b style="color:${OF_DT_MAU.thuc_chi}">Thực chi</b> = tiền thật đã trả nhà cung cấp cho các khoản đó (sổ công nợ: lệnh chi ✔ Đã chi, phiếu chi đã duyệt, khớp sao kê), xếp theo ngày trả; khoản ghi thẳng trên PO chưa có dòng sổ thanh toán thì xếp theo <b style="color:#b45309">ngày ghi trên PO</b> — nguyên giá nhập tay và chi phí vận hành không theo dõi được; <b style="color:${OF_DT_MAU.khau_hao}">Khấu hao</b> = tổng vốn ÷ số tháng hợp đồng, tính từng tháng từ tháng bắt đầu hợp đồng (chỉ cộng các tháng nằm trong kỳ); <b style="color:${OF_DT_MAU.doanh_thu}">Doanh thu thực tế</b> = giá trị các <b>đơn tháng</b> của mã (GỐC-MMYY, chưa VAT), cùng công thức Lãi/Lỗ Record. Lãi sau khấu hao = doanh thu − chi phí vận hành − khấu hao. Thông số hợp đồng (số tháng, ngày bắt đầu, khấu hao nhập tay) sửa ở <b>Cho thuê → Đầu tư – cho thuê</b>.</span>
       <label style="font-size:12px;white-space:nowrap">Tính từ tháng <input type="month" value="${r.tu_thang}" max="${r.den_thang}" onchange="S.ofTuThang=this.value;_ofDauTu(document.getElementById('ofBody'))" style="width:auto;padding:4px 8px"></label></div>
     ${canhBao?`<div class="note" style="border-color:#d9770666;cursor:pointer" onclick="S.ctDuAn='';go('cho_thue')" title="Mở Cho thuê → Đầu tư – cho thuê để xử lý">⚠ ${canhBao} — bấm để xử lý ở mục Cho thuê.</div>`:''}
     ${cards}
@@ -5836,9 +5836,10 @@ async function bhBaoGia(host){
     if(k.thieu){
       if(k.mien_truoc_moc)return `<div><span class="badge b-cho" style="white-space:normal" title="${_bcEscA(k.thieu)} — báo giá tạo trước 28/10/2026 và đã duyệt / đã gửi nên vẫn gửi lại được; lập dự toán để có kiểm soát biên">📋 thiếu dự toán (trước mốc — miễn)</span>${k.tao_nguoc_duoc?` <button class="btn-sm ghost" style="font-size:11px;padding:1px 6px" title="Tạo dự toán hàng bán từ chính các dòng báo giá này (giá vốn ước = giá bán − sàn biên, sửa lại sau) rồi nối báo giá vào" onclick="bgfTaoDuToan(${id})">➕ Tạo dự toán</button>`:''}</div>`;
       return `<div><span class="badge b-tc" style="white-space:normal" title="${_bcEscA(k.thieu)} — người thường không trình duyệt / gửi được; CEO được vượt">📋 ${k.du_toan_ma?'dự toán thiếu giá':'chưa có dự toán'}</span>${k.tao_nguoc_duoc?` <button class="btn-sm ghost" style="font-size:11px;padding:1px 6px" title="Tạo dự toán hàng bán từ chính các dòng báo giá này (giá vốn ước = giá bán − sàn biên, sửa lại sau) rồi nối báo giá vào" onclick="bgfTaoDuToan(${id})">➕ Tạo dự toán</button>`:''}</div>`;}
-    if(k.canh_bao_bien)return `<div><span class="badge b-cho" style="white-space:normal" title="${_bcEscA(k.canh_bao_bien)} — chỉ CEO duyệt">📉 ${k.bien!=null?'biên '+String(k.bien).replace('.',',')+'%':'chưa so được biên'} · ${_bcEscH(k.du_toan_ma||'')}</span></div>`;
+    const uocTag=k.gia_uoc?` <span class="badge b-tc" title="Dự toán ${_bcEscA(k.du_toan_ma||'')} có GIÁ VỐN ƯỚC (tạo ngược từ báo giá, chưa rà) — biên chỉ tạm tính; lúc duyệt chỉ CEO qua được. Rà ở Bán hàng → Dự toán hàng bán → ✓ Đã rà giá vốn">⚠ giá vốn ước</span>`:'';
+    if(k.canh_bao_bien)return `<div><span class="badge b-cho" style="white-space:normal" title="${_bcEscA(k.canh_bao_bien)} — chỉ CEO duyệt">📉 ${k.bien!=null?'biên '+String(k.bien).replace('.',',')+'%':'chưa so được biên'} · ${_bcEscH(k.du_toan_ma||'')}</span>${uocTag}</div>`;
     const them=(k.ngoai_chua_uoc?`<span class="badge b-tc" title="Dòng ngoài dự toán chưa ước chi phí — người thường không trình duyệt được">➕ ${k.ngoai_chua_uoc} chưa ước</span>`:(k.ngoai_du_toan?`<span class="badge b-cho" title="Dòng nhân viên thêm ngoài dự toán (đã ước chi phí)">➕ ${k.ngoai_du_toan} ngoài DT</span>`:''))+(k.dt_doi_gia?` <span class="badge b-cho" title="Dự toán đã đổi giá / SL sau khi lập báo giá — mở báo giá để cập nhật">🔄 ${k.dt_doi_gia} đổi giá</span>`:'')+(k.so_bo?` <span class="badge b-info" title="Dòng dự toán không chào">− ${k.so_bo} không chào</span>`:'');
-    return `<div><span class="badge b-ok" title="Dự toán gốc ${_bcEscA(k.du_toan_ma||'')} (${k.du_toan_loai==='BOQ'?'BOQ dự án':'Dự toán hàng bán'})">📋 ${_bcEscH(k.du_toan_ma||'')}${k.bien!=null?' · biên '+String(k.bien).replace('.',',')+'%':''}</span> ${them}</div>`;};
+    return `<div><span class="badge b-ok" title="Dự toán gốc ${_bcEscA(k.du_toan_ma||'')} (${k.du_toan_loai==='BOQ'?'BOQ dự án':'Dự toán hàng bán'})">📋 ${_bcEscH(k.du_toan_ma||'')}${k.bien!=null?' · biên '+String(k.bien).replace('.',',')+'%':''}</span> ${them}${uocTag}</div>`;};
   S._bgfList=drafts;
   const canOpBGF=can("ban_hang","THAO_TAC");
   const canApproveBGF=can("ban_hang","XEM") && HANMUC.bao_gia[S.role]!==undefined;
@@ -5990,7 +5991,7 @@ function bgfHuongDan(){
     <b>📜 Mẫu điều khoản</b>: ${mkHtml} — bấm mẫu là điền sẵn hiệu lực, thanh toán, giao hàng, bảo hành; sửa lại từng ô nếu cần. Ghi <b>Người báo giá</b> và <b>Email liên hệ</b> đúng người phụ trách.<br><br>
 
     <b>⑤ Lưu &amp; trình duyệt</b><br>
-    <b>💾 Lưu tạm</b> = bản nháp, sửa nhiều lần. <b>🖨 Xuất PDF</b> để xem trước đúng mẫu in gửi khách. Xong bấm <b>📤 Lưu &amp; trình duyệt</b> (hoặc <b>📤 Trình duyệt</b> ở danh sách) — báo giá sang ${B('⏳ Chờ duyệt')}.<br>
+    <b>💾 Lưu tạm</b> = bản nháp, sửa nhiều lần. <b>🖨 Xuất PDF</b> trước khi duyệt chỉ để xem nội bộ: bản in và PDF có dấu <b style="color:#dc2626">BẢN NHÁP — CHƯA DUYỆT</b> chéo trang; bản sạch gửi khách chỉ có sau khi <b>✓ Duyệt</b> (báo giá đã duyệt in đúng bản đã lưu, sửa nội dung thì phải trình duyệt lại). Xong bấm <b>📤 Lưu &amp; trình duyệt</b> (hoặc <b>📤 Trình duyệt</b> ở danh sách) — báo giá sang ${B('⏳ Chờ duyệt')}.<br>
     <span style="color:var(--muted)">Bị chặn khi: thiếu dự toán cùng mã · dự toán còn dòng chưa có giá · dòng ngoài dự toán chưa ước chi phí · có dòng dưới sàn (nhân viên). Sửa theo thông báo rồi trình lại.</span><br><br>
 
     <b>⑥ Duyệt</b><br>
@@ -6007,6 +6008,7 @@ function bgfHuongDan(){
     <div style="background:#fdf3e3;border-radius:10px;padding:10px 14px;margin:12px 0;color:#92620e">
       ⚠ <b>Lỗi hay gặp:</b><br>
       • «📋 CHƯA CÓ DỰ TOÁN cùng mã» → số báo giá phải trùng mã dự toán; lập dự toán đúng mã rồi tạo báo giá từ đó${qtv?' (hoặc dùng <b>📋 Tạo dự toán</b> ngược ở đầu bảng để dọn báo giá cũ)':''}.<br>
+      • «⚠ giá vốn ƯỚC» → dự toán tạo ngược từ báo giá, giá vốn chỉ là ước: sửa giá từng dòng ở Dự toán hàng bán hoặc bấm <b>✓ Đã rà giá vốn</b>; chưa rà thì chỉ CEO duyệt được.<br>
       • «🔒 dòng có giá bán DƯỚI SÀN» → nâng giá về sàn hoặc nhờ CEO / Admin.<br>
       • «➕ dòng ngoài dự toán chưa có chi phí dự kiến» → điền Giá vốn ước cho dòng tự thêm.<br>
       • «Khách … chưa có trong danh mục CRM» → thêm khách ở Bán hàng → Khách hàng, quay lại chọn ở form.<br>
@@ -6313,14 +6315,21 @@ async function bgfLuu(trangThai){
   return true;
 }
 async function bgfPdf(){
-  const ok=await bgfLuu("DA_XUAT"); if(!ok)return;
-  _bgfPrint(S.bgfEdit.d);
+  // 🔒 31/10/2026: bản in SẠCH chỉ khi báo giá đã DUYỆT / đã GỬI — in đúng bản đã lưu, KHÔNG lưu đè (lưu sẽ hủy duyệt);
+  //    chưa duyệt → lưu nháp rồi in kèm dấu BẢN NHÁP chéo trang (chỉ xem nội bộ). Không còn trạng thái «đã xuất PDF» mới.
+  const g0=S.bgfEdit.id?((S._bgfList||[]).find(x=>x.id===S.bgfEdit.id)||(DEMO.bgf||[]).find(x=>x.id===S.bgfEdit.id)):null;
+  if(g0&&!_bgNhap(g0)){
+    const khac=JSON.stringify(g0.noi_dung||{})!==JSON.stringify(S.bgfEdit.d);
+    _bgfPrint(Object.assign({},g0.noi_dung||{}));
+    if(S.mode==="live")api(`/ban-hang/bao-gia-form/${g0.id}/luu-pdf`,{method:'POST'}).catch(()=>{});
+    toast(khac?"Đã in BẢN ĐÃ DUYỆT (đang lưu). Thay đổi trong form chưa lưu — 💾 Lưu tạm sẽ hủy duyệt, phải trình duyệt lại.":"Đã mở bản in đã duyệt — bản PDF cũng lưu vào 📁 Kho tệp","ok");
+    return;
+  }
+  const ok=await bgfLuu("NHAP"); if(!ok)return;
+  _bgfPrint(Object.assign({},S.bgfEdit.d,{_nhap:true}));
+  toast("Bản in có dấu BẢN NHÁP — chỉ xem nội bộ. Bản sạch gửi khách: 📤 trình duyệt → ✓ duyệt → 🖨 / ✉️","ok");
   if(S.mode==="live"&&S.bgfEdit&&S.bgfEdit.id){
-    api(`/ban-hang/bao-gia-form/${S.bgfEdit.id}/luu-pdf`,{method:'POST'})
-      .then(()=>toast("Đã mở bản in — bản PDF cũng đã lưu vào 📁 Kho tệp (Overall Operation)","ok"))
-      .catch(()=>toast("Đã mở bản in — chọn 'Save as PDF' trong hộp thoại in","ok"));
-  }else{
-    toast("Đã mở bản in — chọn 'Save as PDF' trong hộp thoại in","ok");
+    api(`/ban-hang/bao-gia-form/${S.bgfEdit.id}/luu-pdf`,{method:'POST'}).catch(()=>{});   // bản nháp (có dấu) vào Kho tệp
   }
 }
 async function bgfLuuPdfKho(id){
@@ -6335,8 +6344,14 @@ function bgfSua(id){const g=(S._bgfList||[]).find(x=>x.id===id)||(DEMO.bgf||[]).
   if(!S.bgfEdit.d.items||!S.bgfEdit.d.items.length)S.bgfEdit.d.items=[{ten:"",mo_ta:"",so_luong:1,don_vi:"Unit",don_gia:0,vat_pct:8}];
   S.bgfEdit.d.items.forEach(it=>{if(it.vat_pct===undefined||it.vat_pct===null||it.vat_pct==='')it.vat_pct=S.bgfEdit.d.vat_pct??8;});
   viewBanHang($("#main"));}
+/* 🔒 31/10/2026: bản in / PDF sạch chỉ khi đã DUYỆT / đã GỬI; «đã xuất PDF» trước mốc bắt buộc dự toán (gửi tay thời chưa có cổng)
+   vẫn in sạch; còn lại in kèm dấu BẢN NHÁP (cùng quy tắc với máy chủ: bao_gia_ks.ban_nhap) */
+function _bgNhap(g){if(!g)return true; const tt=g.trang_thai, nd=g.noi_dung||{}; if(tt==='DA_DUYET'||tt==='DA_GUI'||nd.loai==='HOP_DONG')return false;
+  if(tt==='DA_XUAT'){const ad=String((S._bgKsCfg||{}).ap_dung_tu||''), ng=String(nd.ngay||'').slice(0,10); if(ad&&ng&&ng<ad)return false;}
+  return true;}
 function bgfPdfTu(id){const g=(S._bgfList||[]).find(x=>x.id===id)||(DEMO.bgf||[]).find(x=>x.id===id);
-  if(!g)return;_bgfPrint(g.noi_dung||{});
+  if(!g)return;const nh=_bgNhap(g);_bgfPrint(Object.assign({},g.noi_dung||{},nh?{_nhap:true}:{}));
+  if(nh)toast("Báo giá chưa duyệt — bản in có dấu BẢN NHÁP (chỉ xem nội bộ). Bản sạch: trình duyệt → ✓ duyệt","ok");
   if(S.mode==="live"&&(g.noi_dung||{}).loai!=="HOP_DONG")
     api(`/ban-hang/bao-gia-form/${id}/luu-pdf`,{method:'POST'})
       .then(()=>toast("Bản PDF cũng đã lưu vào 📁 Kho tệp (Overall Operation)","ok")).catch(()=>{});}
@@ -6355,13 +6370,14 @@ async function bgfTaoDon(id){
 const LN_TUT_BIEN_DIEM=3;   // biên thực thấp hơn biên lúc chào từ ngần này điểm → tô đỏ (khớp TUT_BIEN_DIEM ở app/kiem_soat_ln.py — cổng 📉 duyệt PO)
 function _dhChaoSpan(o,p){
   const pt=v=>v==null?'—':String(v).replace('.',',')+'%';
-  if(o.chot_luc){const tut=(o.bien_chao!=null&&p&&p.doanh_thu)?(o.bien_chao-p.ty_suat_dukien):null;
-    return `<span title="Số liệu báo giá gửi khách lúc chốt đơn${o.bao_gia_rev?' (Rev.'+_bcEscA(o.bao_gia_rev)+')':''}${o.du_toan_ma?' · dự toán '+_bcEscA(o.du_toan_ma):''} — biên thực tính gồm VAT hai vế nên so gần đúng; tụt ≥ ${LN_TUT_BIEN_DIEM} điểm tô đỏ">🧾 Lúc chào: <b>${vnd(o.tong_chao)}</b> · biên <b>${pt(o.bien_chao)}</b>${o.bao_gia_rev?' · Rev.'+_bcEscH(o.bao_gia_rev):''}${tut!=null?` → thực <b style="color:${tut>=LN_TUT_BIEN_DIEM?'#dc2626':'#16a34a'}">${p.ty_suat_dukien}%</b>`:''}</span>`;}
+  if(o.chot_luc){const uoc=!!o.gia_von_chao_uoc; const tut=(!uoc&&o.bien_chao!=null&&p&&p.doanh_thu)?(o.bien_chao-p.ty_suat_dukien):null;
+    return `<span title="Số liệu báo giá gửi khách lúc chốt đơn${o.bao_gia_rev?' (Rev.'+_bcEscA(o.bao_gia_rev)+')':''}${o.du_toan_ma?' · dự toán '+_bcEscA(o.du_toan_ma):''} — biên chào và biên thực đều tính CHƯA VAT (từ 31/10/2026); tụt ≥ ${LN_TUT_BIEN_DIEM} điểm tô đỏ${uoc?'. ⚠ Giá vốn lúc chào là số ƯỚC (dự toán tạo ngược, chưa rà) nên không so':''}">🧾 Lúc chào: <b>${vnd(o.tong_chao)}</b> · biên <b>${pt(o.bien_chao)}</b>${uoc?' <span style="color:#b45309">(ước)</span>':''}${o.bao_gia_rev?' · Rev.'+_bcEscH(o.bao_gia_rev):''}${tut!=null?` → thực <b style="color:${tut>=LN_TUT_BIEN_DIEM?'#dc2626':'#16a34a'}">${p.ty_suat_dukien}%</b>`:''}</span>`;}
   if(o.bao_gia_form_id)return `<span style="color:var(--muted)" title="Đơn nối với báo giá gửi khách cùng mã nhưng chưa ghi số liệu lúc chào — CEO/Admin bấm «📝 Ghi biên chào cho đơn cũ» ở Nhà cung cấp → Kiểm soát">🧾 nối báo giá · chưa ghi biên chào</span>`;
   return '';
 }
 function _ksChaoBadge(x){
   if(x.bien_chao==null)return '';
+  if(x.gia_von_chao_uoc)return ` <span class="badge b-cho" title="Biên lúc chào ${String(x.bien_chao).replace('.',',')}% tính trên GIÁ VỐN ƯỚC (dự toán tạo ngược, chưa rà) — không so với biên thực">chào (ước)</span>`;
   const pt=v=>String(v).replace('.',',')+'%'; const tut=x.ty_suat!=null?(Number(x.bien_chao)-Number(x.ty_suat)):null;
   return ` <span class="badge ${tut!=null&&tut>=LN_TUT_BIEN_DIEM?'b-tc':'b-info'}" title="Biên LÚC CHÀO theo báo giá gửi khách${x.bao_gia_rev?' Rev.'+_bcEscA(x.bao_gia_rev):''}${x.du_toan_ma?' · dự toán '+_bcEscA(x.du_toan_ma):''}${x.so_ma?' (bình quân theo tổng chào của '+x.so_ma+' mã)':''} so với biên thực hiện tại — tụt ≥ ${LN_TUT_BIEN_DIEM} điểm tô đỏ (duyệt PO làm tụt từ mức này: cổng 📉 chỉ CEO)">chào ${pt(x.bien_chao)}${x.ty_suat!=null?' → thực '+pt(x.ty_suat):''}</span>`;
 }
@@ -6402,6 +6418,7 @@ async function bgfDoiChieu(id){
       <span>Biên: <b style="color:${mau};font-size:15px">${pt(r.bien)}</b> (ngưỡng ${r.nguong}%)</span></div>
     ${r.thieu?`<div class="note" style="color:#b91c1c">📋 ${e_(r.thieu)}</div>`:''}
     ${r.canh_bao_bien?`<div class="note" style="color:#b45309">📉 ${e_(r.canh_bao_bien)}</div>`:''}
+    ${r.gia_uoc?`<div class="note" style="color:#b45309">⚠ ${e_(r.canh_bao_uoc||'Dự toán có giá vốn ƯỚC — chưa rà.')} Rà ở Bán hàng → Dự toán hàng bán (sửa giá từng dòng hoặc ✓ Đã rà giá vốn); chưa rà thì chỉ CEO duyệt.</div>`:''}
     ${r.so_bo?`<div class="note">− ${r.so_bo} dòng dự toán <b>không chào</b> (đã trừ khỏi giá vốn).</div>`:''}
     ${(r.ngoai_du_toan||[]).length?`<div style="margin-top:8px"><b>➕ Dòng ngoài dự toán (${r.ngoai_du_toan.length})</b><table><thead><tr><th>Tên</th><th class="num">SL</th><th class="num">Chi phí dự kiến</th><th class="num">Giá bán</th><th class="num">Biên</th></tr></thead><tbody>
       ${r.ngoai_du_toan.map(x=>{const b=x.don_gia>0&&x.gia_von>0?Math.round((x.don_gia-x.gia_von)/x.don_gia*1000)/10:null;return `<tr><td>${e_(x.ten)}</td><td class="num">${x.so_luong}</td><td class="num">${x.gia_von>0?vnd(x.gia_von):'<span style="color:#dc2626">chưa ước</span>'}</td><td class="num">${vnd(x.don_gia)}</td><td class="num">${pt(b)}</td></tr>`;}).join('')}</tbody></table></div>`:''}
@@ -6550,7 +6567,7 @@ function _bgfPrint(d){
   const logo=document.querySelector('img.logo')?.src||'';
   const items=_bgInDong(d,money);
   const ngayVN=d.ngay?d.ngay.split('-').reverse().join('/'):'';
-  const html=`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${d.so||'Quotation'}</title><style>
+  const html=`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${d.so||'Quotation'}${d._nhap?' (DRAFT)':''}</title><style>
     @page{size:A4;margin:12mm}
     body{font-family:"Segoe UI",Arial,sans-serif;color:#16324a;font-size:12.5px;line-height:1.5;margin:0;padding:8mm 9mm}
     .hd{display:flex;align-items:center;gap:14px;border-bottom:3px solid #0E7C86;padding-bottom:10px}
@@ -6573,10 +6590,12 @@ function _bgfPrint(d){
     .add ul{margin:8px 0;padding-left:18px}
     .sig{margin-top:26px;text-align:right}
     .foot{margin-top:30px;text-align:center;color:#5B7186;font-size:11px;border-top:1px solid #d7e3ea;padding-top:8px}
+    .wm{position:fixed;top:38%;left:4%;width:92%;text-align:center;transform:rotate(-26deg);font-size:54px;line-height:1.3;font-weight:900;letter-spacing:3px;color:rgba(220,38,38,.13);pointer-events:none;z-index:0}
   </style></head><body>
+  ${d._nhap?`<div class="wm">BẢN NHÁP — CHƯA DUYỆT<br>DRAFT — NOT APPROVED</div>`:''}
   <div class="hd">${logo?`<img src="${logo}">`:''}
     <div class="cty"><b>Song Viet Technical Solutions Co., Ltd</b><br>Address: 14th Floor, HM Town Building, 412 Nguyen Thi Minh Khai St., Ban Co Ward, Ho Chi Minh City, Vietnam</div></div>
-  <h1>QUOTATION</h1>
+  <h1>QUOTATION</h1>${d._nhap?`<div style="text-align:center;color:#dc2626;font-weight:800;font-size:12px;margin:-2px 0 6px">DRAFT — NOT APPROVED · BẢN NHÁP CHƯA DUYỆT — chỉ xem nội bộ, không có giá trị gửi khách</div>`:''}
   <p>Song Viet Technical Solutions appreciates your interest. We are pleased to send you our quotation as requested:</p>
   <table class="meta"><tr><td class="k">QUOTE NO.</td><td class="v">${d.so||''}${d._rev?` <span style="color:#5B7186">(Rev.${d._rev})</span>`:''}</td><td class="k">QUOTE DATE</td><td>${ngayVN}</td></tr>
     <tr><td class="k">VALID UNTIL</td><td colspan="3">${d.hieu_luc||''}</td></tr></table>
@@ -6715,7 +6734,7 @@ async function bhDonHang(host){
         const kh=khs.find(k=>k.id===o.khach_hang_id);
         return {id:o.id,so:o.so,khach:kh?kh.ten:("KH #"+o.khach_hang_id),khach_hang_id:o.khach_hang_id,ngay:o.ngay||null,
           tong_tien:Number(o.tong_tien),thanh_toan_coc:Number(o.thanh_toan_coc||0),tam_ung:Number(o.tam_ung||0),tra_truoc:_traTruoc(o),nguon_tra_truoc:o.nguon_tra_truoc||null,trang_thai:o.trang_thai,so_hoa_don:o.so_hoa_don||null,tep,pnl,
-          bao_gia_form_id:o.bao_gia_form_id||null,du_toan_ma:o.du_toan_ma||null,bao_gia_rev:o.bao_gia_rev||null,tong_chao:o.tong_chao!=null?Number(o.tong_chao):null,bien_chao:o.bien_chao!=null?Number(o.bien_chao):null,chot_luc:o.chot_luc||null};});
+          bao_gia_form_id:o.bao_gia_form_id||null,du_toan_ma:o.du_toan_ma||null,bao_gia_rev:o.bao_gia_rev||null,tong_chao:o.tong_chao!=null?Number(o.tong_chao):null,bien_chao:o.bien_chao!=null?Number(o.bien_chao):null,gia_von_chao_uoc:!!o.gia_von_chao_uoc,chot_luc:o.chot_luc||null};});
       S._dhOrders=orders;
       }catch(e){toast(e.detail||e.message,"err");} } }
   else { orders=(DEMO.don_hang||[]).map(o=>{
@@ -10155,6 +10174,12 @@ async function _tgChon(mucId,i){
     if(kieu!=='boq'&&r)await _dtbSauLuu(r,mucId,msg); else toast(msg,"ok");
   }catch(e){toast(e.detail||e.message,"err");}
 }
+async function dtbRaGiaVon(id){
+  if(!confirm("Xác nhận ĐÃ RÀ giá vốn của dự toán này?\n\nCờ «giá vốn ước» sẽ gỡ, nhãn ƯỚC trên các dòng bị xóa, biên của báo giá / đơn hàng mã này được tính là thật.\nNếu số vẫn là ước, hãy sửa giá từng dòng trước (sửa giá dòng ƯỚC cũng tự bỏ nhãn)."))return;
+  if(S.mode!=="live")return toast("Chạy ở bản kết nối backend","err");
+  try{const r=await api(`/ncc/du-toan-ban/${id}/ra-gia-von`,{method:'POST'});toast(`Đã gỡ cờ giá vốn ước (${r.so_dong} dòng bỏ nhãn ƯỚC)`,"ok");S._bgKsCfg=null;dtbRender();}
+  catch(e){toast(e.detail||e.message,"err");}
+}
 async function dtbRender(){
   const el=document.getElementById('dtbBody'); if(!el)return;
   const canOp=can("ncc","THAO_TAC")||can("ban_hang","THAO_TAC"), canXoa=can("ncc","DUYET")||can("ban_hang","DUYET");
@@ -10199,7 +10224,7 @@ async function dtbRender(){
   const _rowsFn=(ds,gui)=>(ds||[]).map(d=>{const mo=S._dtbOpen===d.id; const g=gui?_bgGui(d):null; const bgT=g?_bgfTinh(g.noi_dung||{}).tong:0;
     return `<tr data-ma="${esc(d.ma)}" data-tim="${esc([d.ma,d.khach_hang,d.mo_ta,d.nguoi_tao,d.ngay,_ngayGui(d)].join(' ')).toLowerCase()}"${mo?' style="background:var(--panel2,#f4f6f8)"':''}>
     <td style="width:26px;text-align:center"><button class="btn-sm ghost" style="padding:1px 6px" title="${mo?'Gập chi tiết':'Mở chi tiết dự toán'}" onclick="dtbMo(${d.id})">${mo?'▾':'▸'}</button></td>
-    <td><a href="#" onclick="dtbMo(${d.id});return false" style="font-weight:700;text-decoration:none;border-bottom:1px dashed currentColor">${esc(d.ma)}</a>${String(d.ma||'').toUpperCase().startsWith('OP')?' <span class="badge b-cho" title="Chi phí vận hành doanh nghiệp — không có đơn bán">⚙️ OP</span>':''}${_bgNhan(d.ma)}</td>
+    <td><a href="#" onclick="dtbMo(${d.id});return false" style="font-weight:700;text-decoration:none;border-bottom:1px dashed currentColor">${esc(d.ma)}</a>${String(d.ma||'').toUpperCase().startsWith('OP')?' <span class="badge b-cho" title="Chi phí vận hành doanh nghiệp — không có đơn bán">⚙️ OP</span>':''}${_bgNhan(d.ma)}${d.gia_uoc?' <span class="badge b-tc" style="font-size:10px" title="Giá vốn ƯỚC (tạo ngược từ báo giá = giá bán − sàn biên) — chưa rà: biên của báo giá / đơn hàng mã này chỉ tạm tính, lúc duyệt báo giá chỉ CEO qua được. Mở dự toán: sửa giá từng dòng hoặc bấm ✓ Đã rà giá vốn">⚠ giá vốn ước</span>':''}</td>
     <td>${esc(d.khach_hang)||'—'}</td><td style="font-size:12px">${esc(d.mo_ta)||'—'}</td>
     ${gui?`<td style="white-space:nowrap" title="Ngày ✉️ gửi báo giá cho khách (từ nhật ký gửi)">${_ngayGui(d)||'—'}</td>`:''}
     <td style="white-space:nowrap">${d.ngay||'—'}</td><td style="white-space:nowrap" title="Lần sửa gần nhất${d.tao_luc?' · tạo lúc '+esc(String(d.tao_luc)):''}">${_dtbCapNhat(d)}</td><td>${esc(d.nguoi_tao)||'—'}</td>
@@ -10241,6 +10266,7 @@ async function dtbRender(){
         <div>Mã: <b>${esc(det.ma)}</b></div><div>Khách hàng: <b>${esc(det.khach_hang)||'—'}</b></div>
         <div>Ngày tạo: <b>${det.ngay||'—'}</b></div><div title="Lần sửa gần nhất">🕒 Cập nhật: <b>${det.cap_nhat_luc?esc(String(det.cap_nhat_luc)):'—'}</b></div><div>Người tạo: <b>${esc(det.nguoi_tao)||'—'}</b></div>
         <div>Tổng dự toán: <b style="color:#0e7490">${vnd(tong)}</b></div>
+        ${det.gia_uoc?`<div><span class="badge b-tc" title="Dự toán tạo ngược từ báo giá: giá vốn = giá bán − sàn biên (dòng ghi chú «Giá vốn ƯỚC»). Chưa rà thì biên báo giá / đơn hàng mã này chỉ tạm tính, lúc duyệt báo giá chỉ CEO qua">⚠ giá vốn ước — chưa rà</span>${canOp?` <button class="btn-sm" title="Xác nhận đã rà giá vốn từng dòng: gỡ cờ, xóa nhãn ƯỚC trên các dòng, biên của mã này tính là thật" onclick="dtbRaGiaVon(${det.id})">✓ Đã rà giá vốn</button>`:''}</div>`:''}
         ${det.so_dong_thuc?`<div title="Σ giá mua thật × SL dự toán của các dòng đã có PO">Đã mua thật: <b style="color:${(det.tong_thuc||0)>tong?'#dc2626':'#16a34a'}">${vnd(det.tong_thuc||0)}</b> <span style="color:var(--muted)">(${det.so_dong_thuc}/${its.length} dòng)</span></div>`:''}
         ${canOp?`<div><button class="btn-sm" title="File theo MẪU BOQ: máy đọc thẳng (đủ dòng, không AI) · file khác: AI đọc — thêm mục vào dự toán này, trùng tên bỏ qua" onclick="dtbNapFile(${det.id})">📎 Nạp thêm từ file</button> <button class="btn-sm ghost" title="Xuất dự toán này ra Excel đúng MẪU BOQ (theo nhóm, có công thức thành tiền / VAT / tổng) — sửa trong Excel rồi 📎 nạp lại" onclick="tepTaiVe('/ncc/du-toan-ban/mau-boq?dt_id=${det.id}','Mau-BOQ-${esc(det.ma).replace(/[^A-Za-z0-9_-]/g,'-')}.xlsx')">📥 Xuất mẫu BOQ</button> <button class="btn-sm ghost" title="Đổi đơn giá các dòng theo PO đã duyệt gần nhất / báo giá còn hiệu lực — có bảng xem trước" onclick="dtbCapNhatGia()">⟳ Cập nhật giá theo mua thực tế</button> <button class="btn-sm ghost" title="Dòng gõ tay chưa liên kết kho (🆕) → chọn mặt hàng kho gần giống để nhận giá đầu vào" onclick="dtbKhopKho()">🔗 Khớp tên với kho</button> <button class="btn-sm ghost" title="Đưa các dòng dự toán chưa liên kết vào danh mục Sản phẩm NCC: đủ NCC + tên + giá thì tạo mới, danh mục đã có thì nối; dòng thiếu NCC chọn NCC rồi đưa vào — có bảng xem trước" onclick="dtbDanhMuc(${det.id})">🏷 Đưa vào danh mục NCC</button>${can("ban_hang","THAO_TAC")&&!String(det.ma||'').toUpperCase().startsWith('OP')?` <button class="btn-sm" title="Soạn báo giá gửi khách từ danh mục dự toán này — số báo giá = mã dự toán, các dòng và đơn giá điền sẵn (sửa được trước khi lưu)" onclick="dtbTaoBaoGia(${det.id})">📄 Tạo báo giá từ dự toán</button>`:''}</div>`:''}</div>
       ${_dtbViecNenHTML(det)}${det.mo_ta?`<div class="note" style="margin-bottom:8px">${esc(det.mo_ta)}</div>`:''}
@@ -10257,7 +10283,7 @@ async function dtbRender(){
   const tongLuu=listLuu.reduce((s,d)=>s+Number(d.tong||0),0), tongGui=listGui.reduce((s,d)=>s+Number(d.tong||0),0);
   el.innerHTML=`${form}
     <div class="panel" style="margin-top:10px;border:1px solid var(--line)"><div class="panel-h" style="cursor:pointer" onclick="if(event.target.tagName!=='INPUT')dtbLuuToggle()">
-      <h3 data-gap="1"><span id="dtbLuuCaret">${S._dtbLuuOpen?'▾':'▸'}</span> 📚 Bảng lưu dự toán <span class="badge b-info">${listLuu.length} dự toán · ${vnd(tongLuu)}</span>${listGui.length?` <span class="badge b-ok" title="Dự toán đã gửi báo giá nằm ở bảng ✉️ Báo giá đã gửi khách hàng bên dưới">+ ${listGui.length} đã gửi báo giá</span>`:''}</h3><div class="spacer"></div>
+      <h3 data-gap="1"><span id="dtbLuuCaret">${S._dtbLuuOpen?'▾':'▸'}</span> 📚 Bảng lưu dự toán <span class="badge b-info">${listLuu.length} dự toán · ${vnd(tongLuu)}</span>${list.filter(d=>d.gia_uoc).length?` <span class="badge b-tc" title="Dự toán tạo ngược từ báo giá, giá vốn = giá bán − sàn biên, chưa rà — biên của các mã này chỉ tạm tính; bản tuần 📉 nhắc danh sách này">⚠ ${list.filter(d=>d.gia_uoc).length} giá vốn ước chưa rà</span>`:''}${listGui.length?` <span class="badge b-ok" title="Dự toán đã gửi báo giá nằm ở bảng ✉️ Báo giá đã gửi khách hàng bên dưới">+ ${listGui.length} đã gửi báo giá</span>`:''}</h3><div class="spacer"></div>
       ${canOp?`<button class="btn-sm ghost" style="margin-right:8px" title="Rà mọi dự toán: dòng chưa liên kết danh mục Sản phẩm NCC → tạo mới / nối sản phẩm có sẵn (có bảng xem trước, dòng thiếu NCC chọn NCC)" onclick="event.stopPropagation();dtbDanhMuc(null)">🏷 Dự toán → danh mục NCC</button>`:''}
       <input id="dtbLuu_q" placeholder="🔍 Tìm mã · khách · mô tả…" oninput="dtbLuuLoc(this.value)" onclick="event.stopPropagation()" style="padding:5px 10px;border:1px solid var(--line);border-radius:7px;font-size:12.5px;max-width:220px"></div>
       <div class="panel-b${S._dtbLuuOpen?'':' hidden'}" id="dtbLuuWrap" style="overflow-x:auto"><table><thead><tr><th style="width:26px"></th><th>Mã hàng bán</th><th>Khách hàng</th><th>Mô tả yêu cầu</th><th>Ngày tạo</th><th title="Lần sửa gần nhất (thêm / sửa / xóa dòng, sửa tiêu đề, nạp file, tạo PO…) — bảng xếp theo cột này, mới nhất lên trên; chữ xanh = trong 3 ngày">🕒 Cập nhật ▾</th><th>Người tạo</th><th class="num">Tổng dự toán</th><th class="num">Số mục</th><th>Thao tác</th></tr></thead>

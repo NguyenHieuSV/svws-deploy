@@ -3949,7 +3949,7 @@ def ds_cong_no(nha_cung_cap_id: int | None = None, chua_tra: bool = False,
 def chi_phi_theo_don(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
     """Tổng hợp theo TỪNG MÃ ĐƠN HÀNG BÁN — CÔNG THỨC CHUNG (app/lai_lo_ma.py):
     Tổng chi phí = Σ tổng PO ĐÃ DUYỆT gắn mã (nghĩa vụ cam kết) + công nợ nhập ngoài khớp mã
-    + hóa đơn mua gắn mã không qua PO. Lợi nhuận = doanh thu (gồm VAT) − tổng chi phí.
+    + hóa đơn mua gắn mã không qua PO. Lợi nhuận = doanh thu (CHƯA VAT) − tổng chi phí (chưa VAT) — từ 31/10/2026.
     Đã trả / Còn phải trả là dòng tiền, không ảnh hưởng lợi nhuận."""
     from ..models import DonHang
     from ..lai_lo_ma import chi_phi_ma, nhom_ma, chi_phi_ngoai_ma
@@ -3965,6 +3965,7 @@ def chi_phi_theo_don(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "X
                     "bien_chao": float(dh.bien_chao) if dh.bien_chao is not None else None,
                     "tong_chao": float(dh.tong_chao) if dh.tong_chao is not None else None,
                     "bao_gia_rev": dh.bao_gia_rev, "du_toan_ma": dh.du_toan_ma, "bao_gia_form_id": dh.bao_gia_form_id,
+                    "gia_von_chao_uoc": bool(getattr(dh, "gia_von_chao_uoc", False)),
                     "gia_von_po": cp["gia_von_po"], "chi_phi_khac": cp["chi_phi_khac"],
                     "thanh_toan_mua": cp["da_tra_ncc"], "cong_no_phai_tra": cp["con_phai_tra"],
                     "tong_chi_phi": cp["tong_chi_phi"], "loi_nhuan": cp["loi_nhuan"],
@@ -5567,7 +5568,7 @@ def dtb_danh_sach(db: Session = Depends(get_db), _=Depends(yeu_cau_bat_ky(("ncc"
                     "ngay": str(d.ngay) if d.ngay else None, "nguoi_tao": d.nguoi_tao,
                     "tao_luc": str(d.tao_luc)[:16] if d.tao_luc else None,
                     "cap_nhat_luc": str(d.cap_nhat_luc)[:16] if d.cap_nhat_luc else None,
-                    "tong": t, "so_muc": n})
+                    "gia_uoc": bool(d.gia_uoc), "tong": t, "so_muc": n})
     return out
 
 
@@ -6062,6 +6063,40 @@ def dtb_cap_nhat_gia_danh_muc(muc_id: int, db: Session = Depends(get_db),
     return {"ok": True, "sp_id": sp.id, "gia_cu": cu, "gia_moi": gia}
 
 
+def _dtb_bo_uoc(db, m, nd, gia_truoc) -> bool:
+    """mig 162: dòng «Giá vốn ƯỚC …» (tạo ngược từ báo giá) vừa được SỬA GIÁ → bỏ nhãn ƯỚC; dự toán hết dòng ƯỚC → gỡ cờ gia_uoc."""
+    if not str(m.ghi_chu or "").startswith("Giá vốn ƯỚC") or Decimal(m.don_gia or 0) == Decimal(gia_truoc or 0):
+        return False
+    m.ghi_chu = None
+    d = db.get(DuToanBan, m.du_toan_id)
+    if d is not None and d.gia_uoc:
+        con = (db.query(DuToanBanMuc).filter(DuToanBanMuc.du_toan_id == d.id, DuToanBanMuc.id != m.id,
+                                             DuToanBanMuc.ghi_chu.like("Giá vốn ƯỚC%")).count())
+        if con == 0:
+            d.gia_uoc = False
+            ghi_audit(db, nd.id, "RA_GIA_VON", "du_toan_ban", d.id, moi={"ma": d.ma, "cach": "sua_het_dong_uoc"})
+    return True
+
+
+@router.post("/du-toan-ban/{dt_id}/ra-gia-von")
+def dtb_ra_gia_von(dt_id: int, db: Session = Depends(get_db),
+                   nd: NguoiDung = Depends(yeu_cau_bat_ky(("ncc", "THAO_TAC"), ("ban_hang", "THAO_TAC")))):
+    """✓ Đã rà giá vốn (mig 162): người dùng xác nhận các dòng giá vốn ƯỚC đã được rà → gỡ cờ gia_uoc, xóa nhãn ƯỚC trên dòng;
+    từ đây biên của báo giá / đơn hàng mã này được tính là thật (cổng duyệt, Kiểm soát «chào → thực»)."""
+    d = db.get(DuToanBan, dt_id)
+    if d is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy dự toán")
+    so_dong = 0
+    for m in db.query(DuToanBanMuc).filter(DuToanBanMuc.du_toan_id == d.id, DuToanBanMuc.ghi_chu.like("Giá vốn ƯỚC%")).all():
+        m.ghi_chu = None
+        so_dong += 1
+    cu = bool(d.gia_uoc)
+    d.gia_uoc = False
+    ghi_audit(db, nd.id, "RA_GIA_VON", "du_toan_ban", d.id, moi={"ma": d.ma, "so_dong": so_dong, "co_dau": cu})
+    db.commit()
+    return {"ok": True, "so_dong": so_dong}
+
+
 # LƯU Ý thứ tự route: các đường /du-toan-ban/muc/{...} phải khai TRƯỚC /du-toan-ban/{dt_id}
 # để "muc" không bị bắt nhầm vào tham số số nguyên dt_id.
 @router.put("/du-toan-ban/muc/{muc_id}")
@@ -6089,6 +6124,7 @@ def dtb_sua_muc(muc_id: int, data: DtbMucVao, xac_nhan_khoa: bool = False, db: S
     if data.hang_hoa_id is not None and db.get(HangHoa, data.hang_hoa_id) is not None:
         m.hang_hoa_id = data.hang_hoa_id          # 🔎 liên kết mặt hàng khi chọn từ Tìm giá / khớp kho
     _dtb_ap_san_pham_ncc(db, m, data, tao=False)   # mig 139: NCC · mã SP · spec · NSX · liên kết danh mục
+    _dtb_bo_uoc(db, m, nd, gia_truoc)              # mig 162: sửa giá dòng ƯỚC → bỏ nhãn; hết dòng ƯỚC → gỡ cờ dự toán
     # 💲 chọn giá gợi ý / Áp giá mua cũ / 🔎 tìm giá: dòng CHƯA có NCC → nhận NCC của PO / báo giá nguồn giá (đã có thì giữ)
     ncc_dien = None
     if data.ncc_goi_y_id and not m.nha_cung_cap_id and not (m.ncc_ten or "").strip() and not m.san_pham_ncc_id:
@@ -6256,7 +6292,7 @@ def dtb_chi_tiet(dt_id: int, db: Session = Depends(get_db), _=Depends(yeu_cau_ba
     return {"id": d.id, "ma": d.ma, "khach_hang": d.khach_hang, "mo_ta": d.mo_ta,
             "ngay": str(d.ngay) if d.ngay else None, "nguoi_tao": d.nguoi_tao, "viec_nen": viec,
             "tao_luc": str(d.tao_luc)[:16] if d.tao_luc else None,
-            "cap_nhat_luc": str(d.cap_nhat_luc)[:16] if d.cap_nhat_luc else None,
+            "cap_nhat_luc": str(d.cap_nhat_luc)[:16] if d.cap_nhat_luc else None, "gia_uoc": bool(d.gia_uoc),
             "items": items, "tong": sum(x["thanh_tien"] for x in items),
             "tong_thuc": sum((x["gia_thuc"] or 0) * x["so_luong"] for x in items if x["gia_thuc"] is not None),
             "so_dong_thuc": sum(1 for x in items if x["gia_thuc"] is not None)}

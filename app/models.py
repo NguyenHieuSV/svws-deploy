@@ -475,6 +475,7 @@ class DonHang(Base):
     gia_von_chao: Mapped[Decimal | None] = mapped_column(Numeric(18, 0), nullable=True)  # giá vốn dự toán lúc chào
     bien_chao: Mapped[Decimal | None] = mapped_column(Numeric(6, 2), nullable=True)    # % trên giá bán
     chot_luc: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    gia_von_chao_uoc: Mapped[bool] = mapped_column(Boolean, default=False)    # mig 162: giá vốn lúc chào là số ƯỚC → không so biên
     chi_tiet: Mapped[list["DonHangCt"]] = relationship(cascade="all, delete-orphan", lazy="selectin")
 
 
@@ -1838,6 +1839,7 @@ class DuToanBan(Base):
     # mig 161 (29/10/2026): giờ tạo · giờ sửa gần nhất (máy tự ghi ở before_flush cuối file) — Bảng lưu dự toán xếp theo đây
     tao_luc: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, default=lambda: _gio_vn())
     cap_nhat_luc: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, default=lambda: _gio_vn())
+    gia_uoc: Mapped[bool] = mapped_column(Boolean, default=False)   # mig 162: giá vốn ƯỚC (tạo ngược từ báo giá) chưa rà
 
 
 class DuToanBanMuc(Base):

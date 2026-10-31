@@ -9,7 +9,7 @@ from __future__ import annotations
 import os
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
-from reportlab.lib.colors import HexColor, white, black
+from reportlab.lib.colors import HexColor, white, black, Color
 from reportlab.lib.enums import TA_CENTER, TA_RIGHT, TA_LEFT
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.pdfbase import pdfmetrics
@@ -86,7 +86,8 @@ def mo_ta_day_du(it: dict) -> str:
 
 def tao_bao_gia_pdf(path, d, cong_ty=None,
                     font_path="/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-                    font_bold_path="/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"):
+                    font_bold_path="/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", nhap: bool = False):
+    """nhap=True (31/10/2026): báo giá CHƯA DUYỆT → dòng đỏ dưới tiêu đề + dấu «BẢN NHÁP — CHƯA DUYỆT» chéo mọi trang."""
     F, FB = _fonts(font_path, font_bold_path)
     ct = cong_ty or {}
     W = A4[0] - 24 * mm
@@ -111,9 +112,11 @@ def tao_bao_gia_pdf(path, d, cong_ty=None,
     hd.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
                             ("LINEBELOW", (0, 0), (-1, -1), 1.6, TEAL),
                             ("BOTTOMPADDING", (0, 0), (-1, -1), 8)]))
-    story += [hd, Spacer(1, 10),
-              P("<b>QUOTATION</b>", 21, FB, TEAL, TA_CENTER), Spacer(1, 4),
-              P("Song Viet Technical Solutions appreciates your interest. "
+    story += [hd, Spacer(1, 10), P("<b>QUOTATION</b>", 21, FB, TEAL, TA_CENTER), Spacer(1, 4)]
+    if nhap:                                                 # chưa duyệt → ghi rõ + đóng dấu chéo mọi trang (_dong_dau)
+        story += [P("<b>DRAFT — NOT APPROVED · BẢN NHÁP CHƯA DUYỆT — chỉ xem nội bộ, không có giá trị gửi khách</b>",
+                    9, FB, HexColor("#dc2626"), TA_CENTER), Spacer(1, 4)]
+    story += [P("Song Viet Technical Solutions appreciates your interest. "
                 "We are pleased to send you our quotation as requested:", 9), Spacer(1, 6)]
 
     # META
@@ -253,7 +256,21 @@ def tao_bao_gia_pdf(path, d, cong_ty=None,
                                     ("VALIGN", (0, 0), (-1, -1), "MIDDLE"), ("TOPPADDING", (0, 0), (-1, -1), 3),
                                     ("BOTTOMPADDING", (0, 0), (-1, -1), 3)]))
             story += [t2, Spacer(1, 8)]
+    def _dong_dau(c, _doc):
+        """Dấu BẢN NHÁP chéo trang (mọi trang) khi báo giá chưa duyệt."""
+        if not nhap:
+            return
+        c.saveState()
+        c.setFillColor(Color(0.86, 0.15, 0.15, alpha=0.13))
+        c.setFont(FB, 52)
+        c.translate(A4[0] / 2, A4[1] / 2)
+        c.rotate(32)
+        c.drawCentredString(0, 28, "BẢN NHÁP — CHƯA DUYỆT")
+        c.drawCentredString(0, -42, "DRAFT — NOT APPROVED")
+        c.restoreState()
+
     SimpleDocTemplate(path, pagesize=A4, leftMargin=12 * mm, rightMargin=12 * mm,
                       topMargin=12 * mm, bottomMargin=12 * mm,
-                      title=f"Quotation {d.get('so') or ''}").build(story)
+                      title=f"Quotation {d.get('so') or ''}" + (" (DRAFT)" if nhap else "")).build(
+        story, onFirstPage=_dong_dau, onLaterPages=_dong_dau)
     return path

@@ -85,9 +85,28 @@ def po_trung_khoan(pos, so_ct, ncc_id, tong, truoc_thue=None, da_dung=None):
     return None
 
 
+def po_chua_vat(p) -> float:
+    """Giá trị PO CHƯA VAT: tien_hang; PO cũ chưa tách thuế → tong_tien − tien_thue."""
+    th = _f(getattr(p, "tien_hang", 0))
+    return th if th > 0 else max(_f(p.tong_tien) - _f(getattr(p, "tien_thue", 0)), 0.0)
+
+
+def _cn_chua_vat(c) -> float:
+    return max(_f(c.so_tien) - _f(getattr(c, "tien_thue", 0)), 0.0)
+
+
+def _hd_chua_vat(h) -> float:
+    tt = _f(getattr(h, "tien_truoc_thue", 0))
+    return tt if tt > 0 else max(_f(h.tong_tien) - _f(getattr(h, "tien_thue", 0)), 0.0)
+
+
 def chi_phi_ma(db: Session, dh: DonHang, tho: bool = False) -> dict:
     """tho=True → số THÔ (không áp quy tắc đơn ĐẦU TƯ) — dùng để tính vốn đầu tư của dự án cho thuê."""
-    doanh_thu = _f(dh.tong_tien) + _f(dh.tien_thue)
+    # 💡 31/10/2026 (anh Hiếu, mục 3 rà logic): lãi / biên tính CHƯA VAT ở cả hai vế — VAT bán là thu hộ, VAT mua được khấu
+    #    trừ; gộp VAT làm lệch biên khi thuế suất hai vế khác nhau (8% / 10%). Dòng tiền (đã thu / đã trả / còn phải thu) vẫn gồm VAT.
+    #    Chi phí vận hành cho thuê (chi_phi_van_hanh.so_tien) không tách thuế → giữ nguyên số ghi.
+    doanh_thu_gom_vat = _f(dh.tong_tien) + _f(dh.tien_thue)
+    doanh_thu = _f(dh.tong_tien)                                   # tiền hàng CHƯA VAT
     # PO gắn đơn + PO chỉ mang MÃ CHUỖI trùng số đơn (sinh từ Dự toán / Dự án trước khi có
     # đơn bán) — đơn bán cùng số tạo sau vẫn gom đủ giá vốn.
     _dk_pos = DonMua.don_hang_id == dh.id
@@ -97,8 +116,8 @@ def chi_phi_ma(db: Session, dh: DonHang, tho: bool = False) -> dict:
     pos = (db.query(DonMua).filter(_dk_pos,
                                    DonMua.trang_thai != "TU_CHOI").all())
     po_ids = [p.id for p in pos]
-    gia_von_po = sum(_f(p.tong_tien) for p in pos if p.trang_thai == "DA_DUYET")
-    po_cho_duyet = sum(_f(p.tong_tien) for p in pos if p.trang_thai == "CHO_DUYET")
+    gia_von_po = sum(po_chua_vat(p) for p in pos if p.trang_thai == "DA_DUYET")
+    po_cho_duyet = sum(po_chua_vat(p) for p in pos if p.trang_thai == "CHO_DUYET")
     # giá vốn THỰC NHẬN (theo số lượng đã nhận) — thông tin phụ, không dùng tính lãi/lỗ
     gia_von_thuc = 0.0
     if po_ids:
@@ -121,9 +140,9 @@ def chi_phi_ma(db: Session, dh: DonHang, tho: bool = False) -> dict:
     _po_da_khop = set()
     trung_po, chi_chenh_trung = [], 0.0
 
-    def _ghi_trung(loai, so_ct, tien, p):
+    def _ghi_trung(loai, so_ct, tien, p, tien_chua_vat):
         nonlocal chi_chenh_trung
-        chenh = max(_f(tien) - _f(p.tong_tien), 0.0)
+        chenh = max(_f(tien_chua_vat) - po_chua_vat(p), 0.0)      # chênh so PO tính CHƯA VAT
         if chenh <= LECH_TRUNG:
             chenh = 0.0
         chi_chenh_trung += chenh
@@ -135,11 +154,11 @@ def chi_phi_ma(db: Session, dh: DonHang, tho: bool = False) -> dict:
         p = po_trung_khoan(pos, c.so_ct, c.nha_cung_cap_id, c.so_tien,
                            _f(c.so_tien) - _f(getattr(c, "tien_thue", 0)), _po_da_khop)
         if p is not None:
-            _ghi_trung("CONG_NO", c.so_ct or f"CN-{c.id}", c.so_tien, p)
+            _ghi_trung("CONG_NO", c.so_ct or f"CN-{c.id}", c.so_tien, p, _cn_chua_vat(c))
         else:
             _cn_giu.append(c)
     cn_ngoai = _cn_giu
-    chi_ngoai_cn = sum(_f(c.so_tien) for c in cn_ngoai)
+    chi_ngoai_cn = sum(_cn_chua_vat(c) for c in cn_ngoai)
     # hóa đơn MUA gắn mã KHÔNG qua PO (email / nhập tay) — bỏ hóa đơn tự sinh khi nhận hàng PO
     hd_po = {c.hoa_don_id for c in cn_po if c.hoa_don_id}
     hd_ngoai_po = []
@@ -148,10 +167,10 @@ def chi_phi_ma(db: Session, dh: DonHang, tho: bool = False) -> dict:
             continue
         p = po_trung_khoan(pos, hd.so, hd.nha_cung_cap_id, hd.tong_tien, hd.tien_truoc_thue, _po_da_khop)
         if p is not None:
-            _ghi_trung("HOA_DON", hd.so or f"HD-{hd.id}", hd.tong_tien, p)
+            _ghi_trung("HOA_DON", hd.so or f"HD-{hd.id}", hd.tong_tien, p, _hd_chua_vat(hd))
             continue
         hd_ngoai_po.append(hd)
-    chi_hd_ngoai_po = sum(_f(h.tong_tien) for h in hd_ngoai_po) + chi_chenh_trung
+    chi_hd_ngoai_po = sum(_hd_chua_vat(h) for h in hd_ngoai_po) + chi_chenh_trung
     # công nợ sinh từ các hóa đơn ngoài PO (luồng cũ) — chỉ dùng cho DÒNG TIỀN, không cộng chi phí
     cn_hd = []
     if hd_ngoai_po:
@@ -209,11 +228,13 @@ def chi_phi_ma(db: Session, dh: DonHang, tho: bool = False) -> dict:
         dau_tu = {"la_dau_tu": True, "von_dau_tu": tong_chi_phi, "von_po": gia_von_po, "von_khac": chi_phi_khac,
                   "gia_tri_hd": doanh_thu, "tai_san_cho_thue_id": getattr(dh, "tai_san_cho_thue_id", None)}
         doanh_thu = gia_von_po = chi_phi_khac = chi_ngoai_cn = chi_hd_ngoai_po = tong_chi_phi = loi_nhuan = 0.0
+        doanh_thu_gom_vat = 0.0
         da_thu = 0.0
 
     return {
         **dau_tu,
-        "doanh_thu": doanh_thu,
+        "doanh_thu": doanh_thu,                                    # CHƯA VAT
+        "doanh_thu_gom_vat": doanh_thu_gom_vat, "vat_ban": doanh_thu_gom_vat - doanh_thu,
         "gia_von_po": gia_von_po, "po_cho_duyet": po_cho_duyet, "gia_von_thuc": gia_von_thuc,
         "chi_ngoai_cn": chi_ngoai_cn, "chi_hd_ngoai_po": chi_hd_ngoai_po,
         "chi_van_hanh": chi_van_hanh, "trung_vh": trung_vh,
@@ -223,7 +244,7 @@ def chi_phi_ma(db: Session, dh: DonHang, tho: bool = False) -> dict:
         "loi_nhuan": loi_nhuan,
         "ty_suat": round(loi_nhuan / doanh_thu * 100, 1) if doanh_thu else None,
         "da_tra_ncc": da_tra_ncc, "con_phai_tra": con_phai_tra,
-        "da_thu": da_thu, "con_phai_thu": max(doanh_thu - da_thu, 0.0),
+        "da_thu": da_thu, "con_phai_thu": max(doanh_thu_gom_vat - da_thu, 0.0),      # dòng tiền: gồm VAT
         "so_po": len(pos),
         "danh_sach_po": [{"id": p.id, "so": p.so, "nha_cung_cap_id": p.nha_cung_cap_id,
                           "tong_tien": _f(p.tong_tien), "trang_thai": p.trang_thai,
@@ -268,16 +289,16 @@ def chi_phi_ngoai_ma(db: Session) -> dict:
             o = r["ma_le"].setdefault(k, {"ma": str(mb).strip(), "chi": 0.0})
             o["chi"] += v
 
-    for (dhid, mb, tt) in db.query(DonMua.don_hang_id, DonMua.ma_ban, DonMua.tong_tien).filter(
-            DonMua.trang_thai == "DA_DUYET").all():
+    for (dhid, mb, th, tt, tthue) in db.query(DonMua.don_hang_id, DonMua.ma_ban, DonMua.tien_hang, DonMua.tong_tien,
+                                             DonMua.tien_thue).filter(DonMua.trang_thai == "DA_DUYET").all():
         if not dhid:
-            cong(mb, _f(tt))
-    for (mbn, st, sct, hdid, dmid) in db.query(
-            CongNo.ma_ban_ngoai, CongNo.so_tien, CongNo.so_ct,
+            cong(mb, _f(th) if _f(th) > 0 else max(_f(tt) - _f(tthue), 0.0))          # CHƯA VAT (31/10/2026)
+    for (mbn, st, tthue, sct, hdid, dmid) in db.query(
+            CongNo.ma_ban_ngoai, CongNo.so_tien, CongNo.tien_thue, CongNo.so_ct,
             CongNo.hoa_don_id, CongNo.don_mua_id).filter(CongNo.loai == "PHAI_TRA").all():
         if dmid or hdid or str(sct or "").upper().startswith("HDM-"):
             continue
-        cong(mbn, _f(st))
+        cong(mbn, max(_f(st) - _f(tthue), 0.0))                                         # CHƯA VAT
     # 🏭 chi phí vận hành cho thuê mang mã CHƯA có đơn bán (chưa nối PO / hóa đơn MUA) → dòng mã lẻ
     for (mb, st) in (db.query(ChiPhiVanHanh.ma_ban_hang, ChiPhiVanHanh.so_tien)
                      .filter(ChiPhiVanHanh.nguon.in_(VH_TINH_CHI_PHI), ChiPhiVanHanh.don_hang_id.is_(None),

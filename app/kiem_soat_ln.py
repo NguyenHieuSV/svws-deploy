@@ -31,7 +31,8 @@ def bien_chao_gop(rows) -> float | None:
     for r in rows:
         b = r.get("bien_chao") if isinstance(r, dict) else getattr(r, "bien_chao", None)
         g = (r.get("tong_chao") if isinstance(r, dict) else getattr(r, "tong_chao", None)) or 0
-        if b is None or float(g) <= 0:
+        uoc = r.get("gia_von_chao_uoc") if isinstance(r, dict) else getattr(r, "gia_von_chao_uoc", False)
+        if b is None or float(g) <= 0 or uoc:                 # mig 162: biên chào trên giá vốn ƯỚC → không so
             continue
         t += float(g)
         x += float(b) * float(g)
@@ -99,7 +100,8 @@ def so_lieu_nhom(db: Session, nh: str) -> dict:
         cp += float(c.get("tong_chi_phi") or 0)
         dau_tu = dau_tu or bool(c.get("la_dau_tu"))
         ma.append(dh.so)
-        chao.append({"bien_chao": getattr(dh, "bien_chao", None), "tong_chao": getattr(dh, "tong_chao", None)})
+        chao.append({"bien_chao": getattr(dh, "bien_chao", None), "tong_chao": getattr(dh, "tong_chao", None),
+                     "gia_von_chao_uoc": bool(getattr(dh, "gia_von_chao_uoc", False))})
     for g in chi_phi_ngoai_ma(db)["ma_le"].values():
         if (nhom_ma(g["ma"]) or str(g["ma"]).strip().upper()) == goc.upper():
             cp += float(g.get("chi") or 0)
@@ -195,13 +197,18 @@ def bao_cao_tuan(db: Session, hom_nay: date | None = None) -> dict:
     chua_dt.sort(key=lambda o: -o["cp"])
     bien_thap.sort(key=lambda o: o["bien"])
     tut_bien.sort(key=lambda o: o["bien"] - o["bien_chao"])
+    try:                                                     # mig 162: dự toán giá vốn ƯỚC chưa rà → nhắc trong bản tuần
+        from .models import DuToanBan
+        gia_uoc = [d.ma for d in db.query(DuToanBan).filter(DuToanBan.gia_uoc.is_(True)).order_by(DuToanBan.ma).all()]
+    except Exception:                                        # noqa: BLE001
+        gia_uoc = []
     return {"lo": lo, "chua_dt": chua_dt, "bien_thap": bien_thap, "tut_bien": tut_bien, "nguong": ng,
-            "tut_bien_diem": TUT_BIEN_DIEM}
+            "tut_bien_diem": TUT_BIEN_DIEM, "gia_uoc": gia_uoc}
 
 
 def noi_dung_tuan(bc: dict, nhan: str = "") -> str | None:
-    lo, chua, thap, tut = bc["lo"], bc["chua_dt"], bc["bien_thap"], bc.get("tut_bien") or []
-    if not (lo or chua or thap or tut):
+    lo, chua, thap, tut, uoc = bc["lo"], bc["chua_dt"], bc["bien_thap"], bc.get("tut_bien") or [], bc.get("gia_uoc") or []
+    if not (lo or chua or thap or tut or uoc):
         return None
     chao = lambda o: f" · chào {_pt(o['bien_chao'])}%" if o.get("bien_chao") is not None else ""   # noqa: E731
     l = [f"📉 *KIỂM SOÁT LỢI NHUẬN THEO MÃ* {nhan}".rstrip(), "(theo nhóm mã gốc + tháng · chi phí = PO đã duyệt + công nợ / hóa đơn gắn mã)"]
@@ -218,6 +225,10 @@ def noi_dung_tuan(bc: dict, nhan: str = "") -> str | None:
         l.append(f"\n🔵 *Biên thực tụt ≥ {bc.get('tut_bien_diem', TUT_BIEN_DIEM):g} điểm so với lúc chào* — {len(tut)} nhóm:")
         l += [f"• {o['nhom']}: chào {_pt(o['bien_chao'])}% → thực {_pt(o['bien'])}% (doanh thu {_tr(o['dt'])} · chi phí {_tr(o['cp'])})"
               for o in tut[:10]]
+    if uoc:
+        l.append(f"\n⚠ *Dự toán GIÁ VỐN ƯỚC chưa rà* (tạo ngược từ báo giá — biên của các mã này chỉ tạm tính) — {len(uoc)} mã:")
+        l.append("• " + " · ".join(uoc[:15]) + (" …" if len(uoc) > 15 else ""))
+        l.append("👉 Bán hàng → Dự toán hàng bán: sửa giá từng dòng hoặc bấm ✓ Đã rà giá vốn")
     l.append("\n👉 App SVWS → Nhà cung cấp → Kiểm soát (Chi phí theo mã) · Kế toán → Lãi/Lỗ mã bán")
     return "\n".join(l)
 

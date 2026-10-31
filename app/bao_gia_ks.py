@@ -55,6 +55,7 @@ def tim_du_toan(db: Session, bgf) -> dict | None:
         rows = [(m.id, m.ten, float(m.so_luong or 0), float(m.don_gia or 0))
                 for m in db.query(DuToanBanMuc).filter_by(du_toan_id=dt.id).all()]
         loai, did, dma = "DTB", dt.id, dt.ma
+        gia_uoc = bool(getattr(dt, "gia_uoc", False))           # mig 162: giá vốn ƯỚC (tạo ngược) chưa rà
     else:
         das = tim_da_theo_ma(db, ma) if ma else []
         if not das:
@@ -63,6 +64,7 @@ def tim_du_toan(db: Session, bgf) -> dict | None:
         rows = [(x.id, x.ten, float(x.so_luong or 0), float(x.don_gia or 0))
                 for x in db.query(DuAnDuToan).filter_by(du_an_id=da.id).all()]
         loai, did, dma = "BOQ", da.id, da.ma
+        gia_uoc = False
     co_sl = [r for r in rows if r[2] > 0]
     # dòng báo giá đánh dấu «không chào» (khong_chao) → trừ khỏi tổng dự toán dùng để so biên
     bo = {int(it.get("dt_muc_id")) for it in (nd.get("items") or [])
@@ -72,7 +74,7 @@ def tim_du_toan(db: Session, bgf) -> dict | None:
     ngoai = [it for it in (nd.get("items") or []) if it.get("ngoai_du_toan") and not it.get("khong_chao")
              and not it.get("tuy_chon") and float(it.get("so_luong") or 0) > 0]
     tong += sum(float(it.get("so_luong") or 0) * float(it.get("gia_von") or 0) for it in ngoai)
-    return {"loai": loai, "id": did, "ma": dma, "so_dong": len(co_sl),
+    return {"loai": loai, "id": did, "ma": dma, "so_dong": len(co_sl), "gia_uoc": gia_uoc,
             "dong_thieu_gia": [r[1] for r in co_sl if r[3] <= 0 and r[0] not in bo],
             "tong": tong, "so_bo": len(bo),
             "dong": [{"id": r[0], "ten": r[1], "so_luong": r[2], "don_gia": r[3]} for r in rows],
@@ -171,15 +173,17 @@ def tao_du_toan_tu_bao_gia(db: Session, bgf, nd) -> dict:
     db.add(d); db.flush()
     san = san_bien()
     cpc = san["chi_phi_chung"] / 100
-    so_dong, co_von = 0, 0
+    so_dong, co_von, so_uoc = 0, 0, 0
     for it in its:
         ten = str(it.get("ten")).strip()[:250]
         gia_ban = float(it.get("don_gia") or 0)
         von = float(it.get("gia_von") or 0)
-        if von <= 0 and gia_ban > 0:
+        uoc = von <= 0 and gia_ban > 0                        # không có giá vốn thật → ƯỚC ngược từ sàn biên
+        if uoc:
             nhom = (it.get("nhom") or "VAT_TU").upper()
             von = gia_ban * (1 - san.get(nhom, san["VAT_TU"]) / 100) / (1 + cpc)   # ước ngược từ sàn biên
             von = round(von / 1000) * 1000
+            so_uoc += 1
         hh_id = db.query(HangHoa.id).filter(func.lower(func.trim(HangHoa.ten)) == ten.lower()).scalar()   # chỉ lấy id (không nạp quan hệ)
         # 29/10/2026: mang theo thông tin sản phẩm của dòng báo giá (mã SP · spec · NSX · NCC · liên kết danh mục nếu còn)
         ncc_id = (int(it["nha_cung_cap_id"]) if str(it.get("nha_cung_cap_id") or "").isdigit()
@@ -192,7 +196,7 @@ def tao_du_toan_tu_bao_gia(db: Session, bgf, nd) -> dict:
                          ma_sp=(str(it.get("ma_sp") or "").strip()[:60] or None), spec=(str(it.get("spec") or "").strip()[:2000] or None),
                          nha_san_xuat=(str(it.get("nha_san_xuat") or "").strip()[:150] or None),
                          ncc_ten=(str(it.get("ncc_ten") or "").strip()[:200] or None), nha_cung_cap_id=ncc_id, san_pham_ncc_id=sp_id,
-                         ghi_chu="Giá vốn ƯỚC từ giá bán − sàn biên (tạo ngược từ báo giá) — cần rà lại" if von > 0 else None)
+                         ghi_chu="Giá vốn ƯỚC từ giá bán − sàn biên (tạo ngược từ báo giá) — cần rà lại" if uoc else None)
         db.add(m); db.flush()
         it["dt_muc_id"] = m.id
         if float(it.get("gia_von") or 0) <= 0:
@@ -200,6 +204,7 @@ def tao_du_toan_tu_bao_gia(db: Session, bgf, nd) -> dict:
         it.pop("ngoai_du_toan", None)
         so_dong += 1
         co_von += 1 if von > 0 else 0
+    d.gia_uoc = so_uoc > 0                                     # mig 162: cờ «giá vốn ước» → biên chỉ tạm, lúc duyệt chỉ CEO
     nd_["du_toan_id"], nd_["du_toan_ma"] = d.id, d.ma
     nd_.setdefault("bien_nhom", {k: san[k] for k in ("THIET_BI", "VAT_TU", "NHAN_CONG")})
     nd_.setdefault("chi_phi_chung", san["chi_phi_chung"])
@@ -208,7 +213,7 @@ def tao_du_toan_tu_bao_gia(db: Session, bgf, nd) -> dict:
     flag_modified(bgf, "noi_dung")                 # JSONB: báo rõ đã đổi để SQLAlchemy ghi xuống DB
     ghi_audit(db, nd.id, "TAO_TU_BAO_GIA", "du_toan_ban", d.id, moi={"bao_gia": bgf.id, "ma": ma, "so_dong": so_dong})
     db.commit()
-    return {"du_toan_id": d.id, "ma": d.ma, "so_dong": so_dong, "co_von": co_von}
+    return {"du_toan_id": d.id, "ma": d.ma, "so_dong": so_dong, "co_von": co_von, "so_uoc": so_uoc}
 
 
 # ---------------- 🧾 đơn hàng nhớ báo giá lúc chốt (28/10/2026) ----------------
@@ -226,7 +231,7 @@ def so_lieu_chot(db: Session, bgf) -> dict:
           .order_by(BaoGiaPhienBan.id.desc()).first())
     return {"du_toan_ma": dt.get("ma"), "rev": pb[0] if pb else None, "tong_chao": round(float(sub)),
             "tong_gom_vat": round(float(tong)), "gia_von_chao": round(float(dt.get("tong") or 0)) if dt else None,
-            "bien_chao": k["bien"]}
+            "bien_chao": k["bien"], "gia_von_chao_uoc": bool(k.get("gia_uoc"))}
 
 
 BIEN_CHAO_TRAN = 999.0       # |biên| lớn hơn mức này (báo giá 19.000 đ so dự toán 153 tr…) = dữ liệu sai → không ghi biên
@@ -245,6 +250,7 @@ def ghi_chot_len_don(db: Session, dh, bgf, nguon: str = "TAO_DON") -> dict:
     dh.tong_chao = s["tong_chao"]
     dh.gia_von_chao = s["gia_von_chao"]
     dh.bien_chao = s["bien_chao"]
+    dh.gia_von_chao_uoc = bool(s.get("gia_von_chao_uoc"))      # mig 162
     dh.chot_luc = gio_hien_tai()
     s["nguon"] = nguon
     return s
@@ -411,8 +417,11 @@ def kiem_tra(db: Session, bgf) -> dict:
                 ly_do_bien = (f"Tổng báo giá {_tr(tong_bg)} (chưa VAT) so với dự toán {dt['ma']} {_tr(dt['tong'])} → "
                               + (f"LỖ {_tr(dt['tong'] - tong_bg)} (biên {_pt(bien)}%)" if bien < 0
                                  else f"biên chỉ {_pt(bien)}% < ngưỡng {ng:g}%") + ".")
+    gia_uoc = bool((dt or {}).get("gia_uoc")) and not thieu
+    canh_bao_uoc = ((f"Dự toán {dt['ma']} có GIÁ VỐN ƯỚC (tạo ngược từ báo giá = giá bán − sàn biên, chưa rà)"
+                     + (f" — biên {_pt(bien)}% chỉ là tạm tính" if bien is not None else "") + ".") if gia_uoc else None)
     return {"du_toan": dt, "thieu_du_toan": thieu, "tong_bg": tong_bg, "bien": bien, "nguong": ng,
-            "canh_bao_bien": ly_do_bien,
+            "canh_bao_bien": ly_do_bien, "gia_uoc": gia_uoc, "canh_bao_uoc": canh_bao_uoc,
             "ngoai_du_toan": (dt or {}).get("ngoai_du_toan") or [], "ngoai_chua_uoc": (dt or {}).get("ngoai_chua_uoc") or [],
             "so_bo": (dt or {}).get("so_bo") or 0, "dt_doi_gia": dt_doi_gia(dt, bgf.noi_dung or {})}
 
@@ -519,6 +528,25 @@ def mien_truoc_moc(db: Session, bgf) -> bool:
     return bool(ngay and ngay < ad)
 
 
+def ban_nhap(bgf) -> bool:
+    """🖨 Bản in / PDF có đóng dấu BẢN NHÁP không (31/10/2026, mục 1 rà logic): chỉ báo giá ĐÃ DUYỆT / ĐÃ GỬI mới in sạch.
+    Ngoại lệ: «đã xuất PDF» từ TRƯỚC mốc bg_ap_dung_tu (gửi tay thời chưa có cổng) → in sạch để in lại cho khách; hợp đồng không dấu."""
+    from datetime import date as _d
+    tt = getattr(bgf, "trang_thai", None)
+    nd = getattr(bgf, "noi_dung", None) or {}
+    if tt in ("DA_DUYET", "DA_GUI") or nd.get("loai") == "HOP_DONG":
+        return False
+    if tt == "DA_XUAT":
+        ad = ngay_ap_dung()
+        try:
+            ngay = _d.fromisoformat(str(nd.get("ngay") or "")[:10])
+        except ValueError:
+            ngay = None
+        if ad is not None and ngay is not None and ngay < ad:
+            return False
+    return True
+
+
 def cong(db: Session, bgf, nd, xac_nhan: bool, buoc: str, kiem_bien: bool = False) -> dict:
     """Cổng kiểm soát một bước (TRÌNH DUYỆT / DUYỆT / GỬI KHÁCH).
     Thiếu dự toán: người thường 400; CEO chưa xác nhận 409 (📋). Biên thấp (khi kiem_bien): người thường 403; CEO 409 (📉)."""
@@ -544,6 +572,12 @@ def cong(db: Session, bgf, nd, xac_nhan: bool, buoc: str, kiem_bien: bool = Fals
         if not la_ceo(nd):
             raise HTTPException(status.HTTP_403_FORBIDDEN, f"📉 {k['canh_bao_bien']} — chỉ CEO duyệt được báo giá này.")
         van_de.append("📉 " + k["canh_bao_bien"])
+    if kiem_bien and k.get("gia_uoc"):                        # mig 162: giá vốn ƯỚC → biên chưa đáng tin, chỉ CEO duyệt
+        if not la_ceo(nd):
+            raise HTTPException(status.HTTP_403_FORBIDDEN,
+                                f"⚠ {k['canh_bao_uoc']} Rà giá vốn ở Bán hàng → Dự toán hàng bán (sửa giá từng dòng hoặc "
+                                "bấm ✓ Đã rà giá vốn) rồi duyệt, hoặc nhờ CEO duyệt.")
+        van_de.append("⚠ " + k["canh_bao_uoc"])
     if van_de and not xac_nhan:
         raise HTTPException(status.HTTP_409_CONFLICT, " ".join(van_de))
     k["vuot"] = van_de
