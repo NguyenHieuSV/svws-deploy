@@ -786,7 +786,195 @@ def _dt_ra(x):
             "don_vi": x.don_vi, "so_luong": sl, "don_gia": dg,
             "thanh_tien": round(sl * dg), "ghi_chu": x.ghi_chu, "thu_tu": x.thu_tu,
             "hang_hoa_id": getattr(x, "hang_hoa_id", None),
-            "don_mua_id": getattr(x, "don_mua_id", None)}
+            "don_mua_id": getattr(x, "don_mua_id", None),
+            # mig 163: ngang Dự toán hàng bán
+            "nha_cung_cap_id": getattr(x, "nha_cung_cap_id", None), "ncc_ten": getattr(x, "ncc_ten", None),
+            "ma_sp": getattr(x, "ma_sp", None), "spec": getattr(x, "spec", None),
+            "nha_san_xuat": getattr(x, "nha_san_xuat", None), "san_pham_ncc_id": getattr(x, "san_pham_ncc_id", None)}
+
+
+# ---------- 🏷 BOQ dự án ngang Dự toán hàng bán (31/10/2026, mục 5): nhóm mẫu BOQ ↔ loại, nạp mẫu / AI, xuất mẫu ----------
+_BOQ_NHOM = {"THIET_BI": ("A", "THIẾT BỊ"), "VAT_TU": ("B", "VẬT TƯ"), "NHAN_SU": ("C", "NHÂN SỰ"), "CHI_PHI_KHAC": ("D", "CHI PHÍ KHÁC")}
+
+
+def _boq_loai_tu_nhom(nhom_ten) -> str:
+    """Tên nhóm trong mẫu BOQ (A THIẾT BỊ CÔNG NGHỆ, D ĐƯỜNG ỐNG, G CHI PHÍ LẮP ĐẶT…) → loại BOQ dự án."""
+    from ..boq_mau import _kd
+    t = _kd(nhom_ten)
+    if not t:
+        return "THIET_BI"
+    if "thiet bi" in t:
+        return "THIET_BI"
+    if any(k in t for k in ("nhan cong", "nhan su")):
+        return "NHAN_SU"
+    if any(k in t for k in ("chi phi", "lap dat", "xay dung", "thi cong", "van chuyen")):
+        return "CHI_PHI_KHAC"
+    return "VAT_TU"
+
+
+def _boq_snap(x) -> dict:
+    return {"ten": x.ten, "loai": x.loai, "so_luong": _f(x.so_luong), "don_gia": _f(x.don_gia), "don_vi": x.don_vi,
+            "ncc": x.ncc_ten, "ma_sp": x.ma_sp, "nsx": x.nha_san_xuat, "san_pham_ncc_id": x.san_pham_ncc_id}
+
+
+def _boq_them_muc_mau(db, nd, da, items: list, ten_file: str) -> dict:
+    """Thêm dòng đọc từ file MẪU BOQ vào BOQ dự án: nhóm → loại; trùng tên bỏ qua; tên khớp hàng kho → gắn; cột Nhà cung cấp
+    trùng hồ sơ → gắn NCC + ghi ngược danh mục Sản phẩm NCC có kiểm soát (cùng quy tắc Dự toán hàng bán)."""
+    from ..boq_mau import ghi_chu_boq
+    from ..models import HangHoa as _Hh
+    from .ncc import _DtbNapThongKe, _dtb_ncc_theo_ten
+    da_co = {(x.ten or "").strip().lower() for x in db.query(DuAnDuToan).filter_by(du_an_id=da.id).all()}
+    base = db.query(func.coalesce(func.max(DuAnDuToan.thu_tu), 0)).filter(DuAnDuToan.du_an_id == da.id).scalar() or 0
+    tk, them, bo_qua = _DtbNapThongKe(), [], []
+    for it in items[:400]:
+        ten = str(it.get("ten") or "").strip()
+        if not ten or ten.lower() in da_co:
+            if ten:
+                bo_qua.append(ten)
+            continue
+        hh = db.query(_Hh).filter(func.lower(func.trim(_Hh.ten)) == ten.lower()).first()
+        ncc_ten = str(it.get("ncc_ten") or "").strip()[:200]
+        ncc_id = _dtb_ncc_theo_ten(db, ncc_ten) if ncc_ten else None
+        base += 1
+        x = DuAnDuToan(du_an_id=da.id, loai=_boq_loai_tu_nhom(it.get("nhom_ten") or it.get("nhom_ma") or ""),
+                       ten=ten[:250], quy_cach=(str(it.get("quy_cach") or "").strip()[:2000] or None),
+                       don_vi=((str(it.get("don_vi") or "")[:40]) or (getattr(hh, "don_vi", None) if hh is not None else None)),
+                       so_luong=Decimal(str(it.get("so_luong") or 1)), don_gia=Decimal(str(round(float(it.get("don_gia") or 0)))),
+                       nha_san_xuat=(str(it.get("nha_san_xuat") or "")[:150] or None), ma_sp=(str(it.get("ma_sp") or "")[:60] or None),
+                       nha_cung_cap_id=ncc_id, ncc_ten=(ncc_ten or None), hang_hoa_id=(hh.id if hh is not None else None),
+                       ghi_chu=(ghi_chu_boq(it) or f"Nạp từ mẫu BOQ {ten_file}")[:300], thu_tu=base)
+        db.add(x)
+        db.flush()
+        tk.ghi(db, x, nd, da.ma, ncc_ten, ncc_id)
+        ghi_audit(db, nd.id, "THEM_DONG", "du_an_du_toan", x.id, moi=dict(_boq_snap(x), du_an=da.ma, nguon=f"mẫu BOQ {ten_file}"))
+        da_co.add(ten.lower())
+        them.append(ten)
+    return {"so_doc": len(items), "them": len(them), "bo_qua": len(bo_qua), "ds_them": them[:15], "ds_bo_qua": bo_qua[:15], **tk.kq()}
+
+
+def _boq_ai_nhap(db, nd, da, data: bytes, content_type, ten_file: str, loai: str) -> dict:
+    """AI đọc file báo giá / BOQ tự do → thêm dòng (mã SP · spec · NSX · NCC vào cột riêng; NCC trùng hồ sơ → ghi ngược danh mục)."""
+    from ..ai_gateway import doc_bao_gia_file
+    from ..models import HangHoa as _Hh
+    from .ncc import _DtbNapThongKe, _dtb_ncc_theo_ten
+    try:
+        items = doc_bao_gia_file(data, content_type, ten_file)
+    except ValueError as e:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e))
+    if not items:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "AI không tìm thấy sản phẩm nào trong file — kiểm tra lại nội dung.")
+    loai = (loai or "THIET_BI").upper()
+    if loai not in _DT_LOAI:
+        loai = "THIET_BI"
+    da_co = {(x.ten or "").strip().lower() for x in db.query(DuAnDuToan).filter_by(du_an_id=da.id).all()}
+    base = db.query(func.coalesce(func.max(DuAnDuToan.thu_tu), 0)).filter(DuAnDuToan.du_an_id == da.id).scalar() or 0
+    tk, them, bo_qua = _DtbNapThongKe(), 0, 0
+    for it in items[:150]:
+        ten = (it.get("ten") or "").strip()
+        if not ten:
+            continue
+        if ten.lower() in da_co:
+            bo_qua += 1
+            continue
+        hh = db.query(_Hh).filter(func.lower(func.trim(_Hh.ten)) == ten.lower()).first()
+        ncc_ten = str(it.get("nha_cung_cap") or "").strip()[:200]
+        ncc_id = _dtb_ncc_theo_ten(db, ncc_ten) if ncc_ten else None
+        base += 1
+        x = DuAnDuToan(du_an_id=da.id, loai=loai, ten=ten[:250], quy_cach=(str(it.get("mo_ta") or "").strip()[:2000] or None),
+                       spec=(str(it.get("spec") or "").strip()[:2000] or None),
+                       nha_san_xuat=(str(it.get("nha_san_xuat") or "").strip()[:150] or None),
+                       ma_sp=(str(it.get("ma_sp") or "").strip()[:60] or None),
+                       nha_cung_cap_id=ncc_id, ncc_ten=(ncc_ten or None), hang_hoa_id=(hh.id if hh is not None else None),
+                       don_vi=(str(it.get("don_vi"))[:40] if it.get("don_vi") else None),
+                       so_luong=it.get("so_luong") if it.get("so_luong") else 1, don_gia=it.get("don_gia") or 0,
+                       ghi_chu=f"AI nhập từ {ten_file}"[:300], thu_tu=base)
+        db.add(x)
+        db.flush()
+        tk.ghi(db, x, nd, da.ma, ncc_ten, ncc_id)
+        ghi_audit(db, nd.id, "THEM_DONG", "du_an_du_toan", x.id, moi=dict(_boq_snap(x), du_an=da.ma, nguon=f"AI {ten_file}"))
+        da_co.add(ten.lower())
+        them += 1
+    return {"them": them, "bo_qua": bo_qua, **tk.kq()}
+
+
+@router.get("/{da_id}/du-toan/mau-boq")
+def boq_mau(da_id: int, db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
+    """📥 Xuất BOQ dự án ra Excel đúng MẪU BOQ 12 cột (cùng mẫu Dự toán hàng bán: có Nhà cung cấp · Mã SP) — sửa rồi 📎 nạp lại."""
+    from urllib.parse import quote
+    from fastapi.responses import Response
+    from ..boq_mau import tao_mau
+    from ..models import NhaCungCap as _Ncc
+    da = _da_404(db, da_id)
+    ten_ncc = {n.id: n.ten for n in db.query(_Ncc).all()}
+    items = []
+    for x in db.query(DuAnDuToan).filter_by(du_an_id=da_id).order_by(DuAnDuToan.thu_tu, DuAnDuToan.id).all():
+        nh, ten_nhom = _BOQ_NHOM.get(x.loai, ("D", x.loai or "KHÁC"))
+        gc = str(x.ghi_chu or "")
+        ghi_chu = gc if "nhóm " in gc else (f"nhóm {nh} {ten_nhom}" + (f" · Căn cứ: {gc}" if gc else ""))
+        items.append({"ten": x.ten, "quy_cach": x.quy_cach, "don_vi": x.don_vi, "so_luong": _f(x.so_luong),
+                      "nha_san_xuat": x.nha_san_xuat, "ncc_ten": (ten_ncc.get(x.nha_cung_cap_id) or x.ncc_ten), "ma_sp": x.ma_sp,
+                      "don_gia": _f(x.don_gia), "ghi_chu": ghi_chu})
+    ma = da.ma or f"DA{da.id}"
+    data = tao_mau("CÔNG TY TNHH GIẢI PHÁP KỸ THUẬT SÓNG VIỆT", " — ".join(x for x in (ma, da.ten, da.chu_dau_tu) if x), ma, items or None)
+    ten = f"Mau-BOQ-{ma}.xlsx"
+    return Response(content=data, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(ten)}"})
+
+
+@router.post("/{da_id}/du-toan/nhap-file")
+def boq_nhap_file(da_id: int, file: UploadFile = File(...), loai: str = Form("THIET_BI"),
+                  db: Session = Depends(get_db), nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    """📎 Nạp file vào BOQ dự án: đúng MẪU BOQ (Excel / CSV) → máy đọc thẳng (nhóm → loại); file khác → AI đọc (cùng phiên).
+    File gốc lưu vào Kho tệp. Trả thống kê gắn NCC / nối danh mục như Dự toán hàng bán."""
+    from ..boq_mau import doc_boq
+    from ..models import TepDinhKem
+    da = _da_404(db, da_id)
+    ten_file = file.filename or "boq"
+    data = file.file.read()
+    if len(data) > 15 * 1024 * 1024:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "File quá lớn (tối đa 15MB)")
+    mau_loi = None
+    try:
+        kq_mau = doc_boq(data, ten_file)
+    except Exception as e:                                   # noqa: BLE001
+        kq_mau, mau_loi = None, f"{type(e).__name__}: {str(e)[:160]}"
+    if kq_mau:
+        nhom, items = kq_mau
+        kq = _boq_them_muc_mau(db, nd, da, items, ten_file)
+        cach, so_nhom = "MAU_BOQ", len(nhom)
+    else:
+        kq = _boq_ai_nhap(db, nd, da, data, file.content_type, ten_file, loai)
+        cach, so_nhom = "AI", 0
+    ref = luu(data, "du_an_du_toan", da_id, ten_file, file.content_type)
+    db.add(TepDinhKem(doi_tuong="DU_AN_DU_TOAN", doi_tuong_id=da_id, loai="KHAC", ten_file=ten_file[:255], duong_dan=ref,
+                      kich_thuoc=len(data), content_type=file.content_type, nguoi_tai_len=nhan_vien_id_cua(db, nd.id)))
+    ghi_audit(db, nd.id, "NAP_MAU_BOQ" if cach == "MAU_BOQ" else "TAO", "du_an_du_toan", da_id,
+              moi={"file": ten_file, "cach": cach, "them": kq["them"], "bo_qua": kq["bo_qua"]})
+    db.commit()
+    return {"cach": cach, "so_nhom": so_nhom, "mau_loi": mau_loi, **kq}
+
+
+@router.post("/du-toan/{dt_id}/cap-nhat-gia-danh-muc")
+def boq_cap_nhat_gia_danh_muc(dt_id: int, db: Session = Depends(get_db), nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    """💲 Người dùng ĐÃ XÁC NHẬN: lấy đơn giá dòng BOQ ghi đè giá sản phẩm liên kết trong danh mục Sản phẩm NCC (như Dự toán hàng bán)."""
+    from ..models import SanPhamNcc as _Sp
+    from .ncc import _dtb_ghi_chu_gia
+    x = db.get(DuAnDuToan, dt_id)
+    if x is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy dòng BOQ")
+    sp = db.get(_Sp, x.san_pham_ncc_id) if x.san_pham_ncc_id else None
+    if sp is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Dòng này chưa liên kết sản phẩm trong danh mục NCC")
+    gia = _f(x.don_gia)
+    if gia <= 0:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Dòng BOQ chưa có đơn giá")
+    cu = _f(sp.don_gia)
+    da = db.get(DuAn, x.du_an_id)
+    sp.ghi_chu = _dtb_ghi_chu_gia(sp.ghi_chu, cu, gia, da.ma if da else None)
+    sp.don_gia = Decimal(str(round(gia)))
+    ghi_audit(db, nd.id, "SUA", "san_pham_ncc", sp.id, cu={"don_gia": cu}, moi={"don_gia": gia, "tu_boq": da.ma if da else None})
+    db.commit()
+    return {"ok": True, "sp_id": sp.id, "gia_cu": cu, "gia_moi": gia}
 
 
 @router.get("/{da_id}/du-toan")
@@ -877,7 +1065,7 @@ def boq_cap_nhat_gia(da_id: int, data: BoqCapNhatGiaVao, db: Session = Depends(g
 def them_du_toan(da_id: int, data: DuToanVao, db: Session = Depends(get_db),
                  nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
     _da_404(db, da_id)
-    if not (data.ten or "").strip():
+    if not (data.ten or "").strip() and not data.san_pham_ncc_id:      # chọn từ danh mục → tên lấy từ danh mục
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Thiếu tên thiết bị / vật tư / hạng mục")
     loai = (data.loai or "THIET_BI").upper()
     if loai not in _DT_LOAI:
@@ -886,15 +1074,23 @@ def them_du_toan(da_id: int, data: DuToanVao, db: Session = Depends(get_db),
         DuAnDuToan.du_an_id == da_id).scalar() or 0
     from ..models import HangHoa as _ThHh
     hh_id = data.hang_hoa_id if (data.hang_hoa_id and db.get(_ThHh, data.hang_hoa_id)) else None
-    if hh_id is None:   # tên trùng đúng danh mục kho → tự liên kết
+    if hh_id is None and (data.ten or "").strip():   # tên trùng đúng danh mục kho → tự liên kết
         _h = db.query(_ThHh).filter(func.lower(func.trim(_ThHh.ten)) == data.ten.strip().lower()).first()
         hh_id = _h.id if _h else None
-    x = DuAnDuToan(du_an_id=da_id, loai=loai, ten=data.ten.strip(), quy_cach=data.quy_cach,
+    x = DuAnDuToan(du_an_id=da_id, loai=loai, ten=(data.ten or "").strip(), quy_cach=data.quy_cach,
                    don_vi=data.don_vi, so_luong=data.so_luong if data.so_luong is not None else 1,
                    don_gia=data.don_gia or 0, ghi_chu=data.ghi_chu, thu_tu=base + 1,
                    hang_hoa_id=hh_id)
-    db.add(x); db.commit()
-    return _dt_ra(x)
+    from .ncc import _dtb_ap_san_pham_ncc, _dtb_ghi_danh_muc
+    _dtb_ap_san_pham_ncc(db, x, data, tao=True)             # mig 163: NCC · mã SP · spec · NSX · chọn từ danh mục → điền cả dòng
+    if not (x.ten or "").strip():
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Thiếu tên thiết bị / vật tư / hạng mục")
+    db.add(x); db.flush()
+    da = db.get(DuAn, da_id)
+    dm = _dtb_ghi_danh_muc(db, x, nd, da.ma if da else None, doi_gia=True)   # 🔁 ghi ngược có kiểm soát vào danh mục NCC
+    ghi_audit(db, nd.id, "THEM_DONG", "du_an_du_toan", x.id, moi=dict(_boq_snap(x), du_an=(da.ma if da else None)))   # mục 4
+    db.commit()
+    return {**_dt_ra(x), "danh_muc": dm}
 
 
 @router.put("/du-toan/{dt_id}")
@@ -907,17 +1103,24 @@ def sua_du_toan(dt_id: int, data: DuToanVao, xac_nhan_khoa: bool = False, db: Se
     khoa = _boq_khoa_map(db, db.get(DuAn, x.du_an_id), [x]).get(x.id)
     kiem_khoa_sua(khoa, x.ten, nd, xac_nhan_khoa)          # 🔒 dòng đã mua: chỉ CEO / ADMIN, phải xác nhận
     cu = _dt_ra(x)
+    gia_truoc = Decimal(x.don_gia or 0)
     for k in ("loai", "ten", "quy_cach", "don_vi", "so_luong", "don_gia", "ghi_chu", "thu_tu", "hang_hoa_id"):
         v = getattr(data, k)
         if v is not None:
             setattr(x, k, v)
+    from .ncc import _dtb_ap_san_pham_ncc, _dtb_ghi_danh_muc
+    _dtb_ap_san_pham_ncc(db, x, data, tao=False)            # mig 163: NCC · mã SP · spec · NSX · liên kết danh mục
+    da = db.get(DuAn, x.du_an_id)
+    dm = _dtb_ghi_danh_muc(db, x, nd, da.ma if da else None,
+                           doi_gia=(data.don_gia is not None and Decimal(str(data.don_gia)) != gia_truoc))
     moi = _dt_ra(x)
-    doi = {k: moi[k] for k in moi if moi[k] != cu.get(k)}
+    doi = {k: moi[k] for k in moi if k != "thanh_tien" and moi[k] != cu.get(k)}   # thành tiền là số suy ra, không ghi
     if doi:
-        ghi_audit(db, nd.id, "SUA_DONG_DA_MUA" if khoa else "SUA", "du_an_du_toan", x.id,
-                  cu=dict({k: cu.get(k) for k in doi}, **({"po": khoa["so_po"]} if khoa else {})), moi=doi)
+        ghi_audit(db, nd.id, "SUA_DONG_DA_MUA" if khoa else "SUA_DONG", "du_an_du_toan", x.id,
+                  cu=dict({k: cu.get(k) for k in doi}, **({"po": khoa["so_po"]} if khoa else {})),
+                  moi=dict(doi, du_an=(da.ma if da else None)))
     db.commit()
-    return _dt_ra(x)
+    return {**_dt_ra(x), "danh_muc": dm}
 
 
 class BoqKhopKhoVao(BaseModel):
@@ -976,8 +1179,9 @@ def xoa_du_toan(dt_id: int, xac_nhan_khoa: bool = False, db: Session = Depends(g
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy dòng dự toán")
     khoa = _boq_khoa_map(db, db.get(DuAn, x.du_an_id), [x]).get(x.id)
     kiem_khoa_sua(khoa, x.ten, nd, xac_nhan_khoa)
-    ghi_audit(db, nd.id, "XOA_DONG_DA_MUA" if khoa else "XOA", "du_an_du_toan", dt_id,
-              cu={"ten": x.ten, "so_luong": _f(x.so_luong), "don_gia": _f(x.don_gia), **({"po": khoa["so_po"]} if khoa else {})})
+    _da = db.get(DuAn, x.du_an_id)
+    ghi_audit(db, nd.id, "XOA_DONG_DA_MUA" if khoa else "XOA_DONG", "du_an_du_toan", dt_id,
+              cu=dict(_boq_snap(x), du_an=(_da.ma if _da else None), **({"po": khoa["so_po"]} if khoa else {})))
     db.delete(x); db.commit()
     return {"da_xoa": True}
 
@@ -1076,51 +1280,20 @@ def ai_nhap_du_toan(da_id: int, file: UploadFile = File(...), loai: str = Form("
     """AI đọc file báo giá (PDF/ảnh/Excel/CSV) → đổ danh sách thiết bị/vật tư
     thẳng vào danh mục dự toán của dự án. Trùng tên đã có thì bỏ qua.
     File gốc lưu vào Kho tệp dùng chung."""
-    from ..ai_gateway import doc_bao_gia_file
     from ..models import TepDinhKem
-    _da_404(db, da_id)
+    da = _da_404(db, da_id)
     ten_file = file.filename or "bao_gia"
     data = file.file.read()
     if len(data) > 15 * 1024 * 1024:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "File quá lớn (tối đa 15MB)")
-    try:
-        items = doc_bao_gia_file(data, file.content_type, ten_file)
-    except ValueError as e:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e))
-    if not items:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST,
-                            "AI không tìm thấy sản phẩm nào trong file — kiểm tra lại nội dung.")
-    loai = (loai or "THIET_BI").upper()
-    if loai not in _DT_LOAI:
-        loai = "THIET_BI"
-    da_co = {(x.ten or "").strip().lower()
-             for x in db.query(DuAnDuToan).filter_by(du_an_id=da_id).all()}
-    base = db.query(func.coalesce(func.max(DuAnDuToan.thu_tu), 0)).filter(
-        DuAnDuToan.du_an_id == da_id).scalar() or 0
-    them, bo_qua = 0, 0
-    for it in items[:100]:
-        ten = (it.get("ten") or "").strip()
-        if not ten:
-            continue
-        if ten.lower() in da_co:
-            bo_qua += 1
-            continue
-        qc = " — ".join([p for p in (it.get("mo_ta"), it.get("nha_san_xuat")) if p])
-        base += 1
-        db.add(DuAnDuToan(du_an_id=da_id, loai=loai, ten=ten[:250], quy_cach=(qc[:300] or None),
-                          don_vi=(str(it.get("don_vi"))[:40] if it.get("don_vi") else None),
-                          so_luong=it.get("so_luong") if it.get("so_luong") else 1,
-                          don_gia=it.get("don_gia") or 0,
-                          ghi_chu=f"AI nhập từ {ten_file}"[:300], thu_tu=base))
-        da_co.add(ten.lower())
-        them += 1
+    kq = _boq_ai_nhap(db, nd, da, data, file.content_type, ten_file, loai)     # 31/10/2026: dùng chung với 📎 nhap-file
     ref = luu(data, "du_an_du_toan", da_id, ten_file, file.content_type)
     db.add(TepDinhKem(doi_tuong="DU_AN_DU_TOAN", doi_tuong_id=da_id, loai="KHAC",
                       ten_file=ten_file, duong_dan=ref, kich_thuoc=len(data),
                       content_type=file.content_type, nguoi_tai_len=nhan_vien_id_cua(db, nd.id)))
-    ghi_audit(db, nd.id, "TAO", "du_an_du_toan", da_id, moi={"ai_nhap": them, "file": ten_file})
+    ghi_audit(db, nd.id, "TAO", "du_an_du_toan", da_id, moi={"ai_nhap": kq["them"], "file": ten_file})
     db.commit()
-    return {"them": them, "bo_qua": bo_qua}
+    return kq
 
 
 class BoqTaoPoVao(BaseModel):

@@ -957,6 +957,14 @@ class DuToanVao(BaseModel):
     don_gia: Decimal | None = None
     ghi_chu: str | None = None
     thu_tu: int | None = None
+    # mig 163: theo form Sản phẩm NCC (như Dự toán hàng bán)
+    nha_cung_cap_id: int | None = None
+    ncc_ten: str | None = None
+    ma_sp: str | None = None
+    spec: str | None = None
+    nha_san_xuat: str | None = None
+    san_pham_ncc_id: int | None = None      # chọn từ danh mục → máy chủ điền cả dòng từ danh mục
+    ncc_goi_y_id: int | None = None
 
 
 class PhanTichVao(BaseModel):

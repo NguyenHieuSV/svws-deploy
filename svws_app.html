@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="vi">
 <head>
-<!-- build: bg-nhap-uoc-vat-2026-10-31 -->
+<!-- build: boq-ngang-audit-2026-10-31 -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#0f2c44">
@@ -10621,7 +10621,7 @@ function dtbSpTim(p,k){
   _dtbSpTimer=setTimeout(()=>{
     const box=document.getElementById(p+'sp_box');if(!box)return;
     const raw=gv(p+k),q=_dtbKD(raw).trim();
-    if(k==='ten'&&p==='dtbm_'&&typeof dtbGoiYTen==='function')dtbGoiYTen();
+    if(k==='ten'&&typeof dtbGoiYTen==='function'){if(p==='dtbm_')dtbGoiYTen();else if(p==='dm_')dtbGoiYTen('boq');}
     if(q.length<2||!(S._dtbSp||[]).length){box.innerHTML='';return;}
     const toks=q.split(/\s+/).filter(Boolean);
     const cot=(DTB_SP_COT.find(c=>c[0]===k)||[])[1];
@@ -10675,8 +10675,9 @@ async function dtbLuuMuc(id){
   catch(e){toast(e.detail||e.message,"err");}
 }
 /* ---- 🔁 Dự toán → danh mục Sản phẩm NCC: báo kết quả ghi ngược sau khi lưu dòng + hỏi trước khi đổi giá danh mục ---- */
-async function _dtbSauLuu(r,mucId,loiChao){
+async function _dtbSauLuu(r,mucId,loiChao,kieu){
   const dm=(r&&r.danh_muc)||{}; let them='';
+  const urlGia=kieu==='boq'?`/du-an/du-toan/${mucId}/cap-nhat-gia-danh-muc`:`/ncc/du-toan-ban/muc/${mucId}/cap-nhat-gia-danh-muc`;
   if(dm.hanh_dong==='TAO_MOI')them=' · ➕ đã thêm vào danh mục Sản phẩm NCC';
   else if(dm.hanh_dong==='LIEN_KET')them=' · 🔗 đã nối với sản phẩm có sẵn trong danh mục NCC';
   else if(dm.hanh_dong==='LIEN_KET_DIEN_GIA')them=' · 🔗 đã nối danh mục NCC và điền giá (danh mục chưa có giá)';
@@ -10684,7 +10685,7 @@ async function _dtbSauLuu(r,mucId,loiChao){
   toast(loiChao+them,"ok");
   const g=dm.gia_lech;
   if(g&&mucId&&confirm(`Giá trong danh mục Sản phẩm NCC của «${g.ten_danh_muc||g.ten}» đang là ${vnd(g.gia_danh_muc)}.\nDự toán vừa ghi ${vnd(g.gia_du_toan)}.\n\nCập nhật giá DANH MỤC thành ${vnd(g.gia_du_toan)}?\n(Hủy = giữ nguyên giá danh mục, chỉ dự toán dùng giá mới)`)){
-    try{await api(`/ncc/du-toan-ban/muc/${mucId}/cap-nhat-gia-danh-muc`,{method:'POST'});S._dtbSpLuc=0;toast("Đã cập nhật giá danh mục Sản phẩm NCC","ok");}
+    try{await api(urlGia,{method:'POST'});S._dtbSpLuc=0;toast("Đã cập nhật giá danh mục Sản phẩm NCC","ok");}
     catch(e){toast(e.detail||e.message,"err");}
   }
 }
@@ -19487,22 +19488,20 @@ async function daDanhMuc(h){
   if(S.mode==="live"&&canOp){ if(!S._dtbHH){try{S._dtbHH=await api("/kho/hang-hoa");}catch(_){S._dtbHH=[];}} await _giaVaoLoad(false); }
   let html=`<div class="panel"><div class="panel-h"><h3>Danh mục thiết bị - Vật tư (lập dự toán)</h3><div class="spacer"></div>
     <span class="badge b-info" style="font-size:13px">Tổng dự toán: ${vnd(dt.tong_cong||0)}</span>
-    ${laQTV()?'<button id="dmXoaNhieu" class="btn-sm" style="margin-left:8px;display:none;background:#dc2626;color:#fff" onclick="daDmXoaNhieu()">🗑 Xóa mục đã chọn</button>':''}${canOp?`<button class="btn-sm ghost" style="margin-left:8px" title="Dòng gõ tay chưa liên kết kho (🆕) → chọn mặt hàng kho gần giống để nhận giá đầu vào" onclick="daDmKhopKho()">🔗 Khớp tên với kho</button><button class="btn-sm ghost" style="margin-left:8px" title="Đổi đơn giá các dòng theo PO đã duyệt gần nhất / báo giá còn hiệu lực — có bảng xem trước" onclick="daDmCapNhatGia()">⟳ Cập nhật giá theo mua thực tế</button>`:''}<button class="btn-sm ghost" style="margin-left:8px" onclick="daDmXuatExcel()">⬇ Xuất Excel</button></div><div class="panel-b">`;
+    ${laQTV()?'<button id="dmXoaNhieu" class="btn-sm" style="margin-left:8px;display:none;background:#dc2626;color:#fff" onclick="daDmXoaNhieu()">🗑 Xóa mục đã chọn</button>':''}${canOp?`<button class="btn-sm ghost" style="margin-left:8px" title="Dòng gõ tay chưa liên kết kho (🆕) → chọn mặt hàng kho gần giống để nhận giá đầu vào" onclick="daDmKhopKho()">🔗 Khớp tên với kho</button><button class="btn-sm ghost" style="margin-left:8px" title="Đổi đơn giá các dòng theo PO đã duyệt gần nhất / báo giá còn hiệu lực — có bảng xem trước" onclick="daDmCapNhatGia()">⟳ Cập nhật giá theo mua thực tế</button>`:''}<button class="btn-sm ghost" style="margin-left:8px" title="Xuất BOQ này ra Excel đúng MẪU BOQ 12 cột (có Nhà cung cấp · Mã SP, nhóm theo loại) — sửa trong Excel rồi 📎 nạp lại" onclick="tepTaiVe('/du-an/${S.daId}/du-toan/mau-boq','Mau-BOQ-'+String((S.daCt&&(S.daCt.ma||S.daCt.ten))||('DA'+S.daId)).replace(/[^A-Za-z0-9_-]/g,'-')+'.xlsx')">📥 Xuất mẫu BOQ</button><button class="btn-sm ghost" style="margin-left:8px" onclick="daDmXuatExcel()">⬇ Xuất Excel</button></div><div class="panel-b">`;
   if(canOp){
-    html+=`<div class="formrow" style="align-items:end">
-      <div class="f" style="max-width:150px"><label>Loại</label><select id="dm_loai">${Object.entries(DA_DT_LOAI).map(([k,l])=>`<option value="${k}">${l.replace(/^[^ ]+ /,'')}</option>`).join('')}</select></div>
-      <div class="f" style="flex:2"><label>Tên thiết bị / vật tư / hạng mục <span style="font-weight:400;color:var(--muted)">(gõ để chọn hàng kho — tự điền giá mua thật, hoặc <a href="#" onclick="dtbTimGia(0,gv('dm_ten')||'','boq');return false">🔎 tìm giá theo tên</a>)</span></label><input id="dm_ten" list="dm_hh_list" oninput="daDmHhChon();dtbGoiYTen('boq')" placeholder="Bơm chìm nước thải 5.5 kW"><datalist id="dm_hh_list">${(S._dtbHH||[]).map(h=>`<option value="${String(h.ten||'').replace(/"/g,'&quot;')}">`).join('')}</datalist></div>
-      <div class="f" style="flex:2"><label>Quy cách / thông số</label><input id="dm_qc" placeholder="Q=40 m³/h, H=12 m, Inox"></div>
-      <div class="f" style="max-width:90px"><label>Đơn vị</label><input id="dm_dv" placeholder="cái"></div>
-      <div class="f" style="max-width:100px"><label>Số lượng</label><input id="dm_sl" type="number" step="any" value="1"></div>
-      <div class="f" style="max-width:150px"><label>Đơn giá (VND)</label><input id="dm_dg" type="number"><div id="dm_gia_hint" style="font-size:11px;margin-top:2px"></div></div>
-      <div class="f"><label>Ghi chú</label><input id="dm_gc"></div>
-      <button class="btn-sm" onclick="daDmThem()">+ Thêm</button></div><div id="dm_goi_y" style="max-width:720px"></div>
+    if(S.mode==="live")await _dtbSpLoad(false);            // 🏷 31/10/2026: form dòng BOQ giống Dự toán hàng bán — tìm & điền từ danh mục Sản phẩm NCC
+    const maDa=String((S.daCt&&(S.daCt.ma||S.daCt.ten))||('DA'+S.daId)).replace(/[^A-Za-z0-9_-]/g,'-');
+    html+=`<div class="formrow" style="align-items:end;margin-bottom:0">
+      <div class="f" style="max-width:170px"><label>Loại</label><select id="dm_loai">${Object.entries(DA_DT_LOAI).map(([k,l])=>`<option value="${k}">${l.replace(/^[^ ]+ /,'')}</option>`).join('')}</select></div>
+      <div class="f" style="flex:1;font-size:11.5px;color:var(--muted);padding-bottom:6px">Form dòng giống Dự toán hàng bán: gõ vào <b>bất kỳ ô nào</b> để tìm trong <b>Sản phẩm NCC</b>, bấm dòng gợi ý để điền cả hàng · <a href="#" onclick="dtbTimGia(0,gv('dm_ten')||'','boq');return false">🔎 tìm giá theo tên (kho / mua cũ)</a></div>
+      <div class="f" style="max-width:110px"><label>&nbsp;</label><button class="btn-sm" onclick="daDmThem()">+ Thêm</button></div></div>
+      ${_dtbFormHTML('dm_',{},false)}<div id="dm_goi_y" style="max-width:720px"></div>
     <div class="formrow" style="align-items:end;margin-top:6px;padding-top:8px;border-top:1px dashed var(--line)">
-      <div class="f" style="flex:2"><label>🤖 AI đọc file báo giá → đổ vào dự toán (PDF, ảnh, Excel, CSV)</label><input type="file" id="dm_ai_file" accept=".pdf,.png,.jpg,.jpeg,.webp,.csv,.txt,.xlsx,.xlsm"></div>
-      <div class="f" style="max-width:150px"><label>Đưa vào loại</label><select id="dm_ai_loai">${Object.entries(DA_DT_LOAI).map(([k,l])=>`<option value="${k}">${l.replace(/^[^ ]+ /,'')}</option>`).join('')}</select></div>
-      <button class="btn-sm" id="dm_ai_btn" onclick="daDmAiNhap()">🤖 AI đọc & đổ vào dự toán</button>
-      <div class="note" style="flex-basis:100%;padding:4px 0 0;color:var(--muted)">AI trích tên, quy cách, ĐVT, SL, đơn giá từ báo giá NCC; mục trùng tên đã có sẽ bỏ qua. File gốc lưu vào 📁 Kho tệp.</div></div>`;
+      <div class="f" style="flex:2"><label>📎 Nạp từ file — <b>mẫu BOQ</b> (Excel / CSV 12 cột: máy đọc thẳng, có Nhà cung cấp · Mã SP) · file khác (PDF · ảnh · Excel tự do): AI đọc · <a href="#" onclick="tepTaiVe('/du-an/${S.daId}/du-toan/mau-boq','Mau-BOQ-${maDa}.xlsx');return false">📥 Tải mẫu / xuất BOQ này ra mẫu</a></label><input type="file" id="dm_ai_file" accept=".pdf,.png,.jpg,.jpeg,.webp,.csv,.txt,.xlsx,.xlsm"></div>
+      <div class="f" style="max-width:150px"><label>AI đưa vào loại</label><select id="dm_ai_loai">${Object.entries(DA_DT_LOAI).map(([k,l])=>`<option value="${k}">${l.replace(/^[^ ]+ /,'')}</option>`).join('')}</select></div>
+      <button class="btn-sm" id="dm_ai_btn" onclick="daDmAiNhap()">📎 Nạp &amp; thêm mục</button>
+      <div class="note" style="flex-basis:100%;padding:4px 0 0;color:var(--muted)">Mẫu BOQ: nhóm A/B/C… quyết định Loại (thiết bị / vật tư / nhân sự / chi phí khác); cột <b>Nhà cung cấp</b> đúng tên hồ sơ → dòng gắn NCC và tự nối / thêm vào danh mục Sản phẩm NCC. File AI đọc: trích tên · quy cách · spec · NSX · mã SP · NCC · ĐVT · SL · đơn giá. Mục trùng tên đã có sẽ bỏ qua; file gốc lưu vào 📁 Kho tệp.</div></div>`;
   }
   const ds=dt.danh_sach||[];
   let body='';let stt=0;
@@ -19510,31 +19509,45 @@ async function daDanhMuc(h){
     const nhom=ds.filter(x=>x.loai===loai);
     if(!nhom.length)continue;
     body+=`<tr style="background:var(--panel2,#f4f6f8)"><td colspan="${laQTV()?12:11}" style="font-weight:600">${nhan} — ${vnd(dt.tong_theo_loai&&dt.tong_theo_loai[loai]||0)}</td></tr>`;
-    body+=nhom.map(x=>{stt++;return `<tr>${laQTV()?`<td style="text-align:center"><input type="checkbox" class="dmChk" value="${x.id}" onchange="daDmChkCap()" style="width:auto"></td>`:''}<td>${stt}</td><td><b>${x.ten}</b>${x.hang_hoa_id?' <span class="badge b-ok" style="font-size:10px" title="Đã liên kết mặt hàng kho — nhận giá đầu vào, nối được tới PO">📦 kho</span>':' <span class="badge b-cho" style="font-size:10px" title="Chưa liên kết kho — bấm 🔗 Khớp tên với kho">🆕</span>'}</td><td style="font-size:12px;color:var(--muted)">${x.quy_cach||'—'}</td><td>${x.don_vi||'—'}</td>
+    body+=nhom.map(x=>{stt++;return `<tr>${laQTV()?`<td style="text-align:center"><input type="checkbox" class="dmChk" value="${x.id}" onchange="daDmChkCap()" style="width:auto"></td>`:''}<td>${stt}</td><td><b>${x.ten}</b>${x.hang_hoa_id?' <span class="badge b-ok" style="font-size:10px" title="Đã liên kết mặt hàng kho — nhận giá đầu vào, nối được tới PO">📦 kho</span>':' <span class="badge b-cho" style="font-size:10px" title="Chưa liên kết kho — bấm 🔗 Khớp tên với kho">🆕</span>'}${_daDmSub(x)}</td><td style="font-size:12px;color:var(--muted)">${x.quy_cach||'—'}</td><td>${x.don_vi||'—'}</td>
       <td class="num">${_boqSua(x,canOp)?`<input type="number" step="any" id="dm_sl_${x.id}" value="${x.so_luong??''}" style="width:76px;padding:3px 5px">`:_num(x.so_luong,2)}</td>
       <td class="num">${_boqSua(x,canOp)?`<input type="number" id="dm_dg_${x.id}" value="${x.don_gia??''}" style="width:110px;padding:3px 5px">`:vnd(x.don_gia)}</td>
       ${_giaCotHTML(x,'dm_dg_'+x.id,(x.loai==='THIET_BI'||x.loai==='VAT_TU')?_dtbMuaCuHTML(x,canOp&&!x.don_mua_id&&!x.khoa_po,'boq'):'')}
       <td class="num"><b>${vnd(x.thanh_tien||0)}</b></td>
       <td style="font-size:12px">${x.ghi_chu||''}${x.khoa_po?`<div><span class="badge b-info" style="font-size:10.5px" title="🔒 Dòng đã mua — chỉ CEO / Admin sửa hoặc xóa được (có hỏi xác nhận và ghi lại ai sửa)">🔒 ${x.khoa_po}${x.khoa_kieu==='PO_TAY'?' · PO lập tay':''}</span></div>`:''}</td>
-      <td style="white-space:nowrap">${_boqSua(x,canOp)?`<button class="btn-sm ghost" onclick="daDmSua(${x.id})">Lưu</button> <button class="btn-sm ghost" title="🔎 Tìm giá theo tên (không cần nhớ mã): chọn mặt hàng kho đã mua → liên kết + điền giá" onclick="dtbTimGia(${x.id},'${String(x.ten||'').split(' ').slice(0,2).join(' ').replace(/['"<>&]/g,'')}','boq')">🔎</button>`:''}${canDx?` <button class="btn-sm ghost" title="Lập PO chờ duyệt thẳng từ dòng này — mã PO = mã dự án (bước đề xuất mua đã bỏ)" ${x.don_mua_id?'disabled':''} onclick="daDmTaoPo(${x.id},'${String(x.ten||'').replace(/'/g,'')}')">🛒 ${x.don_mua_id?'Đã có PO':'Tạo PO'}</button>`:''}${laQTV()?` <button class="btn-sm ghost" style="color:var(--red)" onclick="daDmXoa(${x.id},'${String(x.ten||'').replace(/'/g,'')}')">✕</button>`:''}</td></tr>`;}).join('');
+      <td style="white-space:nowrap">${_boqSua(x,canOp)?`<button class="btn-sm ghost" title="Sửa đầy đủ dòng theo form Sản phẩm NCC (NCC · mã SP · spec · NSX — gõ cột nào cũng tìm được danh mục)" onclick="daDmSuaForm(${x.id})">✏️</button> <button class="btn-sm ghost" title="Lưu SL / đơn giá của dòng" onclick="daDmSua(${x.id})">Lưu</button> <button class="btn-sm ghost" title="🔎 Tìm giá theo tên (không cần nhớ mã): chọn mặt hàng kho đã mua → liên kết + điền giá" onclick="dtbTimGia(${x.id},'${String(x.ten||'').split(' ').slice(0,2).join(' ').replace(/['"<>&]/g,'')}','boq')">🔎</button>`:''}${canDx?` <button class="btn-sm ghost" title="Lập PO chờ duyệt thẳng từ dòng này — mã PO = mã dự án (bước đề xuất mua đã bỏ)" ${x.don_mua_id?'disabled':''} onclick="daDmTaoPo(${x.id},'${String(x.ten||'').replace(/'/g,'')}')">🛒 ${x.don_mua_id?'Đã có PO':'Tạo PO'}</button>`:''}${laQTV()?` <button class="btn-sm ghost" style="color:var(--red)" onclick="daDmXoa(${x.id},'${String(x.ten||'').replace(/'/g,'')}')">✕</button>`:''}</td></tr>`;}).join('');
   }
   html+=`<table style="margin-top:10px"><thead><tr>${laQTV()?'<th style="width:26px"><input type="checkbox" title="Chọn tất cả" onchange="daDmChkAll(this)" style="width:auto"></th>':''}<th>#</th><th>Tên</th><th>Quy cách</th><th>ĐVT</th><th class="num">SL</th><th class="num">Đơn giá</th><th class="num" title="PO đã duyệt gần nhất của mặt hàng (mọi mã) hoặc báo giá còn hiệu lực — bấm số để điền">💲 Giá gợi ý</th><th class="num" title="Giá trên PO đã lập dưới mã dự án này">🛒 Giá mua thật</th><th class="num">Thành tiền</th><th>Ghi chú</th><th></th></tr></thead>
     <tbody>${body||('<tr><td colspan="'+(laQTV()?12:11)+'" class="empty">Chưa có hạng mục nào. Nhập thiết bị, vật tư, nhân sự... ở form trên để lập dự toán.</td></tr>')}</tbody>
     ${body?`<tfoot><tr style="border-top:2px solid var(--line)"><td colspan="${laQTV()?9:8}" style="text-align:right;font-weight:700">TỔNG DỰ TOÁN</td><td class="num" style="font-weight:700;color:#0e7490">${vnd(dt.tong_cong||0)}</td><td colspan="2"></td></tr></tfoot>`:''}</table>
-    <div class="note" style="margin-top:8px;color:var(--muted)">Thành tiền = Số lượng × Đơn giá. Sửa SL/đơn giá rồi bấm Lưu ở từng dòng. <b>💲 Giá gợi ý</b> = PO đã duyệt gần nhất của mặt hàng hoặc báo giá còn hiệu lực (khớp theo tên với danh mục kho — bấm số để điền); dòng Thiết bị / Vật tư gõ <b>tên chung</b> chưa trùng mặt hàng nào sẽ hiện <b>💡 Giá từ mua hàng cũ</b> — mặt hàng <b>đã mua thật</b> có tên gần giống, bấm <b>Áp giá</b> = liên kết + điền giá; <b>🛒 Giá mua thật</b> = giá trên PO đã lập dưới mã dự án này. Danh mục này phục vụ lập dự toán — độc lập với chi phí thực tế trong tab Triển khai.</div></div></div>`;
+    <div class="note" style="margin-top:8px;color:var(--muted)">Thành tiền = Số lượng × Đơn giá. Sửa SL/đơn giá rồi bấm Lưu ở từng dòng. <b>💲 Giá gợi ý</b> = PO đã duyệt gần nhất của mặt hàng hoặc báo giá còn hiệu lực (khớp theo tên với danh mục kho — bấm số để điền); dòng Thiết bị / Vật tư gõ <b>tên chung</b> chưa trùng mặt hàng nào sẽ hiện <b>💡 Giá từ mua hàng cũ</b> — mặt hàng <b>đã mua thật</b> có tên gần giống, bấm <b>Áp giá</b> = liên kết + điền giá; <b>🛒 Giá mua thật</b> = giá trên PO đã lập dưới mã dự án này. Danh mục này phục vụ lập dự toán — độc lập với chi phí thực tế trong tab Triển khai. <b>Từ 31/10/2026</b> dòng BOQ có nhà cung cấp · mã SP · spec · nhà sản xuất như Dự toán hàng bán (✏️ sửa đầy đủ, 🏷 nối danh mục Sản phẩm NCC, ghi ngược có kiểm soát), 📥 xuất / 📎 nạp mẫu BOQ 12 cột; mọi thêm / sửa / xóa dòng đều ghi nhật ký.</div></div></div>`;
   h.innerHTML=html;
 }
+function _daDmSub(x){const e=s=>String(s==null?'':s).replace(/</g,'&lt;'); const a=[x.ncc_ten,x.ma_sp,x.nha_san_xuat].filter(Boolean).map(e).join(' · '); if(!a&&!x.spec)return '';
+  return `<div style="font-size:11px;color:var(--muted);white-space:normal;line-height:1.3">${x.san_pham_ncc_id?'<span class="badge b-info" style="font-size:10px" title="Dòng lấy từ / đã nối danh mục Sản phẩm NCC">🏷 NCC</span> ':''}${a}${x.spec?`<div>ⓘ ${e(String(x.spec).slice(0,120))}</div>`:''}</div>`;}
 async function daDmThem(){
-  const ten=gv('dm_ten'); if(!ten){toast("Nhập tên thiết bị / vật tư / hạng mục","err");return;}
-  const _hh=(S._dtbHH||[]).find(h=>String(h.ten||'').trim().toLowerCase()===String(ten).trim().toLowerCase());
-  const body={loai:gv('dm_loai'),ten,quy_cach:gv('dm_qc')||null,don_vi:gv('dm_dv')||(_hh&&_hh.don_vi)||null,
-    so_luong:Number(gv('dm_sl')||1),don_gia:Number(gv('dm_dg')||0),ghi_chu:gv('dm_gc')||null,hang_hoa_id:_hh?_hh.id:null};
+  const body=_dtbFormBody('dm_'); body.loai=gv('dm_loai'); if(!body.ten){toast("Nhập tên thiết bị / vật tư / hạng mục","err");return;}
+  if(!body.so_luong)body.so_luong=1;
+  const _hh=(S._dtbHH||[]).find(h=>String(h.ten||'').trim().toLowerCase()===body.ten.toLowerCase()); if(_hh){body.hang_hoa_id=_hh.id; if(!body.don_vi)body.don_vi=_hh.don_vi||null;}
   if(S.mode==="live"){
-    try{await api(`/du-an/${S.daId}/du-toan`,{method:'POST',body:JSON.stringify(body)});toast("Đã thêm vào dự toán","ok");daRenderTab();}
+    try{const r=await api(`/du-an/${S.daId}/du-toan`,{method:'POST',body:JSON.stringify(body)});await _dtbSauLuu(r,r&&r.id,"Đã thêm vào dự toán",'boq');daRenderTab();}
     catch(e){toast(e.detail||e.message,"err");} return;
   }
   const ds=_dmDemoDs(); ds.push(Object.assign({id:Date.now()},body));
   toast("Đã thêm (demo)","ok"); daRenderTab();
+}
+async function daDmSuaForm(id){
+  let x=null;
+  if(S.mode==="live"){try{const d=await api(`/du-an/${S.daId}/du-toan`); x=(d.danh_sach||[]).find(z=>z.id===id);}catch(e){return toast(e.detail||e.message,"err");} await _dtbSpLoad(false);}
+  else x=_dmDemoDs().find(z=>z.id===id);
+  if(!x)return toast("Không tìm thấy dòng BOQ","err");
+  _ktModal('✏️ Sửa dòng BOQ — '+String(x.ten||'').replace(/</g,'&lt;'),`<div class="formrow"><div class="f" style="max-width:220px"><label>Loại</label><select id="dme_loai">${Object.entries(DA_DT_LOAI).map(([k,l])=>`<option value="${k}" ${x.loai===k?'selected':''}>${l.replace(/^[^ ]+ /,'')}</option>`).join('')}</select></div></div>`+_dtbFormHTML('dme_',x,false)+`<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:6px"><button class="btn-sm" onclick="daDmSuaFormLuu(${id})">💾 Lưu dòng</button></div>`);
+}
+async function daDmSuaFormLuu(id){
+  const body=_dtbFormBody('dme_'); body.loai=gv('dme_loai'); if(!body.ten)return toast("Nhập tên thiết bị / vật tư / hạng mục","err");
+  if(S.mode!=="live")return toast("Chạy ở bản kết nối backend","err");
+  try{const r=await apiKhoa(`/du-an/du-toan/${id}`,{method:'PUT',body:JSON.stringify(body)});const md=document.getElementById('ktModal');if(md)md.remove();await _dtbSauLuu(r,id,"Đã cập nhật dòng",'boq');daDmRenderGiu();}
+  catch(e){toast(e.detail||e.message,"err");}
 }
 /* 🔒 BOQ: dòng đã mua (tạo PO từ dòng hoặc PO lập tay cùng mã dự án) — chỉ CEO / Admin sửa */
 function _boqSua(x,canOp){return canOp&&(!x.khoa_po||laQTV());}
@@ -19621,15 +19634,15 @@ async function daDmAiNhap(){
   const inp=document.getElementById('dm_ai_file'), f=inp&&inp.files[0];
   if(!f){toast("Chọn file báo giá (PDF, ảnh, Excel, CSV)","err");return;}
   const btn=document.getElementById('dm_ai_btn');
-  if(btn){btn.disabled=true;btn.textContent="⏳ AI đang đọc file…";}
+  if(btn){btn.disabled=true;btn.textContent="⏳ Đang đọc file…";}
   try{
     const fd=new FormData(); fd.append('file',f); fd.append('loai',gv('dm_ai_loai')||'THIET_BI');
-    const r=await apiUpload(`/du-an/${S.daId}/du-toan/ai-nhap`,fd);
-    let msg=`✅ AI đã đổ ${r.them} mục vào dự toán`;
-    if(r.bo_qua)msg+=` — bỏ qua ${r.bo_qua} mục trùng tên`;
+    const r=await apiUpload(`/du-an/${S.daId}/du-toan/nhap-file`,fd);
+    let msg=r.cach==='MAU_BOQ'?`✅ Nạp theo mẫu BOQ: thêm ${r.them} dòng (${r.so_nhom||0} nhóm)`:`✅ AI đã đổ ${r.them} mục vào dự toán`;
+    if(r.bo_qua)msg+=` · bỏ qua ${r.bo_qua} mục trùng tên`; msg+=_dtbNapNccTxt(r);
     toast(msg,"ok"); daDmRenderGiu();
   }catch(e){toast(e.detail||e.message,"err");}
-  finally{if(btn){btn.disabled=false;btn.textContent="🤖 AI đọc & đổ vào dự toán";}}
+  finally{if(btn){btn.disabled=false;btn.textContent="📎 Nạp & thêm mục";}}
 }
 
 /* --- Tab Tiến độ: nhúng ProjectFlow AI --- */

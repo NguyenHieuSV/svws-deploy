@@ -5713,6 +5713,7 @@ def _dtb_them_muc_boq(db, nd, dt, items: list, ten_file: str) -> dict:
         db.add(m)
         db.flush()
         tk.ghi(db, m, nd, dt.ma, str(it.get("ncc_ten") or "").strip(), ncc_id)
+        ghi_audit(db, nd.id, "THEM_DONG", "du_toan_ban_muc", m.id, moi=dict(_dtb_snap(m), du_toan=dt.ma, nguon=f"mẫu BOQ {ten_file}"))
         da_co.add(ten.lower())
         them.append(ten)
     return {"so_doc": len(items), "them": len(them), "bo_qua": len(bo_qua), "ds_them": them[:15], "ds_bo_qua": bo_qua[:15],
@@ -6063,6 +6064,13 @@ def dtb_cap_nhat_gia_danh_muc(muc_id: int, db: Session = Depends(get_db),
     return {"ok": True, "sp_id": sp.id, "gia_cu": cu, "gia_moi": gia}
 
 
+def _dtb_snap(m) -> dict:
+    """Ảnh chụp dòng dự toán để ghi audit (mục 4, 31/10/2026): mọi thêm / sửa / xóa dòng đều có vết, không chỉ dòng đã mua."""
+    return {"ten": m.ten, "so_luong": float(m.so_luong or 0), "don_gia": float(m.don_gia or 0), "don_vi": m.don_vi,
+            "quy_cach": m.quy_cach, "ncc": m.ncc_ten, "ma_sp": m.ma_sp, "nsx": m.nha_san_xuat, "spec": m.spec,
+            "ghi_chu": m.ghi_chu, "san_pham_ncc_id": m.san_pham_ncc_id}
+
+
 def _dtb_bo_uoc(db, m, nd, gia_truoc) -> bool:
     """mig 162: dòng «Giá vốn ƯỚC …» (tạo ngược từ báo giá) vừa được SỬA GIÁ → bỏ nhãn ƯỚC; dự toán hết dòng ƯỚC → gỡ cờ gia_uoc."""
     if not str(m.ghi_chu or "").startswith("Giá vốn ƯỚC") or Decimal(m.don_gia or 0) == Decimal(gia_truoc or 0):
@@ -6108,6 +6116,7 @@ def dtb_sua_muc(muc_id: int, data: DtbMucVao, xac_nhan_khoa: bool = False, db: S
     khoa = _dtb_khoa_muc(db, m, nd, xac_nhan_khoa)
     cu_khoa = ({"ten": m.ten, "so_luong": float(m.so_luong or 0), "don_gia": float(m.don_gia or 0),
                 "quy_cach": m.quy_cach, "don_vi": m.don_vi, "ghi_chu": m.ghi_chu} if khoa else None)
+    snap_cu = _dtb_snap(m)                                   # mục 4: audit mọi thay đổi dòng
     gia_truoc = Decimal(m.don_gia or 0)
     if data.ten is not None and data.ten.strip():
         m.ten = data.ten.strip()
@@ -6140,6 +6149,12 @@ def dtb_sua_muc(muc_id: int, data: DtbMucVao, xac_nhan_khoa: bool = False, db: S
         ghi_audit(db, nd.id, "SUA_DONG_DA_MUA", "du_toan_ban_muc", m.id, cu=dict(cu_khoa, po=khoa["so_po"]),
                   moi={"ten": m.ten, "so_luong": float(m.so_luong or 0), "don_gia": float(m.don_gia or 0),
                        "quy_cach": m.quy_cach, "don_vi": m.don_vi, "ghi_chu": m.ghi_chu})
+    else:                                          # mục 4 (31/10/2026): dòng thường cũng ghi vết — chỉ các cột đã đổi
+        snap_moi = _dtb_snap(m)
+        doi = {k: snap_moi[k] for k in snap_moi if snap_moi[k] != snap_cu[k]}
+        if doi:
+            ghi_audit(db, nd.id, "SUA_DONG", "du_toan_ban_muc", m.id, cu={k: snap_cu[k] for k in doi},
+                      moi=dict(doi, du_toan=(_d.ma if _d else None)))
     db.commit()
     return {"ok": True, "danh_muc": dm, "ncc_dien": ncc_dien}
 
@@ -6155,6 +6170,9 @@ def dtb_xoa_muc(muc_id: int, xac_nhan_khoa: bool = False, db: Session = Depends(
         ghi_audit(db, nd.id, "XOA_DONG_DA_MUA", "du_toan_ban_muc", m.id,
                   cu={"ten": m.ten, "so_luong": float(m.so_luong or 0), "don_gia": float(m.don_gia or 0),
                       "du_toan_id": m.du_toan_id, "po": khoa["so_po"]})
+    else:                                          # mục 4: xóa dòng thường cũng ghi vết
+        _d = db.get(DuToanBan, m.du_toan_id)
+        ghi_audit(db, nd.id, "XOA_DONG", "du_toan_ban_muc", m.id, cu=dict(_dtb_snap(m), du_toan=(_d.ma if _d else None)))
     db.delete(m); db.commit()
     return {"ok": True}
 
@@ -6183,6 +6201,7 @@ def dtb_them_muc(dt_id: int, data: DtbMucVao, db: Session = Depends(get_db),
     muc_id = m.id
     _d = db.get(DuToanBan, dt_id)
     dm = _dtb_ghi_danh_muc(db, m, nd, _d.ma if _d else None, doi_gia=True)   # 🔁 ghi ngược có kiểm soát vào danh mục NCC
+    ghi_audit(db, nd.id, "THEM_DONG", "du_toan_ban_muc", m.id, moi=dict(_dtb_snap(m), du_toan=(_d.ma if _d else None)))   # mục 4
     db.commit()
     return {"id": muc_id, "danh_muc": dm}
 

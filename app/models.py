@@ -1423,7 +1423,7 @@ class DuAnDuToan(Base):
     du_an_id: Mapped[int] = mapped_column(ForeignKey("du_an.id", ondelete="CASCADE"))
     loai: Mapped[str] = mapped_column(Text, default="THIET_BI")
     ten: Mapped[str] = mapped_column(String(250))
-    quy_cach: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    quy_cach: Mapped[str | None] = mapped_column(Text, nullable=True)                 # mig 163: TEXT
     don_vi: Mapped[str | None] = mapped_column(String(40), nullable=True)
     so_luong: Mapped[Decimal] = mapped_column(Numeric(18, 3), default=1)
     don_gia: Mapped[Decimal] = mapped_column(Numeric(18, 0), default=0)
@@ -1431,6 +1431,13 @@ class DuAnDuToan(Base):
     thu_tu: Mapped[int] = mapped_column(Integer, default=0)
     hang_hoa_id: Mapped[int | None] = mapped_column(ForeignKey("hang_hoa.id", ondelete="SET NULL"), nullable=True)  # mig 118
     don_mua_id: Mapped[int | None] = mapped_column(ForeignKey("don_mua.id", ondelete="SET NULL"), nullable=True)   # mig 147: PO lập từ dòng BOQ
+    # mig 163 (31/10/2026): ngang Dự toán hàng bán — NCC · mã SP · spec · nhà sản xuất · liên kết danh mục Sản phẩm NCC
+    nha_cung_cap_id: Mapped[int | None] = mapped_column(ForeignKey("nha_cung_cap.id", ondelete="SET NULL"), nullable=True)
+    ncc_ten: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    ma_sp: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    spec: Mapped[str | None] = mapped_column(Text, nullable=True)
+    nha_san_xuat: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    san_pham_ncc_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
 
 
 # ---------- Mô tả công việc (JD) & KPI theo vị trí + đánh giá theo kỳ ----------
