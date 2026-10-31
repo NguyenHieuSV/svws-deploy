@@ -1935,6 +1935,24 @@ class TrnKetQua(Base):
     chi_tiet: Mapped[dict | list | None] = mapped_column(JSONB, nullable=True)
     nop_luc: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
+class SaoLuuLog(Base):
+    """💾 mig 164 (31/10/2026): nhật ký sao lưu CSDL — file ZIP trên kho tệp (app/sao_luu_service.py)."""
+    __tablename__ = "sao_luu_log"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    ten_file: Mapped[str] = mapped_column(String(120))
+    duong_dan: Mapped[str | None] = mapped_column(String(400), nullable=True)
+    kich_thuoc: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    so_bang: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    so_dong: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    bat_dau: Mapped[datetime] = mapped_column(DateTime)
+    ket_thuc: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    trang_thai: Mapped[str] = mapped_column(String(16), default="DANG_CHAY")    # DANG_CHAY | THANH_CONG | LOI | DA_XOA
+    nguon: Mapped[str] = mapped_column(String(16), default="TU_DONG")           # TU_DONG | TAY
+    nguoi_dung_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    loi: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ghi_chu: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
 # ---------- 🕒 mig 161: dấu vết lần sửa gần nhất của Dự toán hàng bán (anh Hiếu 29/10/2026) ----------
 from sqlalchemy import event as _sa_event
 from sqlalchemy.orm import Session as _SaSession

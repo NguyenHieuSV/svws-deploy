@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from .routers import (auth, kho, ncc, du_an, ban_hang, ke_toan, tai_chinh,
                       nhan_su, cho_thue, crm, ban_hang_ext, ke_toan_quy, vay, quy_trich_lap,
                       cau_hinh, nhan_su_kpi, cho_thue_ops, dich_vu_kt, quet_mail,
-                      doc_anh_bcvh, dao_tao)
+                      doc_anh_bcvh, dao_tao, sao_luu)
 from svws_registry import registry
 
 app = FastAPI(title="SVWS — Backend hợp nhất (9 module nghiệp vụ)")
@@ -16,7 +16,7 @@ app.add_middleware(
     allow_methods=["*"], allow_headers=["*"], expose_headers=["X-SVWS-Build"],
 )
 for r in (auth, kho, ncc, du_an, ban_hang, ke_toan, tai_chinh, nhan_su, cho_thue, crm, ban_hang_ext, ke_toan_quy, vay, quy_trich_lap, cau_hinh, nhan_su_kpi, cho_thue_ops, dich_vu_kt, quet_mail,
-                      doc_anh_bcvh, dao_tao):
+                      doc_anh_bcvh, dao_tao, sao_luu):
     app.include_router(r.router)
 app.include_router(registry.router)
 

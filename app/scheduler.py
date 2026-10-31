@@ -145,6 +145,17 @@ def _vong_lap():
                         print(f"[SCHEDULER] 📉 Kiểm soát lợi nhuận tuần: {kq6}")
                 finally:
                     db.close()
+            # 💾 SAO LƯU CSDL hàng ngày lên kho tệp (anh Hiếu 31/10/2026): từ sao_luu_gio (VN) mỗi ngày MỘT bản thành công;
+            #    mốc nằm trong bảng sao_luu_log nên khởi động lại không chạy trùng; dọn bản cũ theo sao_luu_giu_ngay / giu_thang.
+            db = SessionLocal()
+            try:
+                from .sao_luu_service import den_han as _sl_den_han, tao_ban_sao as _sl_tao
+                if _sl_den_han(db, gio_hien_tai()):
+                    kq7 = _sl_tao(db, "TU_DONG")
+                    print(f"[SCHEDULER] 💾 Sao lưu CSDL: {kq7.get('trang_thai')} {kq7.get('ten_file')} "
+                          f"{kq7.get('so_bang')} bảng {kq7.get('so_dong')} dòng {kq7.get('kich_thuoc')} bytes {kq7.get('loi') or ''}")
+            finally:
+                db.close()
             # 📬 Tự quét thư hàng tuần — «đến hạn thì chạy»: mốc thứ+giờ (VN) lưu trong CSDL; app ngủ qua giờ hẹn
             # thì lần thức đầu tiên trong tuần chạy bù. Chạy ở luồng riêng (AI đọc thư mất vài phút).
             db = SessionLocal()

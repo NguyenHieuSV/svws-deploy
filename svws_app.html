@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="vi">
 <head>
-<!-- build: kl-ro-nt-2026-10-31 -->
+<!-- build: sao-luu-2026-10-31 -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#0f2c44">
@@ -20059,6 +20059,28 @@ async function qmChayNgay(){
   catch(e){toast(e.detail||e.message,"err");}
 }
 async function qmGuiThu(){try{await api('/quet-mail/gui-thu',{method:'POST'});toast("Đã gửi tin thử vào group riêng","ok");}catch(e){toast(e.detail||e.message,"err");}}
+/* ---- 💾 Sao lưu CSDL (31/10/2026): panel ở Cấu hình — nhật ký, sao lưu tay, tải file (CEO) ---- */
+function _slPanel(sl){
+  if(!sl)return '';
+  const e=s=>String(s==null?'':s).replace(/</g,'&lt;');
+  if(sl.loi)return `<div class="panel" id="slPanel" style="margin-top:14px"><div class="panel-h"><h3>💾 Sao lưu dữ liệu</h3></div><div class="panel-b" style="padding:12px 18px;color:var(--red)">${e(sl.loi)}</div></div>`;
+  const mb=v=>v==null?'—':(v>=1048576?(v/1048576).toFixed(1)+' MB':(v/1024).toFixed(0)+' KB');
+  const g=sl.gan_nhat; const tt={THANH_CONG:['b-ok','✓ thành công'],LOI:['b-tc','✕ lỗi'],DANG_CHAY:['b-cho','⏳ đang chạy'],DA_XOA:['b-info','đã dọn']};
+  return `<div class="panel" id="slPanel" style="margin-top:14px"><div class="panel-h"><h3>💾 Sao lưu dữ liệu ${g?`<span class="badge b-ok">gần nhất ${e(g.bat_dau)}</span>`:'<span class="badge b-tc">chưa có bản nào</span>'}</h3><div class="spacer"></div>
+      <button class="btn-sm" id="slChayBtn" onclick="slChay()">💾 Sao lưu ngay</button></div>
+    <div class="panel-b" style="padding:12px 18px">
+      <div class="note" style="margin-bottom:8px">Mỗi ngày từ <b>${String(sl.gio).padStart(2,'0')}:00</b> (giờ VN) app tự đóng gói toàn bộ CSDL thành một file ZIP (manifest + schema + CSV từng bảng${sl.co_pg_dump?' + pg_dump':''}) lên <b>${e(sl.kho)}</b>; giữ mọi bản trong <b>${sl.giu_ngay} ngày</b> gần nhất và bản đầu mỗi tháng trong <b>${sl.giu_thang} tháng</b>. ${sl.bat?'':'<b style="color:#dc2626">Đang TẮT (SAO_LUU_BAT=0).</b> '}Khôi phục: CEO tải file ZIP → trên máy có Python + psql chạy <code>python -m scripts.khoi_phuc_sao_luu &lt;file.zip&gt; --database-url …</code> vào CSDL mới (hướng dẫn trong script).</div>
+      <table><thead><tr><th>Bắt đầu</th><th>Nguồn</th><th class="num">Bảng</th><th class="num">Dòng</th><th class="num">Dung lượng</th><th>Trạng thái</th><th>Ghi chú</th><th></th></tr></thead><tbody>
+      ${(sl.danh_sach||[]).map(x=>{const t=tt[x.trang_thai]||['b-cho',x.trang_thai];return `<tr><td style="white-space:nowrap">${e(x.bat_dau)}</td><td>${x.nguon==='TAY'?'tay':'tự động'}</td><td class="num">${x.so_bang??'—'}</td><td class="num">${x.so_dong!=null?Number(x.so_dong).toLocaleString('vi-VN'):'—'}</td><td class="num">${mb(x.kich_thuoc)}</td><td><span class="badge ${t[0]}">${t[1]}</span></td><td style="font-size:11.5px;color:${x.loi?'#dc2626':'var(--muted)'};white-space:normal;max-width:300px">${e(x.loi||x.ghi_chu||'')}</td><td>${x.trang_thai==='THANH_CONG'&&x.co_file&&S.role==='CEO'?`<button class="btn-sm ghost" title="Tải file ZIP sao lưu (chỉ CEO — chứa toàn bộ dữ liệu công ty)" onclick="tepTaiVe('/sao-luu/${x.id}/tai','${e(x.ten_file)}')">⬇</button>`:''}</td></tr>`;}).join('')||'<tr><td colspan="8" class="empty">Chưa có bản sao lưu — bấm 💾 Sao lưu ngay để tạo bản đầu tiên.</td></tr>'}</tbody></table></div></div>`;
+}
+async function slTai(){const p=document.getElementById('slPanel'); if(!p)return; let sl=null; try{sl=await api('/sao-luu');}catch(e){sl={loi:e.detail||e.message};} p.outerHTML=_slPanel(sl);}
+async function slChay(){
+  if(S.mode!=="live")return toast("Chạy ở bản kết nối backend","err");
+  const b=document.getElementById('slChayBtn'); if(b){b.disabled=true;b.textContent="⏳ Đang sao lưu…";}
+  try{const r=await api('/sao-luu/chay',{method:'POST'}); toast(r.ok?`✅ Đã sao lưu ${r.so_bang} bảng · ${Number(r.so_dong||0).toLocaleString('vi-VN')} dòng · ${(Number(r.kich_thuoc||0)/1048576).toFixed(1)} MB`:`✕ Sao lưu lỗi: ${r.loi||''}`,r.ok?"ok":"err");}
+  catch(e){toast(e.detail||e.message,"err");}
+  slTai();
+}
 async function viewCauHinh(m){
   m.innerHTML=head("Cấu hình","Quản lý tài khoản người dùng hệ thống");
   if(S.role!=="CEO"&&S.role!=="ADMIN"){
@@ -20096,6 +20118,9 @@ async function viewCauHinh(m){
   // 📬 Tự quét thư hàng tuần — cấu hình + nhật ký
   let qmCh=null; if(S.mode==="live"){try{qmCh=await api('/quet-mail/cau-hinh');}catch(e){qmCh={loi:e.detail||e.message};}}
   m.innerHTML+=_qmPanel(qmCh);
+  // 💾 Sao lưu CSDL (31/10/2026)
+  let slCh=null; if(S.mode==="live"){try{slCh=await api('/sao-luu');}catch(e){slCh={loi:e.detail||e.message};}}
+  m.innerHTML+=_slPanel(slCh);
   // Ma trận Phân quyền theo vị trí (chuyển từ Overall Operation sang — chỉ CEO duyệt)
   if(S.role==="CEO"){
     m.innerHTML+=`<div class="panel" style="border:1px solid var(--teal)">

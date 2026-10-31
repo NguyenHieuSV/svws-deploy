@@ -31,6 +31,10 @@ make test       # pytest (test_e2e cần DB chạy, tự skip nếu không có D
   tạo user demo (tắt bằng `SEED_DEMO=0`), quản trị tài khoản theo `DEMO_PASSWORD` / `ADMIN_*`,
   rồi chạy `uvicorn app.main:app`.
 - Push lên `main` là Render tự build lại. Kiểm tra `/health` sau khi deploy.
+- 💾 Sao lưu: `app/sao_luu_service.py` mỗi ngày (từ `SAO_LUU_GIO`, giờ VN) đóng gói toàn bộ bảng thành ZIP
+  (manifest + schema db/init + CSV từng bảng + pg_dump nếu được) lên kho tệp R2/B2, nhật ký ở bảng `sao_luu_log`,
+  panel Cấu hình → 💾 Sao lưu dữ liệu (CEO/ADMIN; tải file chỉ CEO). Khôi phục:
+  `python -m scripts.khoi_phuc_sao_luu <zip> --database-url …` (tạo schema từ ZIP rồi nạp CSV).
 - Tệp đính kèm: `app/luu_tru.py` lưu lên object storage S3-compatible (Backblaze B2) khi có
   `R2_ENDPOINT / R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY / R2_BUCKET`; thiếu thì lưu đĩa cục bộ.
 - Cấu hình chung đọc từ biến môi trường qua `app/config.py` (email, IMAP, AI, Google Chat webhook…).
