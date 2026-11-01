@@ -56,12 +56,14 @@ class HangHoaSua(BaseModel):
 class PhieuCtVao(BaseModel):
     hang_hoa_id: int
     so_luong: Decimal = Field(gt=0)
+    du_an_du_toan_id: int | None = None  # mig 166: gắn dòng dự toán BOQ của dự án
 
 
 class PhieuKhoVao(BaseModel):
     loai: str = Field(pattern="^(NHAP|XUAT)$")
     so: str | None = None
     don_hang_id: int | None = None       # mã hàng bán (đơn hàng) gắn cho phiếu nhập/xuất
+    du_an_id: int | None = None          # mig 166: dự án (cấp vật tư ra công trường)
     chi_tiet: list[PhieuCtVao] = Field(min_length=1)
 
 

@@ -1357,3 +1357,50 @@ def phan_tich_ai(da_id: int, data: PhanTichVao, db: Session = Depends(get_db),
         "chi_tieu": [_ct_ra(c) for c in cts],
     }
     return phan_tich_thiet_ke(info)
+
+
+# ----- 📦 Vật tư theo HẠNG MỤC: đối chiếu định mức BOQ ↔ thực cấp tại công trường (mig 166) -----
+@router.get("/{da_id}/vat-tu-doi-chieu")
+def vat_tu_doi_chieu(da_id: int, db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
+    """Mỗi dòng dự toán BOQ: định mức (kế hoạch) · đã nhập · đã cấp (xuất) ra công trường ·
+    còn phải cấp · tồn kho hiện có của hàng hóa. Số liệu lấy từ phiếu kho gắn dòng BOQ (du_an_du_toan_id)."""
+    _da_404(db, da_id)
+    from ..models import PhieuKho, PhieuKhoCt, HangHoa, TonKho
+    lines = (db.query(DuAnDuToan).filter_by(du_an_id=da_id)
+             .order_by(DuAnDuToan.thu_tu, DuAnDuToan.id).all())
+    dt_ids = [l.id for l in lines]
+    nhap, xuat = {}, {}
+    if dt_ids:
+        rows = (db.query(PhieuKhoCt.du_an_du_toan_id, PhieuKho.loai,
+                         func.coalesce(func.sum(PhieuKhoCt.so_luong), 0))
+                .join(PhieuKho, PhieuKho.id == PhieuKhoCt.phieu_kho_id)
+                .filter(PhieuKhoCt.du_an_du_toan_id.in_(dt_ids))
+                .group_by(PhieuKhoCt.du_an_du_toan_id, PhieuKho.loai).all())
+        for dt_id, loai, sl in rows:
+            (nhap if loai == "NHAP" else xuat)[dt_id] = float(sl or 0)
+    out = []
+    for l in lines:
+        dm = float(l.so_luong or 0)
+        dx = xuat.get(l.id, 0.0)
+        dn = nhap.get(l.id, 0.0)
+        ton = None
+        if l.hang_hoa_id:
+            t = db.query(TonKho).filter_by(hang_hoa_id=l.hang_hoa_id).first()
+            ton = float(t.so_luong) if t else 0.0
+        con = dm - dx
+        tt = "VUOT" if dx > dm + 1e-6 else ("DU" if dx >= dm - 1e-6 and dm > 0 else ("CHUA" if dx <= 0 else "THIEU"))
+        out.append({
+            "du_an_du_toan_id": l.id, "hang_muc": l.ghi_chu, "ten": l.ten,
+            "don_vi": l.don_vi, "hang_hoa_id": l.hang_hoa_id, "khop_kho": bool(l.hang_hoa_id),
+            "dinh_muc": dm, "da_nhap": dn, "da_cap": dx, "con_phai_cap": con,
+            "ton_kho": ton, "phan_tram": round(dx / dm * 100, 1) if dm else None,
+            "trang_thai": tt,
+        })
+    tong = {
+        "dinh_muc": sum(x["dinh_muc"] for x in out),
+        "da_cap": sum(x["da_cap"] for x in out),
+        "so_dong": len(out),
+        "so_chua_khop": sum(1 for x in out if not x["khop_kho"]),
+        "so_vuot": sum(1 for x in out if x["trang_thai"] == "VUOT"),
+    }
+    return {"danh_sach": out, "tong": tong}

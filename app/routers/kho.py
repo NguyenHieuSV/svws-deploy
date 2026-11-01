@@ -343,6 +343,7 @@ def lap_phieu(
 ):
     phieu = PhieuKho(loai=data.loai, so=data.so, ngay=date.today(),
                      don_hang_id=data.don_hang_id,
+                     du_an_id=getattr(data, "du_an_id", None),
                      nguoi_tao=nhan_vien_id_cua(db, nd.id))
     db.add(phieu)
     db.flush()
@@ -351,7 +352,8 @@ def lap_phieu(
 
     duoi_min = []
     for ct in data.chi_tiet:
-        db.add(PhieuKhoCt(phieu_kho_id=phieu.id, hang_hoa_id=ct.hang_hoa_id, so_luong=ct.so_luong))
+        db.add(PhieuKhoCt(phieu_kho_id=phieu.id, hang_hoa_id=ct.hang_hoa_id, so_luong=ct.so_luong,
+                          du_an_du_toan_id=getattr(ct, "du_an_du_toan_id", None)))
         if data.loai == "NHAP":
             nhap_ton(db, ct.hang_hoa_id, ct.so_luong)
         elif xuat_ton(db, ct.hang_hoa_id, ct.so_luong):  # tồn tụt dưới min → hiện ở Cảnh báo tồn (🛒 Tạo PO)
