@@ -223,6 +223,11 @@ def chi_phi_ma(db: Session, dh: DonHang, tho: bool = False) -> dict:
     # dồn 2 đường ghi của cùng khoản tiền; đã có công nợ → cọc đã cấn vào da_thanh_toan, chỉ cộng tạm ứng còn dư
     coc_don = _f(dh.thanh_toan_coc) if not cn_thu else 0.0
     da_thu = da_thu_cn + (max(tu_thu_clt, coc_don) if not cn_thu else max(tu_thu_clt, 0.0))
+    # tách nguồn ĐÃ THU để hiện cột «Đã thu từ khách» (01/11/2026): cọc trên đơn / phiếu tạm ứng / đã thu công nợ
+    if not cn_thu and coc_don > 0 and coc_don >= tu_thu_clt:
+        da_thu_coc_don, da_thu_tam_ung = coc_don, 0.0           # cọc gõ trên đơn (phiếu tạm ứng nếu có là cùng khoản tiền)
+    else:
+        da_thu_coc_don, da_thu_tam_ung = 0.0, max(tu_thu_clt, 0.0)
 
     # 🏗 ĐƠN ĐẦU TƯ – CHO THUÊ: PO / chi phí của đơn là VỐN ĐẦU TƯ (tài sản, khấu hao dần) — KHÔNG phải giá vốn;
     #    giá trị đơn là giá trị hợp đồng ước tính — KHÔNG phải doanh thu. Xem app/dau_tu_cho_thue.py
@@ -232,7 +237,7 @@ def chi_phi_ma(db: Session, dh: DonHang, tho: bool = False) -> dict:
                   "gia_tri_hd": doanh_thu, "tai_san_cho_thue_id": getattr(dh, "tai_san_cho_thue_id", None)}
         doanh_thu = gia_von_po = chi_phi_khac = chi_ngoai_cn = chi_hd_ngoai_po = tong_chi_phi = loi_nhuan = 0.0
         doanh_thu_gom_vat = 0.0
-        da_thu = 0.0
+        da_thu = da_thu_cn = da_thu_coc_don = da_thu_tam_ung = 0.0
 
     return {
         **dau_tu,
@@ -248,6 +253,7 @@ def chi_phi_ma(db: Session, dh: DonHang, tho: bool = False) -> dict:
         "ty_suat": round(loi_nhuan / doanh_thu * 100, 1) if doanh_thu else None,
         "da_tra_ncc": da_tra_ncc, "con_phai_tra": con_phai_tra,
         "da_thu": da_thu, "con_phai_thu": max(doanh_thu_gom_vat - da_thu, 0.0),      # dòng tiền: gồm VAT
+        "da_thu_cong_no": da_thu_cn, "da_thu_coc_don": da_thu_coc_don, "da_thu_tam_ung": da_thu_tam_ung,
         "so_po": len(pos),
         "danh_sach_po": [{"id": p.id, "so": p.so, "nha_cung_cap_id": p.nha_cung_cap_id,
                           "tong_tien": _f(p.tong_tien), "trang_thai": p.trang_thai,

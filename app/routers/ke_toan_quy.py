@@ -2543,6 +2543,8 @@ def _lai_lo_1(db, dh: DonHang):
             "tong_chi_phi": cp["tong_chi_phi"], "loi_nhuan": loi_nhuan,
             "ty_suat": cp["ty_suat"],
             "da_thu": da_thu, "con_phai_thu": cp["con_phai_thu"],
+            "da_thu_cong_no": cp.get("da_thu_cong_no") or 0, "da_thu_coc_don": cp.get("da_thu_coc_don") or 0,
+            "da_thu_tam_ung": cp.get("da_thu_tam_ung") or 0,
             "tam_ung_thu": tu_thu, "tam_ung_thu_con_lai": tu_thu_clt,
             "tam_ung_chi": tu_chi, "tam_ung_chi_con_lai": tu_chi_clt,
             "da_xuat_hd_ban": hd_ban,
