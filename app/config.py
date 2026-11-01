@@ -84,6 +84,8 @@ class Settings(BaseSettings):
     # Máy chủ Render chạy giờ UTC nhưng người dùng nhập giờ Việt Nam, và cột
     # thoi_diem/han_hoan_thanh lưu giờ địa phương -> phải quy đổi khi so sánh.
     tz_offset_gio: int = 7               # UTC+7
+    # 🔗 Tích hợp đọc dữ liệu (ProjectFlow AI gọi sang đọc vật tư–thiết bị theo mã dự án) — anh Hiếu 01/11/2026
+    tich_hop_api_key: str = ""           # khóa chung; để trống = TẮT endpoint tích hợp (/tich-hop/*)
 
 
 settings = Settings()
