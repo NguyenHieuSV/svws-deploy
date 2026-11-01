@@ -330,8 +330,18 @@ def chi_tiet_phieu(phieu_id: int, db: Session = Depends(get_db),
                      "ma": hh.ma if hh else None, "ten": hh.ten if hh else None,
                      "don_vi": hh.don_vi if hh else None,
                      "so_luong": float(ct.so_luong)})
+    from ..models import NhanVien, DuAn
+    def _ten(nid):
+        nv = db.get(NhanVien, nid) if nid else None
+        return nv.ho_ten if nv else None
+    da = db.get(DuAn, p.du_an_id) if p.du_an_id else None
     return {"id": p.id, "so": p.so, "loai": p.loai, "ngay": str(p.ngay),
-            "don_hang_id": p.don_hang_id, "don_mua_id": p.don_mua_id, "chi_tiet": dong}
+            "don_hang_id": p.don_hang_id, "don_mua_id": p.don_mua_id,
+            "du_an_id": p.du_an_id, "du_an": (da.ma or da.ten) if da else None,
+            "trang_thai": p.trang_thai or "DA_DUYET",
+            "nguoi_nhan": _ten(p.nguoi_nhan_id), "nguoi_giao": _ten(p.nguoi_giao_id),
+            "nguoi_duyet": _ten(p.nguoi_duyet_id), "ngay_duyet": str(p.ngay_duyet) if p.ngay_duyet else None,
+            "ghi_chu": p.ghi_chu, "chi_tiet": dong}
 
 
 # ----- THAO_TAC: lập phiếu nhập/xuất (giao dịch nguyên tử + tự sinh yêu cầu mua) -----
@@ -341,10 +351,19 @@ def lap_phieu(
     db: Session = Depends(get_db),
     nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC")),
 ):
+    nv_id = nhan_vien_id_cua(db, nd.id)
+    # mig 167: phiếu XUẤT cấp cho CÔNG TRƯỜNG (có du_an_id) → CHỜ DUYỆT, chưa trừ tồn; người nhận bắt buộc.
+    can_duyet = (data.loai == "XUAT" and getattr(data, "du_an_id", None))
+    if can_duyet and not getattr(data, "nguoi_nhan_id", None):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Cấp vật tư cho công trường phải chọn người nhận")
     phieu = PhieuKho(loai=data.loai, so=data.so, ngay=date.today(),
                      don_hang_id=data.don_hang_id,
                      du_an_id=getattr(data, "du_an_id", None),
-                     nguoi_tao=nhan_vien_id_cua(db, nd.id))
+                     nguoi_tao=nv_id,
+                     nguoi_nhan_id=getattr(data, "nguoi_nhan_id", None) if can_duyet else None,
+                     nguoi_giao_id=nv_id if can_duyet else None,
+                     trang_thai="MOI" if can_duyet else "DA_DUYET",
+                     ghi_chu=getattr(data, "ghi_chu", None))
     db.add(phieu)
     db.flush()
     if not phieu.so:
@@ -354,16 +373,59 @@ def lap_phieu(
     for ct in data.chi_tiet:
         db.add(PhieuKhoCt(phieu_kho_id=phieu.id, hang_hoa_id=ct.hang_hoa_id, so_luong=ct.so_luong,
                           du_an_du_toan_id=getattr(ct, "du_an_du_toan_id", None)))
+        if can_duyet:
+            continue   # trừ tồn khi DUYỆT, không trừ lúc lập
         if data.loai == "NHAP":
             nhap_ton(db, ct.hang_hoa_id, ct.so_luong)
         elif xuat_ton(db, ct.hang_hoa_id, ct.so_luong):  # tồn tụt dưới min → hiện ở Cảnh báo tồn (🛒 Tạo PO)
             duoi_min.append(ct.hang_hoa_id)
 
     ghi_audit(db, nd.id, "TAO", "phieu_kho", phieu.id,
-              moi={"loai": data.loai, "so_dong": len(data.chi_tiet), "duoi_min": duoi_min})
+              moi={"loai": data.loai, "so_dong": len(data.chi_tiet), "duoi_min": duoi_min,
+                   "trang_thai": phieu.trang_thai})
     db.commit()
     db.refresh(phieu)
     return phieu
+
+
+# ----- DUYET: duyệt phiếu cấp vật tư cho công trường (mig 167) → trừ tồn khi duyệt -----
+@router.post("/phieu/{phieu_id}/duyet")
+def duyet_phieu(phieu_id: int, db: Session = Depends(get_db),
+                nd: NguoiDung = Depends(yeu_cau(MODULE, "DUYET"))):
+    p = db.get(PhieuKho, phieu_id)
+    if p is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy phiếu")
+    if p.trang_thai != "MOI":
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Phiếu không ở trạng thái chờ duyệt")
+    duoi_min = []
+    for ct in p.chi_tiet:
+        if p.loai == "NHAP":
+            nhap_ton(db, ct.hang_hoa_id, ct.so_luong)
+        elif xuat_ton(db, ct.hang_hoa_id, ct.so_luong):
+            duoi_min.append(ct.hang_hoa_id)
+    p.trang_thai = "DA_DUYET"
+    p.nguoi_duyet_id = nhan_vien_id_cua(db, nd.id)
+    p.ngay_duyet = date.today()
+    ghi_audit(db, nd.id, "DUYET", "phieu_kho", p.id, moi={"duoi_min": duoi_min})
+    db.commit()
+    return {"ok": True, "trang_thai": p.trang_thai, "duoi_min": duoi_min}
+
+
+# ----- XEM: danh sách phiếu kho của một dự án (cho tab Vật tư: chờ duyệt + đã duyệt) -----
+@router.get("/phieu-du-an/{da_id}")
+def phieu_theo_du_an(da_id: int, db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
+    from ..models import NhanVien
+    def _ten(nid):
+        nv = db.get(NhanVien, nid) if nid else None
+        return nv.ho_ten if nv else None
+    rows = (db.query(PhieuKho).filter(PhieuKho.du_an_id == da_id, PhieuKho.loai == "XUAT")
+            .order_by(PhieuKho.id.desc()).all())
+    out = []
+    for p in rows:
+        out.append({"id": p.id, "so": p.so, "ngay": str(p.ngay), "trang_thai": p.trang_thai or "DA_DUYET",
+                    "nguoi_nhan": _ten(p.nguoi_nhan_id), "nguoi_giao": _ten(p.nguoi_giao_id),
+                    "so_dong": len(p.chi_tiet), "tong_sl": float(sum(ct.so_luong for ct in p.chi_tiet) or 0)})
+    return out
 
 
 # ----- DUYỆT: điều chỉnh tồn thủ công (kiểm kê) -> cần mức cao hơn -----

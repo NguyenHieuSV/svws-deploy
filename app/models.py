@@ -117,6 +117,13 @@ class PhieuKho(Base):
     du_an_id: Mapped[int | None] = mapped_column(ForeignKey("du_an.id", ondelete="SET NULL"), nullable=True)  # mig 166
     ngay: Mapped[date] = mapped_column(Date, server_default=func.current_date())
     nguoi_tao: Mapped[int | None] = mapped_column(ForeignKey("nhan_vien.id"), nullable=True)
+    # mig 167: giao nhận tại site + duyệt xuất (chỉ phiếu XUẤT cấp cho công trường)
+    nguoi_nhan_id: Mapped[int | None] = mapped_column(ForeignKey("nhan_vien.id"), nullable=True)
+    nguoi_giao_id: Mapped[int | None] = mapped_column(ForeignKey("nhan_vien.id"), nullable=True)
+    trang_thai: Mapped[str] = mapped_column(String(16), default="DA_DUYET")   # MOI | DA_DUYET
+    nguoi_duyet_id: Mapped[int | None] = mapped_column(ForeignKey("nhan_vien.id"), nullable=True)
+    ngay_duyet: Mapped[date | None] = mapped_column(Date, nullable=True)
+    ghi_chu: Mapped[str | None] = mapped_column(Text, nullable=True)
     chi_tiet: Mapped[list["PhieuKhoCt"]] = relationship(cascade="all, delete-orphan", lazy="selectin")
 
 

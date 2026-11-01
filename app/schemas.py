@@ -64,6 +64,8 @@ class PhieuKhoVao(BaseModel):
     so: str | None = None
     don_hang_id: int | None = None       # mã hàng bán (đơn hàng) gắn cho phiếu nhập/xuất
     du_an_id: int | None = None          # mig 166: dự án (cấp vật tư ra công trường)
+    nguoi_nhan_id: int | None = None     # mig 167: người nhận tại site (nhân viên) — bắt buộc khi cấp cho công trường
+    ghi_chu: str | None = None           # mig 167
     chi_tiet: list[PhieuCtVao] = Field(min_length=1)
 
 
