@@ -20,6 +20,7 @@ _NGAY_NHAC_TRN = ""    # ngày đã chạy nhắc thi Training (8h–17h VN, tr�
 _NGAY_NHAC_BC = ""     # ngày đã chạy nhắc «chưa hoàn thành báo cáo ngày» (sáng hôm sau, giờ VN)
 _NGAY_NHAC_TD = ""     # ngày đã chạy nhắc ⏳ việc chậm tiến độ so với thời gian (mốc bền: giao_viec.nhac_lech_ngay)
 _TUAN_LN = ""          # tuần đã gửi 📉 bản kiểm soát lợi nhuận theo mã (thứ Hai từ 8h VN; mốc bền nằm trong audit_log)
+_TUAN_QH = ""          # tuần đã gửi ⏰ nhắc công nợ phải thu quá hạn + PO quá hẹn giao (thứ Hai từ 8h VN; mốc bền trong audit_log)
 
 
 def _vong_lap():
@@ -143,6 +144,29 @@ def _vong_lap():
                         _ga(db, None, "NHAC_TUAN", "kiem_soat_ln", None, moi={k: v for k, v in kq6.items() if k != "loi"})
                         db.commit()
                         print(f"[SCHEDULER] 📉 Kiểm soát lợi nhuận tuần: {kq6}")
+                finally:
+                    db.close()
+            # ⏰ Nhắc QUÁ HẠN hàng tuần (01/11/2026): công nợ phải thu quá hạn → nhóm Duyệt chi · PO đã duyệt quá hẹn giao
+            #    chưa nhận đủ → nhóm Purchasing Team. Thứ Hai từ 8h (VN), mỗi tuần một lần; mốc bền: audit_log «nhac_qua_han».
+            global _TUAN_QH
+            g7 = gio_hien_tai()
+            tuan7 = g7.strftime("%G-W%V")
+            if settings.qua_han_nhac_tuan and g7.weekday() == 0 and g7.hour >= 8 and _TUAN_QH != tuan7:
+                _TUAN_QH = tuan7
+                db = SessionLocal()
+                try:
+                    from datetime import timedelta as _td7
+                    from .models import AuditLog as _AL7
+                    dau_tuan7 = (g7 - _td7(hours=settings.tz_offset_gio)).replace(hour=0, minute=0, second=0, microsecond=0) - _td7(days=1)
+                    da7 = (db.query(_AL7.id).filter(_AL7.bang == "nhac_qua_han", _AL7.hanh_dong == "NHAC_TUAN",
+                                                    _AL7.thoi_gian >= dau_tuan7).first())
+                    if da7 is None:
+                        from .nhac_qua_han import gui_tuan as _qh_gui
+                        from .audit import ghi_audit as _ga7
+                        kq7b = _qh_gui(db)
+                        _ga7(db, None, "NHAC_TUAN", "nhac_qua_han", None, moi={k: v for k, v in kq7b.items() if k != "loi"})
+                        db.commit()
+                        print(f"[SCHEDULER] ⏰ Nhắc quá hạn tuần: {kq7b}")
                 finally:
                     db.close()
             # 💾 SAO LƯU CSDL hàng ngày lên kho tệp (anh Hiếu 31/10/2026): từ sao_luu_gio (VN) mỗi ngày MỘT bản thành công;

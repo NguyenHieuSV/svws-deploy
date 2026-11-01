@@ -1086,6 +1086,28 @@ def cong_no_qua_han(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XE
     return {"hom_nay": str(hom_nay), "so_cong_no_qua_han": len(ds), "danh_sach": ds}
 
 
+# ---- ⏰ Nhắc QUÁ HẠN hàng tuần: công nợ phải thu · PO quá hẹn giao (app/nhac_qua_han.py; app tự gửi thứ Hai 8h) ----
+@router.get("/nhac-qua-han/tuan")
+def nhac_qua_han_xem(db: Session = Depends(get_db), _=Depends(chi_vai_tro("CEO", "ADMIN", "KTT"))):
+    """Xem trước hai bản nhắc (không gửi) + nhóm sẽ nhận + danh sách để hiện bảng."""
+    from ..nhac_qua_han import bao_cao, noi_dung_cong_no, noi_dung_po, noi_gui
+    bc = bao_cao(db)
+    ng = noi_gui()
+    return {"hom_nay": str(bc["hom_nay"]), "so_cong_no": len(bc["cong_no"]), "tong_cong_no": bc["tong_cong_no"],
+            "so_po": len(bc["po"]), "noi_dung_cong_no": noi_dung_cong_no(bc) or "", "noi_dung_po": noi_dung_po(bc) or "",
+            "nhom_cong_no": ng["cong_no_nhom"], "nhom_po": ng["po_nhom"], "cong_no": bc["cong_no"], "po": bc["po"]}
+
+
+@router.post("/nhac-qua-han/gui")
+def nhac_qua_han_gui(db: Session = Depends(get_db), nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN", "KTT"))):
+    """📣 Gửi NGAY hai bản nhắc quá hạn vào nhóm Chat (gửi lại được trong tuần)."""
+    from ..nhac_qua_han import gui_tuan
+    kq = gui_tuan(db, "TAY", getattr(nd, "ho_ten", None) or nd.email)
+    ghi_audit(db, nd.id, "NHAC_TAY", "nhac_qua_han", None, moi={k: v for k, v in kq.items() if k != "loi"})
+    db.commit()
+    return kq
+
+
 # ============ CHỈ SỐ TÀI CHÍNH DOANH NGHIỆP + CẢNH BÁO ============
 def _f(x):
     return float(x or 0)
