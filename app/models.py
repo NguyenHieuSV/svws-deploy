@@ -1440,6 +1440,37 @@ class DuAnDuToan(Base):
     san_pham_ncc_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
 
 
+# ---------- Thiết bị thi công: sổ cá thể + cấp phát/thu hồi theo dự án (mig 165) ----------
+class ThietBiThiCong(Base):
+    __tablename__ = "thiet_bi_thi_cong"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    ma: Mapped[str | None] = mapped_column(String(40), unique=True, nullable=True)
+    ten: Mapped[str] = mapped_column(String(200))
+    loai: Mapped[str] = mapped_column(String(20), default="MAY_MOC")        # MAY_MOC/DUNG_CU/DO_DO/AN_TOAN/KHAC
+    model: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    serial: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    nguyen_gia: Mapped[Decimal] = mapped_column(Numeric(18, 0), default=0)
+    ngay_mua: Mapped[date | None] = mapped_column(Date, nullable=True)
+    tinh_trang: Mapped[str] = mapped_column(String(16), default="SAN_SANG")  # SAN_SANG/DANG_CAP_PHAT/BAO_TRI/HONG/THANH_LY
+    du_an_hien_tai_id: Mapped[int | None] = mapped_column(ForeignKey("du_an.id", ondelete="SET NULL"), nullable=True)
+    ghi_chu: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class CapPhatThietBi(Base):
+    __tablename__ = "cap_phat_thiet_bi"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    thiet_bi_id: Mapped[int] = mapped_column(ForeignKey("thiet_bi_thi_cong.id", ondelete="CASCADE"))
+    du_an_id: Mapped[int | None] = mapped_column(ForeignKey("du_an.id", ondelete="SET NULL"), nullable=True)
+    nguoi_nhan_id: Mapped[int | None] = mapped_column(ForeignKey("nhan_vien.id", ondelete="SET NULL"), nullable=True)
+    ngay_cap: Mapped[date] = mapped_column(Date, default=date.today)
+    tinh_trang_cap: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ngay_tra: Mapped[date | None] = mapped_column(Date, nullable=True)       # NULL = đang giữ ngoài công trường
+    tinh_trang_tra: Mapped[str | None] = mapped_column(Text, nullable=True)
+    nguoi_duyet_id: Mapped[int | None] = mapped_column(ForeignKey("nhan_vien.id", ondelete="SET NULL"), nullable=True)
+    ghi_chu: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
 # ---------- Mô tả công việc (JD) & KPI theo vị trí + đánh giá theo kỳ ----------
 class MoTaCongViec(Base):
     __tablename__ = "mo_ta_cong_viec"
