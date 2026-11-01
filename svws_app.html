@@ -19391,7 +19391,7 @@ async function daXoaDuAn(id,ma){
 async function daDetail(m){
   let ct; try{ ct = S.mode==="live" ? await api(`/du-an/${S.daId}/chi-tiet`) : _daDemoCt(); }catch(e){m.innerHTML=head("Dự án","")+`<div class="empty" style="color:#dc2626;padding:24px">${e.detail||e.message}</div><button class="btn-sm ghost" onclick="daBack()">← Danh sách</button>`;return;}
   S.daCt=ct;
-  const tabs=[["thongtin","Thông tin"],["thietke","Thiết kế"],["danhmuc","Danh mục thiết bị - Vật tư"],["tiendo","Tiến độ"],["antoan","An toàn"],["trienkhai","Triển khai"],["tailieu","Document"],["kpi","KPI"],["baocao","Báo cáo"]];
+  const tabs=[["thongtin","Thông tin"],["thietke","Thiết kế"],["danhmuc","Danh mục thiết bị - Vật tư"],["tiendo","Tiến độ"],["antoan","An toàn"],["trienkhai","Triển khai"],["thietbi","🔧 Thiết bị"],["tailieu","Document"],["kpi","KPI"],["baocao","Báo cáo"]];
   m.innerHTML=head("Dự án",ct.ten);
   m.innerHTML+=`<button class="btn-sm ghost" style="margin-bottom:10px" onclick="daBack()">← Danh sách dự án</button>
     <div class="panel"><div class="panel-b" style="padding:16px 18px">
@@ -19411,7 +19411,7 @@ async function daDetail(m){
 }
 function daSwitch(t){S.daTab=t;_tabActive(t);daRenderTab();}
 async function daRenderTab(){const h=$("#daBody");if(!h)return;h.innerHTML='<div class="empty" style="padding:24px">Đang tải…</div>';
-  try{const f={thongtin:daThongTin,thietke:daThietKe,danhmuc:daDanhMuc,tiendo:daTienDo,antoan:daAnToan,trienkhai:daTrienKhai,tailieu:daTaiLieu,kpi:daKpi,baocao:daBaoCao}[S.daTab]||daThongTin;await f(h);}
+  try{const f={thongtin:daThongTin,thietke:daThietKe,danhmuc:daDanhMuc,tiendo:daTienDo,antoan:daAnToan,trienkhai:daTrienKhai,thietbi:daThietBi,tailieu:daTaiLieu,kpi:daKpi,baocao:daBaoCao}[S.daTab]||daThongTin;await f(h);}
   catch(e){h.innerHTML=`<div class="empty" style="color:#dc2626;padding:24px">${e.detail||e.message}</div>`;}
 }
 
@@ -19915,6 +19915,105 @@ async function daThemNhatKy(){
   const body={ngay:gv('nk_ngay')||null,noi_dung:gv('nk_nd')||null,nhan_luc:gv('nk_nl')||null,thiet_bi:gv('nk_tb')||null,thoi_tiet:gv('nk_tt')||null,van_de:gv('nk_vd')||null};
   if(S.mode!=="live"){toast("Đã lưu (demo)","ok");return;}
   try{await api(`/du-an/${S.daId}/nhat-ky`,{method:'POST',body:JSON.stringify(body)});toast("Đã lưu nhật ký","ok");daRenderTab();}catch(e){toast(e.detail||e.message,"err");}
+}
+
+/* --- Tab Thiết bị thi công (sổ cá thể + cấp phát/thu hồi theo dự án) --- */
+const TB_LOAI={MAY_MOC:"Máy móc",DUNG_CU:"Dụng cụ",DO_DO:"Thiết bị đo",AN_TOAN:"An toàn",KHAC:"Khác"};
+const TB_TT={SAN_SANG:["Sẵn sàng","b-ok"],DANG_CAP_PHAT:["Đang ở công trường","b-cho"],BAO_TRI:["Bảo trì","b-info"],HONG:["Hỏng","b-tc"],THANH_LY:["Thanh lý","b-tc"]};
+function _tbTT(t){const x=TB_TT[t]||[t,"b-info"];return `<span class="badge ${x[1]}">${x[0]}</span>`;}
+async function daThietBi(h){
+  const canOp=can("du_an","THAO_TAC"), canDuyet=can("du_an","DUYET")||laQTV();
+  if(S.mode!=="live"){h.innerHTML='<div class="empty" style="padding:20px">Quản lý thiết bị thi công hiển thị ở bản kết nối backend.</div>';return;}
+  let d,dsTB,nvList;
+  try{
+    [d,dsTB,nvList]=await Promise.all([
+      api(`/thi-cong/du-an/${S.daId}/thiet-bi`),
+      api(`/thi-cong/thiet-bi`),
+      api(`/nhan-su/ho-so`).catch(()=>[])]);
+  }catch(e){h.innerHTML=`<div class="empty" style="color:#dc2626;padding:16px">${e.detail||e.message}</div>`;return;}
+  const tt=dsTB.theo_tinh_trang||{};
+  const sanSang=(dsTB.danh_sach||[]).filter(t=>t.tinh_trang==="SAN_SANG");
+  const nvOpt=(nvList||[]).map(n=>`<option value="${n.id}">${n.ho_ten}${n.chuc_danh?' — '+n.chuc_danh:''}</option>`).join('');
+  let html=`<div class="note" style="padding:0 0 10px">Sổ <b>thiết bị / dụng cụ thi công</b> quản theo <b>từng cái</b> (mã · serial · tình trạng). Cấp ra công trường → thiết bị chuyển sang <b>Đang ở công trường</b> và gắn dự án này; <b>Thu hồi</b> đưa về kho (Sẵn sàng) hoặc Bảo trì. Khác với Danh mục thiết bị–vật tư (đếm số lượng qua Kho).</div>
+  <div style="display:flex;flex-wrap:wrap;gap:8px;padding:0 0 12px">
+    ${_tcCard("Đang ở công trường này",(d.dang_o_cong_truong||[]).length,'',(d.dang_o_cong_truong||[]).length?'#b45309':'')}
+    ${_tcCard("Sẵn sàng (kho)",tt.SAN_SANG||0,'','#16a34a')}
+    ${_tcCard("Bảo trì",tt.BAO_TRI||0)}${_tcCard("Hỏng",tt.HONG||0,'',(tt.HONG||0)?'#dc2626':'')}</div>`;
+  // Cấp phát cho dự án hiện tại
+  if(canOp){
+    html+=`<div class="panel"><div class="panel-h"><h3>Cấp thiết bị cho dự án này</h3></div><div class="panel-b">
+      ${sanSang.length?`<div class="formrow">
+        <div class="f" style="flex:2"><label>Thiết bị (đang sẵn sàng)</label><select id="tb_cp_id">${sanSang.map(t=>`<option value="${t.id}">${t.ma} — ${t.ten}${t.serial?' · SN '+t.serial:''}</option>`).join('')}</select></div>
+        <div class="f" style="flex:2"><label>Người nhận (nhân viên)</label><select id="tb_cp_nv"><option value="">— chọn —</option>${nvOpt}</select></div>
+        <div class="f" style="flex:1"><label>Tình trạng lúc cấp</label><input id="tb_cp_tt" placeholder="Nguyên vẹn, đủ phụ kiện"></div>
+        <button class="btn-sm" style="align-self:end" onclick="daCapPhatTB()">Cấp phát</button></div>`
+      :'<div class="empty" style="padding:8px">Không còn thiết bị nào ở trạng thái Sẵn sàng — thêm thiết bị hoặc thu hồi từ công trường khác.</div>'}</div></div>`;
+  }
+  // Đang ở công trường này
+  const dangRows=(d.dang_o_cong_truong||[]).map(t=>{
+    const cp=(d.lich_su||[]).find(c=>c.thiet_bi_id===t.id&&c.dang_giu);
+    return `<tr><td><b>${t.ma}</b> ${t.ten}</td><td>${TB_LOAI[t.loai]||t.loai}</td><td>${t.serial||'—'}</td>
+      <td>${cp?(cp.nguoi_nhan||'—'):'—'}</td><td>${cp?cp.ngay_cap:'—'}</td>
+      <td>${canDuyet&&cp?`<button class="btn-sm" onclick="daThuHoiTB(${cp.id},'${(t.ten||'').replace(/'/g,'')}')">↩ Thu hồi</button>`:''}</td></tr>`;}).join('');
+  html+=`<div class="panel"><div class="panel-h"><h3>Thiết bị đang ở công trường này <span class="badge b-cho">${(d.dang_o_cong_truong||[]).length}</span></h3></div><div class="panel-b"><table>
+    <thead><tr><th>Thiết bị</th><th>Loại</th><th>Serial</th><th>Người nhận</th><th>Ngày cấp</th><th></th></tr></thead>
+    <tbody>${dangRows||'<tr><td colspan="6" class="empty">Chưa có thiết bị nào ở công trường này.</td></tr>'}</tbody></table></div></div>`;
+  // Thêm thiết bị vào sổ
+  if(canOp){
+    html+=`<div class="panel"><div class="panel-h"><h3>Thêm thiết bị vào sổ</h3></div><div class="panel-b">
+      <div class="formrow"><div class="f" style="flex:2"><label>Tên thiết bị</label><input id="tb_ten" placeholder="Máy hàn Jasic 200A"></div>
+        <div class="f"><label>Loại</label><select id="tb_loai">${Object.entries(TB_LOAI).map(([k,l])=>`<option value="${k}">${l}</option>`).join('')}</select></div>
+        <div class="f"><label>Mã (để trống = tự sinh)</label><input id="tb_ma" placeholder="TB-0001"></div></div>
+      <div class="formrow"><div class="f"><label>Model</label><input id="tb_model"></div>
+        <div class="f"><label>Serial</label><input id="tb_serial"></div>
+        <div class="f"><label>Nguyên giá</label><input id="tb_gia" type="number" min="0" value="0"></div>
+        <div class="f"><label>Ngày mua</label><input id="tb_ngay" type="date"></div>
+        <button class="btn-sm" style="align-self:end" onclick="daThemThietBi()">Thêm</button></div></div></div>`;
+  }
+  // Sổ thiết bị toàn bộ
+  const soRows=(dsTB.danh_sach||[]).map(t=>`<tr><td><b>${t.ma}</b></td><td>${t.ten}${t.model?`<div style="font-size:11px;color:var(--muted)">${t.model}${t.serial?' · SN '+t.serial:''}</div>`:(t.serial?`<div style="font-size:11px;color:var(--muted)">SN ${t.serial}</div>`:'')}</td>
+    <td>${TB_LOAI[t.loai]||t.loai}</td><td>${_tbTT(t.tinh_trang)}</td><td>${t.du_an_hien_tai||'—'}</td>
+    <td style="white-space:nowrap">${canDuyet?(t.tinh_trang!=="DANG_CAP_PHAT"?`<select data-nocbx style="padding:3px 5px" onchange="daSuaTTThietBi(${t.id},this.value)"><option value="">Đổi tình trạng…</option><option value="SAN_SANG">Sẵn sàng</option><option value="BAO_TRI">Bảo trì</option><option value="HONG">Hỏng</option><option value="THANH_LY">Thanh lý</option></select> <button class="btn-sm ghost" style="color:var(--red)" title="Xóa thiết bị" onclick="daXoaThietBi(${t.id})">🗑</button>`:'<span style="font-size:11px;color:var(--muted)">thu hồi để thao tác</span>'):''}</td></tr>`).join('');
+  html+=`<div class="panel"><div class="panel-h"><h3>Sổ thiết bị thi công <span class="badge b-info">${(dsTB.danh_sach||[]).length}</span></h3></div><div class="panel-b" style="overflow-x:auto"><table>
+    <thead><tr><th>Mã</th><th>Tên</th><th>Loại</th><th>Tình trạng</th><th>Đang ở dự án</th><th></th></tr></thead>
+    <tbody>${soRows||'<tr><td colspan="6" class="empty">Sổ thiết bị trống — thêm thiết bị ở trên.</td></tr>'}</tbody></table></div></div>`;
+  // Lịch sử cấp phát của dự án
+  const lsRows=(d.lich_su||[]).map(c=>`<tr><td>${c.ngay_cap}</td><td>${(dsTB.danh_sach.find(t=>t.id===c.thiet_bi_id)||{}).ten||('TB#'+c.thiet_bi_id)}</td>
+    <td>${c.nguoi_nhan||'—'}</td><td>${c.tinh_trang_cap||'—'}</td>
+    <td>${c.dang_giu?'<span class="badge b-cho">Đang giữ</span>':(c.ngay_tra+' · '+(c.tinh_trang_tra||'—'))}</td></tr>`).join('');
+  html+=`<div class="panel"><div class="panel-h"><h3>Lịch sử cấp phát của dự án</h3></div><div class="panel-b"><table>
+    <thead><tr><th>Ngày cấp</th><th>Thiết bị</th><th>Người nhận</th><th>TT lúc cấp</th><th>Trả / TT lúc trả</th></tr></thead>
+    <tbody>${lsRows||'<tr><td colspan="5" class="empty">Chưa có lịch sử.</td></tr>'}</tbody></table></div></div>`;
+  h.innerHTML=html;
+}
+async function daThemThietBi(){
+  const ten=gv('tb_ten'); if(!ten){toast("Nhập tên thiết bị","err");return;}
+  const body={ten,loai:gv('tb_loai'),ma:gv('tb_ma')||null,model:gv('tb_model')||null,serial:gv('tb_serial')||null,
+    nguyen_gia:Number(gv('tb_gia'))||0,ngay_mua:gv('tb_ngay')||null};
+  try{await api('/thi-cong/thiet-bi',{method:'POST',body:JSON.stringify(body)});toast("Đã thêm thiết bị","ok");daRenderTab();}catch(e){toast(e.detail||e.message,"err");}
+}
+async function daCapPhatTB(){
+  const tbId=gv('tb_cp_id'),nv=gv('tb_cp_nv');
+  if(!tbId){toast("Chọn thiết bị","err");return;}
+  if(!nv){toast("Chọn người nhận","err");return;}
+  const body={du_an_id:Number(S.daId),nguoi_nhan_id:Number(nv),tinh_trang_cap:gv('tb_cp_tt')||null};
+  try{await api(`/thi-cong/thiet-bi/${tbId}/cap-phat`,{method:'POST',body:JSON.stringify(body)});toast("Đã cấp phát thiết bị","ok");daRenderTab();}catch(e){toast(e.detail||e.message,"err");}
+}
+async function daThuHoiTB(cpId,ten){
+  const ttt=prompt(`Thu hồi thiết bị "${ten}". Tình trạng lúc trả? (để trống = nguyên vẹn)`,"");
+  if(ttt===null)return;
+  const veBaoTri=confirm("Thiết bị cần BẢO TRÌ trước khi dùng lại?\nOK = đưa về Bảo trì · Cancel = về Sẵn sàng (kho)");
+  try{await api(`/thi-cong/cap-phat/${cpId}/thu-hoi`,{method:'POST',body:JSON.stringify({tinh_trang_tra:ttt||null,ve_bao_tri:veBaoTri})});toast("Đã thu hồi thiết bị","ok");daRenderTab();}catch(e){toast(e.detail||e.message,"err");}
+}
+async function daSuaTTThietBi(id,tt){
+  if(!tt)return;
+  try{await api(`/thi-cong/thiet-bi/${id}`,{method:'PUT',body:JSON.stringify({ten:undefined,tinh_trang:tt})});}
+  catch(e){return toast(e.detail||e.message,"err");}
+  toast("Đã đổi tình trạng","ok");daRenderTab();
+}
+async function daXoaThietBi(id){
+  if(!confirm("Xóa thiết bị này khỏi sổ? Không thể hoàn tác."))return;
+  try{await api(`/thi-cong/thiet-bi/${id}`,{method:'DELETE'});toast("Đã xóa thiết bị","ok");daRenderTab();}catch(e){toast(e.detail||e.message,"err");}
 }
 
 /* --- Tab Tài liệu --- */
