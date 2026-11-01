@@ -3,12 +3,15 @@ Công thức CHUNG chi phí / lãi-lỗ theo MÃ ĐƠN HÀNG BÁN — dùng ở 
   Kế toán → Lãi/Lỗ mã bán · NCC → Kiểm soát (Chi phí theo Mã) · Overall Financial (theo mã)
   · Bán hàng → lãi/lỗ từng đơn.
 
-Nguyên tắc (chốt 2026-08-19 — "chi phí theo NGHĨA VỤ, không theo tiến độ trả tiền"):
-  • GIÁ VỐN PO      = Σ tổng giá trị PO ĐÃ DUYỆT gắn mã (cam kết; không đổi khi trả từng đợt).
-  • CHI PHÍ KHÁC    = công nợ phải trả NHẬP NGOÀI khớp mã (tổng khoản)
-                      + hóa đơn MUA gắn mã KHÔNG qua PO (ghi từ email / tay; bỏ hóa đơn tự sinh khi nhận hàng).
-  • LỢI NHUẬN       = Doanh thu (GỒM VAT) − Giá vốn PO − Chi phí khác   (hai vế cùng gồm VAT).
-  • DÒNG TIỀN (tách riêng, không ảnh hưởng lãi/lỗ): Đã trả NCC / Còn phải trả (từ công nợ của mã).
+Nguyên tắc (chốt 2026-08-19 — "chi phí theo NGHĨA VỤ, không theo tiến độ trả tiền"; từ 2026-10-31 lãi/lỗ tính CHƯA VAT):
+  • GIÁ VỐN PO      = Σ giá trị PO ĐÃ DUYỆT gắn mã, phần CHƯA VAT (po_chua_vat; cam kết, không đổi khi trả từng đợt).
+  • CHI PHÍ KHÁC    = công nợ phải trả NHẬP NGOÀI khớp mã (phần chưa VAT; khoản trùng PO chỉ cộng phần chênh)
+                      + hóa đơn MUA gắn mã KHÔNG qua PO (chưa VAT; bỏ hóa đơn tự sinh khi nhận hàng)
+                      + chi phí vận hành cho thuê gắn mã (hóa đơn email / ghi tay / bảo trì — không tách thuế, giữ số ghi).
+  • LỢI NHUẬN       = Doanh thu (CHƯA VAT = don_hang.tong_tien) − Giá vốn PO − Chi phí khác   (ba vế cùng CHƯA VAT:
+                      VAT bán là thu hộ, VAT mua được khấu trừ; gộp VAT làm lệch biên khi thuế suất hai vế khác nhau).
+  • DÒNG TIỀN (tách riêng, GỒM VAT, không ảnh hưởng lãi/lỗ): Đã trả NCC / Còn phải trả (từ công nợ của mã);
+                      Còn phải thu = doanh thu GỒM VAT (tong_tien + tien_thue) − Đã thu.
   • ĐÃ THU          = đã thanh toán trên công nợ PHẢI THU của mã (gồm cọc đã cấn)
                       + trả trước khách chưa cấn + cọc ghi trên đơn khi chưa có công nợ.
 """
