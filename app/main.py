@@ -248,9 +248,15 @@ async def google_chat_events(request: Request):
     return {}
 
 
+from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+_KHOI_DONG_LUC = _dt.now(_tz.utc).astimezone(_tz(_td(hours=7))).strftime("%Y-%m-%d %H:%M:%S")   # giờ VN lúc tiến trình lên
+
+
 @app.get("/health")
 def health():
+    """Kèm dấu bản dựng + giờ khởi động tiến trình (01/11/2026): biết Render đã dựng xong bản mới chưa
+    ngay cả khi chỉ đổi Dockerfile / backend (dấu build trong svws_app.html không đổi)."""
     return {"he_thong": "SVWS",
             "modules": ["kho", "ncc", "du_an", "ban_hang", "ke_toan",
                         "tai_chinh", "nhan_su", "cho_thue", "crm"],
-            "trang_thai": "ok"}
+            "trang_thai": "ok", "build": _BUILD, "khoi_dong_luc": _KHOI_DONG_LUC}
