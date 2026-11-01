@@ -20019,24 +20019,42 @@ async function daXoaThietBi(id){
 /* --- Tab Vật tư theo hạng mục (đối chiếu định mức BOQ ↔ thực cấp) --- */
 const VT_TT={VUOT:["Vượt định mức","b-tc"],DU:["Đủ","b-ok"],THIEU:["Thiếu","b-cho"],CHUA:["Chưa cấp","b-info"]};
 async function daVatTu(h){
-  const canOp=can("du_an","THAO_TAC");
+  const canOp=can("du_an","THAO_TAC"), canDuyet=can("du_an","DUYET")||laQTV();
   if(S.mode!=="live"){h.innerHTML='<div class="empty" style="padding:20px">Đối chiếu vật tư hiển thị ở bản kết nối backend.</div>';return;}
-  let d; try{ d=await api(`/du-an/${S.daId}/vat-tu-doi-chieu`); }
+  let d,pds,nvList;
+  try{ [d,pds,nvList]=await Promise.all([
+      api(`/du-an/${S.daId}/vat-tu-doi-chieu`),
+      api(`/kho/phieu-du-an/${S.daId}`).catch(()=>[]),
+      api(`/nhan-su/ho-so`).catch(()=>[])]); }
   catch(e){h.innerHTML=`<div class="empty" style="color:#dc2626;padding:16px">${e.detail||e.message}</div>`;return;}
   const rows=d.danh_sach||[], t=d.tong||{};
   const khop=rows.filter(r=>r.khop_kho);
-  let html=`<div class="note" style="padding:0 0 10px">Đối chiếu <b>định mức dự toán (BOQ)</b> với <b>vật tư đã cấp ra công trường</b>. «Đã cấp» = tổng phiếu <b>XUẤT</b> gắn đúng dòng BOQ. Dòng <b>chưa khớp kho</b> (không nối hàng hóa) thì cấp ở tab Danh mục/khớp kho trước. Cấp vật tư ở đây tạo phiếu XUẤT trừ tồn ngay.</div>
+  const nvOpt=(nvList||[]).map(n=>`<option value="${n.id}">${n.ho_ten}${n.chuc_danh?' — '+n.chuc_danh:''}</option>`).join('');
+  const choDuyet=(pds||[]).filter(p=>p.trang_thai==="MOI");
+  let html=`<div class="note" style="padding:0 0 10px">Đối chiếu <b>định mức dự toán (BOQ)</b> với <b>vật tư đã cấp ra công trường</b>. Cấp vật tư tạo <b>phiếu cấp CHỜ DUYỆT</b> (ghi người nhận tại site) — <b>duyệt mới trừ tồn</b> và tính vào «Đã cấp». «Đã cấp» = tổng phiếu XUẤT ĐÃ DUYỆT gắn đúng dòng BOQ. Dòng <b>chưa khớp kho</b> cần khớp hàng hóa ở tab Danh mục trước.</div>
   <div style="display:flex;flex-wrap:wrap;gap:8px;padding:0 0 12px">
-    ${_tcCard("Số dòng BOQ",t.so_dong||0)}${_tcCard("Vượt định mức",t.so_vuot||0,'',(t.so_vuot||0)?'#dc2626':'#16a34a')}
+    ${_tcCard("Số dòng BOQ",t.so_dong||0)}${_tcCard("Phiếu chờ duyệt",choDuyet.length,'',choDuyet.length?'#b45309':'#16a34a')}
+    ${_tcCard("Vượt định mức",t.so_vuot||0,'',(t.so_vuot||0)?'#dc2626':'#16a34a')}
     ${_tcCard("Chưa khớp kho",t.so_chua_khop||0,'',(t.so_chua_khop||0)?'#b45309':'')}</div>`;
   if(canOp){
     html+=`<div class="panel"><div class="panel-h"><h3>Cấp vật tư cho công trường (theo dòng BOQ)</h3></div><div class="panel-b">
       ${khop.length?`<div class="formrow">
         <div class="f" style="flex:3"><label>Hạng mục / vật tư (đã khớp kho)</label><select id="vt_dt">${khop.map(r=>`<option value="${r.du_an_du_toan_id}" data-hh="${r.hang_hoa_id}">${(r.ten||'').replace(/"/g,'&quot;')}${r.don_vi?' ('+r.don_vi+')':''} — còn phải cấp ${(r.con_phai_cap||0)}${r.ton_kho!=null?' · tồn '+r.ton_kho:''}</option>`).join('')}</select></div>
-        <div class="f"><label>Số lượng cấp</label><input id="vt_sl" type="number" min="0" step="0.001"></div>
-        <button class="btn-sm" style="align-self:end" onclick="daCapVatTu()">Cấp (xuất kho)</button></div>
-      <div class="note" style="margin-top:6px;color:var(--muted)">Cấp vượt định mức vẫn được nhưng dòng sẽ tô đỏ «Vượt định mức» để kiểm soát.</div>`
+        <div class="f"><label>Số lượng</label><input id="vt_sl" type="number" min="0" step="0.001"></div>
+        <div class="f" style="flex:2"><label>Người nhận (tại site)</label><select id="vt_nn"><option value="">— chọn —</option>${nvOpt}</select></div>
+        <button class="btn-sm" style="align-self:end" onclick="daCapVatTu()">Lập phiếu cấp</button></div>
+      <div class="note" style="margin-top:6px;color:var(--muted)">Phiếu lập xong ở trạng thái <b>chờ duyệt</b>; người có quyền duyệt bấm <b>Duyệt</b> để trừ tồn. In <b>biên bản cấp phát</b> cho bên nhận ký tại công trường.</div>`
       :'<div class="empty" style="padding:8px">Chưa có dòng BOQ nào khớp kho. Sang tab «Danh mục thiết bị - Vật tư» để khớp dòng dự toán với hàng hóa trước.</div>'}</div></div>`;
+  }
+  // Phiếu cấp vật tư (chờ duyệt + đã duyệt)
+  if((pds||[]).length){
+    const prs=pds.map(p=>`<tr><td><b>${p.so||('#'+p.id)}</b></td><td>${p.ngay}</td><td>${p.nguoi_nhan||'—'}</td>
+      <td class="num">${p.so_dong} dòng · ${p.tong_sl}</td>
+      <td>${p.trang_thai==='MOI'?'<span class="badge b-cho">Chờ duyệt</span>':'<span class="badge b-ok">Đã duyệt</span>'}</td>
+      <td style="white-space:nowrap">${(p.trang_thai==='MOI'&&canDuyet)?`<button class="btn-sm" onclick="daDuyetPhieu(${p.id})">✔ Duyệt</button> `:''}<button class="btn-sm ghost" onclick="daInBienBan(${p.id})">🖨 Biên bản</button></td></tr>`).join('');
+    html+=`<div class="panel"><div class="panel-h"><h3>Phiếu cấp vật tư của dự án <span class="badge b-info">${pds.length}</span></h3></div><div class="panel-b" style="overflow-x:auto"><table style="width:100%">
+      <thead><tr><th>Số phiếu</th><th>Ngày</th><th>Người nhận</th><th class="num">Nội dung</th><th>Trạng thái</th><th></th></tr></thead>
+      <tbody>${prs}</tbody></table></div></div>`;
   }
   const trs=rows.map(r=>{
     const tt=VT_TT[r.trang_thai]||[r.trang_thai,"b-info"];
@@ -20057,11 +20075,40 @@ async function daVatTu(h){
 async function daCapVatTu(){
   const sel=$('#vt_dt'); if(!sel||!sel.value){toast("Chọn dòng BOQ","err");return;}
   const opt=sel.options[sel.selectedIndex], hh=opt&&opt.dataset?opt.dataset.hh:null;
-  const sl=Number(gv('vt_sl'));
+  const sl=Number(gv('vt_sl')), nn=gv('vt_nn');
   if(!hh){toast("Dòng này chưa khớp hàng hóa kho","err");return;}
   if(!(sl>0)){toast("Nhập số lượng > 0","err");return;}
-  const body={loai:"XUAT",du_an_id:Number(S.daId),chi_tiet:[{hang_hoa_id:Number(hh),so_luong:sl,du_an_du_toan_id:Number(sel.value)}]};
-  try{await api('/kho/phieu',{method:'POST',body:JSON.stringify(body)});toast("Đã cấp vật tư (xuất kho)","ok");daRenderTab();}catch(e){toast(e.detail||e.message,"err");}
+  if(!nn){toast("Chọn người nhận tại site","err");return;}
+  const body={loai:"XUAT",du_an_id:Number(S.daId),nguoi_nhan_id:Number(nn),
+    chi_tiet:[{hang_hoa_id:Number(hh),so_luong:sl,du_an_du_toan_id:Number(sel.value)}]};
+  try{await api('/kho/phieu',{method:'POST',body:JSON.stringify(body)});toast("Đã lập phiếu cấp — chờ duyệt","ok");daRenderTab();}catch(e){toast(e.detail||e.message,"err");}
+}
+async function daDuyetPhieu(id){
+  if(!confirm("Duyệt phiếu cấp vật tư này? Tồn kho sẽ bị trừ theo phiếu."))return;
+  try{await api(`/kho/phieu/${id}/duyet`,{method:'POST'});toast("Đã duyệt — đã trừ tồn","ok");daRenderTab();}catch(e){toast(e.detail||e.message,"err");}
+}
+async function daInBienBan(id){
+  let p; try{ p=await api(`/kho/phieu/${id}`); }catch(e){return toast(e.detail||e.message,"err");}
+  const e2=v=>String(v==null?'':v).replace(/</g,'&lt;');
+  const dong=(p.chi_tiet||[]).map((c,i)=>`<tr><td style="text-align:center">${i+1}</td><td>${e2(c.ma)||''}</td><td>${e2(c.ten)||''}</td><td style="text-align:center">${e2(c.don_vi)||''}</td><td style="text-align:right">${c.so_luong}</td></tr>`).join('');
+  const w=window.open('','_blank'); if(!w){toast("Trình duyệt chặn cửa sổ in","err");return;}
+  w.document.write(`<!doctype html><html lang="vi"><head><meta charset="utf-8"><title>Biên bản cấp phát ${e2(p.so)}</title>
+    <style>body{font-family:'Times New Roman',serif;color:#111;max-width:820px;margin:24px auto;padding:0 24px;line-height:1.5}
+    h2{text-align:center;margin:4px 0}.ct{text-align:center;color:#333;font-size:13px}table{width:100%;border-collapse:collapse;margin:12px 0}
+    th,td{border:1px solid #333;padding:6px 8px;font-size:14px}th{background:#f0f0f0}.sign{display:flex;justify-content:space-around;margin-top:48px;text-align:center}
+    .sign>div{width:45%}.muted{color:#555;font-size:13px}@media print{button{display:none}}</style></head><body>
+    <div class="ct">CÔNG TY TNHH GIẢI PHÁP KỸ THUẬT SÓNG VIỆT</div>
+    <div class="ct">Số: ${e2(p.so)} — Ngày ${e2(p.ngay)}</div>
+    <h2>BIÊN BẢN CẤP PHÁT VẬT TƯ</h2>
+    <p class="muted">Dự án: <b>${e2(p.du_an)||'—'}</b> · Trạng thái: <b>${p.trang_thai==='DA_DUYET'?'Đã duyệt':'Chờ duyệt'}</b>${p.ngay_duyet?` (duyệt ${e2(p.ngay_duyet)})`:''}</p>
+    <p class="muted">Bên giao: <b>${e2(p.nguoi_giao)||'…………………'}</b> &nbsp;·&nbsp; Bên nhận: <b>${e2(p.nguoi_nhan)||'…………………'}</b>${p.nguoi_duyet?` &nbsp;·&nbsp; Người duyệt: <b>${e2(p.nguoi_duyet)}</b>`:''}</p>
+    <table><thead><tr><th style="width:36px">TT</th><th style="width:110px">Mã</th><th>Tên vật tư</th><th style="width:70px">ĐVT</th><th style="width:90px">Số lượng</th></tr></thead>
+      <tbody>${dong||'<tr><td colspan="5" style="text-align:center">—</td></tr>'}</tbody></table>
+    ${p.ghi_chu?`<p class="muted">Ghi chú: ${e2(p.ghi_chu)}</p>`:''}
+    <div class="sign"><div><b>BÊN GIAO</b><br><span class="muted">(ký, ghi rõ họ tên)</span><br><br><br>${e2(p.nguoi_giao)||''}</div>
+      <div><b>BÊN NHẬN</b><br><span class="muted">(ký, ghi rõ họ tên)</span><br><br><br>${e2(p.nguoi_nhan)||''}</div></div>
+    <div style="text-align:center;margin-top:28px"><button onclick="window.print()">🖨 In</button></div></body></html>`);
+  w.document.close();
 }
 
 /* --- Tab Tài liệu --- */
