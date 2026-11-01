@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="vi">
 <head>
-<!-- build: nhac-qua-han-2026-11-01 -->
+<!-- build: nhat-ky-2026-11-01 -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#0f2c44">
@@ -223,6 +223,20 @@
 .hvPop{position:relative;display:inline-block;max-width:100%;vertical-align:top}
 .hvPop>.hvBody{display:none;position:fixed;z-index:9000;min-width:240px;max-width:min(460px,92vw);max-height:340px;overflow:auto;background:#fff;border:1px solid var(--line);border-radius:9px;box-shadow:0 10px 28px rgba(15,35,55,.18);padding:9px 11px;white-space:normal;text-align:left;font-size:12px;line-height:1.45;color:#16324a;font-weight:400}
 .hvTrig{cursor:help}
+/* 📜 Nhật ký hệ thống (Cấu hình): bảng vừa khung, không trượt ngang; ô giá trị cũ / mới gọn, rê chuột xem đủ (hvPop) */
+.nkTbl{table-layout:fixed;width:100%}
+.nkTbl>thead>tr>th,.nkTbl>tbody>tr>td{padding:7px 10px;font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:top}
+.nkTbl>thead>tr>th:first-child,.nkTbl>tbody>tr>td:first-child{padding-left:18px}
+.nkTbl>tbody>tr>td>a{color:#0e7490;text-decoration:none}.nkTbl>tbody>tr>td>a:hover{text-decoration:underline}
+.nkTbl .nkGon{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#334155;font-size:12px}
+.nkTbl>tbody>tr>td>.hvPop{display:block;max-width:100%}
+.nkTbl .hvBody table{table-layout:auto;font-size:11.5px}
+.nkTbl .hvBody th,.nkTbl .hvBody td{padding:2px 6px;white-space:normal;word-break:break-word;border-bottom:1px solid var(--line);font-size:11.5px;text-transform:none;letter-spacing:0}
+.nkLoc{display:flex;flex-wrap:wrap;gap:7px;align-items:center;padding:10px 18px;border-bottom:1px solid var(--line);background:var(--surface)}
+.nkLoc input,.nkLoc select{width:auto}
+.nkLoc .cbx{width:190px!important;flex:0 0 auto}                      /* select được _enhanceSelects bọc thành combobox 100% → khóa bề rộng */
+.nkLoc .cbx-inp{padding:6px 9px!important;font-size:12.5px!important;border-radius:7px!important}
+.nkTrang{display:flex;align-items:center;gap:10px;padding:10px 18px;font-size:12.5px;border-top:1px solid var(--line)}
 .dtbTbl{font-size:12.5px}
 .dtbTbl th{padding:8px 6px;letter-spacing:.2px}
 .dtbTbl td{padding:7px 6px;vertical-align:top}
@@ -20106,6 +20120,154 @@ async function slChay(){
   catch(e){toast(e.detail||e.message,"err");}
   slTai();
 }
+/* ---- 📜 Nhật ký hệ thống (01/11/2026, rà app 31/10 mục C5): panel ở Cấu hình — CEO / Admin tra audit_log theo bảng · hành động ·
+   người · bản ghi · khoảng ngày (giờ VN) · chuỗi trong giá trị cũ / mới (gõ mã đơn hàng để thấy mọi vết nhắc tới mã đó). API /nhat-ky ---- */
+const NK_BANG={don_hang:'Đơn hàng bán',don_mua:'Đơn mua (PO)',cong_no:'Công nợ',hoa_don:'Hóa đơn',bao_gia_form:'Báo giá',bao_gia:'Báo giá (cũ)',
+  du_toan_ban:'Dự toán bán',du_toan_ban_muc:'Dòng dự toán',du_an:'Dự án',du_an_du_toan:'BOQ dự án',du_an_chi_phi:'Chi phí dự án',khach_hang:'Khách hàng',
+  nha_cung_cap:'Nhà cung cấp',san_pham_ncc:'Sản phẩm NCC',hang_hoa:'Hàng hóa',phieu_thu_chi:'Phiếu thu / chi',lenh_chi_bank:'Lệnh chi ngân hàng',
+  sao_ke_bank:'Sao kê ngân hàng',sao_ke_dong:'Dòng sao kê',bang_luong:'Bảng lương',ky_luong:'Kỳ lương',nhan_vien:'Hồ sơ nhân viên',nguoi_dung:'Tài khoản',
+  phan_quyen:'Phân quyền',nhac_viec:'Nhắc việc',giao_viec:'Giao việc',bao_cao_ngay:'Báo cáo ngày',ngay_nghi_ot:'Nghỉ / OT',nghi_phep:'Nghỉ phép',cham_cong:'Chấm công',
+  tai_san_cho_thue:'Tài sản cho thuê',hop_dong_thue:'Hợp đồng thuê',ct_bao_cao_vh:'Báo cáo vận hành',ct_bcvh_chi_tieu:'Chỉ tiêu BCVH',ct_thiet_bi:'Thiết bị cho thuê',
+  kt_hoa_don_cho:'HĐ mua chờ (email)',kt_hd_gui_khach:'HĐ bán đã gửi khách',kt_thu_khach_cho:'Thư khách chờ',ct_hoa_don_dau_vao:'HĐ đầu vào',bg_email_cho:'Báo giá email chờ',
+  trn_bai:'Bài Training',trn_ket_qua:'Kết quả Training',kiem_soat_ln:'Kiểm soát lợi nhuận',nhac_qua_han:'Nhắc quá hạn tuần',nhac_sao_ke_thang:'Nhắc sao kê tháng',
+  sao_luu_log:'Sao lưu CSDL',cau_hinh_quet_mail:'Cấu hình quét thư',lich_quet_mail:'Lịch quét thư',phieu_kho:'Phiếu kho',ton_kho:'Tồn kho',kho:'Kho',
+  khoan_vay:'Khoản vay',lich_tra_no:'Lịch trả nợ',quy_trich_lap:'Quỹ trích lập',chi_co_dinh:'Chi cố định',chi_phi_van_hanh:'Chi phí vận hành',
+  thanh_toan_mua:'Thanh toán mua',thanh_toan_thue_ngoai:'Thanh toán thuê ngoài',nhan_su_thue_ngoai:'Nhân sự thuê ngoài',tep_dinh_kem:'Tệp đính kèm',
+  dich_vu_kt:'Dịch vụ kỹ thuật',dich_vu_kt_tai_lieu:'Tài liệu DVKT',lien_lac:'Liên lạc (CRM)',co_hoi:'Cơ hội (CRM)',cham_soc_kh:'Chăm sóc khách',chien_dich_email:'Chiến dịch email',
+  rfq:'RFQ',bao_gia_ncc:'Báo giá NCC',von_muc:'Vốn đầu tư',ngan_sach:'Ngân sách',tai_khoan_quy:'Tài khoản quỹ',bank_tai_khoan:'TK ngân hàng',bank_record:'Giao dịch NH',
+  kpi_vi_tri:'KPI vị trí',cfg_thuong_kpi:'Thưởng KPI',tham_so_luong:'Tham số lương',tham_so_tai_chinh:'Tham số tài chính',nghi_trung_bo_qua:'Nghi trùng (bỏ qua)',
+  phan_tich_ai:'Phân tích AI',fin_ceo:'Tài chính CEO',so_quy:'Sổ quỹ',dinh_muc_tieu_hao:'Định mức tiêu hao',tieu_hao_thuc_te:'Tiêu hao thực tế',ke_hoach_bao_tri:'Kế hoạch bảo trì',
+  cong_viec:'Công việc',du_an_tai_lieu:'Tài liệu dự án',du_an_nhat_ky:'Nhật ký dự án',du_an_an_toan:'An toàn dự án',du_an_thiet_ke:'Thiết kế dự án',nghiem_thu:'Nghiệm thu',danh_gia_ky:'Đánh giá kỳ'};
+const NK_HD={TAO:'Tạo',SUA:'Sửa',XOA:'Xóa',DUYET:'Duyệt',CAP_NHAT:'Cập nhật',TU_CHOI:'Từ chối',TRINH_DUYET:'Trình duyệt',TRINH:'Trình',GUI:'Gửi',HUY:'Hủy',
+  NHAC_TAY:'Nhắc tay',NHAC:'Nhắc',THU_TIEN:'Thu tiền',THANH_TOAN:'Thanh toán',PHAT_HANH:'Phát hành HĐ',NHAN_HANG:'Nhận hàng',DAT_HANG:'Đặt hàng',GAN_MA:'Gắn mã',DOI_MA:'Đổi mã',
+  THEM_DONG:'Thêm dòng',SUA_DONG:'Sửa dòng',XOA_DONG:'Xóa dòng',SUA_DONG_DA_MUA:'Sửa dòng đã mua',XOA_DONG_DA_MUA:'Xóa dòng đã mua',TAO_PO:'Tạo PO',AI_TAO_PO:'AI tạo PO',
+  DUYET_CHI_BANK:'Duyệt chi NH',TU_CHOI_CHI_BANK:'Từ chối chi NH',DA_CHI_TAM_UNG:'Đã chi tạm ứng',DA_CHI_LENH_CN:'Đã chi lệnh CN',LENH_BANK_XONG:'Lệnh NH xong',
+  SNAPSHOT:'Chốt số',IMPORT:'Nhập',NHAP_EXCEL:'Nhập Excel',NHAP_CC_EXCEL:'Nhập chấm công',LUU:'Lưu',GHI:'Ghi',BO_QUA:'Bỏ qua',XU_LY:'Xử lý',KHONG_TRUNG:'Đánh dấu không trùng',
+  KH_KHONG_TRUNG:'Khách không trùng',NCC_KHONG_TRUNG:'NCC không trùng',GOP_KH:'Gộp khách',GOP_NCC:'Gộp NCC',GOP_CONG_NO:'Gộp công nợ',GOP_CN_THU:'Gộp CN thu',
+  TAO_TU_BAO_GIA:'Tạo từ báo giá',NOI_BAO_GIA:'Nối báo giá',CHOT_BAO_GIA_CU:'Chốt báo giá cũ',NAP_MAU_BOQ:'Nạp mẫu BOQ',AI_NHAP_DU_TOAN:'AI nhập dự toán',RA_GIA_VON:'Rà giá vốn',
+  DUA_DANH_MUC:'Đưa vào danh mục',LUU_PDF:'Lưu PDF',DINH_KEM:'Đính kèm',GO_DINH_KEM:'Gỡ đính kèm',GUI_PO:'Gửi PO',GUI_EMAIL:'Gửi email',GUI_RFQ:'Gửi RFQ',
+  NGHI_VIEC:'Nghỉ việc',CHAM_CONG:'Chấm công',DANG_KY_OT:'Đăng ký OT',DANG_KY_PHEP:'Đăng ký phép',HUY_DK_OT:'Hủy đăng ký OT',BAO_CAO_OT:'Báo cáo OT',DANH_GIA:'Đánh giá',
+  KHOP_KHO:'Khớp kho',DAT_COC:'Đặt cọc',XUAT:'Xuất',TRICH_LAP:'Trích lập',SU_DUNG:'Sử dụng quỹ',HACH_TOAN:'Hạch toán',DOI_SOAT_SAO_KE:'Đối soát sao kê',
+  GAN_SAO_KE:'Gắn sao kê',BO_KHOP_SAO_KE:'Bỏ khớp sao kê',COC_SAO_KE:'Cọc (sao kê)',MO_LAI_SAO_KE:'Mở lại sao kê',TAI_SAO_KE:'Tải sao kê',SUA_SAO_KE:'Sửa sao kê',
+  SAO_KE_GHI_THU:'Sao kê → phiếu thu',SAO_KE_GHI_CHI:'Sao kê → phiếu chi',SAO_KE_TAO_PHIEU:'Sao kê → tạo phiếu',CHOT_TT_MUA:'Chốt TT mua',THANH_TOAN_MUA:'Thanh toán mua',
+  TU_CHOI_PO:'Từ chối PO',MO_LAI_TT:'Mở lại thanh toán',SUA_DOT_TT:'Sửa đợt TT',XOA_DOT_TT:'Xóa đợt TT',SUA_DOT_THU:'Sửa đợt thu',XOA_DOT_THU:'Xóa đợt thu',SUA_TONG:'Sửa tổng',
+  NOI_PO:'Nối PO',NOI_CN_THU:'Nối CN thu',DE_NGHI_TRA_CN:'Đề nghị trả CN',BO_QUA_THIEU_HD:'Bỏ qua thiếu HĐ',HUY_BO_QUA_THIEU_HD:'Hủy bỏ qua thiếu HĐ',LOAI_DON_DAU_TU:'Loại đơn đầu tư',
+  TRA_VE_CHUA_XUAT_HD:'Trả về chưa xuất HĐ',TRA_VE_CHO:'Trả về chờ',DA_GUI_KHACH:'Đã gửi khách',LAP_HD_BU:'Lập HĐ bù',KHOP_HD_CONG_NO:'Khớp HĐ – công nợ',SUA_HD_BAN:'Sửa HĐ bán',
+  SUA_HD_MUA:'Sửa HĐ mua',SUA_SO_NGAY_HD:'Sửa số / ngày HĐ',CHUYEN_HD_BAN:'Chuyển HĐ bán',TAO_HD_BAN_TU_HDDT:'Tạo HĐ bán từ HĐĐT',GHI_HD_EMAIL:'Ghi HĐ từ email',
+  GHI_HD_EMAIL_MUA:'Ghi HĐ mua từ email',QUET_THU_KHACH:'Quét thư khách',QUET_HD_GUI_KHACH:'Quét HĐ gửi khách',QUET_MAIL_CHAY_TAY:'Quét thư (tay)',QUET_MAIL_CAU_HINH:'Cấu hình quét thư',
+  AI_DOC_PO:'AI đọc PO',AI_DOC_TEP_HDC:'AI đọc tệp HĐ',AI_NHAP_BG:'AI nhập báo giá',AI_NCC_TU_FILE:'AI tạo NCC từ file',TAO_NCC_TU_EMAIL:'Tạo NCC từ email',
+  THEM_NV_KY:'Thêm NV vào kỳ',SUA_PHIEU_LUONG:'Sửa phiếu lương',DUYET_CHI:'Duyệt chi',TU_GHI_SO:'Tự ghi sổ',DAO_PHIEU:'Đảo phiếu',SUA_TK_DOI_UNG:'Sửa TK đối ứng',
+  CHAY_THU_PHI:'Chạy thu phí',CHUYEN_BCVH:'Chuyển BCVH',CHUYEN_KL:'Chuyển khối lượng',GUI_THU_BCVH:'Gửi thư BCVH',CHUYEN_GD:'Chuyển giai đoạn',GAN_KHACH:'Gắn khách',DONG_BO:'Đồng bộ',
+  DONG_BO_CD:'Đồng bộ chức danh',THAO_TAC:'Thao tác',NHAC_SAO_KE:'Nhắc sao kê',BAT_LAI_TRUNG:'Bật lại cảnh báo trùng',GAN:'Gắn',GHI_CHI:'Ghi chi'};
+function _nkEsc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+function _nkNhan(map,k){return map[k]?`${_nkEsc(map[k])} <span style="color:var(--muted);font-size:10.5px">${_nkEsc(k)}</span>`:_nkEsc(k);}
+function _nkGon(v){                        // một dòng ngắn cho ô bảng: «khóa: giá trị · khóa: giá trị…»
+  if(v==null)return '';
+  if(typeof v!=='object')return String(v);
+  if(Array.isArray(v))return `[${v.length} mục]`;
+  return Object.entries(v).map(([k,x])=>k+': '+(x==null?'—':typeof x==='object'?(Array.isArray(x)?`[${x.length} mục]`:'{…}'):String(x))).join(' · ');
+}
+function _nkJson(v){return `<pre style="margin:0;white-space:pre-wrap;word-break:break-word;font-size:11.5px;font-family:ui-monospace,Consolas,monospace">${_nkEsc(JSON.stringify(v,null,1))}</pre>`;}
+function _nkPop(r,ben){                    // ô «cũ» / «mới»: chữ gọn, rê chuột xem đủ; có cả hai → bảng so từng trường, dòng đổi tô vàng
+  const v=ben==='cu'?r.gia_tri_cu:r.gia_tri_moi; if(v==null)return '<span style="color:var(--muted)">—</span>';
+  const cu=r.gia_tri_cu,moi=r.gia_tri_moi,tieu=ben==='cu'?'Giá trị cũ':'Giá trị mới'; let body;
+  const laObj=x=>x&&typeof x==='object'&&!Array.isArray(x);
+  if(laObj(cu)&&laObj(moi)){
+    const keys=[...new Set([...Object.keys(cu),...Object.keys(moi)])],doi=k=>JSON.stringify(cu[k])!==JSON.stringify(moi[k]);
+    const fmt=x=>x===undefined?'<i style="color:var(--muted)">(không có)</i>':_nkEsc(typeof x==='object'?JSON.stringify(x):String(x));
+    body=`<b>${tieu} — ${keys.length} trường, ${keys.filter(doi).length} thay đổi</b><table style="margin-top:5px;width:100%"><tr><th>Trường</th><th>Cũ</th><th>Mới</th></tr>`
+      +keys.map(k=>`<tr style="${doi(k)?'background:#fef9c3':''}"><td style="white-space:nowrap"><b>${_nkEsc(k)}</b></td><td>${fmt(cu[k])}</td><td>${fmt(moi[k])}</td></tr>`).join('')+'</table>';
+  }else body=`<b>${tieu}</b><div style="margin-top:4px">${_nkJson(v)}</div>`;
+  return hvPop(`<div class="nkGon" style="cursor:help">${_nkEsc(_nkGon(v))}</div>`,body,'style="display:block"');
+}
+function _nkPanel(){
+  if(S.mode!=="live")return `<div class="panel" id="nkPanel"><div class="panel-h"><h3>📜 Nhật ký hệ thống</h3></div><div class="panel-b" style="padding:12px 18px;color:var(--muted)">Chạy ở bản kết nối backend.</div></div>`;
+  const inp='padding:6px 9px;border:1px solid var(--line);border-radius:7px;font-size:12.5px;width:auto';
+  return `<div class="panel" id="nkPanel"><div class="panel-h"><h3>📜 Nhật ký hệ thống <span class="badge b-info" id="nkTong"></span></h3><div class="spacer"></div>
+      <button class="btn-sm ghost" onclick="nkExcel()" title="Xuất Excel đúng bộ lọc đang chọn (tối đa 20.000 dòng mới nhất)">📥 Excel</button>
+      <button class="btn-sm ghost" onclick="nkTai((S._nk||{}).trang||1)" title="Tải lại">🔄</button></div>
+    <div class="nkLoc">
+      <input id="nk_q" placeholder="🔍 Tìm trong nội dung: mã đơn hàng, số PO, tên…" style="${inp};width:260px" onkeydown="if(event.key==='Enter')nkTai(1)">
+      <select id="nk_bang" style="${inp}" onchange="nkDoiBang()"><option value="">— Bảng —</option></select>
+      <select id="nk_hd" style="${inp}"><option value="">— Hành động —</option></select>
+      <select id="nk_nguoi" style="${inp};max-width:210px"><option value="">— Người —</option></select>
+      <input id="nk_tu" type="date" style="${inp}" title="Từ ngày (giờ Việt Nam)"><span style="color:var(--muted)">→</span><input id="nk_den" type="date" style="${inp}" title="Đến ngày (giờ Việt Nam)">
+      <input id="nk_bg" type="number" min="1" placeholder="Bản ghi #" style="${inp};width:96px" title="ID bản ghi (kết hợp với ô Bảng)" onkeydown="if(event.key==='Enter')nkTai(1)">
+      <button class="btn-sm" onclick="nkTai(1)">Lọc</button><button class="btn-sm ghost" onclick="nkBoLoc()">✕ Bỏ lọc</button>
+    </div>
+    <div class="note" style="padding:8px 18px 0">Mọi thao tác tạo / sửa / xóa / duyệt… app đều ghi vết tại đây (giờ Việt Nam, mới nhất lên trên). Gõ mã đơn hàng (vd <code>TM-SIC-1026</code>) để thấy mọi vết nhắc tới mã đó; bấm số <b>bản ghi</b> trên một dòng để xem riêng lịch sử bản ghi ấy, bấm tên <b>người</b> để lọc theo người; rê chuột lên ô giá trị để xem đủ nội dung.</div>
+    <div id="nkBody" style="padding:6px 0 0"><div class="empty">Đang tải…</div></div></div>`;
+}
+function _nkThamSo(){
+  const v=id=>{const el=document.getElementById(id);return el?String(el.value).trim():'';};
+  const p=new URLSearchParams();
+  if(v('nk_q'))p.set('q',v('nk_q')); if(v('nk_bang'))p.set('bang',v('nk_bang')); if(v('nk_hd'))p.set('hanh_dong',v('nk_hd'));
+  if(v('nk_nguoi')!=='')p.set('nguoi_dung_id',v('nk_nguoi')); if(v('nk_tu'))p.set('tu',v('nk_tu')); if(v('nk_den'))p.set('den',v('nk_den'));
+  if(v('nk_bg'))p.set('ban_ghi_id',v('nk_bg'));
+  return p;
+}
+async function nkTai(trang){
+  if(S.mode!=="live"||!document.getElementById('nkBody'))return;
+  S._nk=S._nk||{}; S._nk.trang=Math.max(1,Number(trang)||1);
+  const p=_nkThamSo(); p.set('trang',S._nk.trang); p.set('kem_bo_loc',S._nkBoLoc?'0':'1');
+  document.getElementById('nkBody').innerHTML='<div class="empty">Đang tải…</div>';
+  let kq; try{kq=await api('/nhat-ky?'+p.toString());}
+  catch(e){const b=document.getElementById('nkBody');if(b)b.innerHTML=`<div class="empty" style="color:var(--red)">${_nkEsc(e.detail||e.message)}</div>`;return;}
+  const body=document.getElementById('nkBody'); if(!body)return;      // viewCauHinh dựng lại DOM (innerHTML+=) → lấy lại nút sau khi chờ
+  if(kq.bo_loc){S._nkBoLoc=kq.bo_loc;_nkDungChon();}
+  S._nk.trang=kq.trang; S._nk.tong=kq.tong;
+  const t=document.getElementById('nkTong'); if(t)t.textContent=`${Number(kq.tong).toLocaleString('vi-VN')} dòng`;
+  const rows=(kq.dong||[]).map(r=>`<tr>
+    <td style="white-space:nowrap">${_nkEsc(r.thoi_gian)}</td>
+    <td title="${_nkEsc(r.nguoi)}"><a href="#" onclick="nkLocNguoi(${r.nguoi_dung_id==null?0:r.nguoi_dung_id});return false" title="Chỉ xem vết của ${_nkEsc(r.nguoi)}">${_nkEsc(r.nguoi)}</a></td>
+    <td title="${_nkEsc(r.hanh_dong)}">${_nkNhan(NK_HD,r.hanh_dong)}</td>
+    <td title="${_nkEsc(r.bang)}">${_nkNhan(NK_BANG,r.bang)}</td>
+    <td class="num">${r.ban_ghi_id!=null?`<a href="#" onclick="nkLocBanGhi('${_nkEsc(r.bang)}',${r.ban_ghi_id});return false" title="Xem riêng lịch sử bản ghi #${r.ban_ghi_id} của bảng ${_nkEsc(r.bang)}">#${r.ban_ghi_id}</a>`:'<span style="color:var(--muted)">—</span>'}</td>
+    <td>${_nkPop(r,'cu')}</td><td>${_nkPop(r,'moi')}</td></tr>`).join('');
+  const tong=Number(kq.tong||0),dau=tong?((kq.trang-1)*kq.moi_trang+1):0,cuoi=Math.min(tong,kq.trang*kq.moi_trang),n=x=>Number(x).toLocaleString('vi-VN');
+  body.innerHTML=`<table class="nkTbl"><colgroup><col style="width:132px"><col style="width:13%"><col style="width:12%"><col style="width:14%"><col style="width:70px"><col><col></colgroup>
+    <thead><tr><th>Thời gian (VN)</th><th>Người</th><th>Hành động</th><th>Bảng</th><th class="num">Bản ghi</th><th>Giá trị cũ</th><th>Giá trị mới</th></tr></thead>
+    <tbody>${rows||'<tr><td colspan="7" class="empty" style="white-space:normal">Không có dòng nào khớp bộ lọc.</td></tr>'}</tbody></table>
+    <div class="nkTrang"><span style="color:var(--muted)">${tong?`Dòng ${n(dau)}–${n(cuoi)} / ${n(tong)}`:'0 dòng'}</span><div class="spacer"></div>
+      <button class="btn-sm ghost" ${kq.trang<=1?'disabled':''} onclick="nkTai(${kq.trang-1})">‹ Trước</button><span>Trang <b>${kq.trang}</b> / ${kq.so_trang}</span><button class="btn-sm ghost" ${kq.trang>=kq.so_trang?'disabled':''} onclick="nkTai(${kq.trang+1})">Sau ›</button></div>`;
+}
+function _nkDungChon(){                    // dựng ô chọn từ danh sách CÓ TRONG dữ liệu, giữ giá trị đang chọn
+  const bl=S._nkBoLoc||{};
+  const giu=(id,opts,dau)=>{const el=document.getElementById(id);if(!el)return;const cu=el.value;el.innerHTML=`<option value="">${dau}</option>`+opts;if([...el.options].some(o=>o.value===cu))el.value=cu;};
+  const ten=b=>NK_BANG[b]||b;
+  giu('nk_bang',(bl.bang||[]).slice().sort((a,b)=>ten(a).localeCompare(ten(b),'vi')).map(b=>`<option value="${_nkEsc(b)}">${_nkEsc(NK_BANG[b]?NK_BANG[b]+' · '+b:b)}</option>`).join(''),'— Bảng —');
+  nkDoiBang();
+  giu('nk_nguoi',(bl.nguoi||[]).map(x=>`<option value="${x.id}">${_nkEsc(x.ten)} (${Number(x.so).toLocaleString('vi-VN')})</option>`).join(''),'— Người —');
+}
+function nkDoiBang(){                      // đổi bảng → ô hành động chỉ còn các hành động từng xảy ra ở bảng đó
+  const bl=S._nkBoLoc||{},el=document.getElementById('nk_hd'); if(!el)return;
+  const b=(document.getElementById('nk_bang')||{}).value||'',cu=el.value;
+  const ds=[...new Set(b?(bl.cap||[]).filter(c=>c.bang===b).map(c=>c.hanh_dong):(bl.hanh_dong||[]))].sort((x,y)=>(NK_HD[x]||x).localeCompare(NK_HD[y]||y,'vi'));
+  el.innerHTML='<option value="">— Hành động —</option>'+ds.map(h=>`<option value="${_nkEsc(h)}">${_nkEsc(NK_HD[h]?NK_HD[h]+' · '+h:h)}</option>`).join('');
+  if([...el.options].some(o=>o.value===cu))el.value=cu;
+}
+/* Ba hàm dưới đặt giá trị select rồi gọi _nkDungChon(): dựng lại option (childList đổi) để combobox «gõ để tìm» của app cập nhật chữ hiển thị */
+function nkLocNguoi(id){
+  const bl=S._nkBoLoc||(S._nkBoLoc={}); bl.nguoi=bl.nguoi||[];
+  if(!bl.nguoi.some(x=>String(x.id)===String(id)))bl.nguoi.push({id:id,ten:'#'+id,so:0});   // người chưa có trong danh sách (vết mới sau khi mở trang)
+  const el=document.getElementById('nk_nguoi'); if(el)el.value=String(id);
+  _nkDungChon(); nkTai(1);
+}
+function nkLocBanGhi(bang,id){
+  const bl=S._nkBoLoc||(S._nkBoLoc={}); bl.bang=bl.bang||[];
+  if(!bl.bang.includes(bang))bl.bang.push(bang);
+  const b=document.getElementById('nk_bang'),g=document.getElementById('nk_bg');
+  if(b){if(![...b.options].some(o=>o.value===bang))b.insertAdjacentHTML('beforeend',`<option value="${_nkEsc(bang)}">${_nkEsc(bang)}</option>`);b.value=bang;}
+  if(g)g.value=id;
+  _nkDungChon(); nkTai(1);
+}
+function nkBoLoc(){['nk_q','nk_bang','nk_hd','nk_nguoi','nk_tu','nk_den','nk_bg'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});_nkDungChon();nkTai(1);}
+function nkExcel(){
+  if(S.mode!=="live")return toast("Chạy ở bản kết nối backend","err");
+  const p=_nkThamSo(),d=new Date(),ten=`Nhat-ky-he-thong-${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}.xlsx`;
+  toast("📥 Đang xuất Excel theo bộ lọc đang chọn…","ok");
+  tepTaiVe('/nhat-ky/xuat'+(p.toString()?'?'+p.toString():''),ten);
+}
 async function viewCauHinh(m){
   m.innerHTML=head("Cấu hình","Quản lý tài khoản người dùng hệ thống");
   if(S.role!=="CEO"&&S.role!=="ADMIN"){
@@ -20146,6 +20308,9 @@ async function viewCauHinh(m){
   // 💾 Sao lưu CSDL (31/10/2026)
   let slCh=null; if(S.mode==="live"){try{slCh=await api('/sao-luu');}catch(e){slCh={loi:e.detail||e.message};}}
   m.innerHTML+=_slPanel(slCh);
+  // 📜 Nhật ký hệ thống (01/11/2026): tra audit_log — dựng khung rồi tải trang đầu ở nền (danh sách bảng / hành động / người lấy mới mỗi lần mở)
+  S._nkBoLoc=null; S._nk={trang:1};
+  m.innerHTML+=_nkPanel(); nkTai(1);
   // Ma trận Phân quyền theo vị trí (chuyển từ Overall Operation sang — chỉ CEO duyệt)
   if(S.role==="CEO"){
     m.innerHTML+=`<div class="panel" style="border:1px solid var(--teal)">
