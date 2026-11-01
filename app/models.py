@@ -114,6 +114,7 @@ class PhieuKho(Base):
     loai: Mapped[str] = mapped_column(loai_phieu_kho_t)
     don_hang_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     don_mua_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    du_an_id: Mapped[int | None] = mapped_column(ForeignKey("du_an.id", ondelete="SET NULL"), nullable=True)  # mig 166
     ngay: Mapped[date] = mapped_column(Date, server_default=func.current_date())
     nguoi_tao: Mapped[int | None] = mapped_column(ForeignKey("nhan_vien.id"), nullable=True)
     chi_tiet: Mapped[list["PhieuKhoCt"]] = relationship(cascade="all, delete-orphan", lazy="selectin")
@@ -125,6 +126,7 @@ class PhieuKhoCt(Base):
     phieu_kho_id: Mapped[int] = mapped_column(ForeignKey("phieu_kho.id", ondelete="CASCADE"))
     hang_hoa_id: Mapped[int] = mapped_column(ForeignKey("hang_hoa.id"))
     so_luong: Mapped[Decimal] = mapped_column(Numeric(15, 3))
+    du_an_du_toan_id: Mapped[int | None] = mapped_column(ForeignKey("du_an_du_toan.id", ondelete="SET NULL"), nullable=True)  # mig 166: dòng BOQ
 
 
 class YeuCauMua(Base):

@@ -19391,7 +19391,7 @@ async function daXoaDuAn(id,ma){
 async function daDetail(m){
   let ct; try{ ct = S.mode==="live" ? await api(`/du-an/${S.daId}/chi-tiet`) : _daDemoCt(); }catch(e){m.innerHTML=head("Dự án","")+`<div class="empty" style="color:#dc2626;padding:24px">${e.detail||e.message}</div><button class="btn-sm ghost" onclick="daBack()">← Danh sách</button>`;return;}
   S.daCt=ct;
-  const tabs=[["thongtin","Thông tin"],["thietke","Thiết kế"],["danhmuc","Danh mục thiết bị - Vật tư"],["tiendo","Tiến độ"],["antoan","An toàn"],["trienkhai","Triển khai"],["thietbi","🔧 Thiết bị"],["tailieu","Document"],["kpi","KPI"],["baocao","Báo cáo"]];
+  const tabs=[["thongtin","Thông tin"],["thietke","Thiết kế"],["danhmuc","Danh mục thiết bị - Vật tư"],["tiendo","Tiến độ"],["antoan","An toàn"],["trienkhai","Triển khai"],["thietbi","🔧 Thiết bị"],["vattu","📦 Vật tư"],["tailieu","Document"],["kpi","KPI"],["baocao","Báo cáo"]];
   m.innerHTML=head("Dự án",ct.ten);
   m.innerHTML+=`<button class="btn-sm ghost" style="margin-bottom:10px" onclick="daBack()">← Danh sách dự án</button>
     <div class="panel"><div class="panel-b" style="padding:16px 18px">
@@ -19411,7 +19411,7 @@ async function daDetail(m){
 }
 function daSwitch(t){S.daTab=t;_tabActive(t);daRenderTab();}
 async function daRenderTab(){const h=$("#daBody");if(!h)return;h.innerHTML='<div class="empty" style="padding:24px">Đang tải…</div>';
-  try{const f={thongtin:daThongTin,thietke:daThietKe,danhmuc:daDanhMuc,tiendo:daTienDo,antoan:daAnToan,trienkhai:daTrienKhai,thietbi:daThietBi,tailieu:daTaiLieu,kpi:daKpi,baocao:daBaoCao}[S.daTab]||daThongTin;await f(h);}
+  try{const f={thongtin:daThongTin,thietke:daThietKe,danhmuc:daDanhMuc,tiendo:daTienDo,antoan:daAnToan,trienkhai:daTrienKhai,thietbi:daThietBi,vattu:daVatTu,tailieu:daTaiLieu,kpi:daKpi,baocao:daBaoCao}[S.daTab]||daThongTin;await f(h);}
   catch(e){h.innerHTML=`<div class="empty" style="color:#dc2626;padding:24px">${e.detail||e.message}</div>`;}
 }
 
@@ -20014,6 +20014,54 @@ async function daSuaTTThietBi(id,tt){
 async function daXoaThietBi(id){
   if(!confirm("Xóa thiết bị này khỏi sổ? Không thể hoàn tác."))return;
   try{await api(`/thi-cong/thiet-bi/${id}`,{method:'DELETE'});toast("Đã xóa thiết bị","ok");daRenderTab();}catch(e){toast(e.detail||e.message,"err");}
+}
+
+/* --- Tab Vật tư theo hạng mục (đối chiếu định mức BOQ ↔ thực cấp) --- */
+const VT_TT={VUOT:["Vượt định mức","b-tc"],DU:["Đủ","b-ok"],THIEU:["Thiếu","b-cho"],CHUA:["Chưa cấp","b-info"]};
+async function daVatTu(h){
+  const canOp=can("du_an","THAO_TAC");
+  if(S.mode!=="live"){h.innerHTML='<div class="empty" style="padding:20px">Đối chiếu vật tư hiển thị ở bản kết nối backend.</div>';return;}
+  let d; try{ d=await api(`/du-an/${S.daId}/vat-tu-doi-chieu`); }
+  catch(e){h.innerHTML=`<div class="empty" style="color:#dc2626;padding:16px">${e.detail||e.message}</div>`;return;}
+  const rows=d.danh_sach||[], t=d.tong||{};
+  const khop=rows.filter(r=>r.khop_kho);
+  let html=`<div class="note" style="padding:0 0 10px">Đối chiếu <b>định mức dự toán (BOQ)</b> với <b>vật tư đã cấp ra công trường</b>. «Đã cấp» = tổng phiếu <b>XUẤT</b> gắn đúng dòng BOQ. Dòng <b>chưa khớp kho</b> (không nối hàng hóa) thì cấp ở tab Danh mục/khớp kho trước. Cấp vật tư ở đây tạo phiếu XUẤT trừ tồn ngay.</div>
+  <div style="display:flex;flex-wrap:wrap;gap:8px;padding:0 0 12px">
+    ${_tcCard("Số dòng BOQ",t.so_dong||0)}${_tcCard("Vượt định mức",t.so_vuot||0,'',(t.so_vuot||0)?'#dc2626':'#16a34a')}
+    ${_tcCard("Chưa khớp kho",t.so_chua_khop||0,'',(t.so_chua_khop||0)?'#b45309':'')}</div>`;
+  if(canOp){
+    html+=`<div class="panel"><div class="panel-h"><h3>Cấp vật tư cho công trường (theo dòng BOQ)</h3></div><div class="panel-b">
+      ${khop.length?`<div class="formrow">
+        <div class="f" style="flex:3"><label>Hạng mục / vật tư (đã khớp kho)</label><select id="vt_dt">${khop.map(r=>`<option value="${r.du_an_du_toan_id}" data-hh="${r.hang_hoa_id}">${(r.ten||'').replace(/"/g,'&quot;')}${r.don_vi?' ('+r.don_vi+')':''} — còn phải cấp ${(r.con_phai_cap||0)}${r.ton_kho!=null?' · tồn '+r.ton_kho:''}</option>`).join('')}</select></div>
+        <div class="f"><label>Số lượng cấp</label><input id="vt_sl" type="number" min="0" step="0.001"></div>
+        <button class="btn-sm" style="align-self:end" onclick="daCapVatTu()">Cấp (xuất kho)</button></div>
+      <div class="note" style="margin-top:6px;color:var(--muted)">Cấp vượt định mức vẫn được nhưng dòng sẽ tô đỏ «Vượt định mức» để kiểm soát.</div>`
+      :'<div class="empty" style="padding:8px">Chưa có dòng BOQ nào khớp kho. Sang tab «Danh mục thiết bị - Vật tư» để khớp dòng dự toán với hàng hóa trước.</div>'}</div></div>`;
+  }
+  const trs=rows.map(r=>{
+    const tt=VT_TT[r.trang_thai]||[r.trang_thai,"b-info"];
+    const pct=r.phan_tram!=null?r.phan_tram:0, pcol=r.trang_thai==='VUOT'?'#dc2626':(r.trang_thai==='DU'?'#16a34a':'#b45309');
+    return `<tr><td><b>${(r.ten||'').replace(/</g,'&lt;')}</b>${r.hang_muc?`<div style="font-size:11px;color:var(--muted)">${String(r.hang_muc).replace(/</g,'&lt;')}</div>`:''}${r.khop_kho?'':'<div style="font-size:11px;color:#b45309">⚠ chưa khớp kho</div>'}</td>
+      <td class="num">${r.dinh_muc||0}${r.don_vi?' <span style="color:var(--muted);font-size:11px">'+r.don_vi+'</span>':''}</td>
+      <td class="num">${r.da_nhap||0}</td><td class="num"><b>${r.da_cap||0}</b></td>
+      <td class="num" style="color:${r.con_phai_cap>0?'#b45309':(r.con_phai_cap<0?'#dc2626':'#16a34a')}">${r.con_phai_cap||0}</td>
+      <td class="num">${r.ton_kho!=null?r.ton_kho:'—'}</td>
+      <td style="min-width:90px"><span class="badge ${tt[1]}">${tt[0]}</span>${r.phan_tram!=null?`<div style="height:5px;background:var(--line);border-radius:3px;margin-top:4px;overflow:hidden"><div style="height:100%;width:${Math.min(100,pct)}%;background:${pcol}"></div></div>`:''}</td></tr>`;}).join('');
+  html+=`<div class="panel"><div class="panel-h"><h3>Đối chiếu định mức ↔ thực cấp <span class="badge b-info">${rows.length} dòng</span></h3></div>
+    <div class="panel-b" style="overflow-x:auto"><table style="width:100%"><thead>
+      <tr><th>Hạng mục / vật tư</th><th class="num">Định mức</th><th class="num">Đã nhập</th><th class="num">Đã cấp</th><th class="num">Còn phải cấp</th><th class="num">Tồn kho</th><th>Trạng thái</th></tr></thead>
+    <tbody>${trs||'<tr><td colspan="7" class="empty">Dự án chưa có dòng dự toán BOQ.</td></tr>'}</tbody>
+    <tfoot><tr style="font-weight:700;border-top:2px solid var(--line)"><td>Tổng</td><td class="num">${t.dinh_muc||0}</td><td></td><td class="num">${t.da_cap||0}</td><td></td><td></td><td></td></tr></tfoot></table></div></div>`;
+  h.innerHTML=html;
+}
+async function daCapVatTu(){
+  const sel=$('#vt_dt'); if(!sel||!sel.value){toast("Chọn dòng BOQ","err");return;}
+  const opt=sel.options[sel.selectedIndex], hh=opt&&opt.dataset?opt.dataset.hh:null;
+  const sl=Number(gv('vt_sl'));
+  if(!hh){toast("Dòng này chưa khớp hàng hóa kho","err");return;}
+  if(!(sl>0)){toast("Nhập số lượng > 0","err");return;}
+  const body={loai:"XUAT",du_an_id:Number(S.daId),chi_tiet:[{hang_hoa_id:Number(hh),so_luong:sl,du_an_du_toan_id:Number(sel.value)}]};
+  try{await api('/kho/phieu',{method:'POST',body:JSON.stringify(body)});toast("Đã cấp vật tư (xuất kho)","ok");daRenderTab();}catch(e){toast(e.detail||e.message,"err");}
 }
 
 /* --- Tab Tài liệu --- */
