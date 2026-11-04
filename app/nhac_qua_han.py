@@ -183,7 +183,7 @@ def _khoi_don_chua_hd(ds: list[dict]) -> list[str]:
     tong, da_thu, con = (sum(x[k] for x in ds) for k in ("tong", "da_thu", "con_phai_thu"))
     l = [f"📄 *ĐƠN BÁN CHƯA XUẤT HÓA ĐƠN quá {NGUONG_NHAC_NGAY} ngày*: *{len(ds)} đơn · {_vnd(tong)}* (gồm VAT) — "
          f"đã thu {_vnd(da_thu)} · còn phải thu {_vnd(con)}",
-         "(chưa có hóa đơn nên chưa nằm trong công nợ phải thu; tính từ ngày đơn; bỏ đơn đầu tư – cho thuê)"]
+         "(chưa có hóa đơn nên chưa nằm trong công nợ phải thu; tính từ ngày đơn; bỏ đơn đầu tư – cho thuê và mã nội bộ OP / KHO)"]
     for x in ds[:TOI_DA_DON_CHUA_HD]:
         thu = (f" · đã thu {_vnd(x['da_thu'])}" + (f" ({x['nguon_da_thu']})" if x["nguon_da_thu"] else "")) if x["da_thu"] > 0 else ""
         hd = f" · ⚠ đã ghi số HĐ {x['so_hd_san']} nhưng trạng thái chưa đổi" if x["so_hd_san"] else ""

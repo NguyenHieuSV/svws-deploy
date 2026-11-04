@@ -51,6 +51,8 @@ def _nap(s):
     _dh(s, 6, "DV-COA-NT-2024", _ngay(-400), loai_don="DAU_TU")                                  # đầu tư – cho thuê → không
     _dh(s, 7, "TM-Z-1026", _ngay(-5), so_hoa_don="0001234")                                      # có số HĐ thật, trạng thái chưa đổi
     _dh(s, 8, "DA-W-0726", _ngay(-100), truoc=0, thue=0)                                         # chưa có giá trị
+    _dh(s, 9, "OP-SV-1026", _ngay(-60), truoc=0, thue=0)                                          # mã vận hành nội bộ → không
+    _dh(s, 10, "KHO-0926", _ngay(-60))                                                           # mã kho nội bộ → không
     s.commit()
 
 

@@ -6,7 +6,8 @@ khách không thấy vì công nợ phải thu chỉ sinh khi đơn đã xuất 
                       (bảng «📄 Đơn chưa xuất hóa đơn» đặt trên bảng công nợ ở tab Công nợ khách — API /ban-hang/don-chua-xuat-hd).
   • qua_nguong(db)  → đơn có giá trị, quá NGUONG_NHAC_NGAY ngày — gộp vào bản nhắc công nợ thứ Hai (app/nhac_qua_han.py).
 
-Đơn CHƯA XUẤT HÓA ĐƠN = trạng thái chưa phải «Đã xuất hóa đơn» / «Hoàn thành»; bỏ đơn đầu tư – cho thuê (hóa đơn ở mã tháng).
+Đơn CHƯA XUẤT HÓA ĐƠN = trạng thái chưa phải «Đã xuất hóa đơn» / «Hoàn thành»; bỏ đơn đầu tư – cho thuê (hóa đơn ở mã tháng)
+và mã nội bộ OP- / KHO / mã mẹ theo năm (kiem_soat_ln.mien_kiem — không phải hàng bán cho khách).
 Đơn đã XUẤT KHO (có công nợ + hóa đơn bán mang SỐ TẠM = mã đơn) vẫn là chưa xuất hóa đơn cho tới khi có số hóa đơn thật.
 ĐÃ THU của đơn — cùng quy tắc với Lãi/lỗ theo mã (app/lai_lo_ma.py):
   có công nợ   → đã thanh toán trên công nợ + tạm ứng phiếu thu đã duyệt chưa cấn;
@@ -40,15 +41,18 @@ def hom_nay_vn() -> date:
 
 def danh_sach(db: Session, hom_nay: date | None = None) -> list[dict]:
     """Từng đơn chưa xuất hóa đơn, lâu nhất lên trên (rồi còn phải thu nhiều lên trên)."""
+    from .kiem_soat_ln import mien_kiem
     from .lai_lo_ma import tra_truoc_theo_don
     from .models import CongNo, DonHang, HoaDon, KhachHang, NhanVien
     hom_nay = hom_nay or hom_nay_vn()
+    # bỏ đơn đầu tư – cho thuê và mã NỘI BỘ (OP- vận hành / KHO / mã mẹ theo năm — cùng luật mien_kiem của Kiểm soát):
+    # không phải hàng bán cho khách nên không có hóa đơn để xuất
     rows = [r for r in (db.query(DonHang.id, DonHang.so, DonHang.khach_hang_id, DonHang.ngay, DonHang.tong_tien,
                                  DonHang.tien_thue, DonHang.trang_thai, DonHang.thanh_toan_coc, DonHang.so_hoa_don,
                                  DonHang.loai_don)
                         .filter(or_(DonHang.trang_thai.is_(None),
                                     DonHang.trang_thai.notin_(("DA_XUAT_HD", "HOAN_THANH")))).all())
-            if (r.loai_don or "THUONG").upper() != "DAU_TU"]
+            if (r.loai_don or "THUONG").upper() != "DAU_TU" and not (r.so and mien_kiem(r.so))]
     if not rows:
         return []
     ids = [r.id for r in rows]
