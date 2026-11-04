@@ -26,14 +26,12 @@ def _ngay(n):
 def db(monkeypatch):
     monkeypatch.setattr(nq, "hom_nay_vn", lambda: HOM_NAY)
     e = create_engine("sqlite://")
-    for t in (m.CongNo, m.DonMua, m.DonMuaCt):
+    for t in (m.CongNo, m.DonMua, m.DonMuaCt, m.DonHang, m.HoaDon, m.PhieuThuChi):
         t.__table__.create(e)
     with e.begin() as c:
         c.exec_driver_sql("CREATE TABLE khach_hang (id INTEGER PRIMARY KEY, ten VARCHAR(200), nguoi_phu_trach INTEGER)")
         c.exec_driver_sql("CREATE TABLE nhan_vien (id INTEGER PRIMARY KEY, nguoi_dung_id INTEGER, ho_ten VARCHAR(120))")
         c.exec_driver_sql("CREATE TABLE nguoi_dung (id INTEGER PRIMARY KEY, email VARCHAR(150))")
-        c.exec_driver_sql("CREATE TABLE don_hang (id INTEGER PRIMARY KEY, so VARCHAR(30), khach_hang_id INTEGER)")
-        c.exec_driver_sql("CREATE TABLE hoa_don (id INTEGER PRIMARY KEY, so VARCHAR(40), don_hang_id INTEGER, khach_hang_id INTEGER)")
         c.exec_driver_sql("CREATE TABLE nha_cung_cap (id INTEGER PRIMARY KEY, ten VARCHAR(200))")
         c.exec_driver_sql("CREATE TABLE hang_hoa (id INTEGER PRIMARY KEY, ten VARCHAR(200))")
         c.exec_driver_sql("CREATE TABLE audit_log (id INTEGER PRIMARY KEY, nguoi_dung_id INTEGER, hanh_dong VARCHAR(20), "
@@ -41,14 +39,18 @@ def db(monkeypatch):
         c.exec_driver_sql("INSERT INTO khach_hang VALUES (1,'Công ty A',7),(2,'Công ty B',NULL)")
         c.exec_driver_sql("INSERT INTO nhan_vien VALUES (7,70,'Nguyễn B'),(8,80,'Trần C')")
         c.exec_driver_sql("INSERT INTO nguoi_dung VALUES (70,'b@sv.vn'),(80,'c@sv.vn'),(90,'khac@sv.vn')")
-        c.exec_driver_sql("INSERT INTO don_hang VALUES (9,'TM-SIC-0826-01',1),(10,'DV-COA-NT-1026',2)")
-        c.exec_driver_sql("INSERT INTO hoa_don VALUES (5,'00123',9,NULL)")
         c.exec_driver_sql("INSERT INTO nha_cung_cap VALUES (3,'Hóa chất Miền Nam')")
         c.exec_driver_sql("INSERT INTO hang_hoa VALUES (1,'Hóa chất PAC'),(2,'Van bi 60'),(3,'Bơm định lượng')")
         # PO 101: người lập = bản ghi audit ĐẦU (nd 70), không phải người duyệt sau (nd 90)
         c.exec_driver_sql("INSERT INTO audit_log (id,nguoi_dung_id,hanh_dong,bang,ban_ghi_id) VALUES "
                           "(1,70,'TAO','don_mua',101),(2,90,'DUYET','don_mua',101),(3,80,'TAO','don_mua',105)")
-    return sessionmaker(e)()
+    s = sessionmaker(e)()
+    # đơn 9 / 10 đã xuất hóa đơn / hoàn thành → KHÔNG thuộc khối «đơn chưa xuất hóa đơn»
+    s.add(m.DonHang(id=9, so="TM-SIC-0826-01", khach_hang_id=1, ngay=date(2026, 8, 20), trang_thai="HOAN_THANH"))
+    s.add(m.DonHang(id=10, so="DV-COA-NT-1026", khach_hang_id=2, ngay=date(2026, 10, 5), trang_thai="DA_XUAT_HD"))
+    s.add(m.HoaDon(id=5, loai="BAN", so="00123", don_hang_id=9))
+    s.commit()
+    return s
 
 
 def _cn(s, id_, **kw):
@@ -155,5 +157,46 @@ def test_gui_tuan_khong_co_gi_thi_khong_gui(db, monkeypatch):
     monkeypatch.setattr(settings, "gchat_webhook_duyet_chi", "https://dc")
     monkeypatch.setattr(chat_gateway, "gui_webhook_rieng", lambda *a: pytest.fail("không được gửi khi không có gì quá hạn"))
     kq = nq.gui_tuan(db)
-    assert not kq["da_gui"] and kq["cong_no"]["ly_do"] == "Không có công nợ phải thu quá hạn"
-    assert kq["po"]["ly_do"] == "Không có PO quá hẹn giao" and kq["so_cong_no"] == 0 and kq["so_po"] == 0
+    assert not kq["da_gui"] and kq["cong_no"]["ly_do"] == "Không có công nợ phải thu quá hạn (và không có đơn chưa xuất hóa đơn quá 30 ngày)"
+    assert kq["po"]["ly_do"] == "Không có PO quá hẹn giao" and kq["so_cong_no"] == 0 and kq["so_po"] == 0 and kq["so_don_chua_hd"] == 0
+
+
+def _don_chua_hd(s, id_, so, ngay, coc=0, truoc=100_000_000, thue=8_000_000):
+    s.add(m.DonHang(id=id_, so=so, khach_hang_id=1, ngay=ngay, trang_thai="MOI", tong_tien=Decimal(truoc),
+                    tien_thue=Decimal(thue), thanh_toan_coc=Decimal(coc)))
+
+
+def test_don_chua_xuat_hd_gop_vao_tin_cong_no(db, monkeypatch):
+    _nap(db)
+    _don_chua_hd(db, 11, "DA-IIVI-0926-WAF", _ngay(-45), coc=30_000_000)
+    _don_chua_hd(db, 12, "TM-SIC-1026-02", _ngay(-10), truoc=20_000_000, thue=1_600_000)      # mới 10 ngày → chưa nhắc
+    db.commit()
+    bc = nq.bao_cao(db)
+    assert [x["id"] for x in bc["don_chua_hd"]] == [11] and bc["tong_don_chua_hd"] == 108_000_000
+    nd = nq.noi_dung_cong_no(bc)
+    assert "🏢 *Công ty A* — 2 khoản · 220.000.000 đ" in nd                                      # phần công nợ giữ nguyên
+    assert ("đánh dấu Hoàn thành để ngừng nhắc.\n\n📄 *ĐƠN BÁN CHƯA XUẤT HÓA ĐƠN quá 30 ngày*: *1 đơn · 108.000.000 đ* (gồm VAT)"
+            " — đã thu 30.000.000 đ · còn phải thu 78.000.000 đ\n") in nd
+    assert ("– *DA-IIVI-0926-WAF* · Công ty A · ngày 19/09/2026 → *45 ngày* · 108.000.000 đ · đã thu 30.000.000 đ (cọc trên đơn)"
+            " · còn 78.000.000 đ · Mới\n") in nd
+    gui = []
+    monkeypatch.setattr(chat_gateway, "gui_webhook_rieng", lambda url, nd_: gui.append((url, nd_)) or {"da_gui": True})
+    monkeypatch.setattr(settings, "gchat_webhook_duyet_chi", "https://dc")
+    monkeypatch.setattr(settings, "gchat_webhook_purchasing", "")
+    monkeypatch.setattr(settings, "gchat_webhook_cong_no", "")
+    kq = nq.gui_tuan(db)
+    assert kq["so_don_chua_hd"] == 1 and kq["cong_no"]["da_gui"] and "ĐƠN BÁN CHƯA XUẤT HÓA ĐƠN" in gui[0][1]
+
+
+def test_chi_co_don_chua_hd_van_gui_ban_cong_no(db, monkeypatch):
+    _don_chua_hd(db, 11, "DA-IIVI-0926-WAF", _ngay(-31))
+    db.commit()
+    gui = []
+    monkeypatch.setattr(chat_gateway, "gui_webhook_rieng", lambda url, nd_: gui.append((url, nd_)) or {"da_gui": True})
+    monkeypatch.setattr(settings, "gchat_webhook_duyet_chi", "https://dc")
+    monkeypatch.setattr(settings, "gchat_webhook_purchasing", "")
+    monkeypatch.setattr(settings, "gchat_webhook_cong_no", "")
+    kq = nq.gui_tuan(db)
+    assert kq["so_cong_no"] == 0 and kq["so_don_chua_hd"] == 1 and kq["cong_no"]["da_gui"] and not kq["po"]["da_gui"]
+    assert gui[0][1].startswith("💸 *CÔNG NỢ PHẢI THU QUÁ HẠN*") and "Không có khoản công nợ nào quá hạn 🎉" in gui[0][1]
+    assert "– *DA-IIVI-0926-WAF* · Công ty A · ngày 03/10/2026 → *31 ngày* · 108.000.000 đ · còn 108.000.000 đ · Mới" in gui[0][1]

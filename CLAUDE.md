@@ -100,8 +100,9 @@ Hai module `training.py` và `svws_registry/` dùng SQLModel và tự tạo bả
 - Giao diện tiếng Việt; logo SVWS dùng đúng file gốc (base64), không vẽ lại bằng CSS/SVG.
 
 ## Còn phải làm (ưu tiên — rà lại khi bắt đầu phiên)
-1. Scheduler: đã có bản tin nhắc việc, nhắc tuần (📉 kiểm soát lợi nhuận, ⏰ công nợ phải thu quá hạn + PO quá hẹn giao —
-   `app/nhac_qua_han.py`, thứ Hai 8h, mốc bền trong `audit_log`); còn `cho-thue/chay-thu-phi-dinh-ky`.
+1. Scheduler: đã có bản tin nhắc việc, nhắc tuần (📉 kiểm soát lợi nhuận, ⏰ công nợ phải thu quá hạn + 📄 đơn bán chưa xuất
+   hóa đơn quá 30 ngày + PO quá hẹn giao — `app/nhac_qua_han.py` + `app/don_chua_xuat_hd.py`, thứ Hai 8h, mốc bền trong
+   `audit_log`); còn `cho-thue/chay-thu-phi-dinh-ky`.
 2. Thay `FakeProvider` HĐĐT bằng SDK thật; thuế suất theo mặt hàng; trần BHXH; prorate lương theo công.
 3. Frontend Next.js (PWA) đọc `phan_quyen` để ẩn/hiện module theo vai trò.
 4. Module phụ: Quản lý tài liệu (bản vẽ/HĐ có phiên bản), Dashboard CEO real-time.

@@ -2330,6 +2330,16 @@ def ds_don_hang(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))
     return out
 
 
+@router.get("/don-chua-xuat-hd")
+def ds_don_chua_xuat_hd(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
+    """📄 Đơn bán CHƯA XUẤT HÓA ĐƠN — bảng ở tab Công nợ khách (04/11/2026): các đơn chưa có công nợ phải thu vì chưa có
+    hóa đơn (Mới / Đang thực hiện / Đã xuất kho với số tạm), kèm tuổi đơn, khách đã trả trước, còn phải thu.
+    Quy tắc ở app/don_chua_xuat_hd.py; đơn quá ngưỡng ngày vào bản nhắc thứ Hai."""
+    from ..don_chua_xuat_hd import NGUONG_NHAC_NGAY, danh_sach, tong_hop
+    ds = danh_sach(db)
+    return {**tong_hop(ds), "nguong_ngay": NGUONG_NHAC_NGAY, "ds": ds}
+
+
 @router.get("/don-hang/{dh_id}/chi-tiet")
 def chi_tiet_don_hang(dh_id: int, db: Session = Depends(get_db),
                       _=Depends(yeu_cau(MODULE, "XEM"))):
