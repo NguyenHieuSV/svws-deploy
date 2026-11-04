@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="vi">
 <head>
-<!-- build: dchd-bo-ma-op-2026-11-04 -->
+<!-- build: bao-cao-ceo-tuan-2026-11-04 -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#0f2c44">
@@ -1675,13 +1675,75 @@ async function _renderOverallFinancial(m){
 async function viewOverallFinancial(m){
   if(!laQTV()){m.innerHTML=head("Overall Financial","")+`<div class="perm-denied">Chỉ CEO/ADMIN được xem bức tranh tài chính điều hành.</div>`;return;}
   if(!S.ofTab)S.ofTab="tongquan";
-  const tabs=[["tongquan","Tổng quan"],["mang","📊 Doanh thu theo mảng"]].concat(S.role==='CEO'?[["dautu","🏗 Đầu tư / Khấu hao"],["phantich","🧠 Phân tích dữ liệu"]]:[]);
+  const tabs=[["tongquan","Tổng quan"],["mang","📊 Doanh thu theo mảng"]].concat(S.role==='CEO'?[["dautu","🏗 Đầu tư / Khấu hao"],["phantich","🧠 Phân tích dữ liệu"],["ceo","📋 Báo cáo CEO"]]:[]);
   m.innerHTML=head("Overall Financial","Bức tranh tài chính điều hành theo thời gian thực — Bán hàng · Mua hàng · Công nợ (chỉ CEO/ADMIN)")
     +`<div class="tabs">${tabs.map(([k,l])=>`<button class="${S.ofTab===k?'active':''}" onclick="ofSwitch('${k}')">${l}</button>`).join('')}</div><div id="ofBody"></div>`;
   const host=document.getElementById('ofBody');
-  if(S.ofTab==="mang")await _ofMang(host); else if(S.ofTab==="dautu")await _ofDauTu(host); else if(S.ofTab==="phantich")await _ofPhanTich(host); else await _renderOverallFinancial(host);
+  if(S.ofTab==="mang")await _ofMang(host); else if(S.ofTab==="dautu")await _ofDauTu(host); else if(S.ofTab==="phantich")await _ofPhanTich(host); else if(S.ofTab==="ceo")await _ofBaoCaoCeo(host); else await _renderOverallFinancial(host);
 }
 function ofSwitch(k){S.ofTab=k;viewOverallFinancial($("#main"));}
+/* ---- 📋 BÁO CÁO CEO bản tuần (04/11/2026, app/bao_cao_ceo.py): 12 chỉ số có so tuần trước · việc cần CEO quyết · 6 khối — số lấy từ module sẵn có ---- */
+async function _ofBaoCaoCeo(host){
+  if(S.mode!=="live"){host.innerHTML='<div class="empty" style="padding:24px">Tab Báo cáo CEO chỉ có ở chế độ live.</div>';return;}
+  if(S.role!=='CEO'){host.innerHTML='<div class="perm-denied">Báo cáo CEO gom số lương, vốn và lãi/lỗ toàn công ty — chỉ CEO được xem.</div>';return;}
+  host.innerHTML='<div class="empty" style="padding:20px">⏳ Đang gom số liệu cả công ty (khoảng 10–20 giây)…</div>';
+  const lui=S._ofCeoLui||0;
+  let r;try{r=await api('/tai-chinh/bao-cao-ceo/tuan?lui='+lui);}catch(e){host.innerHTML=`<div class="empty" style="padding:24px;color:#dc2626">${_ptEsc(e.detail||e.message)}</div>`;return;}
+  window._ofCeo=r;
+  const e_=_ptEsc, ky=r.ky||{}, dm=s=>s?`${s.slice(8,10)}/${s.slice(5,7)}`:'—';
+  const fmt=(x,v)=>v==null?'—':(x.don_vi==='tien'?vnd(v):(x.don_vi==='pct'?v+'%':String(v)));
+  const delta=x=>{const a=x.gia_tri,b=x.ky_truoc;if(a==null||b==null)return '';const d=a-b;
+    if(!d)return '<span style="color:var(--muted)">bằng tuần trước</span>';
+    const pct=(b&&x.don_vi!=='pct')?Math.round(Math.abs(d)/Math.abs(b)*100):null;
+    const tot=x.tot_khi?((d>0)===(x.tot_khi==='tang')):null, mau=tot==null?'var(--muted)':(tot?'#16a34a':'#dc2626');
+    const ds=x.don_vi==='tien'?vnd(Math.abs(d)):(x.don_vi==='pct'?Math.abs(d)+' điểm':String(Math.abs(d)));
+    return `<span style="color:${mau};font-weight:600">${d>0?'▲':'▼'} ${ds}${pct!=null?` (${pct}%)`:''}</span> <span style="color:var(--muted)">so tuần trước ${fmt(x,b)}</span>`;};
+  const moA=m=>(m&&m.page)?` <a href="#" onclick="ofCeoMo('${m.page}','${m.tab||''}');return false" style="font-size:11px;color:#0e7490;text-decoration:none;font-weight:400" title="Mở bảng xử lý">mở ↗</a>`:'';
+  const NHOM_MAU={'Tiền':'#0e7490','Lãi':'#7c3aed','Nợ':'#dc2626','Vận hành':'#d97706','Con người':'#16a34a'};
+  const cards=(r.chi_so||[]).map(x=>`<div class="stat" style="flex:1;min-width:215px;border-top:3px solid ${NHOM_MAU[x.nhom]||'var(--line)'}"><div class="k"><span style="color:${NHOM_MAU[x.nhom]||'inherit'};font-size:10.5px;font-weight:700;text-transform:uppercase;margin-right:6px">${e_(x.nhom)}</span>${e_(x.ten)}${moA(x.mo)}</div><div class="v small">${fmt(x,x.gia_tri)}</div><div class="d">${delta(x)}${x.phu?`<div style="margin-top:2px">${e_(x.phu)}</div>`:''}</div></div>`).join('');
+  const MUC={'Cao':'b-tc','Vừa':'b-cho','Thấp':'b-info'};
+  const quyet=(r.quyet||[]).map((x,i)=>`<tr><td>${i+1}</td><td style="white-space:normal"><b>${e_(x.ten)}</b>${x.ghi_chu?`<div style="font-size:11.5px;color:var(--muted)">${e_(x.ghi_chu)}</div>`:''}</td><td class="num"><b>${x.so}</b></td><td class="num">${x.tien?vnd(x.tien):'—'}</td><td><span class="badge ${MUC[x.muc]||'b-info'}">${e_(x.muc)}</span></td><td>${(x.mo&&x.mo.page)?`<button class="btn-sm ghost" onclick="ofCeoMo('${x.mo.page}','${x.mo.tab||''}')">Mở ↗</button>`:''}</td></tr>`).join('');
+  const khoi=(r.khoi||[]).map(k=>`<div class="panel" style="margin:0"><div class="panel-h"><h3>${k.icon||''} ${e_(k.ten)}</h3></div><div class="panel-b" style="padding:10px 16px"><ul style="margin:0;padding-left:18px;font-size:13px;line-height:1.6">${(k.dong||[]).map(d=>`<li>${e_(d)}</li>`).join('')}</ul></div></div>`).join('');
+  host.innerHTML=`<style>.ceoGrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(380px,1fr));gap:14px;align-items:start}</style>
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+      <button class="btn-sm ghost" onclick="ofCeoLui(1)" title="Xem tuần trước">◀</button>
+      <b style="font-size:14px">${e_(ky.nhan)}</b><span style="color:var(--muted)">${dm(ky.tu)} → ${dm(ky.den)}${ky.hien_tai?' (đang diễn ra, số đến hôm nay)':''} · so với ${e_(ky.truoc_nhan)}</span>
+      <button class="btn-sm ghost" onclick="ofCeoLui(-1)" ${lui?'':'disabled'} title="Tuần sau">▶</button>
+      <span style="flex:1"></span>
+      <button class="btn-sm ghost" onclick="ofCeoIn()" title="Mở bản in một trang — In / Lưu PDF">🖨 In / PDF</button>
+      ${r.nhom?`<button class="btn-sm" onclick="ofCeoGui()" title="Gửi bản tóm tắt tuần này vào ${e_(r.nhom)} — app vẫn tự gửi mỗi thứ Hai 8h">📣 Gửi Chat</button>`:'<span class="badge b-cho" title="Khai GCHAT_WEBHOOK_CEO (hoặc GCHAT_WEBHOOK_DUYET_CHI) trên Render để gửi tin tuần">chưa có nhóm Chat</span>'}
+      <button class="btn-sm ghost" onclick="S._ofCeoLui=0;ofSwitch('ceo')" title="Về tuần này và tải lại">🔄</button></div>
+    <div class="note" style="padding:0 0 10px">Một trang gom số của <b>cả công ty</b> từ các module sẵn có, không tính lại công thức nào: <b>12 chỉ số</b> (có so với tuần trước), <b>Việc cần CEO quyết</b> = mọi ngoại lệ đang treo (bấm «Mở» tới bảng xử lý), <b>6 khối</b> theo nhóm menu. Tiền thu / chi theo thanh toán công nợ (gồm VAT); đơn chốt và Lãi/Lỗ Record chưa VAT; Lãi/Lỗ so với bản ghi cuối tuần trước. App tự gửi bản tóm tắt vào Chat mỗi thứ Hai 8h; ba tin chi tiết (📉 ⏰ 🚚) vẫn gửi cho nhóm làm việc.</div>
+    ${(r.loi&&r.loi.length)?`<div class="note" style="border-color:#dc262655">⚠ ${r.loi.length} phần chưa tính được: ${e_(r.loi.join(' · '))}</div>`:''}
+    <div class="cards" style="margin-bottom:12px">${cards}</div>
+    <div class="panel" style="border:1px solid #dc262655"><div class="panel-h"><h3>✅ Việc cần CEO quyết${(r.quyet||[]).length?` <span class="badge b-tc">${r.quyet.length}</span>`:''}</h3><div class="spacer"></div><span style="color:var(--muted);font-size:12px">Cao → Vừa → Thấp · tiền lớn lên trước</span></div>
+      <div class="panel-b" style="overflow-x:auto"><table style="width:100%"><thead><tr><th style="width:34px">#</th><th>Việc</th><th class="num">Số</th><th class="num">Tiền</th><th>Mức</th><th></th></tr></thead><tbody>${quyet||'<tr><td colspan="6" class="empty" style="padding:14px;color:#16a34a">Không có việc nào treo chờ CEO quyết 🎉</td></tr>'}</tbody></table></div></div>
+    <div class="ceoGrid" style="margin-top:14px">${khoi}</div>
+    <details style="margin-top:12px"><summary style="cursor:pointer;color:var(--muted);font-size:12.5px">💬 Nội dung tin Chat của tuần này</summary><pre style="white-space:pre-wrap;font-size:12px;background:var(--surface);padding:8px 10px;border-radius:8px;margin:6px 0 0">${e_(r.noi_dung||'')}</pre></details>`;
+}
+function ofCeoLui(d){S._ofCeoLui=Math.max(0,(S._ofCeoLui||0)+d);ofSwitch('ceo');}
+function ofCeoMo(page,tab){const m={ke_toan:'ktTab',ncc:'nccTab',ban_hang:'bhTab',kho:'khoTab',cho_thue:'ctTab',nhan_su:'nsTab',working_time:'wtTab',overall_financial:'ofTab'}[page];if(m&&tab)S[m]=tab;go(page);}
+async function ofCeoGui(){
+  if(!confirm("Gửi bản tóm tắt tuần này vào nhóm Chat ngay bây giờ?\n(App vẫn tự gửi mỗi thứ Hai 8h.)"))return;
+  let r;try{r=await api('/tai-chinh/bao-cao-ceo/gui',{method:'POST'});}catch(e){return toast(e.detail||e.message,"err");}
+  toast(r.da_gui?`Đã gửi báo cáo tuần → ${r.nhom||''}`:`Chưa gửi: ${r.ly_do||r.loi||''}`,r.da_gui?"ok":"err");
+}
+function ofCeoIn(){       // bản in một trang: 12 chỉ số (tuần này · tuần trước) · việc cần quyết · 6 khối
+  const r=window._ofCeo;if(!r)return;const e_=_ptEsc,ky=r.ky||{};
+  const dmy=s=>s?`${s.slice(8,10)}/${s.slice(5,7)}/${s.slice(0,4)}`:'—', dm=s=>s?`${s.slice(8,10)}/${s.slice(5,7)}`:'—';
+  const f=(x,v)=>v==null?'—':(x.don_vi==='tien'?vnd(v):(x.don_vi==='pct'?v+'%':String(v)));
+  const html=`<!DOCTYPE html><html lang="vi"><head><meta charset="utf-8"><title>Báo cáo tuần CEO — ${e_(ky.nhan)}</title>
+  <style>body{font-family:Arial,sans-serif;font-size:12px;color:#111;margin:18px}h1{font-size:18px;margin:0 0 4px}h2{font-size:14px;margin:16px 0 6px;border-bottom:1px solid #999;padding-bottom:2px}h3{font-size:13px;margin:10px 0 4px}table{border-collapse:collapse;width:100%}th,td{border:1px solid #bbb;padding:4px 6px;text-align:left;vertical-align:top}th{background:#eee}td.num,th.num{text-align:right;white-space:nowrap}ul{margin:0;padding-left:18px}li{margin:2px 0}.bar{margin:0 0 10px}@media print{.bar{display:none}}</style></head><body>
+  <div class="bar"><button onclick="window.print()">🖨 In / Lưu PDF</button> <button onclick="window.close()">Đóng</button></div>
+  <h1>Báo cáo tuần CEO — ${e_(ky.nhan)}</h1><div>Công ty TNHH Giải pháp Kỹ Thuật Sóng Việt · ${dm(ky.tu)} → ${dm(ky.den)} · số liệu đến ${dmy(ky.hom_nay)} · so với ${e_(ky.truoc_nhan)}</div>
+  <h2>① 12 chỉ số sức khỏe công ty</h2><table><thead><tr><th>Nhóm</th><th>Chỉ số</th><th class="num">Tuần này</th><th class="num">Tuần trước</th><th>Ghi chú</th></tr></thead><tbody>${(r.chi_so||[]).map(x=>`<tr><td>${e_(x.nhom)}</td><td>${e_(x.ten)}</td><td class="num"><b>${f(x,x.gia_tri)}</b></td><td class="num">${f(x,x.ky_truoc)}</td><td>${e_(x.phu||'')}</td></tr>`).join('')}</tbody></table>
+  <h2>② Việc cần CEO quyết (${(r.quyet||[]).length})</h2>${(r.quyet||[]).length?`<table><thead><tr><th>#</th><th>Việc</th><th class="num">Số</th><th class="num">Tiền</th><th>Mức</th></tr></thead><tbody>${r.quyet.map((x,i)=>`<tr><td>${i+1}</td><td>${e_(x.ten)}${x.ghi_chu?`<div style="color:#555">${e_(x.ghi_chu)}</div>`:''}</td><td class="num">${x.so}</td><td class="num">${x.tien?vnd(x.tien):''}</td><td>${e_(x.muc)}</td></tr>`).join('')}</tbody></table>`:'<div>Không có việc nào treo.</div>'}
+  <h2>③ Sáu khối</h2>${(r.khoi||[]).map(k=>`<h3>${k.icon||''} ${e_(k.ten)}</h3><ul>${(k.dong||[]).map(d=>`<li>${e_(d)}</li>`).join('')}</ul>`).join('')}
+  ${(r.loi&&r.loi.length)?`<div style="margin-top:10px;color:#b45309">⚠ ${r.loi.length} phần chưa tính được: ${e_(r.loi.join(' · '))}</div>`:''}
+  <div style="margin-top:14px;color:#555">In từ app SVWS lúc ${new Date().toLocaleString('vi-VN')}</div></body></html>`;
+  const w=window.open('','_blank');if(!w)return toast("Trình duyệt chặn cửa sổ mới — cho phép popup rồi bấm lại","err");
+  w.document.write(html);w.document.close();
+}
 /* ---- 🧠 PHÂN TÍCH DỮ LIỆU (Overall Financial, chỉ CEO — có lương + vốn đầu tư): 6 đề mục, mỗi đề mục có biểu đồ + NHẬN XÉT +
         ĐỀ XUẤT theo 4 góc nhìn (tài chính · bán hàng · quản trị · dữ liệu); thêm bản nhận định AI của 4 chuyên gia (bấm mới gọi, có lưu).
         Biểu đồ: một trục, màu cố định theo đối tượng (cùng màu tab Doanh thu theo mảng), luôn có chú giải khi ≥ 2 chuỗi, rê chuột xem số. ---- */
