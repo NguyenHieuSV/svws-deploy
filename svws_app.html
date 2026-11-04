@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="vi">
 <head>
-<!-- build: don-chua-xuat-hd-2026-11-04 -->
+<!-- build: dchd-bo-ma-op-2026-11-04 -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#0f2c44">
@@ -7184,7 +7184,7 @@ async function bhCongNo(host){
       <td style="white-space:nowrap">${canOp?`<input id="dchd_so_${x.id}" value="${_ea(x.so_hd_san||'')}" placeholder="Số HĐ thật" style="width:108px;font-size:11.5px"> <button class="btn-sm" title="Chuyển đơn sang «Đã xuất hóa đơn» với số HĐ này — app mở công nợ phải thu (trừ cọc đã trả) và đơn chuyển xuống bảng công nợ" onclick="bhDchdXuatHd(${x.id})">📄 Đã xuất HĐ</button>`:'—'}</td></tr>`;}).join('');
   const dchdPanel=`<div class="panel" style="border:1px solid #7c3aed55;margin-bottom:14px"><div class="panel-h"><h3>📄 Đơn chưa xuất hóa đơn${dc.length?` <span class="badge b-cho">${dc.length}</span>`:''}</h3><div class="spacer"></div>
       <span class="num" style="font-weight:700">${dcQua?`<span style="color:#dc2626">${dcQua} đơn quá ${dcNg} ngày · </span>`:''}Tổng ${vnd(dcTong)} · đã thu ${vnd(dcDaThu)} · còn phải thu ${vnd(dcCon)}</span></div>
-    <div class="note">Đơn bán <b>chưa có hóa đơn</b> (Mới / Đang thực hiện / Đã xuất kho với số tạm; bỏ đơn đầu tư – cho thuê) nên <b>chưa nằm</b> trong bảng công nợ bên dưới. <b>Đã thu</b> = cọc trên đơn / phiếu tạm ứng (lấy số lớn hơn) hoặc đã thanh toán trên công nợ số tạm; <b>Còn phải thu</b> = giá trị gồm VAT − đã thu. Dòng <span style="background:#fdf3e3;padding:1px 6px;border-radius:4px">vàng</span> = quá ${dcNg} ngày (có trong bản nhắc thứ Hai), <span style="background:var(--red-bg);padding:1px 6px;border-radius:4px">đỏ</span> = quá ${dcNg*2} ngày. Xuất hóa đơn xong: nhập <b>số HĐ thật</b> rồi bấm <b>📄 Đã xuất HĐ</b> — app mở công nợ (trừ cọc) và đơn chuyển xuống bảng công nợ.</div>
+    <div class="note">Đơn bán <b>chưa có hóa đơn</b> (Mới / Đang thực hiện / Đã xuất kho với số tạm; bỏ đơn đầu tư – cho thuê và mã nội bộ OP / KHO) nên <b>chưa nằm</b> trong bảng công nợ bên dưới. <b>Đã thu</b> = cọc trên đơn / phiếu tạm ứng (lấy số lớn hơn) hoặc đã thanh toán trên công nợ số tạm; <b>Còn phải thu</b> = giá trị gồm VAT − đã thu. Dòng <span style="background:#fdf3e3;padding:1px 6px;border-radius:4px">vàng</span> = quá ${dcNg} ngày (có trong bản nhắc thứ Hai), <span style="background:var(--red-bg);padding:1px 6px;border-radius:4px">đỏ</span> = quá ${dcNg*2} ngày. Xuất hóa đơn xong: nhập <b>số HĐ thật</b> rồi bấm <b>📄 Đã xuất HĐ</b> — app mở công nợ (trừ cọc) và đơn chuyển xuống bảng công nợ.</div>
     <div class="panel-b" style="overflow-x:auto"><style>#dchdTbl th,#dchdTbl td{padding:4px 6px;font-size:12px}#dchdTbl td:nth-child(3){max-width:200px;white-space:normal;word-break:break-word;line-height:1.25}#dchdTbl .badge{font-size:10.5px;padding:2px 6px}</style><table id="dchdTbl" style="width:100%"><thead><tr><th>Stt</th><th>Mã đơn · Ngày</th><th>Khách hàng</th><th>Trạng thái</th><th>Đã qua</th><th class="num">Giá trị (GT · VAT)</th><th class="num">Đã thu</th><th class="num">Còn phải thu</th><th>Số HĐ → Đã xuất HĐ</th></tr></thead>
     <tbody>${dcRows||'<tr><td colspan="9" class="empty" style="padding:14px">Mọi đơn bán đều đã xuất hóa đơn ✓</td></tr>'}</tbody></table></div></div>`;
   // Tổng hợp công nợ theo TÊN KHÁCH HÀNG (gộp các khoản CÒN NỢ)
