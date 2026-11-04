@@ -60,6 +60,8 @@ class Settings(BaseSettings):
     ln_nhac_tuan: bool = True            # 📉 thứ Hai 8h (VN): bản kiểm soát lợi nhuận theo mã vào nhóm Duyệt chi
     qua_han_nhac_tuan: bool = True       # ⏰ thứ Hai 8h (VN): công nợ phải thu quá hạn → nhóm Duyệt chi; PO quá hẹn giao → nhóm Purchasing (app/nhac_qua_han.py)
     gchat_webhook_cong_no: str = ""      # (tùy chọn) webhook nhóm riêng nhận bản công nợ quá hạn; để trống → dùng nhóm Duyệt chi
+    bao_cao_ceo_tuan: bool = True        # 📋 thứ Hai 8h (VN): tin tóm tắt BÁO CÁO TUẦN CEO (app/bao_cao_ceo.py)
+    gchat_webhook_ceo: str = ""          # (tùy chọn) webhook nhóm riêng CEO nhận báo cáo tuần; để trống → nhóm Duyệt chi
     bg_bien_toi_thieu: float = 15.0      # 📉 duyệt báo giá: (tổng báo giá − tổng dự toán) / tổng báo giá < ngưỡng (%) → chỉ CEO
     bg_bien_goi_y: float = 20.0          # 💡 (cũ) biên gợi ý chung — nay dùng sàn theo nhóm bên dưới
     bg_bien_thiet_bi: float = 15.0       # 🔒 SÀN biên theo nhóm (anh Hiếu chốt 28/10/2026): nhân viên chỉnh ≥ sàn; CEO / Admin mới được dưới

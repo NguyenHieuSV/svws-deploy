@@ -1110,6 +1110,25 @@ def nhac_qua_han_gui(db: Session = Depends(get_db), nd: NguoiDung = Depends(chi_
     return kq
 
 
+# ---- 📋 BÁO CÁO CEO bản tuần (app/bao_cao_ceo.py; tab Overall Financial › Báo cáo CEO; app tự gửi Chat thứ Hai 8h) ----
+@router.get("/bao-cao-ceo/tuan")
+def bao_cao_ceo_tuan(lui: int = 0, db: Session = Depends(get_db), _=Depends(chi_vai_tro("CEO"))):
+    """Ba tầng: 12 chỉ số (có kỳ trước) · việc cần CEO quyết · sáu khối. `lui` = số tuần lùi (0 = tuần này)."""
+    from ..bao_cao_ceo import noi_dung_tuan, noi_gui, tuan
+    bc = tuan(db, lui=max(0, min(int(lui or 0), 52)))
+    return {**bc, "noi_dung": noi_dung_tuan(bc), "nhom": noi_gui()["nhom"]}
+
+
+@router.post("/bao-cao-ceo/gui")
+def bao_cao_ceo_gui(db: Session = Depends(get_db), nd: NguoiDung = Depends(chi_vai_tro("CEO"))):
+    """📣 Gửi ngay bản tóm tắt tuần này vào nhóm Chat (gửi lại được)."""
+    from ..bao_cao_ceo import gui_tuan
+    kq = gui_tuan(db, "TAY", getattr(nd, "ho_ten", None) or nd.email)
+    ghi_audit(db, nd.id, "GUI_TAY", "bao_cao_ceo", None, moi={k: v for k, v in kq.items() if k != "loi"})
+    db.commit()
+    return kq
+
+
 # ============ CHỈ SỐ TÀI CHÍNH DOANH NGHIỆP + CẢNH BÁO ============
 def _f(x):
     return float(x or 0)

@@ -101,8 +101,9 @@ Hai module `training.py` và `svws_registry/` dùng SQLModel và tự tạo bả
 
 ## Còn phải làm (ưu tiên — rà lại khi bắt đầu phiên)
 1. Scheduler: đã có bản tin nhắc việc, nhắc tuần (📉 kiểm soát lợi nhuận, ⏰ công nợ phải thu quá hạn + 📄 đơn bán chưa xuất
-   hóa đơn quá 30 ngày + PO quá hẹn giao — `app/nhac_qua_han.py` + `app/don_chua_xuat_hd.py`, thứ Hai 8h, mốc bền trong
-   `audit_log`); còn `cho-thue/chay-thu-phi-dinh-ky`.
+   hóa đơn quá 30 ngày + PO quá hẹn giao — `app/nhac_qua_han.py` + `app/don_chua_xuat_hd.py`; 📋 báo cáo tuần CEO —
+   `app/bao_cao_ceo.py`; đều thứ Hai 8h, mốc bền trong `audit_log`); còn `cho-thue/chay-thu-phi-dinh-ky`.
 2. Thay `FakeProvider` HĐĐT bằng SDK thật; thuế suất theo mặt hàng; trần BHXH; prorate lương theo công.
 3. Frontend Next.js (PWA) đọc `phan_quyen` để ẩn/hiện module theo vai trò.
-4. Module phụ: Quản lý tài liệu (bản vẽ/HĐ có phiên bản), Dashboard CEO real-time.
+4. Module phụ: Quản lý tài liệu (bản vẽ/HĐ có phiên bản). Báo cáo CEO: đã có bản TUẦN (Overall Financial › 📋 Báo cáo CEO,
+   `app/bao_cao_ceo.py`); còn bản THÁNG (so tháng trước + kế hoạch năm: doanh thu, lãi gộp, chi phí cố định) và tin ngày 3 dòng.

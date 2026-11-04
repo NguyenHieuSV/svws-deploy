@@ -21,6 +21,7 @@ _NGAY_NHAC_BC = ""     # ngày đã chạy nhắc «chưa hoàn thành báo cáo
 _NGAY_NHAC_TD = ""     # ngày đã chạy nhắc ⏳ việc chậm tiến độ so với thời gian (mốc bền: giao_viec.nhac_lech_ngay)
 _TUAN_LN = ""          # tuần đã gửi 📉 bản kiểm soát lợi nhuận theo mã (thứ Hai từ 8h VN; mốc bền nằm trong audit_log)
 _TUAN_QH = ""          # tuần đã gửi ⏰ nhắc công nợ phải thu quá hạn + PO quá hẹn giao (thứ Hai từ 8h VN; mốc bền trong audit_log)
+_TUAN_CEO = ""         # tuần đã gửi 📋 báo cáo tuần CEO (thứ Hai từ 8h VN; mốc bền trong audit_log «bao_cao_ceo»)
 
 
 def _vong_lap():
@@ -167,6 +168,29 @@ def _vong_lap():
                         _ga7(db, None, "NHAC_TUAN", "nhac_qua_han", None, moi={k: v for k, v in kq7b.items() if k != "loi"})
                         db.commit()
                         print(f"[SCHEDULER] ⏰ Nhắc quá hạn tuần: {kq7b}")
+                finally:
+                    db.close()
+            # 📋 BÁO CÁO TUẦN CEO (04/11/2026): tóm tắt 12 chỉ số + việc cần quyết → nhóm CEO (hoặc Duyệt chi). Thứ Hai từ 8h (VN),
+            #    mỗi tuần một lần; mốc bền: audit_log «bao_cao_ceo» / TUAN. Chạy SAU ba tin chi tiết để CEO đọc tóm tắt cuối cùng.
+            global _TUAN_CEO
+            g8 = gio_hien_tai()
+            tuan8 = g8.strftime("%G-W%V")
+            if settings.bao_cao_ceo_tuan and g8.weekday() == 0 and g8.hour >= 8 and _TUAN_CEO != tuan8:
+                _TUAN_CEO = tuan8
+                db = SessionLocal()
+                try:
+                    from datetime import timedelta as _td8
+                    from .models import AuditLog as _AL8
+                    dau_tuan8 = (g8 - _td8(hours=settings.tz_offset_gio)).replace(hour=0, minute=0, second=0, microsecond=0) - _td8(days=1)
+                    da8 = (db.query(_AL8.id).filter(_AL8.bang == "bao_cao_ceo", _AL8.hanh_dong == "TUAN",
+                                                    _AL8.thoi_gian >= dau_tuan8).first())
+                    if da8 is None:
+                        from .bao_cao_ceo import gui_tuan as _ceo_gui
+                        from .audit import ghi_audit as _ga8
+                        kq8 = _ceo_gui(db)
+                        _ga8(db, None, "TUAN", "bao_cao_ceo", None, moi={k: v for k, v in kq8.items() if k != "loi"})
+                        db.commit()
+                        print(f"[SCHEDULER] 📋 Báo cáo tuần CEO: {kq8}")
                 finally:
                     db.close()
             # 💾 SAO LƯU CSDL hàng ngày lên kho tệp (anh Hiếu 31/10/2026): từ sao_luu_gio (VN) mỗi ngày MỘT bản thành công;
