@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="vi">
 <head>
-<!-- build: da-thu-khach-2026-11-01 -->
+<!-- build: don-chua-xuat-hd-2026-11-04 -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#0f2c44">
@@ -7131,12 +7131,13 @@ function _bhCnDemo(){
   }).filter(Boolean).sort((a,b)=>(a.ngay_tt_tiep||'9999').localeCompare(b.ngay_tt_tiep||'9999'));
 }
 async function bhCongNo(host){
-  let list=[], dhPo=[];
+  let list=[], dhPo=[], dchd={nguong_ngay:30,ds:[]};
   if(S.mode==="live"){
     try{list=await api("/ban-hang/cong-no-khach");}catch(e){toast(e.detail||e.message,"err");list=[];}
     try{dhPo=await api("/ban-hang/don-hang-co-po");}catch{dhPo=[];}
+    try{dchd=await api("/ban-hang/don-chua-xuat-hd");}catch{dchd={nguong_ngay:30,ds:[]};}   // 📄 đơn chưa xuất hóa đơn
   }
-  else { list=_bhCnDemo(); dhPo=(DEMO.don_hang||[]).filter(o=>(o.tep||[]).some(t=>t.loai==='PO'||t.loai==='HOP_DONG')).map(o=>({id:o.id,so:o.so||('DH-'+o.id),khach_ten:o.khach||''})); }
+  else { list=_bhCnDemo(); dhPo=(DEMO.don_hang||[]).filter(o=>(o.tep||[]).some(t=>t.loai==='PO'||t.loai==='HOP_DONG')).map(o=>({id:o.id,so:o.so||('DH-'+o.id),khach_ten:o.khach||''})); dchd=_bhDchdDemo(); }
   S._bhCnList=list; S._bhCnDhPo=dhPo;
   const canOp=can("ban_hang","THAO_TAC");
   const active=list.filter(x=>Number(x.con_lai||0)>0);   // CÒN LẠI > 0 → bảng công nợ chính
@@ -7166,6 +7167,26 @@ async function bhCongNo(host){
         <td class="num">${vnd(x.tong!=null?x.tong:x.so_tien)}</td><td class="num" style="color:#16a34a">${vnd(x.da_thanh_toan)}</td>
         <td class="num"><b style="color:#dc2626">${vnd(x.con_lai)}</b></td>
         <td style="color:var(--muted);font-size:11.5px">${String(x.ghi_chu||'').replace(/</g,'&lt;')}</td></tr>`;}).join('')||'<tr><td colspan="10" class="empty" style="padding:14px">Không có khoản nào tới hạn trong 10 ngày tới ✓</td></tr>'}</tbody></table></div></div>`;
+  // 📄 ĐƠN CHƯA XUẤT HÓA ĐƠN (04/11/2026): chưa có công nợ nên không nằm trong bảng công nợ — theo dõi tuổi đơn, đã thu, còn phải thu
+  const dcNg=Number((dchd&&dchd.nguong_ngay)||30), dc=((dchd&&dchd.ds)||[]);
+  const dcQua=dc.filter(x=>Number(x.so_ngay||0)>dcNg).length;
+  const dcTong=dc.reduce((s,x)=>s+Number(x.tong||0),0), dcDaThu=dc.reduce((s,x)=>s+Number(x.da_thu||0),0), dcCon=dc.reduce((s,x)=>s+Number(x.con_phai_thu||0),0);
+  const _ea=s=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');
+  const dcRows=dc.map((x,i)=>{const n=Number(x.so_ngay||0), qua=n>dcNg, qua2=n>dcNg*2;
+    return `<tr class="${qua2?'qh':(qua?'sh':'')}"><td>${i+1}</td>
+      <td style="white-space:nowrap"><span class="badge b-info">${_ea(x.so)}</span><div style="font-size:10.5px;color:var(--muted);margin-top:2px">${_ea(x.ngay||'')}</div></td>
+      <td><b>${_ea(x.khach||'— chưa gắn khách —')}</b>${x.phu_trach?`<div style="font-size:10.5px;color:var(--muted)">${_ea(x.phu_trach)}</div>`:''}</td>
+      <td>${_dhTtBadge(x.trang_thai)}${x.cong_no_so_tam?'<div style="font-size:10.5px;color:#b45309" title="Đã có công nợ mang số tạm (mã đơn) do xuất kho — cần số hóa đơn thật">công nợ số tạm</div>':''}${x.so_hd_san?`<div style="font-size:10.5px;color:#7c3aed" title="Đã ghi số hóa đơn thật nhưng trạng thái đơn chưa đổi — bấm 📄 Đã xuất HĐ để chuyển">có số HĐ ${_ea(x.so_hd_san)}</div>`:''}</td>
+      <td style="white-space:nowrap">${qua?`<span class="badge ${qua2?'b-tc':'b-cho'}">${n} ngày</span>`:`<span style="color:var(--muted)">${n} ngày</span>`}</td>
+      <td class="num"><b>${vnd(x.tong)}</b><div style="font-size:10.5px;color:var(--muted);white-space:nowrap">GT ${vnd(x.truoc)} · VAT ${vnd(x.thue)}</div></td>
+      <td class="num" style="color:#16a34a">${vnd(x.da_thu)}${Number(x.da_thu)>0&&x.nguon_da_thu?`<div style="font-size:10.5px;color:var(--muted);font-weight:400">${_ea(x.nguon_da_thu)}</div>`:''}</td>
+      <td class="num"><b style="color:#d97706">${vnd(x.con_phai_thu)}</b>${Number(x.tong)<=0?'<div style="font-size:10.5px;color:#dc2626" title="Nhập giá trị đơn ở tab Đơn hàng trước khi xuất hóa đơn">đơn chưa có giá trị</div>':''}</td>
+      <td style="white-space:nowrap">${canOp?`<input id="dchd_so_${x.id}" value="${_ea(x.so_hd_san||'')}" placeholder="Số HĐ thật" style="width:108px;font-size:11.5px"> <button class="btn-sm" title="Chuyển đơn sang «Đã xuất hóa đơn» với số HĐ này — app mở công nợ phải thu (trừ cọc đã trả) và đơn chuyển xuống bảng công nợ" onclick="bhDchdXuatHd(${x.id})">📄 Đã xuất HĐ</button>`:'—'}</td></tr>`;}).join('');
+  const dchdPanel=`<div class="panel" style="border:1px solid #7c3aed55;margin-bottom:14px"><div class="panel-h"><h3>📄 Đơn chưa xuất hóa đơn${dc.length?` <span class="badge b-cho">${dc.length}</span>`:''}</h3><div class="spacer"></div>
+      <span class="num" style="font-weight:700">${dcQua?`<span style="color:#dc2626">${dcQua} đơn quá ${dcNg} ngày · </span>`:''}Tổng ${vnd(dcTong)} · đã thu ${vnd(dcDaThu)} · còn phải thu ${vnd(dcCon)}</span></div>
+    <div class="note">Đơn bán <b>chưa có hóa đơn</b> (Mới / Đang thực hiện / Đã xuất kho với số tạm; bỏ đơn đầu tư – cho thuê) nên <b>chưa nằm</b> trong bảng công nợ bên dưới. <b>Đã thu</b> = cọc trên đơn / phiếu tạm ứng (lấy số lớn hơn) hoặc đã thanh toán trên công nợ số tạm; <b>Còn phải thu</b> = giá trị gồm VAT − đã thu. Dòng <span style="background:#fdf3e3;padding:1px 6px;border-radius:4px">vàng</span> = quá ${dcNg} ngày (có trong bản nhắc thứ Hai), <span style="background:var(--red-bg);padding:1px 6px;border-radius:4px">đỏ</span> = quá ${dcNg*2} ngày. Xuất hóa đơn xong: nhập <b>số HĐ thật</b> rồi bấm <b>📄 Đã xuất HĐ</b> — app mở công nợ (trừ cọc) và đơn chuyển xuống bảng công nợ.</div>
+    <div class="panel-b" style="overflow-x:auto"><style>#dchdTbl th,#dchdTbl td{padding:4px 6px;font-size:12px}#dchdTbl td:nth-child(3){max-width:200px;white-space:normal;word-break:break-word;line-height:1.25}#dchdTbl .badge{font-size:10.5px;padding:2px 6px}</style><table id="dchdTbl" style="width:100%"><thead><tr><th>Stt</th><th>Mã đơn · Ngày</th><th>Khách hàng</th><th>Trạng thái</th><th>Đã qua</th><th class="num">Giá trị (GT · VAT)</th><th class="num">Đã thu</th><th class="num">Còn phải thu</th><th>Số HĐ → Đã xuất HĐ</th></tr></thead>
+    <tbody>${dcRows||'<tr><td colspan="9" class="empty" style="padding:14px">Mọi đơn bán đều đã xuất hóa đơn ✓</td></tr>'}</tbody></table></div></div>`;
   // Tổng hợp công nợ theo TÊN KHÁCH HÀNG (gộp các khoản CÒN NỢ)
   const _khNhom={};
   active.forEach(x=>{ const k=x.khach_ten||'(Chưa gắn khách)';
@@ -7238,7 +7259,7 @@ async function bhCongNo(host){
         <button class="btn-sm" onclick="bhCnTao()">💾 Lưu</button></div>
       <div id="cnt_info" style="color:var(--muted);font-size:12px;margin-top:6px">Một đơn hàng chỉ có <b>một khoản phải thu</b> — thu nhiều đợt thì chọn lại đúng mã đơn, nhập <b>Ngày thanh toán</b> + <b>Số tiền</b> đợt đó, hệ thống tự cộng dồn và trừ ra số còn lại. Lần đầu sẽ tạo kèm <b>hóa đơn bán nháp</b> để Kế toán hạch toán.</div>
     </div></div>`:'';
-  host.innerHTML=(laQTV()?_bhCnAiBar():'')+formTao+`<div class="note" style="padding:0 0 12px">Công nợ <b>phải thu của khách</b> — tự lên khi đơn hàng được <b>xuất kho</b>, hoặc bấm <b>+ Tạo công nợ</b> ở trên để thu theo đợt. <b>Mã đơn bán · Khách hàng · Giá trị đơn hàng</b> tự cập nhật từ tab <b>Đơn hàng &amp; PO/Hợp đồng</b>; <b>Đã thanh toán / Còn lại</b> theo công nợ hóa đơn (gồm VAT). Sales nhập <b>Ngày thanh toán tiếp theo</b> + <b>Ghi chú</b> rồi bấm Lưu.
+  host.innerHTML=(laQTV()?_bhCnAiBar():'')+formTao+`<div class="note" style="padding:0 0 12px">Công nợ <b>phải thu của khách</b> — tự lên khi đơn hàng được <b>xuất kho</b>, khi chuyển đơn sang <b>Đã xuất hóa đơn</b> (bảng 📄 <b>Đơn chưa xuất hóa đơn</b> ở dưới), hoặc bấm <b>+ Tạo công nợ</b> ở trên để thu theo đợt. Đơn <b>chưa xuất hóa đơn</b> chưa có công nợ nên nằm ở bảng 📄 riêng. <b>Mã đơn bán · Khách hàng · Giá trị đơn hàng</b> tự cập nhật từ tab <b>Đơn hàng &amp; PO/Hợp đồng</b>; <b>Đã thanh toán / Còn lại</b> theo công nợ hóa đơn (gồm VAT). Sales nhập <b>Ngày thanh toán tiếp theo</b> + <b>Ghi chú</b> rồi bấm Lưu.
       Dòng <span style="background:#fdf3e3;padding:1px 6px;border-radius:4px">vàng</span> = còn ≤ 7 ngày tới hạn (cần liên hệ khách), <span style="background:var(--red-bg);padding:1px 6px;border-radius:4px">đỏ</span> = đã quá hạn.</div>
     ${nhac.length?`<div class="note" style="background:#fdf3e3;border-radius:10px;padding:10px 14px;margin:0 0 12px;color:#92620e">
       🔔 <b>${nhac.length} khoản công nợ cần xử lý</b> — ${nhac.filter(x=>x.qua_han).length} quá hạn · ${nhac.filter(x=>x.sap_den_han).length} sắp đến hạn trong 7 ngày.</div>`:''}
@@ -7249,6 +7270,7 @@ async function bhCongNo(host){
         if(tre<=0)b.chua+=con;else if(tre<=30)b.d30+=con;else if(tre<=60)b.d60+=con;else if(tre<=90)b.d90+=con;else b.tren90+=con;});
       return `<div style="display:flex;flex-wrap:wrap;gap:8px;padding:0 0 12px">${[['Chưa đến hạn',b.chua,''],['Trễ 1–30 ngày',b.d30,'#d97706'],['31–60',b.d60,'#d97706'],['61–90',b.d90,'#dc2626'],['>90 ngày',b.tren90,'#dc2626']].map(([l,v,c])=>`<div style="flex:1;min-width:118px;background:var(--surface);border-radius:10px;padding:10px 12px"><div style="color:var(--muted);font-size:12px">${l}</div><div style="font-weight:700;margin-top:2px${c?';color:'+c:''}">${vnd(v)}</div></div>`).join('')}</div>`;})()}
     ${sap10Panel}
+    ${dchdPanel}
     <div class="panel"><div class="panel-h"><h3>Công nợ khách hàng</h3><div class="spacer"></div>
       <span class="num" style="font-weight:700">Còn phải thu: ${vnd(tongCon)}</span></div>
     <div class="panel-b" style="overflow-x:auto"><style>#cnTbl th,#cnTbl td{padding:4px 6px;font-size:11.5px}#cnTbl input,#cnTbl select{font-size:11.5px}#cnTbl .badge{font-size:10.5px;padding:2px 6px}#cnTbl td:nth-child(3){max-width:150px;white-space:normal;word-break:break-word;line-height:1.25}#cnTbl td:nth-child(4){max-width:150px;white-space:normal;word-break:break-word;line-height:1.25}</style><table id="cnTbl" style="width:100%"><thead><tr><th>Stt</th><th>Mã bán · Ngày</th><th>Khách hàng</th><th>Diễn giải</th><th>Số HĐ</th><th class="num">Tổng (GT · VAT)</th><th class="num">Đã TT</th><th class="num">Còn lại</th><th>Ngày TT tiếp · Trạng thái</th><th>Ghi chú</th><th></th></tr></thead>
@@ -7280,6 +7302,26 @@ async function bhCnSetTt(id,tt){       // đổi Trạng thái nhắc (Chờ tha
   }
   const x=(S._bhCnList||[]).find(c=>c.id===id); if(x)x.nhac_trang_thai=tt;
   toast(tt==='XONG'?"Đã đánh dấu Hoàn thành":"Chuyển về Chờ thanh toán","ok");
+  viewBanHang($("#main"));
+}
+/* --- 📄 Đơn chưa xuất hóa đơn (bảng trên bảng công nợ) --- */
+function _bhDchdDemo(){
+  const iso=new Date().toISOString().slice(0,10);
+  return {nguong_ngay:30,ds:(DEMO.don_hang||[]).filter(o=>o.trang_thai!=='DA_XUAT_HD'&&o.trang_thai!=='HOAN_THANH').map(o=>{
+    const truoc=Number(o.tong_tien||0), thue=Math.round(truoc*0.08), tong=truoc+thue, coc=Number(o.thanh_toan_coc||0), ngay=o.ngay||iso;
+    const n=Math.max(0,Math.floor((Date.now()-new Date(ngay))/864e5));
+    return {id:o.id,so:o.so||('DH-'+o.id),ngay,so_ngay:n,khach:o.khach||'',trang_thai:o.trang_thai||'MOI',truoc,thue,tong,da_thu:coc,
+      nguon_da_thu:coc?'cọc trên đơn':null,con_phai_thu:Math.max(tong-coc,0),so_hd_san:null,cong_no_so_tam:false};}).sort((a,b)=>b.so_ngay-a.so_ngay)};
+}
+async function bhDchdXuatHd(id){     // nhập số HĐ thật ngay tại dòng → chuyển đơn sang Đã xuất hóa đơn (app mở công nợ, trừ cọc)
+  const so=(gv('dchd_so_'+id)||'').trim();
+  if(!so)return toast("Nhập SỐ HÓA ĐƠN thật đã xuất cho khách vào ô bên cạnh trước","err");
+  if(!confirm(`Chuyển đơn sang «Đã xuất hóa đơn» với số HĐ ${so}?\n\nApp sẽ mở công nợ phải thu cho đơn (trừ cọc khách đã trả) — đơn rời bảng này và xuống bảng Công nợ khách hàng.`))return;
+  if(S.mode==="live"){
+    try{await api(`/ban-hang/don-hang/${id}/trang-thai`,{method:'PUT',body:JSON.stringify({trang_thai:'DA_XUAT_HD',so_hoa_don:so})});}
+    catch(e){return toast(String(e.detail||e.message||'').replace(/^CHUA_CO_SO_HD: /,''),"err");}
+  }else{const o=(DEMO.don_hang||[]).find(x=>x.id===id);if(o){o.trang_thai='DA_XUAT_HD';o.so_hoa_don=so;}}
+  toast("Đã xuất hóa đơn — công nợ đã mở, xem bảng Công nợ khách hàng","ok");
   viewBanHang($("#main"));
 }
 /* --- AI Upload công nợ (chỉ CEO/ADMIN) --- */
@@ -13045,10 +13087,10 @@ async function ksQhXem(){
   const coGui=(d.noi_dung_cong_no&&d.nhom_cong_no)||(d.noi_dung_po&&d.nhom_po);
   _ktModal("⏰ Nhắc quá hạn hàng tuần",`
     <div style="display:flex;gap:14px;flex-wrap:wrap;font-size:13px">
-      <span>💸 Công nợ phải thu quá hạn: <b>${d.so_cong_no}</b> khoản · <b>${vnd(d.tong_cong_no)}</b></span><span>🚚 PO quá hẹn giao chưa nhận đủ: <b>${d.so_po}</b></span></div>
-    ${khoi('💸 Công nợ phải thu quá hạn',d.noi_dung_cong_no,d.nhom_cong_no)}
+      <span>💸 Công nợ phải thu quá hạn: <b>${d.so_cong_no}</b> khoản · <b>${vnd(d.tong_cong_no)}</b></span><span>📄 Đơn chưa xuất HĐ quá 30 ngày: <b>${d.so_don_chua_hd||0}</b> đơn · <b>${vnd(d.tong_don_chua_hd||0)}</b></span><span>🚚 PO quá hẹn giao chưa nhận đủ: <b>${d.so_po}</b></span></div>
+    ${khoi('💸 Công nợ phải thu quá hạn + 📄 đơn chưa xuất hóa đơn',d.noi_dung_cong_no,d.nhom_cong_no)}
     ${khoi('🚚 PO quá hẹn giao',d.noi_dung_po,d.nhom_po)}
-    <div class="note" style="margin-top:8px;color:var(--muted)">Mốc công nợ = ngày thanh toán tiếp theo đã hẹn với khách (Bán hàng → Công nợ khách), chưa hẹn thì lấy hạn; khoản đánh dấu Hoàn thành không nhắc. PO tính khi đã duyệt, quá ngày hẹn giao và chưa nhận đủ — nhận hàng hoặc sửa ngày hẹn giao để khỏi nhắc. App tự gửi hai bản này mỗi thứ Hai 8h.</div>
+    <div class="note" style="margin-top:8px;color:var(--muted)">Mốc công nợ = ngày thanh toán tiếp theo đã hẹn với khách (Bán hàng → Công nợ khách), chưa hẹn thì lấy hạn; khoản đánh dấu Hoàn thành không nhắc. Đơn bán <b>chưa xuất hóa đơn</b> quá 30 ngày (tính từ ngày đơn) gộp vào cuối bản công nợ — xử lý ở bảng 📄 trong tab Công nợ khách. PO tính khi đã duyệt, quá ngày hẹn giao và chưa nhận đủ — nhận hàng hoặc sửa ngày hẹn giao để khỏi nhắc. App tự gửi hai bản này mỗi thứ Hai 8h.</div>
     ${coGui?`<button class="btn-sm" style="margin-top:10px" onclick="ksQhGui()">📣 Gửi ngay vào nhóm Chat</button>`:''}`);
 }
 async function ksQhGui(){

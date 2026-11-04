@@ -1095,7 +1095,9 @@ def nhac_qua_han_xem(db: Session = Depends(get_db), _=Depends(chi_vai_tro("CEO",
     ng = noi_gui()
     return {"hom_nay": str(bc["hom_nay"]), "so_cong_no": len(bc["cong_no"]), "tong_cong_no": bc["tong_cong_no"],
             "so_po": len(bc["po"]), "noi_dung_cong_no": noi_dung_cong_no(bc) or "", "noi_dung_po": noi_dung_po(bc) or "",
-            "nhom_cong_no": ng["cong_no_nhom"], "nhom_po": ng["po_nhom"], "cong_no": bc["cong_no"], "po": bc["po"]}
+            "nhom_cong_no": ng["cong_no_nhom"], "nhom_po": ng["po_nhom"], "cong_no": bc["cong_no"], "po": bc["po"],
+            "so_don_chua_hd": len(bc["don_chua_hd"]), "tong_don_chua_hd": bc["tong_don_chua_hd"],
+            "don_chua_hd": bc["don_chua_hd"]}
 
 
 @router.post("/nhac-qua-han/gui")

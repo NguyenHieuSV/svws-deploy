@@ -6,6 +6,8 @@ Hai bản tin, thứ Hai từ 8h (giờ VN), mỗi tuần một lần (scheduler
      bỏ khoản đã đánh dấu Hoàn thành / đã thu đủ (cùng luật với bảng Bán hàng › Công nợ khách).
   2. 🚚 PO ĐÃ DUYỆT QUÁ HẸN GIAO, CHƯA NHẬN ĐỦ → nhóm Purchasing Team (GCHAT_WEBHOOK_PURCHASING); chưa khai webhook
      đó thì gửi vào nhóm Duyệt chi để CEO vẫn thấy (ghi rõ trong tin).
+  + (04/11/2026) 📄 ĐƠN BÁN CHƯA XUẤT HÓA ĐƠN quá 30 ngày (app/don_chua_xuat_hd.py) gộp vào CUỐI bản tin công nợ — có đơn
+     mà không có công nợ quá hạn thì bản công nợ vẫn gửi (ghi «không có khoản nào quá hạn»).
 Không ném lỗi ra ngoài: nhắn hỏng không được làm hỏng luồng nền. Chỉ đọc đúng cột cần (test chạy SQLite với bảng tối giản).
 """
 from datetime import date
@@ -151,7 +153,14 @@ def bao_cao(db: Session, hom_nay: date | None = None) -> dict:
     hom_nay = hom_nay or hom_nay_vn()
     cn = cong_no_qua_han(db, hom_nay)
     po = po_qua_hen(db, hom_nay)
-    return {"hom_nay": hom_nay, "cong_no": cn, "tong_cong_no": sum(x["con_lai"] for x in cn), "po": po}
+    try:
+        from .don_chua_xuat_hd import qua_nguong
+        dchd = qua_nguong(db, hom_nay)
+    except Exception:                                                    # noqa: BLE001 — không để hỏng bản công nợ / PO
+        db.rollback()
+        dchd = []
+    return {"hom_nay": hom_nay, "cong_no": cn, "tong_cong_no": sum(x["con_lai"] for x in cn), "po": po,
+            "don_chua_hd": dchd, "tong_don_chua_hd": sum(x["tong"] for x in dchd)}
 
 
 # ---------------------------------------------------------------- nội dung tin
@@ -159,20 +168,52 @@ def _nhan(hom_nay: date, nhan: str) -> str:
     return nhan or f"— tuần {hom_nay:%V/%Y} (tính đến {_dmy(hom_nay)})"
 
 
+TOI_DA_DON_CHUA_HD = 20
+_TT_DON = {"MOI": "Mới", "DANG_THUC_HIEN": "Đang thực hiện", "DA_XUAT": "Đã xuất kho"}
+
+
+def _dmy_s(s) -> str:
+    s = str(s or "")
+    return f"{s[8:10]}/{s[5:7]}/{s[0:4]}" if len(s) >= 10 else "…"
+
+
+def _khoi_don_chua_hd(ds: list[dict]) -> list[str]:
+    """📄 Khối đơn bán chưa xuất hóa đơn quá ngưỡng — nối vào cuối bản tin công nợ."""
+    from .don_chua_xuat_hd import NGUONG_NHAC_NGAY
+    tong, da_thu, con = (sum(x[k] for x in ds) for k in ("tong", "da_thu", "con_phai_thu"))
+    l = [f"📄 *ĐƠN BÁN CHƯA XUẤT HÓA ĐƠN quá {NGUONG_NHAC_NGAY} ngày*: *{len(ds)} đơn · {_vnd(tong)}* (gồm VAT) — "
+         f"đã thu {_vnd(da_thu)} · còn phải thu {_vnd(con)}",
+         "(chưa có hóa đơn nên chưa nằm trong công nợ phải thu; tính từ ngày đơn; bỏ đơn đầu tư – cho thuê)"]
+    for x in ds[:TOI_DA_DON_CHUA_HD]:
+        thu = (f" · đã thu {_vnd(x['da_thu'])}" + (f" ({x['nguon_da_thu']})" if x["nguon_da_thu"] else "")) if x["da_thu"] > 0 else ""
+        hd = f" · ⚠ đã ghi số HĐ {x['so_hd_san']} nhưng trạng thái chưa đổi" if x["so_hd_san"] else ""
+        l.append(f"   – *{x['so']}* · {x['khach'] or '— chưa gắn khách —'} · ngày {_dmy_s(x['ngay'])} → *{x['so_ngay']} ngày* · "
+                 f"{_vnd(x['tong'])}{thu} · còn {_vnd(x['con_phai_thu'])} · {_TT_DON.get(x['trang_thai'], x['trang_thai'])}{hd}")
+    if len(ds) > TOI_DA_DON_CHUA_HD:
+        l.append(f"   … và {len(ds) - TOI_DA_DON_CHUA_HD} đơn khác — xem trong app")
+    l.append("👉 App SVWS → Bán hàng → Công nợ khách → bảng «📄 Đơn chưa xuất hóa đơn»: xuất hóa đơn cho khách rồi nhập số HĐ "
+             "và bấm «Đã xuất HĐ» (app mở công nợ, đơn rời bảng); đơn không còn bán thì xóa / sửa giá trị ở tab Đơn hàng.")
+    return l
+
+
 def noi_dung_cong_no(bc: dict, nhan: str = "") -> str | None:
     ds = bc["cong_no"]
-    if not ds:
+    dchd = bc.get("don_chua_hd") or []
+    if not ds and not dchd:
         return None
     hom_nay = bc["hom_nay"]
+    l = [f"💸 *CÔNG NỢ PHẢI THU QUÁ HẠN* {_nhan(hom_nay, nhan)}"]
+    if not ds:
+        l.append("Không có khoản công nợ nào quá hạn 🎉")
+        return "\n".join(l + [""] + _khoi_don_chua_hd(dchd))
     theo_bac = {}
     for x in ds:
         b = theo_bac.setdefault(x["bac"], [0, 0.0])
         b[0] += 1
         b[1] += x["con_lai"]
     tom = " · ".join(f"{ten}: {theo_bac[ten][0]} ({_vnd(theo_bac[ten][1])})" for _, _, ten in BAC if ten in theo_bac)
-    l = [f"💸 *CÔNG NỢ PHẢI THU QUÁ HẠN* {_nhan(hom_nay, nhan)}",
-         f"Tổng: *{len(ds)} khoản · {_vnd(bc['tong_cong_no'])}* — {tom}",
-         "(mốc = ngày thanh toán tiếp theo đã hẹn với khách, chưa hẹn thì lấy hạn; đã đánh dấu Hoàn thành thì không nhắc)"]
+    l += [f"Tổng: *{len(ds)} khoản · {_vnd(bc['tong_cong_no'])}* — {tom}",
+          "(mốc = ngày thanh toán tiếp theo đã hẹn với khách, chưa hẹn thì lấy hạn; đã đánh dấu Hoàn thành thì không nhắc)"]
     nhom = {}
     for x in ds:
         g = nhom.setdefault(x["khach"], {"khoan": [], "tong": 0.0, "phu_trach": x["phu_trach"], "lau": 0})
@@ -194,6 +235,8 @@ def noi_dung_cong_no(bc: dict, nhan: str = "") -> str | None:
         con = sum(len(g["khoan"]) for _, g in thu_tu[TOI_DA_KHACH:])
         l.append(f"… và {len(thu_tu) - TOI_DA_KHACH} khách khác ({con} khoản) — xem trong app")
     l.append("👉 App SVWS → Bán hàng → Công nợ khách: ghi ngày TT tiếp theo đã hẹn hoặc đánh dấu Hoàn thành để ngừng nhắc.")
+    if dchd:
+        l += [""] + _khoi_don_chua_hd(dchd)
     return "\n".join(l)
 
 
@@ -238,11 +281,12 @@ def gui_tuan(db: Session, nguon: str = "TU_DONG", nguoi=None) -> dict:
     try:
         bc = bao_cao(db)
         kq["so_cong_no"], kq["tong_cong_no"], kq["so_po"] = len(bc["cong_no"]), bc["tong_cong_no"], len(bc["po"])
+        kq["so_don_chua_hd"] = len(bc["don_chua_hd"])
         ng = noi_gui()
         duoi = f" (gửi tay bởi {nguoi})" if nguoi else ""
         nd_cn = noi_dung_cong_no(bc)
         if not nd_cn:
-            kq["cong_no"]["ly_do"] = "Không có công nợ phải thu quá hạn"
+            kq["cong_no"]["ly_do"] = "Không có công nợ phải thu quá hạn (và không có đơn chưa xuất hóa đơn quá 30 ngày)"
         elif not ng["cong_no"]:
             kq["cong_no"]["ly_do"] = "Chưa cấu hình GCHAT_WEBHOOK_DUYET_CHI (hoặc GCHAT_WEBHOOK_CONG_NO)"
         else:
