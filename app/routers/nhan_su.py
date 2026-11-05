@@ -1856,8 +1856,46 @@ def _nv_doc_thoi_diem(s: str) -> datetime:
                             "Thời điểm không hợp lệ (định dạng YYYY-MM-DD HH:MM)")
 
 
-def _nv_ra(r: NhacViec, ten: dict) -> dict:
+def _nv_khoa_map(db, rows) -> dict:
+    """🔒 dòng khóa (mig 168) của các lời nhắc đang hiển thị: id lời nhắc → {khoa_luc, hieu_luc}."""
+    ids = [r.id for r in rows]
+    if not ids:
+        return {}
+    try:
+        from ..models import NhacViecKhoa
+        return {k.nhac_viec_id: {"khoa_id": k.id, "khoa_luc": k.khoa_luc.isoformat(timespec="minutes") if k.khoa_luc else None,
+                                 "hieu_luc": bool(k.da_khoa_tai_khoan) and k.mo_khoa_luc is None}
+                for k in db.query(NhacViecKhoa).filter(NhacViecKhoa.nhac_viec_id.in_(ids)).all()}
+    except Exception:                                                   # noqa: BLE001
+        db.rollback()
+        return {}
+
+
+def _nv_mien_khoa(db) -> set:
+    """Nhân viên là CEO / ADMIN — luật 🔒 không áp dụng, không hiện giờ khóa dự kiến."""
+    try:
+        from ..khoa_nhac_viec import nv_mien
+        return nv_mien(db)
+    except Exception:                                                   # noqa: BLE001
+        return set()
+
+
+def _nv_khoa_du_kien(r, mien: set | None = None) -> str | None:
+    """Giờ sẽ 🔒 khóa nếu việc được giao vẫn không phản hồi (app/khoa_nhac_viec.py); None = không áp dụng."""
+    if mien and r.nhan_vien_id in mien:
+        return None
+    try:
+        from ..khoa_nhac_viec import han_khoa
+        hk = han_khoa(r)
+        return hk.isoformat(timespec="minutes") if hk else None
+    except Exception:                                                   # noqa: BLE001
+        return None
+
+
+def _nv_ra(r: NhacViec, ten: dict, khoa: dict | None = None, mien: set | None = None) -> dict:
     return {"id": r.id, "nguoi_tao": r.nguoi_tao, "nhan_vien_id": r.nhan_vien_id,
+            # 🔒 mig 168: giờ sẽ khóa nếu không phản hồi · dòng khóa đã ghi (nếu có)
+            "khoa_du_kien": _nv_khoa_du_kien(r, mien), "da_khoa": (khoa or {}).get(r.id),
             "tieu_de": r.tieu_de, "thoi_diem": r.thoi_diem.isoformat(timespec="minutes"),
             "han_hoan_thanh": (r.han_hoan_thanh.isoformat(timespec="minutes")
                                if r.han_hoan_thanh else None),
@@ -1964,7 +2002,8 @@ def nhac_viec_cua_toi(db: Session = Depends(get_db),
         (NhacViec.nhan_vien_id == me) | (NhacViec.nguoi_tao == me)
     ).order_by(NhacViec.thoi_diem).all()
     ten = _nv_ten_map(db, rows)
-    ra = [_nv_ra(r, ten) for r in rows]
+    khoa, mien = _nv_khoa_map(db, rows), _nv_mien_khoa(db)
+    ra = [_nv_ra(r, ten, khoa, mien) for r in rows]
     return {"nhan_vien_id": me,
             "nhac_toi": [x for x in ra if x["nhan_vien_id"] == me],
             "toi_nhac": [x for x in ra if x["nguoi_tao"] == me and x["nhan_vien_id"] != me]}
@@ -1981,7 +2020,8 @@ def ds_nhac_viec(trang_thai: str | None = None, nhan_vien_id: int | None = None,
         q = q.filter(NhacViec.nhan_vien_id == nhan_vien_id)
     rows = q.order_by(NhacViec.thoi_diem).limit(400).all()
     ten = _nv_ten_map(db, rows)
-    return {"danh_sach": [_nv_ra(r, ten) for r in rows]}
+    khoa, mien = _nv_khoa_map(db, rows), _nv_mien_khoa(db)
+    return {"danh_sach": [_nv_ra(r, ten, khoa, mien) for r in rows]}
 
 
 @router.put("/nhac-viec/{nv_id}")
@@ -2085,6 +2125,59 @@ def danh_gia_nhac_viec(nv_id: int, data: NhacViecDanhGiaVao, db: Session = Depen
     ghi_audit(db, nd.id, "DANH_GIA", "nhac_viec", nv_id, cu=cu, moi={"ket_qua_diem": diem, "ghi_chu": r.ket_qua_ghi_chu})
     db.commit()
     return {"ok": True, "kpi": _kpi_nv(r)}
+
+
+# ---- 🔒 KHÓA TÀI KHOẢN khi không phản hồi việc được giao (mig 168, app/khoa_nhac_viec.py — anh Hiếu 05/11/2026) ----
+def _wt_xem_het(db, nd) -> bool:
+    """CEO / ADMIN hoặc có quyền XEM Working time → xem mọi người; còn lại chỉ thấy phần của mình."""
+    la_qtv = (nd.vai_tro.ma if nd.vai_tro else "").upper() in ("CEO", "ADMIN")
+    return la_qtv or THU_BAC.get(muc_cua(db, nd.vai_tro_id, MODULE_WT), 0) >= THU_BAC["XEM"]
+
+
+@router.get("/nhac-viec/khoa")
+def ds_khoa_nhac_viec(thang: str | None = None, db: Session = Depends(get_db),
+                      nd: NguoiDung = Depends(lay_nguoi_dung_hien_tai)):
+    """Danh sách lần khóa (+ quy tắc). Quản lý xem cả công ty; nhân viên chỉ thấy của mình."""
+    from ..khoa_nhac_viec import danh_sach_khoa, quy_tac
+    xem_het = _wt_xem_het(db, nd)
+    me = nhan_vien_id_cua(db, nd.id)
+    return {"quy_tac": quy_tac(), "xem_het": xem_het, "nhan_vien_id": me,
+            "danh_sach": danh_sach_khoa(db, None if xem_het else (me or -1), (thang or "").strip()[:7] or None)}
+
+
+@router.post("/nhac-viec/khoa/quet")
+def quet_khoa_nhac_viec(db: Session = Depends(get_db), nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
+    """▶ Quét ngay (CEO / ADMIN): khóa thật những việc đã đủ điều kiện, không chờ tới giờ quét sáng."""
+    from ..khoa_nhac_viec import khoa_khong_phan_hoi
+    kq = khoa_khong_phan_hoi(db, ep=True)
+    ghi_audit(db, nd.id, "QUET_KHOA", "nhac_viec_khoa", None, moi={k: v for k, v in kq.items() if k != "chi_tiet"})
+    db.commit()
+    return kq
+
+
+@router.post("/nhac-viec/khoa/{khoa_id}/mo-khoa")
+def mo_khoa_nhac_viec(khoa_id: int, db: Session = Depends(get_db), nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
+    """🔓 Mở khóa tài khoản (CEO / ADMIN). KPI tháng vẫn = 0."""
+    from ..khoa_nhac_viec import mo_khoa
+    k = mo_khoa(db, khoa_id, nd)
+    if k is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy dòng khóa")
+    return {"ok": True, "mo_khoa_luc": k.mo_khoa_luc.isoformat(timespec="minutes") if k.mo_khoa_luc else None}
+
+
+@router.get("/nhac-viec/kpi-thang")
+def kpi_thang_nhac_viec(thang: str | None = None, db: Session = Depends(get_db),
+                        nd: NguoiDung = Depends(lay_nguoi_dung_hien_tai)):
+    """⭐ KPI tháng theo nhân viên (trung bình KPI lời nhắc có hạn trong tháng; bị 🔒 khóa → 0)."""
+    import re as _re
+    from ..khoa_nhac_viec import kpi_thang
+    now = _gio_vn()
+    thang = (thang or "").strip()[:7] or now.strftime("%Y-%m")
+    if not _re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", thang):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Tháng không hợp lệ (YYYY-MM)")
+    xem_het = _wt_xem_het(db, nd)
+    me = nhan_vien_id_cua(db, nd.id)
+    return {**kpi_thang(db, thang, now, None if xem_het else (me or -1)), "xem_het": xem_het, "nhan_vien_id": me}
 
 
 @router.delete("/nhac-viec/{nv_id}")

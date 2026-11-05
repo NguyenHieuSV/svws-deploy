@@ -246,6 +246,13 @@ def sua_nguoi_dung(
             raise HTTPException(status.HTTP_400_BAD_REQUEST,
                                 "Không thể tự khóa tài khoản của chính mình.")
         u.trang_thai = p.trang_thai
+        if p.trang_thai == "HOAT_DONG" and cu["trang_thai"] != "HOAT_DONG":
+            try:                                            # 🔒 mở tay ở đây → đóng dòng khóa «không phản hồi việc» cho khớp
+                from ..khoa_nhac_viec import dong_khoa_khi_mo_tay
+                with db.begin_nested():
+                    dong_khoa_khi_mo_tay(db, u.id, nd.id)
+            except Exception:                               # noqa: BLE001
+                pass
     ghi_audit(db, nd.id, "SUA", "nguoi_dung", u.id, cu=cu,
               moi={"email": p.email, "vai_tro": p.vai_tro, "trang_thai": p.trang_thai})
     db.commit()

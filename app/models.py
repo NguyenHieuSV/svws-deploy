@@ -742,6 +742,24 @@ class NhacViecBanTin(Base):
     ket_qua: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
+class NhacViecKhoa(Base):
+    """🔒 mig 168: một lời nhắc do người khác giao mà vẫn «Chờ làm» quá N ngày sau hạn → khóa tài khoản + KPI tháng = 0.
+    Mỗi lời nhắc một dòng (UNIQUE) nên khởi động lại không khóa / nhắn trùng. Xem app/khoa_nhac_viec.py."""
+    __tablename__ = "nhac_viec_khoa"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    nhac_viec_id: Mapped[int] = mapped_column(ForeignKey("nhac_viec.id", ondelete="CASCADE"), unique=True)
+    nhan_vien_id: Mapped[int] = mapped_column(ForeignKey("nhan_vien.id", ondelete="CASCADE"))
+    nguoi_dung_id: Mapped[int | None] = mapped_column(ForeignKey("nguoi_dung.id", ondelete="SET NULL"), nullable=True)
+    thang: Mapped[str] = mapped_column(String(7))
+    han: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    khoa_luc: Mapped[datetime] = mapped_column(DateTime)
+    da_khoa_tai_khoan: Mapped[bool] = mapped_column(Boolean, default=False)
+    mo_khoa_luc: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    mo_khoa_boi: Mapped[int | None] = mapped_column(ForeignKey("nguoi_dung.id", ondelete="SET NULL"), nullable=True)
+    chat_da_gui: Mapped[bool] = mapped_column(Boolean, default=False)
+    chat_loi: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
 class ChatDM(Base):
     """Phòng nhắn riêng giữa bot Google Chat và một người — ghi khi họ nhắn bot lần đầu."""
     __tablename__ = "chat_dm"

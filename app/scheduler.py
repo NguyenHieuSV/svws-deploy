@@ -19,6 +19,7 @@ _THANG_SAO_KE = ""     # tháng đã kiểm tra nhắc tải sao kê (ngày 7 h�
 _NGAY_NHAC_TRN = ""    # ngày đã chạy nhắc thi Training (8h–17h VN, trừ Chủ nhật)
 _NGAY_NHAC_BC = ""     # ngày đã chạy nhắc «chưa hoàn thành báo cáo ngày» (sáng hôm sau, giờ VN)
 _NGAY_NHAC_TD = ""     # ngày đã chạy nhắc ⏳ việc chậm tiến độ so với thời gian (mốc bền: giao_viec.nhac_lech_ngay)
+_NGAY_KHOA_NV = ""     # ngày đã quét 🔒 khóa tài khoản không phản hồi việc được giao (mốc bền: bảng nhac_viec_khoa)
 _TUAN_LN = ""          # tuần đã gửi 📉 bản kiểm soát lợi nhuận theo mã (thứ Hai từ 8h VN; mốc bền nằm trong audit_log)
 _TUAN_QH = ""          # tuần đã gửi ⏰ nhắc công nợ phải thu quá hạn + PO quá hẹn giao (thứ Hai từ 8h VN; mốc bền trong audit_log)
 _TUAN_CEO = ""         # tuần đã gửi 📋 báo cáo tuần CEO (thứ Hai từ 8h VN; mốc bền trong audit_log «bao_cao_ceo»)
@@ -122,6 +123,21 @@ def _vong_lap():
                     kq5b = _nhac_td(db)
                     if kq5b.get("da_gui") or kq5b.get("loi"):
                         print(f"[SCHEDULER] ⏳ Nhắc chậm tiến độ: {kq5b}")
+                finally:
+                    db.close()
+            # 🔒 KHÓA TÀI KHOẢN không phản hồi việc được giao quá N ngày sau hạn (anh Hiếu 05/11/2026): mỗi ngày 1 lần từ
+            #    bao_cao_nhac_gio (giờ VN). Mốc bền: bảng nhac_viec_khoa (UNIQUE nhac_viec_id) → khởi động lại không khóa / nhắn trùng.
+            global _NGAY_KHOA_NV
+            g5c = gio_hien_tai()
+            ngay5c = g5c.strftime("%Y-%m-%d")
+            if settings.nhac_viec_khoa_tu_dong and g5c.hour >= settings.bao_cao_nhac_gio and _NGAY_KHOA_NV != ngay5c:
+                _NGAY_KHOA_NV = ngay5c
+                db = SessionLocal()
+                try:
+                    from .khoa_nhac_viec import khoa_khong_phan_hoi as _khoa_nv
+                    kq5c = _khoa_nv(db)
+                    if kq5c.get("so_viec") or kq5c.get("loi"):
+                        print(f"[SCHEDULER] 🔒 Khóa không phản hồi việc được giao: {kq5c}")
                 finally:
                     db.close()
             # 📉 Bản KIỂM SOÁT LỢI NHUẬN THEO MÃ: thứ Hai từ 8h (VN) → nhóm Duyệt chi, mỗi tuần một lần.

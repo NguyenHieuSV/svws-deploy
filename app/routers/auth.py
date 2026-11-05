@@ -17,8 +17,9 @@ def dang_nhap(form: OAuth2PasswordRequestForm = Depends(), db: Session = Depends
     if not nd or not kiem_mat_khau(form.password, nd.mat_khau_hash):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Sai email hoặc mật khẩu")
     if nd.trang_thai != "HOAT_DONG":
-        raise HTTPException(status.HTTP_403_FORBIDDEN,
-                            "Tài khoản đã bị khóa. Liên hệ Admin/CEO để mở lại.")
+        # 🔒 khóa do không phản hồi việc được giao (app/khoa_nhac_viec.py) → đúng câu anh Hiếu chốt; khóa tay → câu chung
+        from ..khoa_nhac_viec import thong_bao_dang_nhap
+        raise HTTPException(status.HTTP_403_FORBIDDEN, thong_bao_dang_nhap(db, nd))
     return TokenRa(access_token=tao_token(nd.id))
 
 
