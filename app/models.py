@@ -1713,6 +1713,12 @@ class KtHoaDonCho(Base):
     tao_luc: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     don_mua_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)      # mig 141: PO gợi ý / kế toán chọn
     po_khop: Mapped[str | None] = mapped_column(String(20), nullable=True)         # SO_HD | TIEN | TIEN_TRUOC (+n) | TAY | BO
+    # mig 169: đọc thư cổng HĐĐT theo nhãn (app/hddt_doc_nhan.py)
+    ky_hieu: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    ncc_mst: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    ma_cqt: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    nguon_doc: Mapped[str | None] = mapped_column(String(12), nullable=True)       # NHAN | AI | REGEX
+    trung_voi_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)    # BO_QUA vì trùng dòng này
 
 
 class BgEmailCho(Base):

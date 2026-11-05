@@ -1659,8 +1659,11 @@ def _rut_hd_email(tieu_de: str, noi_dung: str) -> dict:
         if m:
             ngay = f"{m.group(3)}-{int(m.group(2)):02d}-{int(m.group(1)):02d}"
     tien = 0
+    mst = set(_re.findall(r"\b\d{10}\b|\b\d{13}\b", t))          # mã số thuế / mã CQT 10–13 số liền → không phải tiền
     for m in _re.finditer(r"\d[\d\.,]{3,}", t):
         try:
+            if m.group(0) in mst or _re.fullmatch(r"\d{10}|\d{13}", m.group(0)):
+                continue
             n = int(_re.sub(r"[.,]", "", m.group(0)))
             if 1000 <= n <= 10 ** 12 and n > tien:
                 tien = n
