@@ -5,7 +5,8 @@
 
 KHÔNG tính lại công thức nào — gọi đúng hàm của từng module đang dùng: Overall Financial (số dư ngân hàng, Lãi/Lỗ Record,
 ngân sách thực thu / thực chi), Kiểm soát lợi nhuận (kiem_soat_ln), nhắc quá hạn (nhac_qua_han), đơn chưa xuất hóa đơn
-(don_chua_xuat_hd), việc kế toán treo (ke_toan_quy), tạm ứng mua hàng, kho, báo cáo ngày, tiến độ, sao lưu, sao kê.
+(don_chua_xuat_hd), việc kế toán treo (ke_toan_quy), tạm ứng mua hàng, kho, báo cáo ngày, tiến độ, sao lưu, sao kê,
+cho thuê THEO DỰ ÁN (dau_tu_cho_thue — cùng số với Overall Financial › 🏗 Đầu tư / Khấu hao, không dùng bảng hop_dong_thue).
 Mỗi phần bọc try/except: phần nào hỏng ghi vào `loi`, các phần khác vẫn ra số (không bao giờ trắng trang).
 
 Nơi dùng: Overall Financial › tab 📋 Báo cáo CEO (chỉ CEO; API /tai-chinh/bao-cao-ceo/tuan?lui=n, n tuần lùi) và tin Google
@@ -22,6 +23,7 @@ from .config import settings
 NGAY_SAP_TOI = 30            # «30 ngày tới» cho phải thu / phải chi
 TOI_DA_QUYET_TIN = 8         # số việc cần quyết liệt kê trong tin Chat
 SAO_LUU_TRE_GIO = 30         # sao lưu gần nhất cách quá số giờ này → cảnh báo
+NGAY_SAP_HET_HD = 30         # hợp đồng cho thuê còn ≤ số ngày này → «sắp hết hạn»
 _DON_DANG_LAM = ("MOI", "DANG_THUC_HIEN", "DA_XUAT")
 _MUC_THU_TU = {"Cao": 0, "Vừa": 1, "Thấp": 2}
 
@@ -187,7 +189,7 @@ def _p_no(db: Session, ky: dict) -> dict:
 
 def _p_van_hanh(db: Session, ky: dict) -> dict:
     from .kiem_soat_ln import mien_kiem
-    from .models import BaoGiaForm, CoHoi, DonHang, DonMua, HopDongThue
+    from .models import BaoGiaForm, CoHoi, DonHang, DonMua
     from .nhac_qua_han import po_qua_hen
     hn = ky["hom_nay"]
     rows = [r for r in db.query(DonHang.so, DonHang.tong_tien, DonHang.loai_don)
@@ -226,11 +228,6 @@ def _p_van_hanh(db: Session, ky: dict) -> dict:
     except Exception:                                        # noqa: BLE001
         db.rollback()
         out["treo"] = {}
-    hd = (db.query(HopDongThue.gia_thue, HopDongThue.chu_ky, HopDongThue.ngay_ket_thuc)
-          .filter(HopDongThue.trang_thai == "HIEU_LUC", HopDongThue.ngay_ket_thuc >= hn).all())
-    out.update({"thue_n": len(hd),
-                "thue_thang": sum(_f(h.gia_thue) / (3 if (h.chu_ky or "").upper() == "QUY" else 1) for h in hd),
-                "thue_sap_het": sum(1 for h in hd if h.ngay_ket_thuc <= hn + timedelta(days=30))})
     bg = [t for (t,) in db.query(BaoGiaForm.trang_thai).all()]
     out.update({"bg_cho_duyet": sum(1 for t in bg if t == "CHO_DUYET"), "bg_nhap": sum(1 for t in bg if t == "NHAP")})
     out["co_hoi_mo"] = int(db.query(func.count(CoHoi.id))
@@ -307,8 +304,67 @@ def _p_tuan_thu(db: Session, ky: dict) -> dict:
     return out
 
 
+# ---------------------------------------------------------------- cho thuê THEO DỰ ÁN
+def _thang_truoc(d: date, n: int = 1) -> date:
+    """Ngày 1 của tháng cách tháng của `d` n tháng về trước (n=0 → tháng của d)."""
+    y, m = d.year, d.month - n
+    while m <= 0:
+        y, m = y - 1, m + 12
+    return date(y, m, 1)
+
+
+def tong_hop_cho_thue(du_an: list[dict], hom_nay: date) -> dict:
+    """Gộp số cho thuê theo DỰ ÁN từ danh sách dự án đang theo dõi — mỗi dự án: ma, dt_nay / dt_truoc / dt_truoc2 (doanh thu
+    tháng này · tháng trước · tháng trước nữa, chưa VAT), dt_luy_ke, von, von_chua_thu_hoi, con_ngay_hd, thieu_thong_so.
+    Thuần Python (không CSDL) để test được; _p_cho_thue lấy số từ dau_tu_cho_thue rồi gọi hàm này."""
+    t0, t1, t2 = (_thang_truoc(hom_nay, i) for i in (0, 1, 2))
+    co_dt = [x for x in du_an if _f(x.get("dt_nay")) > 0 or _f(x.get("dt_truoc")) > 0]
+    ma_co_dt = {x["ma"] for x in co_dt}
+    dau_tu = [x for x in du_an if _f(x.get("von")) > 0 and _f(x.get("dt_luy_ke")) <= 0]
+    chua_don = [x["ma"] for x in du_an if _f(x.get("dt_truoc")) <= 0 < _f(x.get("dt_truoc2"))]
+    cn = lambda x: x.get("con_ngay_hd")                                               # noqa: E731
+    sap_het = [x for x in du_an if cn(x) is not None and 0 <= cn(x) <= NGAY_SAP_HET_HD]
+    qua_han = [x for x in du_an if cn(x) is not None and cn(x) < 0 and x["ma"] in ma_co_dt]
+    thieu = [x["ma"] for x in du_an if x.get("thieu_thong_so")]
+    top = sorted((x for x in du_an if _f(x.get("dt_truoc")) > 0), key=lambda x: -_f(x.get("dt_truoc")))[:3]
+    tong = lambda k: sum(_f(x.get(k)) for x in du_an)                                  # noqa: E731
+    return {"thue_n": len(du_an), "thue_co_dt_n": len(co_dt), "thue_dau_tu_n": len(dau_tu),
+            "thue_dt_nay": tong("dt_nay"), "thue_dt_truoc": tong("dt_truoc"), "thue_dt_truoc2": tong("dt_truoc2"),
+            "thue_dt_luy_ke": tong("dt_luy_ke"), "thue_von": tong("von"), "thue_von_chua_thu_hoi": tong("von_chua_thu_hoi"),
+            "thue_thang_nay": f"{t0:%m/%Y}", "thue_thang_truoc": f"{t1:%m/%Y}", "thue_thang_truoc2": f"{t2:%m/%Y}",
+            "thue_chua_don": chua_don, "thue_chua_don_n": len(chua_don),
+            "thue_sap_het": [f"{x['ma']} còn {cn(x)} ngày" for x in sap_het], "thue_sap_het_n": len(sap_het),
+            "thue_qua_han": [f"{x['ma']} quá {-cn(x)} ngày" for x in qua_han], "thue_qua_han_n": len(qua_han),
+            "thue_thieu_ts": thieu, "thue_thieu_ts_n": len(thieu),
+            "thue_top": [f"{x['ma']} {_tr(x.get('dt_truoc'))}" for x in top]}
+
+
+def _p_cho_thue(db: Session, ky: dict) -> dict:
+    """Cho thuê THEO DỰ ÁN (bảng tai_san_cho_thue = mã mẹ; mảng cho thuê không dùng hop_dong_thue) — cùng số với Overall
+    Financial › 🏗 Đầu tư / Khấu hao: dự án đang theo dõi = có vốn đầu tư hoặc có đơn tháng (dau_tu_cho_thue.tong_hop);
+    doanh thu tháng = tổng tiền chưa VAT các đơn tháng của dự án (bỏ đơn đầu tư, cùng don_thang_cua_du_an); hợp đồng
+    (số tháng · ngày bắt đầu → ngày hết hạn) ghi ngay trên dự án."""
+    from .dau_tu_cho_thue import don_thang_cua_du_an, la_don_dau_tu, tong_hop
+    from .models import TaiSanChoThue
+    hn = ky["hom_nay"]
+    th = tong_hop(db, hn)
+    ds_ts = {t.id: t for t in db.query(TaiSanChoThue).all()}
+    thang = [_thang_truoc(hn, i) for i in (0, 1, 2)]
+    du_an = []
+    for r in th["du_an"]:
+        ts = ds_ts.get(r["tai_san_id"])
+        if ts is None:
+            continue
+        dt = [sum(_f(dh.tong_tien) for dh in don_thang_cua_du_an(db, ts, d) if not la_don_dau_tu(dh)) for d in thang]
+        du_an.append({"ma": r["ma"], "dt_nay": dt[0], "dt_truoc": dt[1], "dt_truoc2": dt[2],
+                      "dt_luy_ke": _f(r.get("dt_luy_ke")), "von": _f(r.get("von_dau_tu")),
+                      "von_chua_thu_hoi": _f(r.get("von_chua_thu_hoi")), "con_ngay_hd": r.get("con_ngay_hd"),
+                      "thieu_thong_so": r.get("thieu_thong_so") or []})
+    return tong_hop_cho_thue(du_an, hn)
+
+
 _PHAN = (("tien", _p_tien), ("lai", _p_lai), ("no", _p_no), ("van_hanh", _p_van_hanh),
-         ("con_nguoi", _p_con_nguoi), ("tuan_thu", _p_tuan_thu))
+         ("con_nguoi", _p_con_nguoi), ("tuan_thu", _p_tuan_thu), ("cho_thue", _p_cho_thue))
 
 
 # ---------------------------------------------------------------- ghép ba tầng
@@ -368,7 +424,7 @@ def chi_so(d: dict) -> list[dict]:
 
 def viec_can_quyet(d: dict) -> list[dict]:
     """② Mọi ngoại lệ đang treo — chỉ liệt kê mục có số > 0; Cao → Vừa → Thấp, tiền lớn lên trước."""
-    l, n, v, c, tt = (d.get(k) or {} for k in ("lai", "no", "van_hanh", "con_nguoi", "tuan_thu"))
+    l, n, v, c, tt, ct = (d.get(k) or {} for k in ("lai", "no", "van_hanh", "con_nguoi", "tuan_thu", "cho_thue"))
     treo = v.get("treo") or {}
     q = []
 
@@ -396,7 +452,15 @@ def viec_can_quyet(d: dict) -> list[dict]:
     add("Hóa đơn mua chưa hạch toán", treo.get("hd_chua_ht"), treo.get("hd_chua_ht_tong"), "Thấp", {"page": "ke_toan", "tab": "hoadon"})
     add("Hóa đơn email chờ xác nhận", treo.get("hdc_cho"), 0, "Thấp", {"page": "ke_toan", "tab": "hoadon"})
     add("Khoản phải trả thiếu số hóa đơn", treo.get("cn_thieu_hd"), treo.get("cn_thieu_hd_tong"), "Thấp", {"page": "ncc", "tab": "cong_no"})
-    add("Hợp đồng thuê sắp hết hạn (≤ 30 ngày)", v.get("thue_sap_het"), 0, "Vừa", {"page": "cho_thue", "tab": "hop_dong"})
+    mo_ct = {"page": "overall_financial", "tab": "dautu"}                 # 🏗 bảng theo dự án: hợp đồng · doanh thu tháng · vốn
+    add(f"Hợp đồng cho thuê sắp hết hạn (≤ {NGAY_SAP_HET_HD} ngày)", ct.get("thue_sap_het_n"), 0, "Vừa", mo_ct,
+        " · ".join(ct.get("thue_sap_het") or []))
+    add("Hợp đồng cho thuê đã hết hạn, dự án vẫn có doanh thu", ct.get("thue_qua_han_n"), 0, "Vừa", mo_ct,
+        " · ".join(ct.get("thue_qua_han") or []))
+    add(f"Dự án cho thuê chưa ghi doanh thu tháng {ct.get('thue_thang_truoc') or '—'}", ct.get("thue_chua_don_n"), 0, "Thấp",
+        mo_ct, " · ".join(ct.get("thue_chua_don") or []))
+    add("Dự án cho thuê thiếu thông số hợp đồng (số tháng / ngày bắt đầu)", ct.get("thue_thieu_ts_n"), 0, "Thấp", mo_ct,
+        " · ".join(ct.get("thue_thieu_ts") or []))
     add("Hàng dưới mức tồn tối thiểu", v.get("ton_duoi_min"), 0, "Thấp", {"page": "kho", "tab": "canh_bao"})
     add("Việc giao đang chậm tiến độ", c.get("cham_n"), 0, "Vừa", {"page": "working_time", "tab": "report"},
         " · ".join(c.get("cham_top") or []))
@@ -413,10 +477,11 @@ def viec_can_quyet(d: dict) -> list[dict]:
 
 def sau_khoi(d: dict) -> list[dict]:
     """③ Sáu khối theo nhóm menu — mỗi khối vài dòng chữ đọc được ngay."""
-    t, l, n, v, c, tt = (d.get(k) or {} for k in ("tien", "lai", "no", "van_hanh", "con_nguoi", "tuan_thu"))
+    t, l, n, v, c, tt, ct = (d.get(k) or {} for k in ("tien", "lai", "no", "van_hanh", "con_nguoi", "tuan_thu", "cho_thue"))
     treo = v.get("treo") or {}
     pct = lambda x: "—" if x is None else f"{x}%"                                       # noqa: E731
     bien = l.get("bien")
+    th_tr, th_tr2, th_nay = (ct.get(k) or "—" for k in ("thue_thang_truoc", "thue_thang_truoc2", "thue_thang_nay"))
     return [
         {"ma": "thuong_mai", "icon": "🤝", "ten": "Thương mại", "dong": [
             f"Đơn chốt trong tuần: {l.get('don_n', 0)} đơn · {_tr(l.get('don_gt', 0))} (tuần trước {l.get('don_n_truoc', 0)} đơn · "
@@ -436,8 +501,16 @@ def sau_khoi(d: dict) -> list[dict]:
             f"Tồn kho: {_tr(v.get('ton_gia_tri', 0))} · {v.get('ton_duoi_min', 0)} mặt hàng dưới mức tồn tối thiểu"]},
         {"ma": "dich_vu", "icon": "🏗", "ten": "Dịch vụ", "dong": [
             f"Dự án (mã DA-) đang triển khai: {v.get('du_an_n', 0)} · {_tr(v.get('du_an_gt', 0))}",
-            f"Cho thuê: {v.get('thue_n', 0)} hợp đồng hiệu lực · giá thuê theo hợp đồng ≈ {_tr(v.get('thue_thang', 0))}/tháng · "
-            f"sắp hết hạn (≤ 30 ngày): {v.get('thue_sap_het', 0)}",
+            f"Cho thuê theo dự án: {ct.get('thue_n', 0)} dự án đang theo dõi ({ct.get('thue_co_dt_n', 0)} có doanh thu 2 tháng gần nhất · "
+            f"{ct.get('thue_dau_tu_n', 0)} đang đầu tư, chưa có doanh thu) · vốn đầu tư {_tr(ct.get('thue_von', 0))}, chưa thu hồi "
+            f"{_tr(ct.get('thue_von_chua_thu_hoi', 0))}",
+            f"Doanh thu cho thuê tháng {th_tr}: {_tr(ct.get('thue_dt_truoc', 0))} (tháng {th_tr2}: {_tr(ct.get('thue_dt_truoc2', 0))}) · "
+            f"tháng {th_nay} đến nay: {_tr(ct.get('thue_dt_nay', 0))} · lũy kế {_tr(ct.get('thue_dt_luy_ke', 0))}, chưa VAT"
+            + (f" · lớn nhất: {' · '.join(ct['thue_top'])}" if ct.get("thue_top") else ""),
+            f"Hợp đồng cho thuê: sắp hết hạn (≤ {NGAY_SAP_HET_HD} ngày) {ct.get('thue_sap_het_n', 0)} · đã hết hạn còn doanh thu "
+            f"{ct.get('thue_qua_han_n', 0)} · chưa ghi doanh thu tháng {th_tr}: {ct.get('thue_chua_don_n', 0)}"
+            + (f" ({' · '.join(ct['thue_chua_don'])})" if ct.get("thue_chua_don") else "")
+            + f" · thiếu thông số hợp đồng {ct.get('thue_thieu_ts_n', 0)}",
             f"Đơn chưa xuất hóa đơn: {n.get('dchd_n', 0)} · còn phải thu {_tr(n.get('dchd_con', 0))}"]},
         {"ma": "tai_chinh", "icon": "💰", "ten": "Tài chính", "dong": [
             f"Tiền hiện có {_tr(t.get('hien_co', 0))} (ngân hàng {_tr(t.get('ngan_hang', 0))} · quỹ tiền mặt {_tr(t.get('tien_mat', 0))})",
@@ -508,6 +581,12 @@ def noi_dung_tuan(bc: dict, nguoi=None) -> str:
          f"({phu('dchd')})",
          f"⚙ *Vận hành*: PO quá hẹn giao {so('po')} · {phu('po')}",
          f"👥 *Nhân sự*: báo cáo ngày {so('nhan_su')}{'%' if v('nhan_su') is not None else ''}{ss('nhan_su')} · {phu('nhan_su')}"]
+    ct = (bc.get("so_lieu") or {}).get("cho_thue") or {}
+    if ct:                                                   # 🏗 cho thuê theo dự án (có số liệu mới ghi dòng)
+        l.insert(5, f"🏗 *Cho thuê*: doanh thu tháng {ct.get('thue_thang_truoc')} {_tr(ct.get('thue_dt_truoc'))} "
+                    f"(tháng {ct.get('thue_thang_truoc2')} {_tr(ct.get('thue_dt_truoc2'))}) · {ct.get('thue_co_dt_n', 0)}/{ct.get('thue_n', 0)} "
+                    f"dự án có doanh thu · chưa ghi doanh thu tháng {ct.get('thue_thang_truoc')}: {ct.get('thue_chua_don_n', 0)} · "
+                    f"vốn chưa thu hồi {_tr(ct.get('thue_von_chua_thu_hoi'))}")
     q = bc.get("quyet") or []
     if q:
         l.append(f"✅ *Cần CEO quyết* ({len(q)} việc):")

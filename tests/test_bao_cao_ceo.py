@@ -69,6 +69,32 @@ def test_tuan_sqlite_thieu_bang_van_ra_cau_truc():
     assert "phần chưa tính được" in nd and nd.endswith("in PDF")
 
 
+def _du_an_mau():
+    """Dự án cho thuê như bản thật 05/11/2026 (mọi dự án đều tinh_trang SAN_SANG — không dựa vào trạng thái)."""
+    def da(ma, nay, truoc, truoc2, luy_ke, von=0.0, chua_thu_hoi=0.0, con_ngay=None, thieu=()):
+        return {"ma": ma, "dt_nay": nay, "dt_truoc": truoc, "dt_truoc2": truoc2, "dt_luy_ke": luy_ke, "von": von,
+                "von_chua_thu_hoi": chua_thu_hoi, "con_ngay_hd": con_ngay, "thieu_thong_so": list(thieu)}
+    return [da("DV-COA-NT-2024", 0, 560e6, 635e6, 4.95e9),
+            da("DV-COA-RO-2024", 0, 0, 163e6, 500e6),                                  # tháng 10 chưa có đơn
+            da("DV-COA-REJ-0926", 0, 0, 0, 0, von=2.045e9, chua_thu_hoi=2.045e9, con_ngay=1425),   # đang đầu tư
+            da("DV-X-HET", 30e6, 30e6, 30e6, 900e6, von=500e6, con_ngay=-12),          # hợp đồng hết hạn vẫn thu
+            da("DV-Y-SAP", 0, 20e6, 20e6, 100e6, von=300e6, chua_thu_hoi=200e6, con_ngay=10, thieu=("ngày bắt đầu",)),
+            da("DV-Z-KHONG", 0, 0, 0, 0)]                                               # không vốn, không doanh thu
+
+
+def test_thang_truoc_va_tong_hop_cho_thue():
+    assert bc._thang_truoc(date(2026, 1, 15), 2) == date(2025, 11, 1) and bc._thang_truoc(HOM_NAY, 0) == date(2026, 11, 1)
+    r = bc.tong_hop_cho_thue(_du_an_mau(), HOM_NAY)
+    assert (r["thue_n"], r["thue_co_dt_n"], r["thue_dau_tu_n"]) == (6, 3, 1)
+    assert (r["thue_thang_nay"], r["thue_thang_truoc"], r["thue_thang_truoc2"]) == ("11/2026", "10/2026", "09/2026")
+    assert (r["thue_dt_nay"], r["thue_dt_truoc"], r["thue_dt_truoc2"]) == (30e6, 610e6, 848e6)
+    assert r["thue_von"] == 2.845e9 and r["thue_von_chua_thu_hoi"] == 2.245e9 and r["thue_dt_luy_ke"] == 6.45e9
+    assert r["thue_chua_don"] == ["DV-COA-RO-2024"] and r["thue_chua_don_n"] == 1          # có 09 mà không có 10
+    assert r["thue_sap_het"] == ["DV-Y-SAP còn 10 ngày"] and r["thue_qua_han"] == ["DV-X-HET quá 12 ngày"]
+    assert r["thue_thieu_ts"] == ["DV-Y-SAP"] and r["thue_top"] == ["DV-COA-NT-2024 560 tr", "DV-X-HET 30 tr", "DV-Y-SAP 20 tr"]
+    assert bc.tong_hop_cho_thue([], HOM_NAY)["thue_n"] == 0
+
+
 def _d_mau():
     return {"tien": {"ngan_hang": 1.2e9, "tien_mat": 50e6, "hien_co": 1.25e9, "vao": 300e6, "ra": 200e6, "vao_truoc": 250e6,
                      "ra_truoc": 400e6, "lenh_cho_chi": 100e6, "tra_30": 150e6, "phai_chi_30": 250e6, "thu_30": 500e6, "n_thu_30": 4},
@@ -85,7 +111,8 @@ def _d_mau():
                          "ton_duoi_min": 4,
                          "treo": {"phieu_cho": 3, "phieu_cho_tong": 45e6, "lenh_cho": 2, "lenh_cho_tong": 60e6, "lenh_qua7": 1,
                                   "hd_chua_ht": 7, "hd_chua_ht_tong": 90e6, "hdc_cho": 5, "cn_thieu_hd": 0, "hd_ban_so_tam": 2},
-                         "thue_n": 6, "thue_thang": 120e6, "thue_sap_het": 1, "bg_cho_duyet": 1, "bg_nhap": 4, "co_hoi_mo": 7},
+                         "bg_cho_duyet": 1, "bg_nhap": 4, "co_hoi_mo": 7},
+            "cho_thue": bc.tong_hop_cho_thue(_du_an_mau(), HOM_NAY),
             "con_nguoi": {"nv_n": 22, "nv_thu_viec": 2, "bc_phai": 40, "bc_da": 30, "bc_pct": 75, "bc_pct_truoc": 60,
                           "cham_n": 2, "cham_qua_han": 1, "cham_top": ["Nguyễn A: Lắp bơm"], "nhac_qua_han": 3, "giao_xong_tuan": 5},
             "tuan_thu": {"sao_luu_luc": "2026-11-04 02:00", "sao_luu_ok": True, "audit_n": 120, "audit_nguoi": 6,
@@ -108,7 +135,18 @@ def test_ba_tang_tu_so_lieu_mau():
     assert ten["Chưa có sao kê ngân hàng tháng 10/2026"]["muc"] == "Vừa" and not any("Sao lưu" in t for t in ten)
     assert ten["Việc giao đang chậm tiến độ"]["so"] == 2 and ten["Việc giao đang chậm tiến độ"]["ghi_chu"] == "Nguyễn A: Lắp bơm"
     assert "Khoản phải trả thiếu số hóa đơn" not in ten                                            # 0 → không liệt kê
+    x = ten["Dự án cho thuê chưa ghi doanh thu tháng 10/2026"]                                  # 🏗 theo dự án
+    assert (x["so"], x["muc"], x["ghi_chu"], x["mo"]) == (1, "Thấp", "DV-COA-RO-2024", {"page": "overall_financial", "tab": "dautu"})
+    assert ten["Hợp đồng cho thuê sắp hết hạn (≤ 30 ngày)"]["ghi_chu"] == "DV-Y-SAP còn 10 ngày"
+    assert ten["Hợp đồng cho thuê đã hết hạn, dự án vẫn có doanh thu"]["ghi_chu"] == "DV-X-HET quá 12 ngày"
+    assert ten["Dự án cho thuê thiếu thông số hợp đồng (số tháng / ngày bắt đầu)"]["so"] == 1
     kh = {k["ma"]: k for k in bc.sau_khoi(d)}
+    assert kh["dich_vu"]["dong"][1] == ("Cho thuê theo dự án: 6 dự án đang theo dõi (3 có doanh thu 2 tháng gần nhất · 1 đang đầu tư, "
+                                        "chưa có doanh thu) · vốn đầu tư 2,85 tỷ, chưa thu hồi 2,25 tỷ")
+    assert kh["dich_vu"]["dong"][2] == ("Doanh thu cho thuê tháng 10/2026: 610 tr (tháng 09/2026: 848 tr) · tháng 11/2026 đến nay: 30 tr · "
+                                        "lũy kế 6,45 tỷ, chưa VAT · lớn nhất: DV-COA-NT-2024 560 tr · DV-X-HET 30 tr · DV-Y-SAP 20 tr")
+    assert kh["dich_vu"]["dong"][3] == ("Hợp đồng cho thuê: sắp hết hạn (≤ 30 ngày) 1 · đã hết hạn còn doanh thu 1 · chưa ghi doanh thu "
+                                        "tháng 10/2026: 1 (DV-COA-RO-2024) · thiếu thông số hợp đồng 1")
     assert kh["tai_chinh"]["dong"][0] == "Tiền hiện có 1,25 tỷ (ngân hàng 1,20 tỷ · quỹ tiền mặt 50 tr)"
     assert kh["noi_bo"]["dong"][1] == "Báo cáo ngày: 30/40 lượt = 75% (tuần trước 60%)"
     assert kh["tuan_thu"]["dong"][1] == "Sao kê ngân hàng tháng 10/2026: chưa tải ⚠"
@@ -120,7 +158,11 @@ def test_ba_tang_tu_so_lieu_mau():
     assert "👥 *Nhân sự*: báo cáo ngày 75% (tuần trước 60%) · 30/40 lượt" in nd
     assert f"✅ *Cần CEO quyết* ({len(q)} việc):" in nd
     assert "– [Cao] Công nợ phải thu quá 60 ngày: *2* · 400 tr — Coats 300 tr" in nd
-    assert nd.endswith("_(gửi tay bởi Hiếu)_") and "phần chưa tính được" not in nd
+    assert nd.endswith("_(gửi tay bởi Hiếu)_") and "phần chưa tính được" not in nd and "🏗" not in nd   # chưa có so_lieu
+    nd2 = bc.noi_dung_tuan({**r, "so_lieu": d})
+    assert ("🏗 *Cho thuê*: doanh thu tháng 10/2026 610 tr (tháng 09/2026 848 tr) · 3/6 dự án có doanh thu · "
+            "chưa ghi doanh thu tháng 10/2026: 1 · vốn chưa thu hồi 2,25 tỷ") in nd2
+    assert nd2.index("🏗 *Cho thuê*") > nd2.index("⚙ *Vận hành*") and nd2.index("🏗 *Cho thuê*") < nd2.index("👥 *Nhân sự*")
 
 
 def test_gui_tuan(monkeypatch):
