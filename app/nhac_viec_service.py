@@ -67,6 +67,15 @@ def _mo_ta(r: NhacViec, ten: dict) -> str:
     return "\n".join(d)
 
 
+def _han_khoa(r):
+    """Giờ sẽ 🔒 khóa tài khoản nếu việc được giao vẫn không phản hồi (app/khoa_nhac_viec.py); None = không áp dụng."""
+    try:
+        from .khoa_nhac_viec import han_khoa
+        return han_khoa(r)
+    except Exception:                                            # noqa: BLE001
+        return None
+
+
 def _ten_map(db: Session, ids) -> dict:
     ids = {i for i in ids if i}
     if not ids:
@@ -144,6 +153,10 @@ def gui_ban_tin_ngay(db: Session, ep: bool = False) -> dict:
             dong.append(f"\n⚠️ *{len(qua_han)} việc đã quá hạn*")
         for i, r in enumerate(ds, 1):
             dong.append(f"\n*{i}.* {_mo_ta(r, ten)}")
+            hk = _han_khoa(r)
+            if hk is not None and r in qua_han:                  # 🔒 việc được giao, quá hạn, chưa phản hồi → báo giờ khóa
+                dong.append(f"   🔒 Chưa phản hồi (bấm ▶ Đang làm / ✓ Xong) trước *{hk:%d/%m %H:%M}* → "
+                            "tài khoản bị khóa, KPI tháng = 0.")
         dong.append("\n_Mở app SVWS → Working time & Report → Work Reminder để đánh dấu hoàn thành._")
         kq = gui_toi_nguoi(db, prov, nv.email or "", "\n".join(dong))
         if kq.get("da_gui"):

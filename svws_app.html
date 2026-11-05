@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="vi">
 <head>
-<!-- build: ceo-cho-thue-du-an-2026-11-05 -->
+<!-- build: khoa-nhac-viec-2026-11-05 -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#0f2c44">
@@ -16970,7 +16970,8 @@ function _wrRow(r,kieu){
   return `<tr class="${cls}" style="${xong?'opacity:.55':''}">
     <td style="white-space:nowrap">${_wrGio(r.thoi_diem)}</td>
     <td style="white-space:nowrap">${r.han_hoan_thanh?`<b>${_wrGio(r.han_hoan_thanh)}</b>`:'<span style="color:var(--muted)">—</span>'}
-      ${qua?'<div style="font-size:11px;color:#dc2626">⚠ quá hạn</div>':''}</td>
+      ${qua?'<div style="font-size:11px;color:#dc2626">⚠ quá hạn</div>':''}
+      ${r.da_khoa?`<div style="font-size:11px;color:#dc2626" title="Khóa lúc ${_wrGio(r.da_khoa.khoa_luc)}">🔒 ${r.da_khoa.hieu_luc?'đã khóa tài khoản':'đã khóa (đã mở lại)'} · KPI tháng = 0</div>`:(r.khoa_du_kien&&!xong?`<div style="font-size:11px;color:#b45309" title="Việc được giao chưa phản hồi: không bấm ▶ Đang làm / ✓ Xong trước giờ này → khóa tài khoản, KPI tháng = 0">🔒 khóa lúc ${_wrGio(r.khoa_du_kien)} nếu không phản hồi</div>`:'')}</td>
     <td><b>${_bcEscH(r.tieu_de)}</b>${r.nhom?' <span class="badge b-info">👥 nhắc tất cả</span>':''}${r.ghi_chu?`<div style="font-size:11px;color:var(--muted)">${_bcEscH(r.ghi_chu)}</div>`:''}</td>
     <td style="font-size:12px">${_bcEscH(ai)||'—'}${kieu==='all'&&r.nguoi_tao_ten?`<div style="font-size:11px;color:var(--muted)">nhắc bởi ${_bcEscH(r.nguoi_tao_ten)}</div>`:''}</td>
     <td style="font-size:12px">${_bcEscH(r.ma_lien_quan)||'—'}</td>
@@ -16980,6 +16981,7 @@ function _wrRow(r,kieu){
     <td><span class="badge ${tt[1]}">${tt[0]}</span></td>
     <td>${_wrKpiCell(r)}</td>
     <td style="white-space:nowrap">
+      ${r.trang_thai==='CHO_LAM'?`<button class="btn-sm ghost" title="Phản hồi: đã nhận việc, đang làm" onclick="wrTT(${r.id},'DANG_LAM')">▶</button>`:''}
       ${r.trang_thai!=='XONG'?`<button class="btn-sm ghost" title="Đánh dấu đã xong" onclick="wrTT(${r.id},'XONG')">✓</button>`:`<button class="btn-sm ghost" title="Mở lại việc" onclick="wrTT(${r.id},'CHO_LAM')">↺</button>`}
       <button class="btn-sm ghost" title="Sửa lời nhắc" onclick="wrSua(${r.id})">✏️</button>
       <button class="btn-sm ghost" style="color:var(--red)" title="Xóa lời nhắc" onclick="wrXoa(${r.id})">🗑</button></td></tr>`;
@@ -17141,13 +17143,17 @@ async function wrXoaNhom(nhom){
 }
 async function wtRemind(host){
   const canXem=can("working_time","XEM");
-  let my={nhac_toi:[],toi_nhac:[],nhan_vien_id:null}, ds={danh_sach:[]}, nvs=[];
+  let my={nhac_toi:[],toi_nhac:[],nhan_vien_id:null}, ds={danh_sach:[]}, nvs=[], khoa=null, kpiT=null;
   try{
     if(S.mode==="live"){
       my=await api("/nhan-su/nhac-viec/cua-toi").catch(e=>({nhac_toi:[],toi_nhac:[],nhan_vien_id:null,_loi:e.detail||e.message}));
       nvs=await api("/nhan-su/danh-ba").catch(()=>[]);
       if(canXem)ds=await api("/nhan-su/nhac-viec"+(S.wrLoc?`?trang_thai=${S.wrLoc}`:"")).catch(()=>({danh_sach:[]}));
+      // 🔒 khóa do không phản hồi việc được giao + ⭐ KPI tháng theo nhân viên (mig 168) — máy chủ tự giới hạn theo quyền
+      khoa=await api("/nhan-su/nhac-viec/khoa").catch(()=>null);
+      kpiT=await api("/nhan-su/nhac-viec/kpi-thang"+(S.wrThang?`?thang=${S.wrThang}`:"")).catch(()=>null);
     } else {
+      khoa={quy_tac:{bat:true,sau_ngay:2,ap_dung_tu:'2026-11-05'},xem_het:laQTV(),danh_sach:[]}; kpiT=null;
       if(!DEMO.ns_hoso)DEMO.ns_hoso=_nsDemoHoSo();
       nvs=DEMO.ns_hoso.map(v=>({id:v.id,ma:v.ma,ho_ten:v.ho_ten,chuc_danh:v.chuc_danh}));
       if(!DEMO.wr)DEMO.wr=_wrDemo();
@@ -17195,6 +17201,7 @@ async function wtRemind(host){
    <div class="panel"><div class="panel-h"><h3>🔔 Đặt lời nhắc công việc</h3><div class="spacer"></div>
      <span style="font-size:12px;color:var(--muted)">Nhắc chính mình hoặc nhắc đồng nghiệp — mọi nhân viên đều đặt được.</span></div>
     <div class="panel-b">
+     ${_wrKhoaNote(khoa)}
      <div class="formrow" style="padding-bottom:0"><div class="f" style="flex:1 1 100%"><label>Việc cần làm <span style="color:var(--red)">*</span></label>
        <input id="wr_td" placeholder="VD: Gọi khách xác nhận lịch nghiệm thu cụm RO"></div></div>
      <div class="formrow" style="align-items:end;padding-top:8px">
@@ -17239,8 +17246,56 @@ async function wtRemind(host){
       <div class="panel-b"><table>${_wrThead('Người được nhắc')}
        <tbody>${_wrBody(all,'all')||'<tr><td colspan="11" class="empty">Chưa có lời nhắc nào.</td></tr>'}</tbody></table></div></div>`;
   }
-  host.innerHTML=form+bangToi+bangNguoi+mgr+chatPanel;
+  host.innerHTML=form+bangToi+bangNguoi+_wrKhoaPanel(khoa)+_wrKpiThangPanel(kpiT)+mgr+chatPanel;
 }
+/* 🔒 KHÓA TÀI KHOẢN khi không phản hồi việc được giao (anh Hiếu 05/11/2026, mig 168, app/khoa_nhac_viec.py):
+   việc NGƯỜI KHÁC giao vẫn «Chờ làm» quá N ngày sau hạn → khóa đăng nhập + KPI tháng = 0 + nhắn Chat. CEO/Admin mở khóa. */
+function _wrNgayVN(s){s=String(s||'');return s.length>=10?`${s.slice(8,10)}/${s.slice(5,7)}/${s.slice(0,4)}`:'—';}
+function _wrKhoaNote(k){const qt=(k&&k.quy_tac)||{bat:true,sau_ngay:2,ap_dung_tu:'2026-11-05'};
+  return `<div class="note" style="margin-bottom:8px;color:#b91c1c;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:8px 12px">🔒 <b>Quy định:</b> việc do <b>người khác giao</b> mà người được nhắc <b>không phản hồi</b> (chưa bấm ▶ Đang làm / ✓ Xong) quá <b>${qt.sau_ngay||2} ngày sau hạn</b> → <b>tài khoản bị khóa, KPI tháng = 0</b>, nhắn Google Chat «Tài khoản của bạn bị khóa do không phản hồi việc được giao. KPI tháng = 0.» Áp dụng từ ${_wrNgayVN(qt.ap_dung_tu)} (việc có hạn trước đó tính ${qt.sau_ngay||2} ngày từ ngày áp dụng). Chỉ CEO / Admin mở khóa.${qt.bat===false?' <b>(đang TẮT quét tự động)</b>':''}</div>`;}
+function _wrKhoaPanel(k){
+  if(!k)return '';
+  const ds=k.danh_sach||[];
+  if(!ds.length&&!laQTV())return '';
+  const rows=ds.map(x=>`<tr style="${x.hieu_luc?'':'opacity:.7'}">
+    <td><b>${_bcEscH(x.nhan_vien||'')}</b>${x.email?`<div style="font-size:11px;color:var(--muted)">${_bcEscH(x.email)}</div>`:''}</td>
+    <td>${_bcEscH(x.tieu_de||'')}</td><td style="white-space:nowrap">${_wrGio(x.han)}</td><td style="white-space:nowrap">${_wrGio(x.khoa_luc)}</td>
+    <td style="text-align:center"><b style="color:#dc2626">${_bcEscH(x.thang)}</b></td>
+    <td>${x.da_khoa_tai_khoan?(x.hieu_luc?'<span class="badge b-tc">🔒 đang khóa</span>':`<span class="badge b-ok">🔓 đã mở ${_wrGio(x.mo_khoa_luc)}</span>`):(x.nguoi_dung_id?'<span class="badge b-cho">đã khóa từ trước</span>':'<span class="badge b-cho">chưa có tài khoản</span>')}</td>
+    <td style="font-size:12px">${x.chat_da_gui?'✓ đã nhắn':(x.chat_loi?`<span style="color:#dc2626" title="${_bcEscA(x.chat_loi)}">✗ chưa nhắn được</span>`:'—')}</td>
+    <td style="white-space:nowrap">${x.hieu_luc&&laQTV()?`<button class="btn-sm" onclick="wrMoKhoa(${x.id})">🔓 Mở khóa</button>`:''}</td></tr>`).join('');
+  return `<div class="panel"><div class="panel-h"><h3>🔒 Khóa tài khoản do không phản hồi việc được giao (${ds.length})</h3><div class="spacer"></div>
+     ${laQTV()?'<button class="btn-sm ghost" title="Khóa ngay những việc đã đủ điều kiện, không chờ giờ quét sáng" onclick="wrKhoaQuet()">▶ Quét ngay</button>':''}</div>
+    <div class="panel-b"><table><thead><tr><th>Nhân viên</th><th>Việc được giao</th><th>Hạn</th><th>Khóa lúc</th><th>KPI tháng = 0</th><th>Tài khoản</th><th>Chat</th><th></th></tr></thead>
+     <tbody>${rows||'<tr><td colspan="8" class="empty">Chưa có ai bị khóa. Máy chủ tự quét mỗi sáng; việc sắp bị khóa có ghi giờ 🔒 ở cột Hạn hoàn thành.</td></tr>'}</tbody></table></div></div>`;}
+function _wrKpiThangPanel(t){
+  if(!t)return '';
+  const ds=t.danh_sach||[];
+  const rows=ds.map(x=>`<tr><td><b>${_bcEscH(x.ho_ten)}</b>${x.chuc_danh?`<div style="font-size:11px;color:var(--muted)">${_bcEscH(x.chuc_danh)}</div>`:''}</td>
+    <td style="text-align:center">${x.so_viec}</td><td style="text-align:center">${x.so_xong}</td>
+    <td style="text-align:center">${x.so_qua_han}${x.chua_phan_hoi?`<div style="color:#dc2626;font-size:11px">${x.chua_phan_hoi} chưa phản hồi</div>`:''}</td>
+    <td style="text-align:center">${x.kpi_tb!=null?`<b style="color:${_wrKpiMau(x.kpi_tb)}">${x.kpi_tb}%</b><div style="font-size:11px;color:var(--muted)">${x.so_da_cham} việc chấm được</div>`:'<span style="color:var(--muted)">—</span>'}</td>
+    <td style="text-align:center">${x.kpi!=null?`<b style="color:${_wrKpiMau(x.kpi)};font-size:14px">${x.kpi}%</b>`:'<span style="color:var(--muted)">—</span>'}${x.ly_do?`<div style="font-size:11px;color:#dc2626">${_bcEscH(x.ly_do)}</div>`:''}</td></tr>`).join('');
+  return `<div class="panel"><div class="panel-h"><h3>⭐ KPI tháng theo nhân viên${t.xem_het?'':' (của tôi)'}</h3><div class="spacer"></div>
+     <input type="month" value="${_bcEscA(t.thang||'')}" data-nocbx style="max-width:150px" onchange="S.wrThang=this.value;wtRemind($('#wtBody'))"></div>
+    <div class="panel-b"><table><thead><tr><th>Nhân viên</th><th>Việc có hạn trong tháng</th><th>Xong</th><th>Quá hạn</th><th>⭐ KPI TB</th><th>KPI tháng</th></tr></thead>
+     <tbody>${rows||'<tr><td colspan="6" class="empty">Không có lời nhắc nào có hạn trong tháng này.</td></tr>'}</tbody></table>
+     <div class="note" style="margin-top:8px;color:var(--muted)">KPI tháng = trung bình ⭐ KPI các việc có hạn trong tháng (việc hủy / chưa đến hạn không tính). Có việc bị 🔒 khóa do không phản hồi → KPI tháng = <b>0</b> dù các việc khác đạt.</div></div></div>`;}
+async function wrMoKhoa(id){
+  if(S.mode!=="live")return toast("Chế độ demo","err");
+  if(!confirm("Mở khóa tài khoản này? (KPI tháng vẫn = 0)"))return;
+  try{await api(`/nhan-su/nhac-viec/khoa/${id}/mo-khoa`,{method:'POST'});toast("Đã mở khóa tài khoản","ok");}catch(e){return toast(e.detail||e.message,"err");}
+  wtRemind($('#wtBody'));}
+async function wrKhoaQuet(){
+  if(S.mode!=="live")return toast("Chế độ demo","err");
+  if(!confirm("Quét ngay sẽ KHÓA THẬT tài khoản của người có việc được giao quá hạn mà chưa phản hồi đủ số ngày quy định, ghi KPI tháng = 0 và nhắn Chat. Tiếp tục?"))return;
+  let r; try{r=await api("/nhan-su/nhac-viec/khoa/quet",{method:'POST'});}catch(e){return toast(e.detail||e.message,"err");}
+  const ct=(r.chi_tiet||[]).map(x=>`<li><b>${_bcEscH(x.nhan_vien)}</b> — ${_bcEscH(x.tieu_de)} (hạn ${_wrGio(x.han)}) · ${_bcEscH(x.tai_khoan)} · KPI tháng ${_bcEscH(x.thang)} = 0 · Chat ${x.chat_da_gui?'✓':'✗'}</li>`).join('');
+  _ktModal("🔒 Kết quả quét",`<div style="font-size:13px;line-height:1.7">${r.bo_qua?`<div style="color:#d97706">${_bcEscH(r.bo_qua)}</div>`:''}
+    <div>Việc đủ điều kiện: <b>${r.so_viec||0}</b> · tài khoản vừa khóa: <b style="color:#dc2626">${r.da_khoa_tk||0}</b> · chưa có tài khoản: ${r.khong_tk||0} · đã khóa từ trước: ${r.da_khoa_truoc||0} · CEO/Admin miễn: ${r.mien||0} · Chat đã nhắn: ${r.chat_da_gui||0}</div>
+    ${ct?`<ul style="margin:8px 0 0 18px">${ct}</ul>`:'<div style="color:var(--muted)">Không có việc nào tới giờ khóa.</div>'}
+    ${(r.loi&&r.loi.length)?`<div style="margin-top:8px;color:#dc2626"><b>Lỗi gửi tin:</b><div style="white-space:pre-wrap">${_bcEscH(r.loi.join('\n'))}</div></div>`:''}</div>`);
+  wtRemind($('#wtBody'));}
 async function wrChatThu(){
   if(S.mode!=="live")return toast("Chế độ demo — không gửi thật","err");
   const em=(prompt("Nhập email Google Chat để gửi thử.\n(Để trống = tài khoản của bạn):","")||"").trim();
