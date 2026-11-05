@@ -1190,14 +1190,12 @@ def thong_ke_thu_chi(tu_ngay: str | None = None, den_ngay: str | None = None,
 
 
 def _rut_link_tra_cuu(nd):
-    """Tìm link tra cứu HĐĐT + mã tra cứu trong thân thư (MISA meInvoice/VNPT/Viettel…)."""
+    """Tìm link tra cứu HĐĐT + mã tra cứu trong thân thư (MISA meInvoice/VNPT/Viettel/EasyInvoice…).
+    Link: bỏ link quảng cáo (EasyPIT…) và link chỉ là trang chủ — app/hddt_doc_nhan.link_tra_cuu."""
     import re as _re
+    from ..hddt_doc_nhan import link_tra_cuu as _ltc
     nd = nd or ""
-    url = None
-    for u in _re.findall(r"https?://[^\s<>\"')\]]+", nd):
-        if _re.search(r"tra-?cuu|invoice|hoa-?don|hddt", u, _re.I):
-            url = u.rstrip(".,;")[:300]
-            break
+    url = _ltc(nd)
     ma = None
     m2 = _re.search(r"m[ãa]\s*(?:s[ốo](?!\s*thu[ếe])|tra\s*c[ứu]u)\s*[:：]?\s*([A-Za-z0-9_\-]{6,30})",
                     nd, _re.I)
@@ -1269,7 +1267,8 @@ def _khop_ncc(ds_ncc, ten_ai, email=None):
 
 # ---- 📤 mig 145: hóa đơn BÁN của CHÍNH CÔNG TY đến qua cổng HĐĐT (MISA meInvoice…) — không phải hóa đơn mua ----
 _TEN_CTY_MINH = ("song viet", "songviet", "svws")
-_MIEN_CONG_HDDT = ("meinvoice", "misa", "vnpt-invoice", "sinvoice", "viettel", "einvoice", "bkav", "cyberbill", "fpt", "mobifone")
+_MIEN_CONG_HDDT = ("meinvoice", "misa", "vnpt-invoice", "sinvoice", "viettel", "einvoice", "bkav", "cyberbill", "fpt", "mobifone",
+                   "easyinvoice", "softdreams")          # EasyInvoice (Softdreams): hoadon-noreply@easyinvoice.vn / @softdreams.vn
 
 
 def _la_cong_ty_minh(ten) -> bool:
@@ -1407,14 +1406,20 @@ def quet_hoa_don_mua_email(tu_ngay: date | None = None, db: Session = Depends(ge
     ds_po = db.query(_DMq).filter(_DMq.trang_thai != "TU_CHOI").all()
     po_da_gan = {x.don_mua_id for x in db.query(KtHoaDonCho).filter_by(trang_thai="CHO_XAC_NHAN").all() if x.don_mua_id}
     from ..config import settings as _st_mua
+    from ..hddt_doc_nhan import doc_nhan as _doc_nhan, bo_mst_lam_tien as _bo_mst
     mien_cty = ((_st_mua.email_from_ncc or _st_mua.email_from or "").split("@")[-1] or "").strip().lower()
-    them = trung = dung_ai = khong_khop = con_lai = hd_ban = 0
+    ncc_theo_mst = {}
+    for n in ds_ncc:
+        k = (n.ma_so_thue or "").strip().replace("-", "")
+        if k and k not in ncc_theo_mst:
+            ncc_theo_mst[k] = n.id
+    them = trung = dung_ai = khong_khop = con_lai = hd_ban = doc_nhan_n = trung_hd = sua_cu = 0
     GIOI_HAN = 25
     for m in thu:
         mid = (m.get("message_id") or "").strip()[:250] or None
         cu = db.query(KtHoaDonCho).filter_by(message_id=mid).first() if mid else None
         if cu is not None:
-            # 🔗 bổ sung link tra cứu / ngày HĐ cho bản ghi cũ còn thiếu (không đụng số tiền)
+            # 🔗 bổ sung link tra cứu / ngày HĐ cho bản ghi cũ còn thiếu; 📧 đọc lại theo NHÃN để sửa tiền 0 / tiền = MST
             if cu.trang_thai == "CHO_XAC_NHAN":
                 nd_cu = m.get("noi_dung") or ""
                 if not getattr(cu, "link_tra_cuu", None):
@@ -1423,6 +1428,8 @@ def quet_hoa_don_mua_email(tu_ngay: date | None = None, db: Session = Depends(ge
                         cu.link_tra_cuu, cu.ma_tra_cuu = l0, ma0
                 if cu.ngay_hd is None:
                     cu.ngay_hd = _rut_ngay_hd(nd_cu)
+                if _hdc_bo_sung_nhan(cu, _doc_nhan(cu.tieu_de or m.get("tieu_de") or "", nd_cu), nd_cu, ncc_theo_mst):
+                    sua_cu += 1
             trung += 1
             continue
         if mid and db.query(_KtGkM).filter_by(message_id=mid).first() is not None:
@@ -1442,11 +1449,27 @@ def quet_hoa_don_mua_email(tu_ngay: date | None = None, db: Session = Depends(ge
             continue
         nd_thu = m.get("noi_dung") or ""
         link_tc, ma_tc = _rut_link_tra_cuu(nd_thu)
-        info = doc_hoa_don_email(tieu_de, nd_thu)
-        if info:
-            dung_ai += 1
+        # 📧 thư cổng HĐĐT (EasyInvoice / MISA / VNPT…) đọc THEO NHÃN trước — đủ số HĐ + tổng tiền thì khỏi nhờ AI
+        nhan = _doc_nhan(tieu_de, nd_thu) or {}
+        link_tc, ma_tc = (nhan.get("link_tra_cuu") or link_tc), (nhan.get("ma_tra_cuu") or ma_tc)
+        nguon_doc = None
+        if nhan.get("du"):
+            info = {k: nhan.get(k) for k in ("ncc_ten", "nguoi_mua", "so_hoa_don", "ngay", "so_tien",
+                                               "tien_truoc_thue", "tien_thue", "mo_ta")}
+            nguon_doc = "NHAN"
+            doc_nhan_n += 1
         else:
-            info = _rut_hd_email(tieu_de, nd_thu)
+            info = doc_hoa_don_email(tieu_de, nd_thu)
+            if info:
+                dung_ai += 1
+                nguon_doc = "AI"
+            else:
+                info = _rut_hd_email(tieu_de, nd_thu)
+                nguon_doc = "REGEX"
+            info = _bo_mst(info, nd_thu)                                   # MST 10 số đọc nhầm thành tiền → bỏ
+            for k in ("ncc_ten", "so_hoa_don", "ngay", "so_tien", "tien_truoc_thue", "tien_thue"):
+                if not info.get(k) and nhan.get(k):
+                    info[k] = nhan[k]
         if not float(info.get("so_tien") or 0):
             for tep in (m.get("dinh_kem") or []):
                 info2 = doc_hoa_don_tep(tep.get("data") or b"", tep.get("content_type") or "",
@@ -1489,20 +1512,32 @@ def quet_hoa_don_mua_email(tu_ngay: date | None = None, db: Session = Depends(ge
             tk_ai = "632" if any(w in nd_kd for w in
                                  ("hoa chat", "vat tu", "thiet bi", "hang hoa", "vat lieu",
                                   "pac", "naoh", "polymer", "loc", "bom")) else "642"
-        # 🏢 NCC: ưu tiên email trùng hồ sơ → khớp theo tên AI đọc / tên miền riêng
-        ncc_id = tin_cay.get(nguoi) or _khop_ncc(ds_ncc, str(info.get("ncc_ten") or ""), nguoi)
+        # 🏢 NCC: ưu tiên email trùng hồ sơ → MST bên bán trùng hồ sơ (thư cổng HĐĐT) → khớp theo tên AI đọc / tên miền riêng
+        mst_ban = (nhan.get("ncc_mst") or "").replace("-", "")
+        ncc_id = tin_cay.get(nguoi) or ncc_theo_mst.get(mst_ban) or _khop_ncc(ds_ncc, str(info.get("ncc_ten") or ""), nguoi)
+        so_hd_moi = (str(info.get("so_hoa_don") or "")[:60]) or None
+        # 🔁 cùng hóa đơn đã có trong hàng chờ (cổng gửi 2 thư: báo phát hành + gửi hóa đơn) → bổ sung dòng cũ, không thêm dòng
+        cu_trung = _hdc_tim_trung(db, ncc_id, info.get("ncc_ten"), mst_ban, so_hd_moi, nhan.get("ky_hieu"))
+        if cu_trung is not None:
+            if cu_trung.trang_thai == "CHO_XAC_NHAN":
+                _hdc_bo_sung_nhan(cu_trung, nhan, nd_thu, ncc_theo_mst, tong=tong, truoc=truoc, ts=ts, ngay_hd=ngay_hd,
+                                  link_tc=link_tc, ma_tc=ma_tc, ncc_id=ncc_id)
+            trung_hd += 1
+            continue
         _moi = KtHoaDonCho(
             tk_chi_phi=tk_ai,
             nha_cung_cap_id=ncc_id,
             tu_email=(m.get("tu_email") or "")[:160] or None,
             ncc_ten=(str(info.get("ncc_ten") or "")[:200]) or None,
-            so_hoa_don=(str(info.get("so_hoa_don") or "")[:60]) or None,
+            so_hoa_don=so_hd_moi,
             ngay_hd=ngay_hd,
             tien_truoc_thue=Decimal(str(int(truoc))), thue_suat=Decimal(str(int(ts))),
             tong_tien=Decimal(str(int(tong))),
             mo_ta=((("⚠ VAT ước 8% từ tổng — kiểm tra lại · " if vat_uoc else "")
                     + str(info.get("mo_ta") or ""))[:300]) or None,
             link_tra_cuu=link_tc, ma_tra_cuu=ma_tc,
+            ky_hieu=(nhan.get("ky_hieu") or None), ncc_mst=(mst_ban or None), ma_cqt=(nhan.get("ma_cqt") or None),
+            nguon_doc=nguon_doc,
             tieu_de=tieu_de or None, message_id=mid, tao_luc=gio_hien_tai())
         db.add(_moi)
         _dm, _cach, _n = _hdc_do_po(db, ncc_id, _moi.so_hoa_don, tong, truoc, ngay_hd, ds_po, po_da_gan)   # 🔗 mig 141
@@ -1522,10 +1557,140 @@ def quet_hoa_don_mua_email(tu_ngay: date | None = None, db: Session = Depends(ge
             if _dm is not None:
                 _hdc_gan_po(db, r0, _dm, _cach, _n)
                 po_da_gan.add(_dm.id)
+    gop = _hdc_gop_trung(db)                                   # 🔁 dòng trùng còn sót (cùng NCC + số HĐ) → BO_QUA, trỏ về dòng giữ
     db.commit()
     return {"ok": True, "che_do": prov.ten, "thu_moi": len(thu), "tu_ngay": str(moc),
-            "da_them": them, "trung_bo_qua": trung, "ai": dung_ai, "hd_ban": hd_ban,
+            "da_them": them, "trung_bo_qua": trung, "ai": dung_ai, "doc_nhan": doc_nhan_n, "hd_ban": hd_ban,
+            "trung_hd": trung_hd + gop, "sua_cu": sua_cu,
             "khong_khop": khong_khop, "con_lai": con_lai}
+
+
+# ---- 📧 đọc thư cổng HĐĐT theo nhãn (mig 169, app/hddt_doc_nhan.py — anh Hiếu 05/11/2026) ----
+def _hdc_so_hd_chuan(so) -> str:
+    return str(so or "").strip().lstrip("0").lower()
+
+
+def _hdc_cung_ncc(r, ncc_id, ncc_ten, mst) -> bool:
+    """Hai dòng cùng bên bán: cùng MST, hoặc cùng hồ sơ NCC, hoặc cùng tên (đã bỏ dấu + từ pháp lý)."""
+    r_mst = (getattr(r, "ncc_mst", None) or "").replace("-", "")
+    if mst and r_mst:
+        return mst == r_mst
+    if ncc_id and r.nha_cung_cap_id:
+        return r.nha_cung_cap_id == ncc_id
+    g1, g2 = _ten_goc_ncc(ncc_ten or ""), _ten_goc_ncc(r.ncc_ten or "")
+    return bool(g1) and bool(g2) and (g1 == g2 or g1 in g2 or g2 in g1)
+
+
+def _hdc_tim_trung(db, ncc_id, ncc_ten, mst, so_hd, ky_hieu):
+    """Dòng hàng chờ đã có của CÙNG hóa đơn (cùng bên bán + số HĐ; ký hiệu khác nhau thì là hóa đơn khác)."""
+    from ..models import KtHoaDonCho
+    so = _hdc_so_hd_chuan(so_hd)
+    if not so or not (ncc_id or mst or ncc_ten):
+        return None
+    for r in (db.query(KtHoaDonCho).filter(KtHoaDonCho.trang_thai != "BO_QUA").order_by(KtHoaDonCho.id).all()):
+        if _hdc_so_hd_chuan(r.so_hoa_don) != so:
+            continue
+        kh = getattr(r, "ky_hieu", None)
+        if ky_hieu and kh and ky_hieu.upper() != kh.upper():
+            continue
+        if _hdc_cung_ncc(r, ncc_id, ncc_ten, mst):
+            return r
+    return None
+
+
+def _hdc_tien_nghi(r) -> bool:
+    """Tiền đáng ngờ: 0 đ, hay ≥ 1 tỷ mà bằng đúng một mã số thuế 10 số (bản thật 05/11: 13 dòng EasyInvoice)."""
+    t = int(float(r.tong_tien or 0))
+    return t <= 0 or (t >= 10 ** 9 and len(str(t)) in (10, 13))
+
+
+def _hdc_bo_sung_nhan(r, nhan, noi_dung, ncc_theo_mst, tong=None, truoc=None, ts=None, ngay_hd=None,
+                      link_tc=None, ma_tc=None, ncc_id=None) -> bool:
+    """Điền vào dòng chờ đang thiếu / sai: tiền (khi 0 hay = MST), ngày, link, mã tra cứu, ký hiệu, MST, NCC theo MST.
+    Không đụng dòng đã ghi / bỏ qua, không ghi đè tiền hợp lệ kế toán có thể đã sửa tay. → True khi có đổi."""
+    nhan = nhan or {}
+    doi = False
+    if r.trang_thai != "CHO_XAC_NHAN":
+        return False
+    t_moi = tong if tong is not None else nhan.get("so_tien")
+    if _hdc_tien_nghi(r) and t_moi and float(t_moi) > 0:
+        tr = truoc if truoc is not None else nhan.get("tien_truoc_thue")
+        th = nhan.get("tien_thue")
+        if not tr and th is not None and float(t_moi) >= float(th):
+            tr = float(t_moi) - float(th)
+        if not tr:
+            tr = round(float(t_moi) / 1.08)
+        suat = ts if ts is not None else (nhan.get("thue_suat") or round((float(t_moi) - float(tr)) / float(tr) * 100) if tr else 8)
+        r.tong_tien = Decimal(str(int(float(t_moi))))
+        r.tien_truoc_thue = Decimal(str(int(float(tr))))
+        r.thue_suat = Decimal(str(int(suat if 0 <= int(suat) <= 20 else 8)))
+        r.mo_ta = ("📧 đọc lại theo nhãn thư cổng HĐĐT · " + str(r.mo_ta or "").replace("⚠ VAT ước 8% từ tổng — kiểm tra lại · ", ""))[:300]
+        doi = True
+    if r.ngay_hd is None:
+        ng = ngay_hd
+        if ng is None and nhan.get("ngay"):
+            try:
+                ng = date.fromisoformat(str(nhan["ngay"])[:10])
+            except ValueError:
+                ng = None
+        if ng is not None:
+            r.ngay_hd, doi = ng, True
+    lk = link_tc or nhan.get("link_tra_cuu")
+    if lk and (not r.link_tra_cuu or any(b in (r.link_tra_cuu or "") for b in ("easy-pit",))):
+        r.link_tra_cuu, doi = lk[:300], True
+    mt = ma_tc or nhan.get("ma_tra_cuu")
+    if mt and not r.ma_tra_cuu:
+        r.ma_tra_cuu, doi = mt[:40], True
+    if nhan.get("ky_hieu") and not getattr(r, "ky_hieu", None):
+        r.ky_hieu, doi = nhan["ky_hieu"][:20], True
+    if nhan.get("ma_cqt") and not getattr(r, "ma_cqt", None):
+        r.ma_cqt, doi = nhan["ma_cqt"][:40], True
+    mst = (nhan.get("ncc_mst") or "").replace("-", "")
+    if mst and not getattr(r, "ncc_mst", None):
+        r.ncc_mst, doi = mst[:20], True
+    if not r.ncc_ten and nhan.get("ncc_ten"):
+        r.ncc_ten, doi = nhan["ncc_ten"][:200], True
+    if not r.nha_cung_cap_id:
+        nid = ncc_id or (ncc_theo_mst or {}).get(mst)
+        if nid:
+            r.nha_cung_cap_id, doi = nid, True
+    if not r.so_hoa_don and nhan.get("so_hoa_don"):
+        r.so_hoa_don, doi = str(nhan["so_hoa_don"])[:60], True
+    if doi and getattr(r, "nguon_doc", None) in (None, "AI", "REGEX") and nhan.get("du"):
+        r.nguon_doc = "NHAN"
+    return doi
+
+
+def _hdc_gop_trung(db) -> int:
+    """Hàng chờ CHO_XAC_NHAN trùng nhau (cùng bên bán + số HĐ, cùng ký hiệu nếu có): giữ dòng đầu (id nhỏ, hay dòng có tiền),
+    dòng sau → BO_QUA + trung_voi_id; tiền / ngày / link thiếu ở dòng giữ lấy từ dòng bỏ. → số dòng đã gộp."""
+    from ..models import KtHoaDonCho
+    rows = db.query(KtHoaDonCho).filter_by(trang_thai="CHO_XAC_NHAN").order_by(KtHoaDonCho.id).all()
+    n = 0
+    for i, a in enumerate(rows):
+        if a.trang_thai != "CHO_XAC_NHAN" or not _hdc_so_hd_chuan(a.so_hoa_don):
+            continue
+        for b in rows[i + 1:]:
+            if b.trang_thai != "CHO_XAC_NHAN" or _hdc_so_hd_chuan(b.so_hoa_don) != _hdc_so_hd_chuan(a.so_hoa_don):
+                continue
+            ka, kb = getattr(a, "ky_hieu", None), getattr(b, "ky_hieu", None)
+            if ka and kb and ka.upper() != kb.upper():
+                continue
+            if not _hdc_cung_ncc(b, a.nha_cung_cap_id, a.ncc_ten, (getattr(a, "ncc_mst", None) or "").replace("-", "")):
+                continue
+            giu, bo = (a, b) if (not _hdc_tien_nghi(a) or _hdc_tien_nghi(b)) else (b, a)
+            for k in ("ngay_hd", "link_tra_cuu", "ma_tra_cuu", "ky_hieu", "ncc_mst", "ma_cqt", "ncc_ten", "nha_cung_cap_id"):
+                if not getattr(giu, k, None) and getattr(bo, k, None):
+                    setattr(giu, k, getattr(bo, k))
+            if _hdc_tien_nghi(giu) and not _hdc_tien_nghi(bo):
+                giu.tong_tien, giu.tien_truoc_thue, giu.thue_suat = bo.tong_tien, bo.tien_truoc_thue, bo.thue_suat
+            bo.trang_thai = "BO_QUA"
+            bo.trung_voi_id = giu.id
+            bo.mo_ta = (f"🔁 Trùng với dòng #{giu.id} (cổng HĐĐT gửi 2 thư) · " + str(bo.mo_ta or ""))[:300]
+            n += 1
+            if bo is a:
+                break
+    return n
 
 
 @router.get("/hoa-don-cho")
@@ -1566,6 +1731,9 @@ def ds_hoa_don_cho(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM
                     "tk_chi_phi": getattr(r, "tk_chi_phi", None),
                     "link_tra_cuu": getattr(r, "link_tra_cuu", None),
                     "ma_tra_cuu": getattr(r, "ma_tra_cuu", None),
+                    "ky_hieu": getattr(r, "ky_hieu", None), "ncc_mst": getattr(r, "ncc_mst", None),     # mig 169
+                    "ma_cqt": getattr(r, "ma_cqt", None), "nguon_doc": getattr(r, "nguon_doc", None),
+                    "trung_voi_id": getattr(r, "trung_voi_id", None),
                     "don_hang_id": getattr(r, "don_hang_id", None),
                     "don_mua_id": r.don_mua_id, "po_khop": r.po_khop,
                     "po_so": (po.so or f"PO-{po.id}") if po else None,

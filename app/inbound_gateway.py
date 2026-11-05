@@ -42,8 +42,12 @@ def _txt(v):
 
 
 def _bo_html(t: str) -> str:
-    """Bóc thẻ HTML/CSS ra chữ thường — thư HĐĐT (MISA/VNPT…) thường chỉ có thân HTML."""
+    """Bóc thẻ HTML/CSS ra chữ thường — thư HĐĐT (MISA/VNPT…) thường chỉ có thân HTML.
+    Link của thẻ <a> giữ lại sau chữ: «link (https://…hd.easyinvoice.com.vn/…)» — thư cổng HĐĐT chỉ ghi chữ «link»,
+    bỏ thẻ đi là mất link tra cứu / tải PDF (05/11/2026)."""
     t = _re.sub(r"(?is)<(style|script|head).*?</\1>", " ", t)
+    t = _re.sub(r"(?is)<a\b[^>]*?href\s*=\s*[\"']?(https?://[^\"'\s>]+)[\"']?[^>]*>(.*?)</a>",
+                lambda m: f" {m.group(2)} ({m.group(1)}) " if m.group(1) not in m.group(2) else f" {m.group(2)} ", t)
     t = _re.sub(r"(?i)<br\s*/?>|</p>|</tr>|</div>|</li>|</h[1-6]>", "\n", t)
     t = _re.sub(r"<[^>]+>", " ", t)
     t = _html.unescape(t)
@@ -52,16 +56,19 @@ def _bo_html(t: str) -> str:
 
 def _body(m) -> str:
     if m.is_multipart():
-        van_html = ""
+        van_plain, van_html = "", ""
         for p in m.walk():
             ct = p.get_content_type()
-            if ct == "text/plain":
-                try: return p.get_payload(decode=True).decode(p.get_content_charset() or "utf-8", "ignore")
+            if ct == "text/plain" and not van_plain:
+                try: van_plain = p.get_payload(decode=True).decode(p.get_content_charset() or "utf-8", "ignore")
                 except Exception: continue
             if ct == "text/html" and not van_html:
                 try: van_html = p.get_payload(decode=True).decode(p.get_content_charset() or "utf-8", "ignore")
                 except Exception: pass
-        return _bo_html(van_html) if van_html else ""
+        # phần chữ thường rỗng / chỉ một dòng nhắc «xem bản HTML» (thư cổng HĐĐT) → lấy bản HTML để khỏi mất số liệu
+        if van_plain.strip() and (len(van_plain.strip()) >= 80 or not van_html):
+            return van_plain
+        return _bo_html(van_html) if van_html else van_plain
     try: t = m.get_payload(decode=True).decode(m.get_content_charset() or "utf-8", "ignore")
     except Exception: return m.get_payload() or ""
     return _bo_html(t) if m.get_content_type() == "text/html" else t
