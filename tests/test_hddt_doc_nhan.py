@@ -86,9 +86,13 @@ def test_bo_html_giu_link_va_body_uu_tien_html():
     msg.add_alternative(html, subtype="html")
     assert "Số hóa đơn: 277" in ig._body(msg) and "http://x.vn/tra-cuu?m=1" in ig._body(msg)
     msg2 = EmailMessage()
-    msg2.set_content("Chào anh,\n" + "nội dung dài " * 10 + "\nTổng tiền 5.000.000 đ")   # chữ thường đủ dài → giữ chữ thường
+    msg2.set_content("Chào anh,\n" + "nội dung dài " * 10 + "\nTổng tiền 5.000.000 đ")   # chữ thường dài hơn → giữ chữ thường
     msg2.add_alternative("<p>html</p>", subtype="html")
     assert ig._body(msg2).startswith("Chào anh")
+    msg3 = EmailMessage()                                           # chữ thường bị cắt gọn (thiếu tiền) → lấy bản HTML dài hơn
+    msg3.set_content("Hóa đơn điện tử số: 277 - CÔNG TY TNHH TM - SX CƠ KHÍ TUẤN TÀI. Mã tra cứu: 7UT2SH9WV. Xem bản HTML.")
+    msg3.add_alternative("<html><body>" + "".join(f"<p>{d}</p>" for d in THU.splitlines()) + "</body></html>", subtype="html")
+    assert "Tổng tiền thanh toán: 10,476,000 VND" in ig._body(msg3)
 
 
 def _db():
@@ -143,3 +147,10 @@ def test_hang_cho_trung_va_bo_sung_theo_nhan():
     assert c.trang_thai == "BO_QUA" and c.trung_voi_id == b.id and c.mo_ta.startswith("🔁 Trùng với dòng #")
     assert b.trang_thai == "CHO_XAC_NHAN" and b.ngay_hd == date(2026, 10, 29) and int(b.tong_tien) == 4_994_000
     assert d.trang_thai == "CHO_XAC_NHAN" and kq._hdc_gop_trung(s) == 0
+    # cùng KÝ HIỆU + số HĐ nhưng một dòng chưa đọc được tên NCC (bản thật 05/11: HĐ 277 thành 2 dòng) → vẫn là một hóa đơn
+    e = _hdc(tu_email="hoadon-noreply@easyinvoice.vn", ncc_ten=None, so_hoa_don="277", ky_hieu="1C26TTT", message_id="<m5>")
+    f = _hdc(tu_email="hoadon-noreply@easyinvoice.vn", ncc_ten="CÔNG TY TNHH TM - SX CƠ KHÍ TUẤN TÀI", so_hoa_don="277",
+             ky_hieu="1C26TTT", tong_tien=Decimal(10_476_000), tien_truoc_thue=Decimal(9_700_000), message_id="<m6>")
+    s.add_all([e, f]); s.commit()
+    assert kq._hdc_tim_trung(s, None, None, "", "277", "1C26TTT") is e
+    assert kq._hdc_gop_trung(s) == 1 and e.trang_thai == "BO_QUA" and e.trung_voi_id == f.id and f.trang_thai == "CHO_XAC_NHAN"

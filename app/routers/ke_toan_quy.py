@@ -1371,10 +1371,12 @@ def _hd_nhap_cua_po(db, dm, tong=None):
 
 # ============ 📥 HÓA ĐƠN MUA TỪ EMAIL — chờ xác nhận trước khi vào bảng Hóa đơn ============
 @router.post("/hoa-don-cho/quet")
-def quet_hoa_don_mua_email(tu_ngay: date | None = None, db: Session = Depends(get_db),
+def quet_hoa_don_mua_email(tu_ngay: date | None = None, chan_doan: bool = False, db: Session = Depends(get_db),
                            nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
     """🤖 Quét hộp thư công ty: thư hóa đơn của NCC (email trùng hồ sơ NCC / danh bạ dự án,
-    hoặc tiêu đề có chữ hóa đơn/invoice) được AI đọc (cả PDF đính kèm) → hàng CHỜ XÁC NHẬN."""
+    hoặc tiêu đề có chữ hóa đơn/invoice) được AI đọc (cả PDF đính kèm) → hàng CHỜ XÁC NHẬN.
+    chan_doan=1: trả thêm `mau_thu` — thân thư (2.000 ký tự đầu) + kết quả đọc nhãn của tối đa 6 thư hóa đơn, để xem máy chủ
+    thực sự nhận được gì khi bộ đọc trả tiền 0 (không ghi gì thêm)."""
     from ..inbound_gateway import lay_inbound_provider
     from ..ai_gateway import doc_hoa_don_email, doc_hoa_don_tep
     from ..models import KtHoaDonCho, NhaCungCap, CtNccEmail, KtHdGuiKhach as _KtGkM
@@ -1415,8 +1417,14 @@ def quet_hoa_don_mua_email(tu_ngay: date | None = None, db: Session = Depends(ge
             ncc_theo_mst[k] = n.id
     them = trung = dung_ai = khong_khop = con_lai = hd_ban = doc_nhan_n = trung_hd = sua_cu = 0
     GIOI_HAN = 25
+    mau_thu = []
     for m in thu:
         mid = (m.get("message_id") or "").strip()[:250] or None
+        if chan_doan and len(mau_thu) < 6 and (_tu_cong_hddt(m.get("tu_email") or "") or "hoa don" in _kd2(m.get("tieu_de") or "")):
+            _nd0 = m.get("noi_dung") or ""
+            mau_thu.append({"tu": m.get("tu_email"), "tieu_de": (m.get("tieu_de") or "")[:120], "dai": len(_nd0),
+                            "dinh_kem": [t.get("ten_file") for t in (m.get("dinh_kem") or [])], "nd": _nd0[:2000],
+                            "nhan": _doc_nhan(m.get("tieu_de") or "", _nd0)})
         cu = db.query(KtHoaDonCho).filter_by(message_id=mid).first() if mid else None
         if cu is not None:
             # 🔗 bổ sung link tra cứu / ngày HĐ cho bản ghi cũ còn thiếu; 📧 đọc lại theo NHÃN để sửa tiền 0 / tiền = MST
@@ -1562,7 +1570,7 @@ def quet_hoa_don_mua_email(tu_ngay: date | None = None, db: Session = Depends(ge
     return {"ok": True, "che_do": prov.ten, "thu_moi": len(thu), "tu_ngay": str(moc),
             "da_them": them, "trung_bo_qua": trung, "ai": dung_ai, "doc_nhan": doc_nhan_n, "hd_ban": hd_ban,
             "trung_hd": trung_hd + gop, "sua_cu": sua_cu,
-            "khong_khop": khong_khop, "con_lai": con_lai}
+            "khong_khop": khong_khop, "con_lai": con_lai, **({"mau_thu": mau_thu} if chan_doan else {})}
 
 
 # ---- 📧 đọc thư cổng HĐĐT theo nhãn (mig 169, app/hddt_doc_nhan.py — anh Hiếu 05/11/2026) ----
@@ -1585,7 +1593,7 @@ def _hdc_tim_trung(db, ncc_id, ncc_ten, mst, so_hd, ky_hieu):
     """Dòng hàng chờ đã có của CÙNG hóa đơn (cùng bên bán + số HĐ; ký hiệu khác nhau thì là hóa đơn khác)."""
     from ..models import KtHoaDonCho
     so = _hdc_so_hd_chuan(so_hd)
-    if not so or not (ncc_id or mst or ncc_ten):
+    if not so or not (ncc_id or mst or ncc_ten or ky_hieu):
         return None
     for r in (db.query(KtHoaDonCho).filter(KtHoaDonCho.trang_thai != "BO_QUA").order_by(KtHoaDonCho.id).all()):
         if _hdc_so_hd_chuan(r.so_hoa_don) != so:
@@ -1593,7 +1601,8 @@ def _hdc_tim_trung(db, ncc_id, ncc_ten, mst, so_hd, ky_hieu):
         kh = getattr(r, "ky_hieu", None)
         if ky_hieu and kh and ky_hieu.upper() != kh.upper():
             continue
-        if _hdc_cung_ncc(r, ncc_id, ncc_ten, mst):
+        # cùng KÝ HIỆU mẫu số + số HĐ = cùng hóa đơn (ký hiệu mang mã của bên bán), kể cả khi một dòng chưa đọc được tên NCC
+        if (ky_hieu and kh and ky_hieu.upper() == kh.upper()) or _hdc_cung_ncc(r, ncc_id, ncc_ten, mst):
             return r
     return None
 
@@ -1676,7 +1685,8 @@ def _hdc_gop_trung(db) -> int:
             ka, kb = getattr(a, "ky_hieu", None), getattr(b, "ky_hieu", None)
             if ka and kb and ka.upper() != kb.upper():
                 continue
-            if not _hdc_cung_ncc(b, a.nha_cung_cap_id, a.ncc_ten, (getattr(a, "ncc_mst", None) or "").replace("-", "")):
+            cung_kh = bool(ka and kb and ka.upper() == kb.upper())
+            if not cung_kh and not _hdc_cung_ncc(b, a.nha_cung_cap_id, a.ncc_ten, (getattr(a, "ncc_mst", None) or "").replace("-", "")):
                 continue
             giu, bo = (a, b) if (not _hdc_tien_nghi(a) or _hdc_tien_nghi(b)) else (b, a)
             for k in ("ngay_hd", "link_tra_cuu", "ma_tra_cuu", "ky_hieu", "ncc_mst", "ma_cqt", "ncc_ten", "nha_cung_cap_id"):
