@@ -65,10 +65,12 @@ def _body(m) -> str:
             if ct == "text/html" and not van_html:
                 try: van_html = p.get_payload(decode=True).decode(p.get_content_charset() or "utf-8", "ignore")
                 except Exception: pass
-        # phần chữ thường rỗng / chỉ một dòng nhắc «xem bản HTML» (thư cổng HĐĐT) → lấy bản HTML để khỏi mất số liệu
-        if van_plain.strip() and (len(van_plain.strip()) >= 80 or not van_html):
+        # Thư cổng HĐĐT (EasyInvoice…) có phần chữ thường bị cắt gọn (thiếu số tiền / ngày) → lấy bản DÀI HƠN trong hai bản;
+        # bản HTML đã bóc thẻ, giữ link <a>. Chỉ có một bản thì dùng bản đó.
+        van_html_chu = _bo_html(van_html) if van_html else ""
+        if van_plain.strip() and len(van_plain.strip()) >= len(van_html_chu.strip()):
             return van_plain
-        return _bo_html(van_html) if van_html else van_plain
+        return van_html_chu or van_plain
     try: t = m.get_payload(decode=True).decode(m.get_content_charset() or "utf-8", "ignore")
     except Exception: return m.get_payload() or ""
     return _bo_html(t) if m.get_content_type() == "text/html" else t
