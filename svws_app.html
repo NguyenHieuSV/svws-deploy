@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="vi">
 <head>
-<!-- build: quet-hdc-nen-2026-11-06 -->
+<!-- build: quet-hdc-nen-2026-11-06b -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#0f2c44">
@@ -13693,7 +13693,7 @@ async function ktHoaDon(host){
       <span id="hdcChonBar" style="display:none;margin-right:10px;font-size:12.5px;white-space:nowrap">Đã chọn <b id="hdcChonN">0</b> dòng <button class="btn-sm" style="border-color:#dc2626;color:#dc2626;margin-left:4px" title="Bỏ qua mọi dòng đã tick — không vào bảng Hóa đơn, không ghi chi phí" onclick="hdcBoQuaChon()">🚫 Bỏ qua hàng loạt</button></span>
       ${(canOp&&hdcCho.some(x=>x.hd_ban_cty))?`<button class="btn-sm" style="margin-right:10px;border-color:#dc2626;color:#dc2626" title="Các dòng AI đọc bên bán là chính công ty (hóa đơn BÁN qua cổng HĐĐT) — chuyển hết sang bảng 📤 Hóa đơn bán đã gửi khách" onclick="ktHdcChuyenBanTatCa()">📤 Chuyển ${hdcCho.filter(x=>x.hd_ban_cty).length} HĐ bán lạc</button>`:''}
       ${canOp?`<label style="font-weight:normal;font-size:12px;margin-right:12px"><input type="checkbox" id="hdc_ht" checked> Hạch toán ngay</label>
-      <span style="font-size:12px;color:var(--muted);margin-right:4px" title="Quét thư từ ngày này. Để trống = 8 ngày gần nhất">Mốc ngày</span><input id="hdc_tu_ngay" type="date" title="Quét thư từ ngày này — để trống = 8 ngày gần nhất" style="padding:4px 8px;border:1px solid var(--line);border-radius:6px;font-size:12.5px;margin-right:8px">
+      <span style="font-size:12px;color:var(--muted);margin-right:4px" title="Quét thư từ ngày này. Để trống = 8 ngày gần nhất">Mốc ngày</span><input id="hdc_tu_ngay" type="date" title="Quét thư từ ngày này — để trống = 8 ngày gần nhất" style="width:150px;flex:0 0 150px;padding:4px 8px;border:1px solid var(--line);border-radius:6px;font-size:12.5px;margin-right:8px">
       <button class="btn-sm" onclick="ktHdcQuet(false)" title="Quét hộp thư từ Mốc ngày (để trống = 8 ngày gần nhất) ở NỀN — trả lời ngay, tiến độ hiện dưới tiêu đề, xong tự nạp lại bảng. Chỉ xử lý thư chưa có trong hàng chờ; không đánh dấu đã đọc hộp thư">🤖 Quét ngay</button>
       <button class="btn-sm ghost" style="margin-left:6px" onclick="ktHdcQuet(true)" title="Quét cả lịch sử từ Mốc ngày (bắt buộc chọn) — nhiều thư thì vài phút, chạy ở nền: mỗi lượt tối đa 25 thư mới, tự lặp tới 4 lượt, còn nữa thì bấm lại; thư đã xử lý tự bỏ qua">📜 Quét lịch sử</button>`:''}</div>
     ${_hdcNenHTML(qn)}<div class="note">AI đọc email hóa đơn gửi về <b>inf@watersolutions.company</b> (thư của NCC có email trong hồ sơ / danh bạ dự án, hoặc tiêu đề có chữ "hóa đơn"/"invoice") — trích số HĐ · ngày · tiền trước thuế · VAT từ thân thư và <b>file PDF đính kèm</b>. Cột <b>Nhà cung cấp</b> tự khớp hồ sơ: email trùng hồ sơ → tên AI đọc → tên miền email; đổi bằng <b>✎ Chọn NCC</b>, chưa có hồ sơ thì bấm <b>➕ Tạo NCC từ tên AI</b>. Hàng chờ <b>nhóm theo tháng hóa đơn</b>, mặc định mở tháng gần nhất — bấm tiêu đề tháng để mở / gấp. <b>Dọn hàng chờ:</b> tick từng dòng, tick ô đầu tháng, hoặc bấm vào <u>email người gửi</u> để chọn mọi thư cùng người gửi, rồi <b>🚫 Bỏ qua hàng loạt</b> (thư trùng, thư không phải hóa đơn mua). Kế toán rà lại rồi bấm <b>✔ Ghi vào Hóa đơn MUA</b> — lúc đó mới chính thức vào bảng Hóa đơn (kèm công nợ + hạch toán theo 2 ô tick trên). 🔗 Máy <b>tự dò PO</b> của NCC (cùng số HĐ / cùng tổng ±1.000 đ / cùng tiền trước thuế) và điền sẵn mã đơn của PO; khi Ghi, số HĐ + ngày được <b>điền lên PO và công nợ phải trả</b> (PO hết «chưa có hóa đơn»), PO đã có hóa đơn nháp HDM-… cùng tiền thì hóa đơn nháp <b>nhận số thật</b> thay vì tạo hóa đơn thứ hai. 📤 Thư từ <b>cổng HĐĐT</b> (MISA meInvoice…) mà bên bán là <b>chính công ty</b> là <b>hóa đơn BÁN</b> gửi khách → máy tự chuyển sang bảng <b>📤 Hóa đơn bán đã gửi khách</b>, không ghi thành hóa đơn mua.</div>
@@ -13984,19 +13984,21 @@ async function ktHdSoTamLuuHet(){
 /* ⏳ QUÉT HÓA ĐƠN MUA TỪ EMAIL Ở LUỒNG NỀN (06/11/2026): POST /quet-nen trả {id} ngay (trước: quét đồng bộ 30 ngày ≈ 1.000 thư
    → Render cắt 502 sau ~100 giây); hỏi tiến độ 5 giây/lần tới khi xong rồi nạp lại bảng. Mốc ngày dùng cho cả hai nút (trống = 8 ngày). */
 function _hdcNenTomTat(r){const k=r.ket_qua||{};
-  return `${k.thu_moi!=null?`${k.thu_moi} thư từ ${k.tu_ngay||r.tu_ngay||'?'}`:`từ ${k.tu_ngay||r.tu_ngay||'?'}`}${k.che_do?` (${k.che_do})`:''}${k.luot>1?` · ${k.luot} lượt`:''} — thêm <b>${k.da_them||0}</b> hóa đơn${k.hd_ban?` · 📤 ${k.hd_ban} hóa đơn BÁN của công ty → bảng Hóa đơn gửi khách`:''}${k.doc_nhan?` · 📋 đọc theo nhãn ${k.doc_nhan}`:''}${k.ai?` · 🤖 AI đọc ${k.ai}`:''}${k.trung_hd?` · 🔁 gộp ${k.trung_hd} thư trùng hóa đơn`:''}${k.sua_cu?` · ✎ bổ sung ${k.sua_cu} dòng cũ`:''}${k.trung_bo_qua?` · ${k.trung_bo_qua} đã xử lý trước`:''}${k.khong_khop?` · ${k.khong_khop} thư không liên quan`:''}${k.con_lai?` · ⏭ CÒN ${k.con_lai} thư mới — bấm Quét ngay lần nữa`:''}${(k.loi||[]).length?` · ⚠ ${k.loi.join(' | ')}`:''}`;}
+  return `${k.thu_moi!=null?`${k.thu_moi} thư từ ${k.tu_ngay||r.tu_ngay||'?'}`:`từ ${k.tu_ngay||r.tu_ngay||'?'}`}${k.che_do?` (${k.che_do})`:''}${Number(k.so_cua_so||1)>1?` · ${k.cua_so_xong||0}/${k.so_cua_so} cửa sổ ${k.cua_so_ngay||7} ngày`:''}${k.luot>1?` · ${k.luot} lượt`:''} — thêm <b>${k.da_them||0}</b> hóa đơn${k.hd_ban?` · 📤 ${k.hd_ban} hóa đơn BÁN của công ty → bảng Hóa đơn gửi khách`:''}${k.doc_nhan?` · 📋 đọc theo nhãn ${k.doc_nhan}`:''}${k.ai?` · 🤖 AI đọc ${k.ai}`:''}${k.trung_hd?` · 🔁 gộp ${k.trung_hd} thư trùng hóa đơn`:''}${k.sua_cu?` · ✎ bổ sung ${k.sua_cu} dòng cũ`:''}${k.trung_bo_qua?` · ${k.trung_bo_qua} đã xử lý trước`:''}${k.khong_khop?` · ${k.khong_khop} thư không liên quan`:''}${k.con_lai?` · ⏭ CÒN ${k.con_lai} thư mới — bấm Quét ngay lần nữa`:''}${(k.loi||[]).length?` · ⚠ ${k.loi.join(' | ')}`:''}`;}
 function _hdcNenHTML(r){
   if(!r)return '';
   const esc=s=>String(s==null?'':s).replace(/</g,'&lt;');
-  if(r.trang_thai==='DANG_CHAY'){const t=r.tien_do||{};const n=Number(t.so_thu||0),d=Number(t.da_xet||0);const pc=n?Math.min(100,Math.round(d*100/n)):0;
-    const buoc=t.buoc==='DANG_LAY_THU'?'đang lấy thư từ hộp thư…':t.buoc==='DANG_GHI'?'đang ghi kết quả…':t.buoc==='DANG_DOC'?`đang đọc thư <b>${d}/${n}</b>`:'chuẩn bị…';
-    return `<div id="hdcQuetNen" class="note" style="margin-bottom:8px;border:1px solid #d9770655;background:#fffbeb">⏳ <b>Đang quét hộp thư từ ${esc(r.tu_ngay)}</b> ở nền (bắt đầu ${esc(r.bat_dau)}) · lượt ${t.luot||1}/${t.toi_da_luot||4} · ${buoc}${t.da_them?` · đã thêm <b>${t.da_them}</b> hóa đơn`:''}${t.doc_nhan?` · 📋 nhãn ${t.doc_nhan}`:''}${t.ai?` · 🤖 AI ${t.ai}`:''}${t.trung?` · ${t.trung} đã có`:''} — anh làm việc khác được, xong bảng tự nạp lại.<div style="height:6px;background:#fde68a;border-radius:3px;margin-top:6px;overflow:hidden"><div style="height:100%;width:${pc}%;background:#d97706;transition:width .4s"></div></div></div>`;}
+  if(r.trang_thai==='DANG_CHAY'){const t=r.tien_do||{};const lay=t.buoc==='DANG_LAY_THU';const n=Number(t.so_thu||0),d=Number(lay?(t.da_lay||0):(t.da_xet||0));const pc=n?Math.min(100,Math.round(d*100/n)):0;
+    const cs=Number(t.so_cua_so||1)>1?` · cửa sổ ${t.cua_so||1}/${t.so_cua_so}${t.tu?` (${_ngayVN(t.tu)} → ${t.den?_ngayVN(t.den):'nay'})`:''}`:'';   // quét theo từng cửa sổ 7 ngày
+    const buoc=lay?(n?`đang lấy thư <b>${d}/${n}</b> từ hộp thư…`:'đang lấy thư từ hộp thư…'):t.buoc==='DANG_GHI'?'đang ghi kết quả…':t.buoc==='DANG_DOC'?`đang đọc thư <b>${d}/${n}</b>`:'chuẩn bị…';
+    const them=Number(t.da_them_tong||0)+Number(t.da_them||0);
+    return `<div id="hdcQuetNen" class="note" style="margin-bottom:8px;border:1px solid #d9770655;background:#fffbeb">⏳ <b>Đang quét hộp thư từ ${esc(r.tu_ngay)}</b> ở nền (bắt đầu ${esc(r.bat_dau)})${cs} · lượt ${t.luot||1}/${t.toi_da_luot||4} · ${buoc}${them?` · đã thêm <b>${them}</b> hóa đơn`:''}${t.doc_nhan?` · 📋 nhãn ${t.doc_nhan}`:''}${t.ai?` · 🤖 AI ${t.ai}`:''}${t.trung?` · ${t.trung} đã có`:''} — anh làm việc khác được, xong bảng tự nạp lại.<div style="height:6px;background:#fde68a;border-radius:3px;margin-top:6px;overflow:hidden"><div style="height:100%;width:${pc}%;background:#d97706;transition:width .4s"></div></div></div>`;}
   if(!r.ket_thuc||!r.gan_day)return '';
   const ok=r.trang_thai==='XONG';
   return `<div id="hdcQuetNen" class="note" style="margin-bottom:8px${ok?'':';color:var(--red)'}">${ok?'✅':'⚠'} Lượt quét gần nhất (${esc(r.ket_thuc)}): ${_hdcNenTomTat(r)}</div>`;
 }
-S._hdcNenPoll=S._hdcNenPoll||{};
 function _hdcTheoDoi(id){
+  S._hdcNenPoll=S._hdcNenPoll||{};   // tạo tại đây, không ở đầu script: S được gán lại khi đăng nhập (S={mode:"live",…}) làm mất thuộc tính
   if(!id||S._hdcNenPoll[id])return; S._hdcNenPoll[id]=1; let dem=0;
   const tick=async()=>{dem++; let r=null; try{r=await api('/ke-toan/hoa-don-cho/quet-nen/'+id);}catch(e){}
     if(r&&r.trang_thai!=='DANG_CHAY'){delete S._hdcNenPoll[id];

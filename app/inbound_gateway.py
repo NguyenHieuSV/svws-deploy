@@ -19,7 +19,7 @@ class InboundProvider(Protocol):
 
 class FakeInboundProvider:
     ten = "DEMO"
-    def lay_thu(self, tu_ngay=None) -> list[dict]:
+    def lay_thu(self, tu_ngay=None, den_ngay=None, bao=None) -> list[dict]:
         return self.lay_thu_moi()
 
     def lay_thu_moi(self) -> list[dict]:
@@ -101,8 +101,8 @@ def _thu_long(m) -> str:
 
 class ImapInboundProvider:
     ten = "IMAP"
-    def lay_thu(self, tu_ngay=None) -> list[dict]:
-        return _imap_lay_thu(tu_ngay)
+    def lay_thu(self, tu_ngay=None, den_ngay=None, bao=None) -> list[dict]:
+        return _imap_lay_thu(tu_ngay, den_ngay, bao)
 
     def lay_thu_moi(self) -> list[dict]:
         out = []
@@ -168,18 +168,32 @@ def _dinh_kem(m, mo_eml: bool = True) -> list[dict]:
     return out
 
 
-def _imap_lay_thu(tu_ngay=None) -> list[dict]:
-    """Quét theo MỐC THỜI GIAN (SINCE) — đọc bằng BODY.PEEK nên KHÔNG đánh dấu đã đọc
-    trong hộp thư; 'AI chưa đọc' do nơi gọi tự khử trùng bằng Message-ID đã lưu."""
+IMAP_TIMEOUT = 180      # giây cho mỗi thao tác socket — kết nối treo không giữ luồng quét nền mãi (06/11/2026)
+
+
+def _imap_lay_thu(tu_ngay=None, den_ngay=None, bao=None) -> list[dict]:
+    """Quét theo MỐC THỜI GIAN (SINCE tu_ngay; thêm BEFORE den_ngay = cửa sổ [tu_ngay, den_ngay) theo ngày nhận — quét nền
+    chia 30 ngày thành từng cửa sổ 7 ngày để không giữ cả ~1.000 thư kèm đính kèm trong bộ nhớ) — đọc bằng BODY.PEEK nên
+    KHÔNG đánh dấu đã đọc trong hộp thư; 'AI chưa đọc' do nơi gọi tự khử trùng bằng Message-ID đã lưu.
+    bao(i, n): báo tiến độ lấy thư (mỗi 20 thư và thư cuối)."""
     out = []
-    M = imaplib.IMAP4_SSL(settings.imap_host, settings.imap_port)
+    M = imaplib.IMAP4_SSL(settings.imap_host, settings.imap_port, timeout=IMAP_TIMEOUT)
     M.login(settings.imap_user, settings.imap_pass)
     M.select("INBOX")
     if tu_ngay is not None:
-        typ, data = M.search(None, f"(SINCE {tu_ngay.strftime('%d-%b-%Y')})")
+        dk = f"SINCE {tu_ngay.strftime('%d-%b-%Y')}"
+        if den_ngay is not None:
+            dk += f" BEFORE {den_ngay.strftime('%d-%b-%Y')}"
+        typ, data = M.search(None, f"({dk})")
     else:
         typ, data = M.search(None, "UNSEEN")
-    for num in data[0].split():
+    nums = data[0].split()
+    for i, num in enumerate(nums, 1):
+        if bao is not None and (i % 20 == 0 or i == len(nums)):
+            try:
+                bao(i, len(nums))
+            except Exception:
+                pass
         typ, md = M.fetch(num, "(BODY.PEEK[])")
         m = email.message_from_bytes(md[0][1])
         if (m.get("Auto-Submitted", "no").lower() != "no"
