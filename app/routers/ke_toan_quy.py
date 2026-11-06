@@ -1373,16 +1373,65 @@ def _hd_nhap_cua_po(db, dm, tong=None):
 @router.post("/hoa-don-cho/quet")
 def quet_hoa_don_mua_email(tu_ngay: date | None = None, chan_doan: bool = False, db: Session = Depends(get_db),
                            nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
-    """🤖 Quét hộp thư công ty: thư hóa đơn của NCC (email trùng hồ sơ NCC / danh bạ dự án,
-    hoặc tiêu đề có chữ hóa đơn/invoice) được AI đọc (cả PDF đính kèm) → hàng CHỜ XÁC NHẬN.
+    """🤖 Quét hộp thư công ty (ĐỒNG BỘ trong request — giữ cho tương thích; giao diện nay dùng /hoa-don-cho/quet-nen):
+    thư hóa đơn của NCC (email trùng hồ sơ NCC / danh bạ dự án, hoặc tiêu đề có chữ hóa đơn/invoice) được AI đọc
+    (cả PDF đính kèm) → hàng CHỜ XÁC NHẬN.
     chan_doan=1: trả thêm `mau_thu` — thân thư (2.000 ký tự đầu) + kết quả đọc nhãn của tối đa 6 thư hóa đơn, để xem máy chủ
     thực sự nhận được gì khi bộ đọc trả tiền 0 (không ghi gì thêm)."""
+    return hdc_quet_lo(db, nd, tu_ngay or (date.today() - timedelta(days=30)), chan_doan=chan_doan)
+
+
+@router.post("/hoa-don-cho/quet-nen")
+def quet_hoa_don_mua_email_nen(tu_ngay: date | None = None, db: Session = Depends(get_db),
+                               nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
+    """⏳ «Quét ngay» ở LUỒNG NỀN (06/11/2026): trả {id, …} ngay; luồng riêng quét hộp thư từ `tu_ngay` (mặc định 8 ngày),
+    mỗi lượt tối đa 25 thư mới, còn thư thì tự lặp tới 4 lượt; tiến độ xem ở GET /hoa-don-cho/quet-nen/{id}.
+    Đang có lượt chạy → trả lượt đó (moi=false). Trước đây quét đồng bộ 30 ngày ≈ 1.000 thư làm Render cắt 502 sau ~100 giây."""
+    from .. import hdc_quet_nen as hqn
+    from .. import quet_mail_service as qm
+    if qm.dang_chay(db):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Lượt 📬 quét thư hàng tuần đang chạy (cũng đọc hóa đơn mua) — chờ xong rồi bấm lại.")
+    moc = tu_ngay or (date.today() - timedelta(days=8))
+    if moc > date.today():
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Mốc ngày không được sau hôm nay")
+    v, moi = hqn.bat_dau(db, nd, moc)
+    if moi:
+        ghi_audit(db, nd.id, "HDC_QUET_NEN", "viec_nen", v.id, moi={"tu_ngay": str(moc)})
+        db.commit()
+    return {**hqn.to_dict(v), "moi": moi}
+
+
+@router.get("/hoa-don-cho/quet-nen")
+def quet_hoa_don_mua_email_nen_moi_nhat(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
+    """Lượt quét nền gần nhất (đang chạy / xong / lỗi) — bảng hàng chờ hiện tiến độ hoặc kết quả vừa xong; null nếu chưa có."""
+    from .. import hdc_quet_nen as hqn
+    v = hqn.moi_nhat(db)
+    return hqn.to_dict(v) if v is not None else None
+
+
+@router.get("/hoa-don-cho/quet-nen/{viec_id}")
+def quet_hoa_don_mua_email_nen_xem(viec_id: int, db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM"))):
+    """Tiến độ / kết quả một lượt quét nền (giao diện hỏi 5 giây/lần)."""
+    from .. import hdc_quet_nen as hqn
+    from ..models import ViecNen
+    v = db.get(ViecNen, viec_id)
+    if v is None or v.loai != hqn.LOAI:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy lượt quét")
+    if v.trang_thai == "DANG_CHAY":
+        hqn.dang_chay(db)                           # dòng kẹt quá hạn → đóng là LOI
+        db.commit()
+    return hqn.to_dict(v)
+
+
+def hdc_quet_lo(db, nd, moc, chan_doan=False, bao_tien_do=None) -> dict:
+    """Lõi quét hóa đơn mua từ email (một LƯỢT): lấy thư từ `moc`, đọc nhãn / AI, thêm hàng chờ; tối đa 25 thư mới mỗi lượt
+    (con_lai = số thư mới chưa xử lý). `bao_tien_do(dict)` (tùy chọn) được gọi theo tiến độ để luồng nền ghi lại."""
     from ..inbound_gateway import lay_inbound_provider
     from ..ai_gateway import doc_hoa_don_email, doc_hoa_don_tep
     from ..models import KtHoaDonCho, NhaCungCap, CtNccEmail, KtHdGuiKhach as _KtGkM
     from ..nhac_viec_service import gio_hien_tai
     from .cho_thue_ops import _rut_hd_email
-    from datetime import timedelta as _td
     import unicodedata
 
     def _kd2(s2):
@@ -1391,7 +1440,6 @@ def quet_hoa_don_mua_email(tu_ngay: date | None = None, chan_doan: bool = False,
         return s2.replace("đ", "d").replace("Đ", "D").lower()
 
     prov = lay_inbound_provider()
-    moc = tu_ngay or (date.today() - _td(days=30))
     try:
         thu = prov.lay_thu(moc) if hasattr(prov, "lay_thu") else prov.lay_thu_moi()
     except Exception as e:
@@ -1418,7 +1466,17 @@ def quet_hoa_don_mua_email(tu_ngay: date | None = None, chan_doan: bool = False,
     them = trung = dung_ai = khong_khop = con_lai = hd_ban = doc_nhan_n = trung_hd = sua_cu = 0
     GIOI_HAN = 25
     mau_thu = []
-    for m in thu:
+
+    def _bao(buoc, da_xet):
+        if bao_tien_do:
+            bao_tien_do({"buoc": buoc, "so_thu": len(thu), "da_xet": da_xet, "da_them": them, "ai": dung_ai,
+                         "doc_nhan": doc_nhan_n, "trung": trung, "khong_khop": khong_khop, "con_lai": con_lai,
+                         "hd_ban": hd_ban})
+
+    _bao("DANG_DOC", 0)
+    for i_thu, m in enumerate(thu, 1):
+        if i_thu % 10 == 0:
+            _bao("DANG_DOC", i_thu)
         mid = (m.get("message_id") or "").strip()[:250] or None
         if chan_doan and len(mau_thu) < 6 and (_tu_cong_hddt(m.get("tu_email") or "") or "hoa don" in _kd2(m.get("tieu_de") or "")):
             _nd0 = m.get("noi_dung") or ""
@@ -1553,6 +1611,8 @@ def quet_hoa_don_mua_email(tu_ngay: date | None = None, chan_doan: bool = False,
             _hdc_gan_po(db, _moi, _dm, _cach, _n)
             po_da_gan.add(_dm.id)
         them += 1
+        _bao("DANG_DOC", i_thu)                                   # vừa thêm một hóa đơn → giao diện thấy số nhảy
+    _bao("DANG_GHI", len(thu))
     # 🔁 Khớp lại các hàng chờ cũ chưa gắn NCC (quét trước khi có tự khớp theo tên)
     for r0 in db.query(KtHoaDonCho).filter_by(trang_thai="CHO_XAC_NHAN").all():
         if r0.nha_cung_cap_id is None and (r0.ncc_ten or r0.tu_email):
