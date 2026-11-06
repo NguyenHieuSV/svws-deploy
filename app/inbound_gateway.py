@@ -19,7 +19,7 @@ class InboundProvider(Protocol):
 
 class FakeInboundProvider:
     ten = "DEMO"
-    def lay_thu(self, tu_ngay=None, den_ngay=None, bao=None) -> list[dict]:
+    def lay_thu(self, tu_ngay=None, den_ngay=None, bao=None, bo_qua_mid=None) -> list[dict]:
         return self.lay_thu_moi()
 
     def lay_thu_moi(self) -> list[dict]:
@@ -101,8 +101,8 @@ def _thu_long(m) -> str:
 
 class ImapInboundProvider:
     ten = "IMAP"
-    def lay_thu(self, tu_ngay=None, den_ngay=None, bao=None) -> list[dict]:
-        return _imap_lay_thu(tu_ngay, den_ngay, bao)
+    def lay_thu(self, tu_ngay=None, den_ngay=None, bao=None, bo_qua_mid=None) -> list[dict]:
+        return _imap_lay_thu(tu_ngay, den_ngay, bao, bo_qua_mid=bo_qua_mid)
 
     def lay_thu_moi(self) -> list[dict]:
         out = []
@@ -169,13 +169,44 @@ def _dinh_kem(m, mo_eml: bool = True) -> list[dict]:
 
 
 IMAP_TIMEOUT = 180      # giây cho mỗi thao tác socket — kết nối treo không giữ luồng quét nền mãi (06/11/2026)
+MID_MOI_LENH = 100      # số thư hỏi Message-ID trong MỘT lệnh FETCH (header vài chục byte / thư)
 
 
-def _imap_lay_thu(tu_ngay=None, den_ngay=None, bao=None) -> list[dict]:
+def _mid_chuan(mid) -> str:
+    """Message-ID như nơi gọi lưu vào CSDL (strip, cắt 250 ký tự) — để so với tập đã biết."""
+    return (mid or "").strip()[:250]
+
+
+def _imap_mid_theo_so(M, nums) -> dict:
+    """Message-ID của từng số thư, hỏi hàng loạt bằng BODY.PEEK[HEADER.FIELDS (MESSAGE-ID)] (mỗi lệnh MID_MOI_LENH thư,
+    không tải thân / đính kèm, không đánh dấu đã đọc). → {số thư (bytes): Message-ID thô (str, có thể rỗng)}.
+    Trả lời của máy chủ là dãy (b'12 (BODY[HEADER.FIELDS (MESSAGE-ID)] {n}', b'Message-ID: <…>\\r\\n\\r\\n'), b')' …"""
+    ra = {}
+    for i in range(0, len(nums), MID_MOI_LENH):
+        lo = nums[i:i + MID_MOI_LENH]
+        typ, data = M.fetch(b",".join(lo), "(BODY.PEEK[HEADER.FIELDS (MESSAGE-ID)])")
+        for p in data or []:
+            if not (isinstance(p, tuple) and len(p) >= 2):
+                continue
+            mo = _re.match(rb"\s*(\d+)\s*\(", p[0] or b"")
+            if mo is None:
+                continue
+            try:
+                ra[mo.group(1)] = email.message_from_bytes(p[1] or b"").get("Message-ID") or ""
+            except Exception:
+                ra[mo.group(1)] = ""
+    return ra
+
+
+def _imap_lay_thu(tu_ngay=None, den_ngay=None, bao=None, bo_qua_mid=None) -> list[dict]:
     """Quét theo MỐC THỜI GIAN (SINCE tu_ngay; thêm BEFORE den_ngay = cửa sổ [tu_ngay, den_ngay) theo ngày nhận — quét nền
     chia 30 ngày thành từng cửa sổ 7 ngày để không giữ cả ~1.000 thư kèm đính kèm trong bộ nhớ) — đọc bằng BODY.PEEK nên
     KHÔNG đánh dấu đã đọc trong hộp thư; 'AI chưa đọc' do nơi gọi tự khử trùng bằng Message-ID đã lưu.
-    bao(i, n): báo tiến độ lấy thư (mỗi 20 thư và thư cuối)."""
+    bo_qua_mid (tập Message-ID ĐÃ BIẾT, 06/11/2026): hỏi Message-ID của cả cửa sổ trước (một lệnh / 100 thư); thư có
+    Message-ID trong tập → trả bản RÚT GỌN {"message_id", "rut_gon": True, tu_email/tieu_de None, noi_dung "", dinh_kem []}
+    KHÔNG tải thân + đính kèm (bản thật 30 ngày ≈ 1.000 thư, ~85 % đã xử lý mà vẫn tải cả đính kèm → ~9 phút);
+    thư còn lại tải đủ như cũ. None → tải đủ mọi thư (endpoint cũ, quét tuần).
+    bao(i, n): báo tiến độ lấy thư (mỗi 20 thư và thư cuối); khi có bo_qua_mid gọi bao(i, n, so_thu_khong_tai_than)."""
     out = []
     M = imaplib.IMAP4_SSL(settings.imap_host, settings.imap_port, timeout=IMAP_TIMEOUT)
     M.login(settings.imap_user, settings.imap_pass)
@@ -188,12 +219,20 @@ def _imap_lay_thu(tu_ngay=None, den_ngay=None, bao=None) -> list[dict]:
     else:
         typ, data = M.search(None, "UNSEEN")
     nums = data[0].split()
+    mid_theo_so = _imap_mid_theo_so(M, nums) if (bo_qua_mid and nums) else {}
+    bo_qua_n = 0
     for i, num in enumerate(nums, 1):
         if bao is not None and (i % 20 == 0 or i == len(nums)):
             try:
-                bao(i, len(nums))
+                bao(i, len(nums), bo_qua_n) if bo_qua_mid is not None else bao(i, len(nums))
             except Exception:
                 pass
+        mid0 = mid_theo_so.get(num)
+        if mid0 and _mid_chuan(mid0) in bo_qua_mid:
+            bo_qua_n += 1
+            out.append({"message_id": mid0, "rut_gon": True, "tu_email": None, "den_email": "", "tieu_de": None,
+                        "noi_dung": "", "dinh_kem": [], "ngay": None, "in_reply_to": None})
+            continue
         typ, md = M.fetch(num, "(BODY.PEEK[])")
         m = email.message_from_bytes(md[0][1])
         if (m.get("Auto-Submitted", "no").lower() != "no"

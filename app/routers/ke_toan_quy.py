@@ -1441,16 +1441,23 @@ def hdc_quet_lo(db, nd, moc, chan_doan=False, bao_tien_do=None, den_ngay=None) -
         return s2.replace("đ", "d").replace("Đ", "D").lower()
 
     prov = lay_inbound_provider()
+    quet_nen = den_ngay is not None or bool(bao_tien_do)
+    # ⏩ quét nền: cổng thư chỉ hỏi Message-ID, thư ĐÃ BIẾT (đã ghi / bỏ qua / chờ nhưng đã đủ, hay là hóa đơn bán) trả bản
+    # rút gọn không tải thân + đính kèm; dòng chờ còn thiếu tiền / link / ngày vẫn tải đủ để «✎ bổ sung» (06/11/2026)
+    bo_qua_mid = _hdc_mid_da_biet(db) if quet_nen else None
     try:
-        if den_ngay is not None or bao_tien_do:
+        if quet_nen:
             thu = prov.lay_thu(moc, den_ngay=den_ngay,
-                               bao=((lambda i, n: bao_tien_do({"buoc": "DANG_LAY_THU", "so_thu": n, "da_lay": i}))
-                                    if bao_tien_do else None))
+                               bao=((lambda i, n, bo_qua=0: bao_tien_do({"buoc": "DANG_LAY_THU", "so_thu": n, "da_lay": i,
+                                                                          "bo_qua_header": bo_qua}))
+                                    if bao_tien_do else None),
+                               bo_qua_mid=bo_qua_mid)
         else:
             thu = prov.lay_thu(moc) if hasattr(prov, "lay_thu") else prov.lay_thu_moi()
     except Exception as e:
         raise HTTPException(status.HTTP_400_BAD_REQUEST,
                             f"Không đọc được hộp thư ({prov.ten}): {str(e)[:150]}")
+    bo_qua_header = sum(1 for m in thu if m.get("rut_gon"))        # thư đã biết, cổng thư không tải thân
     ds_ncc = db.query(NhaCungCap).all()
     tin_cay = {}
     for n in ds_ncc:
@@ -1477,13 +1484,16 @@ def hdc_quet_lo(db, nd, moc, chan_doan=False, bao_tien_do=None, den_ngay=None) -
         if bao_tien_do:
             bao_tien_do({"buoc": buoc, "so_thu": len(thu), "da_xet": da_xet, "da_them": them, "ai": dung_ai,
                          "doc_nhan": doc_nhan_n, "trung": trung, "khong_khop": khong_khop, "con_lai": con_lai,
-                         "hd_ban": hd_ban})
+                         "hd_ban": hd_ban, "bo_qua_header": bo_qua_header})
 
     _bao("DANG_DOC", 0)
     for i_thu, m in enumerate(thu, 1):
         if i_thu % 10 == 0:
             _bao("DANG_DOC", i_thu)
         mid = (m.get("message_id") or "").strip()[:250] or None
+        if m.get("rut_gon"):
+            trung += 1                                      # ⏩ thư đã biết (cổng thư chỉ lấy Message-ID) → như «đã xử lý trước»
+            continue
         if chan_doan and len(mau_thu) < 6 and (_tu_cong_hddt(m.get("tu_email") or "") or "hoa don" in _kd2(m.get("tieu_de") or "")):
             _nd0 = m.get("noi_dung") or ""
             mau_thu.append({"tu": m.get("tu_email"), "tieu_de": (m.get("tieu_de") or "")[:120], "dai": len(_nd0),
@@ -1636,8 +1646,28 @@ def hdc_quet_lo(db, nd, moc, chan_doan=False, bao_tien_do=None, den_ngay=None) -
     return {"ok": True, "che_do": prov.ten, "thu_moi": len(thu), "tu_ngay": str(moc),
             **({"den_ngay": str(den_ngay)} if den_ngay is not None else {}),
             "da_them": them, "trung_bo_qua": trung, "ai": dung_ai, "doc_nhan": doc_nhan_n, "hd_ban": hd_ban,
-            "trung_hd": trung_hd + gop, "sua_cu": sua_cu,
+            "trung_hd": trung_hd + gop, "sua_cu": sua_cu, "bo_qua_header": bo_qua_header,
             "khong_khop": khong_khop, "con_lai": con_lai, **({"mau_thu": mau_thu} if chan_doan else {})}
+
+
+def _hdc_mid_da_biet(db) -> set:
+    """⏩ Message-ID của thư ĐÃ BIẾT — quét nền đưa cho cổng thư để khỏi tải thân + đính kèm (06/11/2026):
+    • hàng chờ hóa đơn mua đã ghi / bỏ qua (trạng thái khác CHO_XAC_NHAN);
+    • dòng CHO_XAC_NHAN đã ĐỦ: tiền hợp lệ (_hdc_tien_nghi False), có link tra cứu (không phải link easy-pit), có ngày HĐ —
+      không còn gì để «✎ bổ sung dòng cũ theo nhãn» (PR #25) nên không cần đọc lại thân thư; dòng còn thiếu KHÔNG đưa vào;
+    • mọi thư đã nhận là hóa đơn BÁN của công ty (kt_hd_gui_khach, mig 145)."""
+    from ..models import KtHoaDonCho, KtHdGuiKhach
+    ra = set()
+    for r in db.query(KtHoaDonCho.message_id, KtHoaDonCho.trang_thai, KtHoaDonCho.tong_tien, KtHoaDonCho.link_tra_cuu,
+                      KtHoaDonCho.ngay_hd).filter(KtHoaDonCho.message_id.isnot(None)).all():
+        if r.trang_thai != "CHO_XAC_NHAN":
+            ra.add(r.message_id)
+        elif (not _hdc_tien_nghi(r) and r.link_tra_cuu and "easy-pit" not in (r.link_tra_cuu or "") and r.ngay_hd is not None):
+            ra.add(r.message_id)
+    for (mid,) in db.query(KtHdGuiKhach.message_id).filter(KtHdGuiKhach.message_id.isnot(None)).all():
+        ra.add(mid)
+    ra.discard("")
+    return ra
 
 
 # ---- 📧 đọc thư cổng HĐĐT theo nhãn (mig 169, app/hddt_doc_nhan.py — anh Hiếu 05/11/2026) ----
