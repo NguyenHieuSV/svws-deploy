@@ -13,7 +13,8 @@ from .database import SessionLocal
 LOAI = "HDC_QUET_MAIL"
 TOI_DA_LUOT = 4                     # mỗi cửa sổ: còn thư mới (con_lai) thì lặp tới chừng này lượt
 CUA_SO_NGAY = 7                     # quét theo từng CỬA SỔ 7 ngày (IMAP SINCE … BEFORE …): lấy cả ~1.000 thư 30 ngày kèm đính kèm
-                                    # vào bộ nhớ một lần làm máy chủ hết RAM — Render khởi động lại giữa lượt #63 (14:27 06/11/2026)
+                                    # vào bộ nhớ một lần (lượt #63 14:27 06/11/2026 bị cắt — thực ra do deploy PR #29, nhưng
+                                    # 52 phút lấy thư vẫn quá lâu); thư đã biết nay chỉ lấy Message-ID (_hdc_mid_da_biet)
 QUA_HAN = timedelta(hours=2)        # dòng DANG_CHAY cũ hơn mức này = máy chủ đã khởi động lại giữa lượt → đóng là LỖI
 GAN_DAY = timedelta(hours=3)        # kết quả lượt gần nhất còn hiện trên bảng trong khoảng này
 _khoa = threading.Lock()            # tạo lượt tuần tự (hai người bấm cùng lúc chỉ ra một lượt)
@@ -173,7 +174,7 @@ def _chay(viec_id: int, nd_id, moc):
             for luot in range(1, TOI_DA_LUOT + 1):
                 bao({"cua_so": i_cs, "tu": str(tu), "den": (str(den) if den else None), "luot": luot, "buoc": "DANG_LAY_THU",
                      "so_thu": 0, "da_lay": 0, "da_xet": 0, "da_them": 0, "ai": 0, "doc_nhan": 0, "trung": 0, "con_lai": 0,
-                     "da_them_tong": tong.get("da_them", 0) + tong_cs.get("da_them", 0)})
+                     "bo_qua_header": 0, "da_them_tong": tong.get("da_them", 0) + tong_cs.get("da_them", 0)})
                 try:
                     k = hdc_quet_lo(db, nd, tu, bao_tien_do=bao, den_ngay=den)
                 except HTTPException as e:

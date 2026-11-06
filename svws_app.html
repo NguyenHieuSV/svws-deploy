@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="vi">
 <head>
-<!-- build: quet-hdc-nen-2026-11-06b -->
+<!-- build: quet-hdc-bo-qua-mid-2026-11-06 -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#0f2c44">
@@ -13984,7 +13984,7 @@ async function ktHdSoTamLuuHet(){
 /* ⏳ QUÉT HÓA ĐƠN MUA TỪ EMAIL Ở LUỒNG NỀN (06/11/2026): POST /quet-nen trả {id} ngay (trước: quét đồng bộ 30 ngày ≈ 1.000 thư
    → Render cắt 502 sau ~100 giây); hỏi tiến độ 5 giây/lần tới khi xong rồi nạp lại bảng. Mốc ngày dùng cho cả hai nút (trống = 8 ngày). */
 function _hdcNenTomTat(r){const k=r.ket_qua||{};
-  return `${k.thu_moi!=null?`${k.thu_moi} thư từ ${k.tu_ngay||r.tu_ngay||'?'}`:`từ ${k.tu_ngay||r.tu_ngay||'?'}`}${k.che_do?` (${k.che_do})`:''}${Number(k.so_cua_so||1)>1?` · ${k.cua_so_xong||0}/${k.so_cua_so} cửa sổ ${k.cua_so_ngay||7} ngày`:''}${k.luot>1?` · ${k.luot} lượt`:''} — thêm <b>${k.da_them||0}</b> hóa đơn${k.hd_ban?` · 📤 ${k.hd_ban} hóa đơn BÁN của công ty → bảng Hóa đơn gửi khách`:''}${k.doc_nhan?` · 📋 đọc theo nhãn ${k.doc_nhan}`:''}${k.ai?` · 🤖 AI đọc ${k.ai}`:''}${k.trung_hd?` · 🔁 gộp ${k.trung_hd} thư trùng hóa đơn`:''}${k.sua_cu?` · ✎ bổ sung ${k.sua_cu} dòng cũ`:''}${k.trung_bo_qua?` · ${k.trung_bo_qua} đã xử lý trước`:''}${k.khong_khop?` · ${k.khong_khop} thư không liên quan`:''}${k.con_lai?` · ⏭ CÒN ${k.con_lai} thư mới — bấm Quét ngay lần nữa`:''}${(k.loi||[]).length?` · ⚠ ${k.loi.join(' | ')}`:''}`;}
+  return `${k.thu_moi!=null?`${k.thu_moi} thư từ ${k.tu_ngay||r.tu_ngay||'?'}`:`từ ${k.tu_ngay||r.tu_ngay||'?'}`}${k.che_do?` (${k.che_do})`:''}${Number(k.so_cua_so||1)>1?` · ${k.cua_so_xong||0}/${k.so_cua_so} cửa sổ ${k.cua_so_ngay||7} ngày`:''}${k.luot>1?` · ${k.luot} lượt`:''} — thêm <b>${k.da_them||0}</b> hóa đơn${k.hd_ban?` · 📤 ${k.hd_ban} hóa đơn BÁN của công ty → bảng Hóa đơn gửi khách`:''}${k.doc_nhan?` · 📋 đọc theo nhãn ${k.doc_nhan}`:''}${k.ai?` · 🤖 AI đọc ${k.ai}`:''}${k.trung_hd?` · 🔁 gộp ${k.trung_hd} thư trùng hóa đơn`:''}${k.sua_cu?` · ✎ bổ sung ${k.sua_cu} dòng cũ`:''}${k.trung_bo_qua?` · ${k.trung_bo_qua} đã xử lý trước`:''}${k.bo_qua_header?` · ⏩ ${k.bo_qua_header} thư đã biết, không tải lại`:''}${k.khong_khop?` · ${k.khong_khop} thư không liên quan`:''}${k.con_lai?` · ⏭ CÒN ${k.con_lai} thư mới — bấm Quét ngay lần nữa`:''}${(k.loi||[]).length?` · ⚠ ${k.loi.join(' | ')}`:''}`;}
 function _hdcNenHTML(r){
   if(!r)return '';
   const esc=s=>String(s==null?'':s).replace(/</g,'&lt;');
@@ -13992,7 +13992,7 @@ function _hdcNenHTML(r){
     const cs=Number(t.so_cua_so||1)>1?` · cửa sổ ${t.cua_so||1}/${t.so_cua_so}${t.tu?` (${_ngayVN(t.tu)} → ${t.den?_ngayVN(t.den):'nay'})`:''}`:'';   // quét theo từng cửa sổ 7 ngày
     const buoc=lay?(n?`đang lấy thư <b>${d}/${n}</b> từ hộp thư…`:'đang lấy thư từ hộp thư…'):t.buoc==='DANG_GHI'?'đang ghi kết quả…':t.buoc==='DANG_DOC'?`đang đọc thư <b>${d}/${n}</b>`:'chuẩn bị…';
     const them=Number(t.da_them_tong||0)+Number(t.da_them||0);
-    return `<div id="hdcQuetNen" class="note" style="margin-bottom:8px;border:1px solid #d9770655;background:#fffbeb">⏳ <b>Đang quét hộp thư từ ${esc(r.tu_ngay)}</b> ở nền (bắt đầu ${esc(r.bat_dau)})${cs} · lượt ${t.luot||1}/${t.toi_da_luot||4} · ${buoc}${them?` · đã thêm <b>${them}</b> hóa đơn`:''}${t.doc_nhan?` · 📋 nhãn ${t.doc_nhan}`:''}${t.ai?` · 🤖 AI ${t.ai}`:''}${t.trung?` · ${t.trung} đã có`:''} — anh làm việc khác được, xong bảng tự nạp lại.<div style="height:6px;background:#fde68a;border-radius:3px;margin-top:6px;overflow:hidden"><div style="height:100%;width:${pc}%;background:#d97706;transition:width .4s"></div></div></div>`;}
+    return `<div id="hdcQuetNen" class="note" style="margin-bottom:8px;border:1px solid #d9770655;background:#fffbeb">⏳ <b>Đang quét hộp thư từ ${esc(r.tu_ngay)}</b> ở nền (bắt đầu ${esc(r.bat_dau)})${cs} · lượt ${t.luot||1}/${t.toi_da_luot||4} · ${buoc}${them?` · đã thêm <b>${them}</b> hóa đơn`:''}${t.doc_nhan?` · 📋 nhãn ${t.doc_nhan}`:''}${t.ai?` · 🤖 AI ${t.ai}`:''}${t.trung?` · ${t.trung} đã có`:''}${t.bo_qua_header?` · ⏩ ${t.bo_qua_header} thư đã biết, không tải lại`:''} — anh làm việc khác được, xong bảng tự nạp lại.<div style="height:6px;background:#fde68a;border-radius:3px;margin-top:6px;overflow:hidden"><div style="height:100%;width:${pc}%;background:#d97706;transition:width .4s"></div></div></div>`;}
   if(!r.ket_thuc||!r.gan_day)return '';
   const ok=r.trang_thai==='XONG';
   return `<div id="hdcQuetNen" class="note" style="margin-bottom:8px${ok?'':';color:var(--red)'}">${ok?'✅':'⚠'} Lượt quét gần nhất (${esc(r.ket_thuc)}): ${_hdcNenTomTat(r)}</div>`;

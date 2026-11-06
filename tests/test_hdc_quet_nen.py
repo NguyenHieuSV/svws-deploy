@@ -45,24 +45,37 @@ THU_KHAC = {"tu_email": "ai@do.vn", "tieu_de": "Chào hỏi", "noi_dung": "Hẹn
 class _HopThu:
     """Hộp thư giả: da_vao bật khi lượt bắt đầu lấy thư; cho (nếu có) giữ luồng nền lại cho tới khi test cho đi tiếp.
     chi_mo=True: chỉ trả thư ở cửa sổ MỞ (den_ngay=None — cửa sổ cuối của quét nền, và endpoint cũ); cửa sổ kín trả rỗng.
-    goi: các (tu_ngay, den_ngay) đã được hỏi."""
+    goi: các (tu_ngay, den_ngay) đã được hỏi; bo_qua: tập bo_qua_mid nhận ở mỗi lần gọi (None = tải đủ mọi thư);
+    tai_du: Message-ID các thư đã TẢI ĐỦ thân ở lần gọi gần nhất — thư có Message-ID trong bo_qua_mid trả bản rút gọn
+    như _imap_lay_thu (không thân, không đính kèm)."""
     ten = "GIA"
 
     def __init__(self, thu, cho=None, da_vao=None, loi=None, chi_mo=True):
         self.thu, self.cho, self.da_vao, self.loi, self.chi_mo, self.so_lan, self.goi = thu, cho, da_vao, loi, chi_mo, 0, []
+        self.bo_qua, self.tai_du = [], []
 
-    def lay_thu(self, tu_ngay=None, den_ngay=None, bao=None):
+    def lay_thu(self, tu_ngay=None, den_ngay=None, bao=None, bo_qua_mid=None):
         self.so_lan += 1
         self.goi.append((tu_ngay, den_ngay))
+        self.bo_qua.append(None if bo_qua_mid is None else set(bo_qua_mid))
         if self.da_vao is not None:
             self.da_vao.set()
         if self.cho is not None:
             assert self.cho.wait(30), "test không cho luồng nền đi tiếp"
         if self.loi:
             raise RuntimeError(self.loi)
-        thu = list(self.thu) if (den_ngay is None or not self.chi_mo) else []
+        thu, self.tai_du, rut_gon = [], [], 0
+        for t in (list(self.thu) if (den_ngay is None or not self.chi_mo) else []):
+            mid = (t.get("message_id") or "").strip()[:250]
+            if bo_qua_mid and mid in bo_qua_mid:
+                rut_gon += 1
+                thu.append({"message_id": t.get("message_id"), "rut_gon": True, "tu_email": None, "tieu_de": None,
+                            "noi_dung": "", "dinh_kem": []})
+            else:
+                self.tai_du.append(mid)
+                thu.append(dict(t))
         if bao is not None and thu:
-            bao(len(thu), len(thu))
+            bao(len(thu), len(thu), rut_gon) if bo_qua_mid is not None else bao(len(thu), len(thu))
         return thu
 
 
@@ -225,6 +238,120 @@ def test_cua_so_7_ngay(moi_truong, monkeypatch):
     s = SL()
     assert s.query(m.KtHoaDonCho).count() == 2
     s.close()
+
+
+def test_bo_qua_mid_thu_da_biet(moi_truong, monkeypatch):
+    """⏩ Quét nền đưa cho cổng thư tập Message-ID ĐÃ BIẾT để khỏi tải thân: dòng đã ghi / bỏ qua, dòng chờ đã ĐỦ, hóa đơn bán;
+    dòng chờ còn THIẾU tiền / link vẫn tải đủ và được «✎ bổ sung»; endpoint cũ (đồng bộ) không đưa tập này."""
+    from decimal import Decimal
+    from app.routers.ke_toan_quy import hdc_quet_lo, _hdc_mid_da_biet
+    SL, nd = moi_truong
+    moc = (gio_hien_tai() - timedelta(days=3)).date()
+    prov = _dat_hop_thu(monkeypatch, _HopThu([_thu_hd(501), _thu_hd(502), _thu_hd(503), THU_KHAC]))
+    db = SL()
+    v, _ = hqn.bat_dau(db, nd, moc)
+    db.close()
+    assert hqn.cho_xong(v.id, 60)
+    kq = _xem(SL, v.id)["ket_qua"]
+    assert kq["da_them"] == 3 and kq["bo_qua_header"] == 0 and prov.bo_qua == [set()]       # chưa biết thư nào → tải đủ
+    s = SL()
+    r501, r502, r503 = [s.query(m.KtHoaDonCho).filter_by(so_hoa_don=str(so)).one() for so in (501, 502, 503)]
+    assert all(int(r.tong_tien) == 10_476_000 and r.link_tra_cuu and r.ngay_hd for r in (r501, r502, r503))
+    # 502: tiền về 0 + mất link (như 13 dòng EasyInvoice bản thật 05/11) → còn THIẾU; 503: đã ghi sổ; thêm một HĐ bán đã nhận
+    r502.tong_tien, r502.tien_truoc_thue, r502.link_tra_cuu = Decimal(0), Decimal(0), None
+    r503.trang_thai = "DA_GHI"
+    s.add(m.KtHdGuiKhach(message_id="<gk-1@meinvoice.vn>", tieu_de="HĐ bán", trang_thai="CHUA_KHOP"))
+    s.commit()
+    assert _hdc_mid_da_biet(s) == {"<hd-501@easyinvoice.vn>", "<hd-503@easyinvoice.vn>", "<gk-1@meinvoice.vn>"}
+    s.close()
+    prov.thu = prov.thu + [{"tu_email": "noreply@meinvoice.vn", "tieu_de": "HĐ bán", "noi_dung": "x",
+                            "message_id": "<gk-1@meinvoice.vn>", "dinh_kem": []}]
+    db = SL()
+    v2, _ = hqn.bat_dau(db, nd, moc)
+    db.close()
+    assert hqn.cho_xong(v2.id, 60)
+    d2 = _xem(SL, v2.id)
+    kq2 = d2["ket_qua"]
+    assert prov.bo_qua[-1] == {"<hd-501@easyinvoice.vn>", "<hd-503@easyinvoice.vn>", "<gk-1@meinvoice.vn>"}
+    assert prov.tai_du == ["<hd-502@easyinvoice.vn>", "<khac-1@do.vn>"]                    # chỉ dòng thiếu + thư lạ tải đủ
+    assert kq2["thu_moi"] == 5 and kq2["bo_qua_header"] == 3 and kq2["trung_bo_qua"] == 4   # 3 rút gọn + 502 vẫn đếm «đã xử lý»
+    assert kq2["da_them"] == 0 and kq2["sua_cu"] == 1 and kq2["khong_khop"] == 1 and kq2["loi"] == []
+    assert d2["tien_do"]["bo_qua_header"] == 3 and d2["tien_do"]["so_thu"] == 5 and d2["tien_do"]["da_lay"] == 5
+    s = SL()
+    r502 = s.query(m.KtHoaDonCho).filter_by(so_hoa_don="502").one()
+    assert int(r502.tong_tien) == 10_476_000 and r502.link_tra_cuu and r502.mo_ta.startswith("📧 đọc lại theo nhãn")
+    assert s.query(m.KtHoaDonCho).count() == 3
+    # lượt 3: 502 đã đủ → vào tập đã biết, không tải lại nữa
+    assert "<hd-502@easyinvoice.vn>" in _hdc_mid_da_biet(s)
+    # endpoint cũ / quét tuần (không bao_tien_do, không den_ngay) → không đưa bo_qua_mid, tải đủ như trước
+    k0 = hdc_quet_lo(s, nd, moc)
+    assert prov.bo_qua[-1] is None and k0["trung_bo_qua"] == 4 and k0["bo_qua_header"] == 0 and len(prov.tai_du) == 5
+    s.close()
+
+
+def test_imap_lay_thu_rut_gon(monkeypatch):
+    """_imap_lay_thu với máy chủ IMAP giả: hỏi Message-ID hàng loạt (một FETCH / 100 thư, trả lời dạng imaplib), thư trong
+    bo_qua_mid trả bản rút gọn không FETCH thân; thư thiếu Message-ID hay không trong tập → tải đủ; bao(i, n, bo_qua)."""
+    import email
+    from datetime import date
+    from email.message import EmailMessage
+
+    def _eml(mid, so):
+        e = EmailMessage()
+        e["From"] = f"ncc{so}@x.vn"
+        e["Subject"] = f"Hóa đơn {so}"
+        if mid:
+            e["Message-ID"] = mid
+        e.set_content(f"Thân thư {so}")
+        return e.as_bytes()
+
+    thu = {b"1": _eml("<a@x.vn>", 1), b"2": _eml("<b@x.vn>", 2), b"3": _eml(None, 3), b"4": _eml("  <c@x.vn>  ", 4)}
+    lenh = []
+
+    class _Imap:
+        def __init__(self, host, port, timeout=None):
+            pass
+
+        def login(self, u, p): pass
+        def select(self, hop): pass
+        def logout(self): pass
+
+        def search(self, cs, dk):
+            lenh.append(("search", dk))
+            return "OK", [b" ".join(thu)]
+
+        def fetch(self, so, phan):
+            lenh.append(("fetch", so, phan))
+            ra = []
+            for n in so.split(b","):
+                if "HEADER.FIELDS" in phan:
+                    msg = email.message_from_bytes(thu[n])
+                    h = (f"Message-ID: {msg['Message-ID']}\r\n\r\n" if msg["Message-ID"] else "\r\n").encode()
+                    ra += [(n + b" (BODY[HEADER.FIELDS (MESSAGE-ID)] {%d}" % len(h), h), b")"]
+                else:
+                    ra += [(n + b" (BODY[] {%d}" % len(thu[n]), thu[n]), b")"]
+            return "OK", ra
+
+    monkeypatch.setattr(ig.imaplib, "IMAP4_SSL", _Imap)
+    monkeypatch.setattr(ig, "MID_MOI_LENH", 3)
+    tien_do = []
+    out = ig._imap_lay_thu(date(2026, 11, 1), date(2026, 11, 8), bao=lambda *a: tien_do.append(a),
+                           bo_qua_mid={"<a@x.vn>", "<c@x.vn>"})
+    assert lenh[0] == ("search", "(SINCE 01-Nov-2026 BEFORE 08-Nov-2026)")
+    assert lenh[1] == ("fetch", b"1,2,3", "(BODY.PEEK[HEADER.FIELDS (MESSAGE-ID)])")       # hàng loạt, 3 thư / lệnh
+    assert lenh[2] == ("fetch", b"4", "(BODY.PEEK[HEADER.FIELDS (MESSAGE-ID)])")
+    assert [l[1] for l in lenh[3:]] == [b"2", b"3"] and all(l[2] == "(BODY.PEEK[])" for l in lenh[3:])   # chỉ tải thân 2 + 3
+    assert [(m.get("message_id") or "").strip() for m in out] == ["<a@x.vn>", "<b@x.vn>", "", "<c@x.vn>"]
+    assert out[0]["rut_gon"] and out[3]["rut_gon"] and out[0]["noi_dung"] == "" and out[0]["dinh_kem"] == []
+    assert not out[1].get("rut_gon") and "Thân thư 2" in out[1]["noi_dung"] and out[1]["tu_email"] == "ncc2@x.vn"
+    assert not out[2].get("rut_gon") and "Thân thư 3" in out[2]["noi_dung"]
+    assert tien_do == [(4, 4, 1)]                      # thư cuối: 4/4, lúc đó mới bỏ qua 1 (thư 4 xét sau khi báo)
+    # không có bo_qua_mid → không hỏi header, tải đủ mọi thư, bao(i, n) hai tham số như cũ
+    lenh.clear(); tien_do.clear()
+    out0 = ig._imap_lay_thu(date(2026, 11, 1), bao=lambda *a: tien_do.append(a))
+    assert lenh[0] == ("search", "(SINCE 01-Nov-2026)") and [l[1] for l in lenh[1:]] == [b"1", b"2", b"3", b"4"]
+    assert all(l[2] == "(BODY.PEEK[])" for l in lenh[1:]) and not any(m.get("rut_gon") for m in out0)
+    assert tien_do == [(4, 4)]
 
 
 def test_endpoint_quet_nen(moi_truong, monkeypatch):
