@@ -11,7 +11,9 @@ from datetime import timedelta
 from .database import SessionLocal
 
 LOAI = "HDC_QUET_MAIL"
-TOI_DA_LUOT = 4
+TOI_DA_LUOT = 4                     # mỗi cửa sổ: còn thư mới (con_lai) thì lặp tới chừng này lượt
+CUA_SO_NGAY = 7                     # quét theo từng CỬA SỔ 7 ngày (IMAP SINCE … BEFORE …): lấy cả ~1.000 thư 30 ngày kèm đính kèm
+                                    # vào bộ nhớ một lần làm máy chủ hết RAM — Render khởi động lại giữa lượt #63 (14:27 06/11/2026)
 QUA_HAN = timedelta(hours=2)        # dòng DANG_CHAY cũ hơn mức này = máy chủ đã khởi động lại giữa lượt → đóng là LỖI
 GAN_DAY = timedelta(hours=3)        # kết quả lượt gần nhất còn hiện trên bảng trong khoảng này
 _khoa = threading.Lock()            # tạo lượt tuần tự (hai người bấm cùng lúc chỉ ra một lượt)
@@ -33,14 +35,28 @@ def to_dict(v) -> dict:
             "tu_ngay": kq.get("tu_ngay"), "tien_do": td, "ket_qua": kq, "nguoi_dung_id": v.nguoi_dung_id}
 
 
+def _khoi_dong():
+    from .nhac_viec_service import gio_hien_tai
+    return gio_hien_tai()
+
+
+KHOI_DONG = _khoi_dong()            # mốc tiến trình này nạp module: lượt bắt đầu TRƯỚC mốc mà không còn luồng = của tiến trình cũ
+
+
 def dang_chay(db):
-    """Lượt đang chạy (chưa quá hạn) hoặc None. Dòng DANG_CHAY kẹt từ lần máy chủ khởi động lại → đóng là LOI (chưa commit)."""
+    """Lượt đang chạy hoặc None. Dòng DANG_CHAY mà luồng không còn trong tiến trình này (Render khởi động lại / deploy giữa lượt)
+    hoặc quá QUA_HAN → đóng là LOI ngay (chưa commit) để không chặn Quét ngay; tránh ghi đè lượt vừa xong đang ghi kết quả."""
     from .models import ViecNen
     from .nhac_viec_service import gio_hien_tai
     bay_gio = gio_hien_tai()
     for v in db.query(ViecNen).filter_by(loai=LOAI, trang_thai="DANG_CHAY").order_by(ViecNen.id.desc()).all():
-        if v.bat_dau and (bay_gio - v.bat_dau) < QUA_HAN:
-            return v
+        t = _luong.get(v.id)
+        if t is not None:
+            if t.is_alive():
+                return v
+            continue                                    # luồng vừa xong, đang ghi kết quả → không đụng
+        if v.bat_dau and v.bat_dau >= KHOI_DONG and (bay_gio - v.bat_dau) < QUA_HAN:
+            return v                                    # lượt của worker khác cùng bản dựng (nếu chạy nhiều worker)
         v.trang_thai, v.ket_thuc = "LOI", bay_gio
         v.ket_qua = dict(v.ket_qua or {},
                          loi=["Lượt quét bị cắt giữa chừng (máy chủ khởi động lại) — bấm Quét ngay để chạy lại"])
@@ -101,6 +117,7 @@ def _ghi_tien_do(viec_id: int, td: dict):
 
 
 def _gop(tong: dict, k: dict):
+    """Cộng dồn các LƯỢT trong một cửa sổ (việc mới làm cộng; trạng thái lặp lại lấy lượt cuối)."""
     for kk, v in (k or {}).items():
         if kk in ("ok", "mau_thu"):
             continue
@@ -112,14 +129,37 @@ def _gop(tong: dict, k: dict):
             tong[kk] = v
 
 
+def _gop_cua_so(tong: dict, cs: dict):
+    """Cộng các CỬA SỔ: mọi số đều cộng (thư mỗi cửa sổ khác nhau); tu_ngay/den_ngay của cửa sổ không ghi đè mốc chung."""
+    for kk, v in (cs or {}).items():
+        if kk in ("tu_ngay", "den_ngay"):
+            continue
+        if isinstance(v, bool) or not isinstance(v, (int, float)):
+            tong[kk] = v
+        else:
+            tong[kk] = tong.get(kk, 0) + v
+
+
+def cua_so(moc, hom_nay, buoc: int = CUA_SO_NGAY) -> list:
+    """Chia [moc, hôm nay] thành các cửa sổ kín `buoc` ngày [tu, den) + cửa sổ cuối MỞ (den=None: chỉ SINCE, gồm cả hôm nay)."""
+    ds, tu = [], moc
+    while (hom_nay - tu).days >= buoc:
+        ds.append((tu, tu + timedelta(days=buoc)))
+        tu += timedelta(days=buoc)
+    ds.append((tu, None))
+    return ds
+
+
 def _chay(viec_id: int, nd_id, moc):
-    """Luồng nền: quét từng lượt tới khi hết thư mới (con_lai = 0) hoặc đủ TOI_DA_LUOT; ghi tiến độ + kết quả vào viec_nen."""
+    """Luồng nền: quét từng CỬA SỔ 7 ngày từ `moc` tới nay; trong cửa sổ lặp từng lượt tới khi hết thư mới (con_lai = 0) hoặc đủ
+    TOI_DA_LUOT; ghi tiến độ + kết quả (cộng dồn) vào viec_nen. Lỗi hộp thư → dừng (các cửa sổ đã xong vẫn giữ)."""
     from fastapi import HTTPException
     from .models import ViecNen, NguoiDung
     from .nhac_viec_service import gio_hien_tai
     from .routers.ke_toan_quy import hdc_quet_lo
-    tong, loi = {"tu_ngay": str(moc), "luot": 0}, []
-    td = {"buoc": "DANG_LAY_THU", "luot": 1, "toi_da_luot": TOI_DA_LUOT}
+    ds_cs = cua_so(moc, gio_hien_tai().date())
+    tong, loi = {"tu_ngay": str(moc), "luot": 0, "so_cua_so": len(ds_cs), "cua_so_xong": 0, "cua_so_ngay": CUA_SO_NGAY}, []
+    td = {"buoc": "DANG_LAY_THU", "luot": 1, "toi_da_luot": TOI_DA_LUOT, "cua_so": 1, "so_cua_so": len(ds_cs), "da_them_tong": 0}
 
     def bao(x=None):
         td.update(x or {})
@@ -128,26 +168,36 @@ def _chay(viec_id: int, nd_id, moc):
     db = SessionLocal()
     try:
         nd = db.get(NguoiDung, nd_id) if nd_id else None
-        for luot in range(1, TOI_DA_LUOT + 1):
-            bao({"luot": luot, "buoc": "DANG_LAY_THU"})
-            try:
-                k = hdc_quet_lo(db, nd, moc, bao_tien_do=bao)
-            except HTTPException as e:
-                db.rollback()
-                loi.append(f"Lượt {luot}: {e.detail}")
+        for i_cs, (tu, den) in enumerate(ds_cs, 1):
+            tong_cs, dung = {}, False
+            for luot in range(1, TOI_DA_LUOT + 1):
+                bao({"cua_so": i_cs, "tu": str(tu), "den": (str(den) if den else None), "luot": luot, "buoc": "DANG_LAY_THU",
+                     "so_thu": 0, "da_lay": 0, "da_xet": 0, "da_them": 0, "ai": 0, "doc_nhan": 0, "trung": 0, "con_lai": 0,
+                     "da_them_tong": tong.get("da_them", 0) + tong_cs.get("da_them", 0)})
+                try:
+                    k = hdc_quet_lo(db, nd, tu, bao_tien_do=bao, den_ngay=den)
+                except HTTPException as e:
+                    db.rollback()
+                    loi.append(f"Cửa sổ {i_cs} lượt {luot}: {e.detail}")
+                    dung = True
+                    break
+                except Exception as e:
+                    db.rollback()
+                    loi.append(f"Cửa sổ {i_cs} lượt {luot}: {type(e).__name__}: {str(e)[:150]}")
+                    dung = True
+                    break
+                tong["luot"] += 1
+                _gop(tong_cs, k)
+                if not k.get("con_lai"):
+                    break
+            _gop_cua_so(tong, tong_cs)
+            if dung:
                 break
-            except Exception as e:
-                db.rollback()
-                loi.append(f"Lượt {luot}: {type(e).__name__}: {str(e)[:150]}")
-                break
-            tong["luot"] = luot
-            _gop(tong, k)
-            if not k.get("con_lai"):
-                break
+            tong["cua_so_xong"] = i_cs
     finally:
         db.close()
-    print(f"[HDC_QUET_NEN] #{viec_id} xong: luot={tong.get('luot')} thu={tong.get('thu_moi')} them={tong.get('da_them')} "
-          f"con_lai={tong.get('con_lai')} loi={loi}")
+    print(f"[HDC_QUET_NEN] #{viec_id} xong: cua_so={tong.get('cua_so_xong')}/{tong.get('so_cua_so')} luot={tong.get('luot')} "
+          f"thu={tong.get('thu_moi')} them={tong.get('da_them')} con_lai={tong.get('con_lai')} loi={loi}")
     db2 = SessionLocal()
     try:
         v = db2.get(ViecNen, viec_id)

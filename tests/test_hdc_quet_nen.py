@@ -43,21 +43,27 @@ THU_KHAC = {"tu_email": "ai@do.vn", "tieu_de": "Chào hỏi", "noi_dung": "Hẹn
 
 
 class _HopThu:
-    """Hộp thư giả: da_vao bật khi lượt bắt đầu lấy thư; cho (nếu có) giữ luồng nền lại cho tới khi test cho đi tiếp."""
+    """Hộp thư giả: da_vao bật khi lượt bắt đầu lấy thư; cho (nếu có) giữ luồng nền lại cho tới khi test cho đi tiếp.
+    chi_mo=True: chỉ trả thư ở cửa sổ MỞ (den_ngay=None — cửa sổ cuối của quét nền, và endpoint cũ); cửa sổ kín trả rỗng.
+    goi: các (tu_ngay, den_ngay) đã được hỏi."""
     ten = "GIA"
 
-    def __init__(self, thu, cho=None, da_vao=None, loi=None):
-        self.thu, self.cho, self.da_vao, self.loi, self.so_lan = thu, cho, da_vao, loi, 0
+    def __init__(self, thu, cho=None, da_vao=None, loi=None, chi_mo=True):
+        self.thu, self.cho, self.da_vao, self.loi, self.chi_mo, self.so_lan, self.goi = thu, cho, da_vao, loi, chi_mo, 0, []
 
-    def lay_thu(self, tu_ngay=None):
+    def lay_thu(self, tu_ngay=None, den_ngay=None, bao=None):
         self.so_lan += 1
+        self.goi.append((tu_ngay, den_ngay))
         if self.da_vao is not None:
             self.da_vao.set()
         if self.cho is not None:
             assert self.cho.wait(30), "test không cho luồng nền đi tiếp"
         if self.loi:
             raise RuntimeError(self.loi)
-        return list(self.thu)
+        thu = list(self.thu) if (den_ngay is None or not self.chi_mo) else []
+        if bao is not None and thu:
+            bao(len(thu), len(thu))
+        return thu
 
 
 @pytest.fixture()
@@ -107,7 +113,7 @@ def test_tao_luot_trang_thai_va_khong_song_song(moi_truong, monkeypatch):
     SL, nd = moi_truong
     cho, da_vao = threading.Event(), threading.Event()
     prov = _dat_hop_thu(monkeypatch, _HopThu([_thu_hd(277), _thu_hd(278), THU_KHAC], cho=cho, da_vao=da_vao))
-    moc = (gio_hien_tai() - timedelta(days=8)).date()
+    moc = (gio_hien_tai() - timedelta(days=3)).date()           # < 7 ngày → một cửa sổ mở
     db = SL()
     v, moi = hqn.bat_dau(db, nd, moc)
     assert moi and v.trang_thai == "DANG_CHAY" and v.loai == hqn.LOAI and v.nguoi_dung_id == nd.id
@@ -127,7 +133,9 @@ def test_tao_luot_trang_thai_va_khong_song_song(moi_truong, monkeypatch):
     kq = d["ket_qua"]
     assert kq["luot"] == 1 and kq["thu_moi"] == 3 and kq["da_them"] == 2 and kq["doc_nhan"] == 2 and kq["ai"] == 0
     assert kq["khong_khop"] == 1 and kq["con_lai"] == 0 and kq["loi"] == [] and kq["che_do"] == "GIA"
+    assert kq["so_cua_so"] == 1 and kq["cua_so_xong"] == 1 and prov.goi == [(moc, None)]
     assert d["tien_do"]["buoc"] == "XONG" and d["tien_do"]["so_thu"] == 3 and d["tien_do"]["da_them"] == 2
+    assert d["tien_do"]["da_lay"] == 3 and d["tien_do"]["cua_so"] == 1            # tiến độ lúc lấy thư cũng ghi
     s = SL()
     rows = s.query(m.KtHoaDonCho).order_by(m.KtHoaDonCho.so_hoa_don).all()
     assert [r.so_hoa_don for r in rows] == ["277", "278"]
@@ -148,7 +156,7 @@ def test_tu_lap_khi_con_thu_moi(moi_truong, monkeypatch):
     SL, nd = moi_truong
     prov = _dat_hop_thu(monkeypatch, _HopThu([_thu_hd(so) for so in range(101, 131)]))     # 30 thư mới > giới hạn 25 / lượt
     db = SL()
-    v, moi = hqn.bat_dau(db, nd, (gio_hien_tai() - timedelta(days=30)).date())
+    v, moi = hqn.bat_dau(db, nd, (gio_hien_tai() - timedelta(days=5)).date())            # một cửa sổ
     db.close()
     assert moi and hqn.cho_xong(v.id, 120)
     d = _xem(SL, v.id)
@@ -169,19 +177,53 @@ def test_loi_hop_thu_va_dong_kiet(moi_truong, monkeypatch):
     db.close()
     assert hqn.cho_xong(v.id, 60)
     d = _xem(SL, v.id)
-    assert d["trang_thai"] == "LOI" and d["ket_qua"]["luot"] == 0
-    assert d["ket_qua"]["loi"] == ["Lượt 1: Không đọc được hộp thư (GIA): IMAP timeout"]
-    # dòng DANG_CHAY kẹt từ lần máy chủ khởi động lại (quá 2 giờ) → không chặn, đóng là LOI
+    assert d["trang_thai"] == "LOI" and d["ket_qua"]["luot"] == 0 and d["ket_qua"]["cua_so_xong"] == 0
+    assert d["ket_qua"]["loi"] == ["Cửa sổ 1 lượt 1: Không đọc được hộp thư (GIA): IMAP timeout"]
+    # dòng DANG_CHAY của TIẾN TRÌNH CŨ (bắt đầu trước mốc nạp module, luồng không còn — Render deploy giữa lượt)
+    # hoặc quá 2 giờ → không chặn, đóng là LOI ngay
     s = SL()
     ket = m.ViecNen(loai=hqn.LOAI, trang_thai="DANG_CHAY", bat_dau=gio_hien_tai() - timedelta(hours=3),
                     ket_qua={"tu_ngay": "2026-10-01"})
-    s.add(ket); s.commit()
-    assert hqn.dang_chay(s) is None and ket.trang_thai == "LOI" and ket.ket_thuc and "khởi động lại" in ket.ket_qua["loi"][0]
+    cu = m.ViecNen(loai=hqn.LOAI, trang_thai="DANG_CHAY", bat_dau=hqn.KHOI_DONG - timedelta(seconds=1), ket_qua={})
+    s.add_all([ket, cu]); s.commit()
+    assert hqn.dang_chay(s) is None
+    assert ket.trang_thai == "LOI" and ket.ket_thuc and "khởi động lại" in ket.ket_qua["loi"][0]
+    assert cu.trang_thai == "LOI" and cu.ket_thuc
     s.commit()
-    # dòng DANG_CHAY còn trong hạn → vẫn là lượt đang chạy
-    moi_r = m.ViecNen(loai=hqn.LOAI, trang_thai="DANG_CHAY", bat_dau=gio_hien_tai() - timedelta(minutes=5), ket_qua={})
+    # dòng DANG_CHAY bắt đầu sau mốc nạp module mà luồng không ở tiến trình này (worker khác) → vẫn coi là đang chạy
+    moi_r = m.ViecNen(loai=hqn.LOAI, trang_thai="DANG_CHAY", bat_dau=gio_hien_tai(), ket_qua={})
     s.add(moi_r); s.commit()
     assert hqn.dang_chay(s) is moi_r and hqn.moi_nhat(s) is moi_r
+    s.close()
+
+
+def test_cua_so_7_ngay(moi_truong, monkeypatch):
+    from datetime import date
+    # chia mốc → hôm nay thành cửa sổ kín 7 ngày [tu, den) + cửa sổ cuối mở
+    assert hqn.cua_so(date(2026, 10, 7), date(2026, 11, 6)) == [
+        (date(2026, 10, 7), date(2026, 10, 14)), (date(2026, 10, 14), date(2026, 10, 21)), (date(2026, 10, 21), date(2026, 10, 28)),
+        (date(2026, 10, 28), date(2026, 11, 4)), (date(2026, 11, 4), None)]
+    assert hqn.cua_so(date(2026, 11, 1), date(2026, 11, 6)) == [(date(2026, 11, 1), None)]
+    assert hqn.cua_so(date(2026, 10, 30), date(2026, 11, 6)) == [(date(2026, 10, 30), date(2026, 11, 6)), (date(2026, 11, 6), None)]
+    # chạy nền 20 ngày → 3 cửa sổ; hộp thư trả cùng 3 thư ở mọi cửa sổ → cửa sổ 1 thêm, cửa sổ 2–3 trùng; số liệu cộng theo cửa sổ
+    SL, nd = moi_truong
+    prov = _dat_hop_thu(monkeypatch, _HopThu([_thu_hd(401), _thu_hd(402), THU_KHAC], chi_mo=False))
+    hom_nay = gio_hien_tai().date()
+    moc = hom_nay - timedelta(days=20)
+    db = SL()
+    v, _ = hqn.bat_dau(db, nd, moc)
+    db.close()
+    assert hqn.cho_xong(v.id, 120)
+    d = _xem(SL, v.id)
+    kq = d["ket_qua"]
+    assert prov.goi == hqn.cua_so(moc, hom_nay) == [(moc, moc + timedelta(days=7)), (moc + timedelta(days=7), moc + timedelta(days=14)),
+                                                    (moc + timedelta(days=14), None)]
+    assert d["trang_thai"] == "XONG" and kq["so_cua_so"] == 3 and kq["cua_so_xong"] == 3 and kq["luot"] == 3
+    assert kq["da_them"] == 2 and kq["thu_moi"] == 9 and kq["trung_bo_qua"] == 4 and kq["khong_khop"] == 3 and kq["con_lai"] == 0
+    assert kq["tu_ngay"] == str(moc) and "den_ngay" not in kq
+    assert d["tien_do"]["cua_so"] == 3 and d["tien_do"]["so_cua_so"] == 3 and d["tien_do"]["da_them_tong"] == 2
+    s = SL()
+    assert s.query(m.KtHoaDonCho).count() == 2
     s.close()
 
 
@@ -226,6 +268,9 @@ def test_endpoint_quet_nen(moi_truong, monkeypatch):
         assert hqn.cho_xong(r["id"], 60)
         d = c.get(f"/ke-toan/hoa-don-cho/quet-nen/{r['id']}").json()
         assert d["trang_thai"] == "XONG" and d["ket_qua"]["da_them"] == 2 and d["gan_day"] and d["tien_do"]["buoc"] == "XONG"
+        from datetime import date
+        so_cs = len(hqn.cua_so(date(2026, 10, 1), gio_hien_tai().date()))          # 01/10 → nay: nhiều cửa sổ, thư chỉ ở cửa sổ mở cuối
+        assert d["ket_qua"]["so_cua_so"] == so_cs == d["ket_qua"]["cua_so_xong"] and d["ket_qua"]["luot"] == so_cs
         # endpoint cũ (đồng bộ) vẫn chạy và trả kết quả như trước
         d0 = c.post("/ke-toan/hoa-don-cho/quet?tu_ngay=2026-10-01").json()
         assert d0["ok"] and d0["thu_moi"] == 2 and d0["da_them"] == 0 and d0["trung_bo_qua"] == 2

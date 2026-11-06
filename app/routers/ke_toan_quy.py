@@ -1424,9 +1424,10 @@ def quet_hoa_don_mua_email_nen_xem(viec_id: int, db: Session = Depends(get_db), 
     return hqn.to_dict(v)
 
 
-def hdc_quet_lo(db, nd, moc, chan_doan=False, bao_tien_do=None) -> dict:
-    """Lõi quét hóa đơn mua từ email (một LƯỢT): lấy thư từ `moc`, đọc nhãn / AI, thêm hàng chờ; tối đa 25 thư mới mỗi lượt
-    (con_lai = số thư mới chưa xử lý). `bao_tien_do(dict)` (tùy chọn) được gọi theo tiến độ để luồng nền ghi lại."""
+def hdc_quet_lo(db, nd, moc, chan_doan=False, bao_tien_do=None, den_ngay=None) -> dict:
+    """Lõi quét hóa đơn mua từ email (một LƯỢT): lấy thư từ `moc` (tới trước `den_ngay` nếu có — cửa sổ của quét nền), đọc nhãn /
+    AI, thêm hàng chờ; tối đa 25 thư mới mỗi lượt (con_lai = số thư mới chưa xử lý). `bao_tien_do(dict)` (tùy chọn) được gọi
+    theo tiến độ (cả lúc lấy thư) để luồng nền ghi lại."""
     from ..inbound_gateway import lay_inbound_provider
     from ..ai_gateway import doc_hoa_don_email, doc_hoa_don_tep
     from ..models import KtHoaDonCho, NhaCungCap, CtNccEmail, KtHdGuiKhach as _KtGkM
@@ -1441,7 +1442,12 @@ def hdc_quet_lo(db, nd, moc, chan_doan=False, bao_tien_do=None) -> dict:
 
     prov = lay_inbound_provider()
     try:
-        thu = prov.lay_thu(moc) if hasattr(prov, "lay_thu") else prov.lay_thu_moi()
+        if den_ngay is not None or bao_tien_do:
+            thu = prov.lay_thu(moc, den_ngay=den_ngay,
+                               bao=((lambda i, n: bao_tien_do({"buoc": "DANG_LAY_THU", "so_thu": n, "da_lay": i}))
+                                    if bao_tien_do else None))
+        else:
+            thu = prov.lay_thu(moc) if hasattr(prov, "lay_thu") else prov.lay_thu_moi()
     except Exception as e:
         raise HTTPException(status.HTTP_400_BAD_REQUEST,
                             f"Không đọc được hộp thư ({prov.ten}): {str(e)[:150]}")
@@ -1628,6 +1634,7 @@ def hdc_quet_lo(db, nd, moc, chan_doan=False, bao_tien_do=None) -> dict:
     gop = _hdc_gop_trung(db)                                   # 🔁 dòng trùng còn sót (cùng NCC + số HĐ) → BO_QUA, trỏ về dòng giữ
     db.commit()
     return {"ok": True, "che_do": prov.ten, "thu_moi": len(thu), "tu_ngay": str(moc),
+            **({"den_ngay": str(den_ngay)} if den_ngay is not None else {}),
             "da_them": them, "trung_bo_qua": trung, "ai": dung_ai, "doc_nhan": doc_nhan_n, "hd_ban": hd_ban,
             "trung_hd": trung_hd + gop, "sua_cu": sua_cu,
             "khong_khop": khong_khop, "con_lai": con_lai, **({"mau_thu": mau_thu} if chan_doan else {})}
