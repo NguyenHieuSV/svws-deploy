@@ -121,7 +121,8 @@ def chay(db, nguon="LICH", nd=None) -> dict:
         return tong
 
     from .routers.ke_toan_quy import quet_hoa_don_mua_email
-    kq["hoa_don"] = _lap("Hóa đơn", lambda: quet_hoa_don_mua_email(tu, db, nd), 3)
+    # gọi bằng TÊN tham số: PR #26 chèn `chan_doan` vào vị trí thứ 2 nên gọi theo vị trí (tu, db, nd) bị lệch (db → chan_doan, nd → db)
+    kq["hoa_don"] = _lap("Hóa đơn", lambda: quet_hoa_don_mua_email(tu, db=db, nd=nd), 3)
     from .routers.ncc import quet_bao_gia_email, bo_sung_spec_bao_gia_email
     kq["bao_gia"] = _lap("Báo giá", lambda: quet_bao_gia_email(tu, db, nd), 4)
     kq["spec"] = _lap("Spec", lambda: bo_sung_spec_bao_gia_email(db, nd), 3)
