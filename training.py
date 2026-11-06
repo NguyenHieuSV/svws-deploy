@@ -235,8 +235,8 @@ _seed_admin()
 
 def send_otp(email: str, code: str) -> bool:
     try:
-        msg = MIMEText("Ma xac minh SVWS Training cua ban: %s (hieu luc 15 phut)." % code, "plain", "utf-8")
-        msg["Subject"] = "SVWS Training - Ma xac minh"
+        msg = MIMEText("Ma xac minh YTouch Training cua ban: %s (hieu luc 15 phut)." % code, "plain", "utf-8")
+        msg["Subject"] = "YTouch Training - Ma xac minh"
         msg["From"] = SMTP["FROM"] or SMTP["USER"]; msg["To"] = email
         with smtplib.SMTP(SMTP["HOST"], int(SMTP["PORT"] or 587), timeout=15) as s:
             s.starttls(); s.login(SMTP["USER"], SMTP["PASS"]); s.sendmail(msg["From"], [email], msg.as_string())
@@ -904,7 +904,7 @@ def training_app():
     return HTMLResponse("<h3>Chưa có file giao diện — đặt bản APP tại " + HTML_PATH + "</h3>", status_code=404)
 
 _REG_HTML = """<!doctype html><html lang=vi><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
-<title>Đăng ký SVWS Training</title><style>
+<title>Đăng ký YTouch Training</title><style>
 body{font-family:system-ui,Segoe UI,Arial;margin:0;background:linear-gradient(160deg,#0a192f,#13315c);min-height:100vh;display:flex;align-items:center;justify-content:center;padding:18px;box-sizing:border-box}
 .card{background:#fff;border-radius:16px;max-width:450px;width:100%;padding:26px;box-shadow:0 24px 70px rgba(0,0,0,.45)}
 h1{font-size:20px;color:#13315c;margin:0 0 4px}p.sub{color:#5a6b85;font-size:13px;margin:0 0 12px}
@@ -928,7 +928,7 @@ a{color:#0582ca;font-size:13.5px}.foot{margin-top:12px;text-align:center}
 label.chk{display:flex;gap:8px;align-items:flex-start;font-size:13px;color:#33445e;line-height:1.45;margin:0 0 9px;cursor:pointer}
 label.chk input{width:auto;margin:2px 0 0;flex:none}
 </style><div class=card>
-<h1>💧 SVWS Training</h1>
+<h1>💧 YTouch Training</h1>
 <p class=sub>Chương trình huấn luyện <b>công nghệ xử lý nước cấp – nước thải – khí thải</b> của Công ty TNHH GPKT Sóng Việt (SVWS), biên soạn theo chuẩn đào tạo kỹ sư nội bộ — mở miễn phí cho sinh viên ngành Môi trường, Cấp thoát nước, Hóa – Kỹ thuật.</p>
 <div class=stats>
 <div><b>95</b><span>chuyên đề<br>3 lĩnh vực</span></div>
@@ -1062,7 +1062,7 @@ def terms_page():
     return _policy_page("terms.html")
 
 _ADMIN_HTML = """<!doctype html><html lang=vi><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
-<title>SVWS Training — Quản trị</title><style>
+<title>YTouch Training — Quản trị</title><style>
 body{font-family:system-ui,Segoe UI,Arial;margin:0;background:#f4f7fb;color:#16273f}
 .wrap{max-width:1180px;margin:0 auto;padding:22px}
 h1{font-size:20px;color:#13315c}h2{font-size:16px;color:#13315c;margin:26px 0 6px}
@@ -1076,7 +1076,7 @@ th,td{border:1px solid #e3eaf4;padding:7px 9px;text-align:left}th{background:#ee
 .tag{border-radius:999px;padding:1px 9px;font-size:11.5px;font-weight:700}
 .tP{background:#fff3d6;color:#8a6100}.tPer{background:#eef0f4;color:#5a6b85}.tA{background:#dcf5e7;color:#0a7a3d}.tB{background:#ffe1e1;color:#b02020}.edu{color:#0a7a3d;font-weight:700}
 </style><div class=wrap>
-<h1>💧 SVWS Training — Quản trị</h1>
+<h1>💧 YTouch Training — Quản trị</h1>
 <div class=bar><input id=k type=password placeholder="Khóa quản trị" size=24><button onclick=loadAll()>Tải dữ liệu</button>
 <button style="background:#13315c" onclick="dlcsv()">⬇ CSV điểm</button><span class=mut id=st></span></div>
 <h2>👷 Nhân viên <span class=mut id=empCount></span></h2><div id=emp></div>
@@ -1185,13 +1185,13 @@ def icon512(): return Response(base64.b64decode(_ICON512), media_type="image/png
 
 @router.get("/manifest.json", include_in_schema=False)
 def manifest():
-    return JSONResponse({"name": "SVWS Training — Công nghệ xử lý nước & khí thải",
-        "short_name": "SVWS Training", "start_url": "/training", "scope": "/training",
+    return JSONResponse({"name": "YTouch — Huấn luyện công nghệ xử lý nước & khí thải",
+        "short_name": "YTouch", "start_url": "/training", "scope": "/training",
         "display": "standalone", "background_color": "#f4f7fb", "theme_color": "#13315c",
         "icons": [{"src": "/training/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable"},
                   {"src": "/training/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable"}]})
 
-_SW = """const C='svws-trn-v51';
+_SW = """const C='svws-trn-v52';
 self.addEventListener('install',e=>{e.waitUntil(caches.open(C).then(c=>c.addAll(['/training','/training/icon-192.png'])));self.skipWaiting();});
 self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==C).map(k=>caches.delete(k)))));self.clients.claim();});
 self.addEventListener('fetch',e=>{
@@ -1202,3 +1202,25 @@ self.addEventListener('fetch',e=>{
 
 @router.get("/sw.js", include_in_schema=False)
 def sw(): return Response(_SW, media_type="application/javascript")
+
+
+# ── Đường tắt thương hiệu: /ytouch → /training (link ngắn để chia sẻ) ──────────
+# main.py chỉ include `router`; router chính có prefix "/training" nên route
+# /ytouch phải nằm ở router ngoài không prefix. Gói router chính vào trong rồi
+# gán lại tên `router` để main.py và tests không phải sửa.
+from fastapi.responses import RedirectResponse as _Redirect
+
+_brand_router = APIRouter()
+
+
+@_brand_router.get("/ytouch", include_in_schema=False)
+@_brand_router.get("/ytouch/", include_in_schema=False)
+@_brand_router.get("/YTouch", include_in_schema=False)
+def ytouch_shortlink(request: Request):
+    q = ("?" + request.url.query) if request.url.query else ""
+    return _Redirect("/training" + q, status_code=307)
+
+
+_brand_router.include_router(router)
+router = _brand_router
+
