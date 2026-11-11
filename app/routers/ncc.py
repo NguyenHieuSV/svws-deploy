@@ -2349,11 +2349,13 @@ def _bo_qua_trung(db) -> set:
 
 
 def _lcb_gan_nghi_trung(rows_active: list, lich_su: list, so_ngay: int = 30, bo_qua: set | None = None):
-    """Gắn nghi_trung[] cho lệnh CHỜ DUYỆT / ĐÃ DUYỆT: cùng NCC với lệnh khác (chờ · đã duyệt · đã chi) và
-    (a) cùng SỐ HÓA ĐƠN NCC ở PO / công nợ khác → mạnh; (b) cùng SỐ TIỀN ĐỢT trong ≤ so_ngay ngày → nhẹ (kể cả cùng PO)."""
+    """Gắn nghi_trung[] cho lệnh CHỜ DUYỆT / ĐÃ DUYỆT — CHỈ MỘT tiêu chí (anh Hiếu chốt 11/11/2026):
+    cùng NCC + cùng SỐ HÓA ĐƠN với lệnh khác (chờ · đã duyệt · đã chi) ở PO / công nợ KHÁC.
+    Không còn bắt «cùng số tiền đợt trong 30 ngày» (so_ngay giữ cho tương thích, không dùng)."""
     from ..lai_lo_ma import so_hd_chuan
     from datetime import date as _d
     tat_ca = rows_active + lich_su
+    bq = bo_qua or set()
 
     def ngay(x):
         s = (x.get("chi_luc") or x.get("duyet_luc") or x.get("de_nghi_luc") or "")[:10]
@@ -2367,27 +2369,25 @@ def _lcb_gan_nghi_trung(rows_active: list, lich_su: list, so_ngay: int = 30, bo_
         return float(v if v is not None else (x.get("so_tien") or 0))
 
     for a in rows_active:
+        a["nghi_trung"] = []
         if a.get("trang_thai") not in ("CHO_DUYET", "DA_DUYET") or not a.get("ncc_id"):
-            a["nghi_trung"] = []
             continue
-        ds, na, ta, sa = [], ngay(a), tien(a), so_hd_chuan(a.get("so_hoa_don"))
+        sa = so_hd_chuan(a.get("so_hoa_don"))
+        if not sa or ("HOA_DON", f"{a['ncc_id']}|{sa}") in bq:      # chưa có số hóa đơn / CEO đã xác nhận không trùng
+            continue
+        ds = []
         for b in tat_ca:
             if b["id"] == a["id"] or b.get("ncc_id") != a["ncc_id"]:
                 continue
             cung_ct = bool((a.get("don_mua_id") and a.get("don_mua_id") == b.get("don_mua_id"))
                            or (a.get("cong_no_id") and a.get("cong_no_id") == b.get("cong_no_id")))
-            sb, tb, nb = so_hd_chuan(b.get("so_hoa_don")), tien(b), ngay(b)
-            gan = (na is None or nb is None or abs((na - nb).days) <= so_ngay)
-            ly_do, manh = None, False
-            bq = bo_qua or set()
-            if sa and sa == sb and not cung_ct and ("HOA_DON", f"{a['ncc_id']}|{sa}") not in bq:
-                ly_do, manh = f"cùng số hóa đơn {a.get('so_hoa_don')} với lệnh {b.get('so')}", True
-            elif ta > 0 and abs(ta - tb) < 1 and gan and ("LENH_TIEN", f"{a['ncc_id']}|{int(round(ta))}") not in bq:
-                ly_do = f"{'cùng PO, ' if cung_ct else ''}cùng số tiền {ta:,.0f} với lệnh {b.get('so')}".replace(",", ".")
-            if ly_do:
-                ds.append({"id": b["id"], "so": b.get("so"), "trang_thai": b.get("trang_thai"), "so_tien": tb,
-                           "ngay": str(nb) if nb else None, "ly_do": ly_do, "manh": manh})
-        ds.sort(key=lambda x: (not x["manh"], x["id"]))
+            if cung_ct or so_hd_chuan(b.get("so_hoa_don")) != sa:   # cùng chứng từ = trả nhiều đợt, không phải trùng
+                continue
+            nb = ngay(b)
+            ds.append({"id": b["id"], "so": b.get("so"), "trang_thai": b.get("trang_thai"), "so_tien": tien(b),
+                       "ngay": str(nb) if nb else None,
+                       "ly_do": f"cùng số hóa đơn {a.get('so_hoa_don')} với lệnh {b.get('so')}", "manh": True})
+        ds.sort(key=lambda x: x["id"])
         a["nghi_trung"] = ds[:6]
 
 
@@ -6688,13 +6688,12 @@ def _bao_trung_hoa_don(so_hd, ds) -> str:
 
 
 # =====================================================================================
-# 🔍 LỚP 4 — RÀ TRÙNG toàn bộ (CEO): hóa đơn · PO cùng tiền · lệnh chi cùng tiền
+# 🔍 LỚP 4 — RÀ TRÙNG toàn bộ (CEO): CHỈ «cùng nhà cung cấp + cùng số hóa đơn» (11/11/2026 bỏ PO cùng tiền · lệnh cùng tiền)
 # =====================================================================================
 @router.get("/ra-trung")
 def ra_trung(so_ngay: int = 30, db: Session = Depends(get_db), _=Depends(chi_vai_tro("CEO", "ADMIN"))):
+    """Rà toàn bộ PO / công nợ phải trả: nhóm có CÙNG nhà cung cấp + CÙNG số hóa đơn ở chứng từ khác nhau."""
     from ..lai_lo_ma import so_hd_chuan
-    from ..models import LenhChiBank
-    from datetime import date as _d
     ten_ncc = {n.id: n.ten for n in db.query(NhaCungCap).all()}
     pos = db.query(DonMua).filter(DonMua.trang_thai != "TU_CHOI").order_by(DonMua.id.desc()).all()
     cns = db.query(CongNo).filter(CongNo.loai == "PHAI_TRA").all()
@@ -6728,60 +6727,18 @@ def ra_trung(so_ngay: int = 30, db: Session = Depends(get_db), _=Depends(chi_vai
                 "tong": sum(x["tong"] for x in v), "da_tra": sum(x["da_tra"] for x in v)}
                for k, v in nhom.items() if len(v) > 1 and ("HOA_DON", f"{k[0]}|{k[1]}") not in bq]
     hoa_don.sort(key=lambda g: -g["tong"])
-    # ② PO cùng NCC + cùng tổng tiền trong ≤ so_ngay ngày (nghi tạo PO trùng)
-    nhom2 = {}
-    for p in pos:
-        if float(p.tong_tien or 0) > 0 and p.nha_cung_cap_id:
-            nhom2.setdefault((p.nha_cung_cap_id, int(round(float(p.tong_tien or 0)))), []).append(p)
-    po_cung_tien = []
-    for k, v in nhom2.items():
-        if len(v) < 2:
-            continue
-        v = sorted(v, key=lambda p: str(p.ngay or ""))
-        gan = any(p1.ngay and p2.ngay and abs((p1.ngay - p2.ngay).days) <= so_ngay for i, p1 in enumerate(v) for p2 in v[i + 1:])
-        if gan and ("PO_TIEN", f"{k[0]}|{k[1]}") not in bq:
-            po_cung_tien.append({"ncc_id": k[0], "ncc_ten": ten_ncc.get(k[0]), "tong": float(k[1]), "khoa": f"{k[0]}|{k[1]}",
-                                 "items": [po_item(p) for p in v]})
-    po_cung_tien.sort(key=lambda g: -g["tong"])
-    # ③ lệnh chi đã duyệt / đã chi: cùng NCC + cùng số tiền đợt ở PO / công nợ KHÁC trong ≤ so_ngay ngày
-    cn_by = {c.id: c for c in cns}
-    lenh = []
-    for l in db.query(LenhChiBank).filter(LenhChiBank.trang_thai.in_(("DA_DUYET", "DA_CHI"))).order_by(LenhChiBank.id.desc()).limit(800).all():
-        p = po_by.get(l.don_mua_id) if l.don_mua_id else None
-        c = cn_by.get(getattr(l, "cong_no_id", None)) if getattr(l, "cong_no_id", None) else None
-        ncc_id = (p.nha_cung_cap_id if p else None) or (c.nha_cung_cap_id if c else None)
-        if not ncc_id:
-            continue
-        tien = float(l.so_tien_dot if getattr(l, "so_tien_dot", None) is not None else (l.so_tien or 0))
-        luc = l.chi_luc or l.duyet_luc or l.de_nghi_luc
-        lenh.append({"id": l.id, "ncc_id": ncc_id, "tien": int(round(tien)), "ngay": luc.date() if luc else None,
-                     "ct": f"po{l.don_mua_id}" if l.don_mua_id else f"cn{getattr(l, 'cong_no_id', None)}",
-                     "so": (p.so if p else None) or (f"CN-{c.id}" if c else f"#{l.id}"), "trang_thai": l.trang_thai,
-                     "so_hd": (p.so_hoa_don if p else None) or (c.so_ct if c else None)})
-    nhom3 = {}
-    for x in lenh:
-        if x["tien"] > 0:
-            nhom3.setdefault((x["ncc_id"], x["tien"]), []).append(x)
-    lenh_cung_tien = []
-    for k, v in nhom3.items():
-        if len({x["ct"] for x in v}) < 2:
-            continue
-        gan = any(a["ngay"] and b["ngay"] and abs((a["ngay"] - b["ngay"]).days) <= so_ngay and a["ct"] != b["ct"]
-                  for i, a in enumerate(v) for b in v[i + 1:])
-        if gan and ("LENH_TIEN", f"{k[0]}|{k[1]}") not in bq:
-            lenh_cung_tien.append({"ncc_id": k[0], "ncc_ten": ten_ncc.get(k[0]), "tien": float(k[1]), "khoa": f"{k[0]}|{k[1]}",
-                                   "items": [dict(x, ngay=str(x["ngay"]) if x["ngay"] else None) for x in v]})
-    lenh_cung_tien.sort(key=lambda g: -g["tien"])
+    # (11/11/2026 — anh Hiếu chốt) CHỈ bắt trùng theo «cùng NCC + cùng số hóa đơn». Hai nhóm cũ ② PO cùng tổng tiền và
+    # ③ lệnh chi cùng số tiền đợt đã BỎ; hai khóa po_cung_tien / lenh_cung_tien giữ rỗng để tab chưa tải lại không vỡ.
     from ..models import NghiTrungBoQua
     da_bo_qua = [{"id": r.id, "loai": r.loai, "khoa": r.khoa, "mo_ta": r.mo_ta, "ly_do": r.ly_do, "luc": str(r.tao_luc)[:16] if r.tao_luc else None}
-                 for r in db.query(NghiTrungBoQua).order_by(NghiTrungBoQua.id.desc()).all()]
-    return {"so_ngay": so_ngay, "hoa_don": hoa_don, "po_cung_tien": po_cung_tien, "lenh_cung_tien": lenh_cung_tien,
-            "tong": {"hoa_don": len(hoa_don), "po_cung_tien": len(po_cung_tien), "lenh_cung_tien": len(lenh_cung_tien)},
+                 for r in db.query(NghiTrungBoQua).filter(NghiTrungBoQua.loai == "HOA_DON").order_by(NghiTrungBoQua.id.desc()).all()]
+    return {"so_ngay": so_ngay, "hoa_don": hoa_don, "po_cung_tien": [], "lenh_cung_tien": [],
+            "tong": {"hoa_don": len(hoa_don), "po_cung_tien": 0, "lenh_cung_tien": 0},
             "da_bo_qua": da_bo_qua}
 
 
 class BoQuaTrungVao(_NccCnBase):
-    loai: str                       # HOA_DON | PO_TIEN | LENH_TIEN
+    loai: str                       # HOA_DON (PO_TIEN / LENH_TIEN đã bỏ 11/11/2026 — dòng cũ trong bảng giữ làm lịch sử)
     khoa: str
     mo_ta: str | None = None
     ly_do: str | None = None
@@ -6791,8 +6748,8 @@ class BoQuaTrungVao(_NccCnBase):
 def ra_trung_bo_qua(data: BoQuaTrungVao, db: Session = Depends(get_db), nd: NguoiDung = Depends(chi_vai_tro("CEO"))):
     """✅ CEO xác nhận nhóm nghi trùng là KHÔNG trùng → bỏ cảnh báo (nhãn ⚠, chặn duyệt, panel Rà trùng)."""
     from ..models import NghiTrungBoQua
-    if data.loai not in ("HOA_DON", "PO_TIEN", "LENH_TIEN") or not (data.khoa or "").strip():
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Thiếu loại / khóa nhóm")
+    if data.loai != "HOA_DON" or not (data.khoa or "").strip():
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Thiếu khóa nhóm — chỉ còn nhóm «cùng nhà cung cấp + cùng số hóa đơn»")
     r = db.query(NghiTrungBoQua).filter_by(loai=data.loai, khoa=data.khoa.strip()).first()
     if r is None:
         r = NghiTrungBoQua(loai=data.loai, khoa=data.khoa.strip()[:120], nguoi_dung_id=nd.id)
