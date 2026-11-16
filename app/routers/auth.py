@@ -28,6 +28,14 @@ def toi(nd: NguoiDung = Depends(lay_nguoi_dung_hien_tai)):
     return nd
 
 
+@router.get("/vai-tro")
+def ten_cac_vai_tro(nd: NguoiDung = Depends(lay_nguoi_dung_hien_tai), db: Session = Depends(get_db)):
+    """Mã → tên mọi vị trí (kể cả vị trí CEO tự tạo, mig 170) cho người đã đăng nhập: giao diện dựng nhãn vị trí và
+    gợi ý chức danh ở Hồ sơ lương. Không kèm quyền / số liệu."""
+    from ..vi_tri import ten_vai_tro
+    return ten_vai_tro(db)
+
+
 @router.get("/quyen-cua-toi")
 def quyen_cua_toi(nd: NguoiDung = Depends(lay_nguoi_dung_hien_tai),
                   db: Session = Depends(get_db)):
