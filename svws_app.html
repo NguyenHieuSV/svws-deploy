@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="vi">
 <head>
-<!-- build: trung-chi-so-hd-2026-11-11 -->
+<!-- build: tao-vi-tri-2026-11-16 -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#0f2c44">
@@ -375,6 +375,13 @@ const ROLE_NAME = {CEO:"Giám đốc",TP_KD:"Trưởng P. Kinh doanh",NV_KD:"NV 
   NV_CRM:"NV Chăm sóc KH",TP_CU:"Trưởng P. Cung ứng",NV_MUA:"NV Mua hàng",THUKHO:"Thủ kho",
   KTT:"Kế toán trưởng",NV_KT:"NV Kế toán",TP_DA:"Trưởng dự án",NV_DA:"NV Dự án",
   NV_KTH:"NV Kỹ thuật",NV_THUE:"NV Cho thuê",NV_HCNS:"NV Hành chính-NS",ADMIN:"Admin / IT"};
+/* 🪪 Vị trí CEO tự tạo (mig 170, 16/11/2026): sau khi đăng nhập nạp thêm tên các vị trí có trong CSDL mà bản đồ trên chưa có
+   (và tên mới nhất của vị trí tự tạo) → nhãn vị trí, gợi ý chức danh ở Hồ sơ lương luôn đủ. Lỗi mạng / máy chủ cũ: bỏ qua. */
+const DEMO_VT_TU_TAO={};
+function _napTenVaiTro(){
+  if(S.mode!=="live")return;
+  api("/auth/vai-tro").then(ds=>{(ds||[]).forEach(r=>{if(r&&r.ma&&(r.tu_tao||!(r.ma in ROLE_NAME)))ROLE_NAME[r.ma]=r.ten;});}).catch(()=>{});
+}
 
 /* Ma trận quyền (đồng bộ với SVWS_seed_rbac) — dùng cho chế độ demo */
 const X="XEM",T="THAO_TAC",D="DUYET",A="QUAN_TRI";
@@ -624,6 +631,7 @@ async function doLogin(){
     const q=await api("/auth/quyen-cua-toi");
     S.role=q.vai_tro; S.roleName=q.ten_vai_tro; S.email=q.email; S.perm=q.quyen;
     try{localStorage.setItem('svws_email',email);localStorage.setItem('svws_token',access_token);localStorage.setItem('svws_api',api_);}catch(_){}
+    _napTenVaiTro();
     startApp();
   }catch(e){
     const m=$("#loginErr"); m.classList.add('err');
@@ -18118,8 +18126,9 @@ async function nsTaoTK(nvId){
     <div class="note" style="margin-bottom:10px">Tài khoản dùng để đăng nhập hệ thống SVWS; quyền theo vai trò được chọn. Có thể quản lý lại ở phân hệ <b>Cấu hình</b>.</div>
     <label>Email đăng nhập</label><input id="tk_email" type="email" value="${(nv.email||'').replace(/"/g,'&quot;')}" placeholder="ten@svws.vn">
     <label>Mật khẩu ban đầu (tối thiểu 6 ký tự)</label><input id="tk_mk" type="text" placeholder="Người dùng nên đổi sau khi nhận">
-    <label>Vai trò (đoán từ chức danh — sửa được)</label>
+    <label>Vị trí / chức danh (đoán từ chức danh — sửa được)</label>
     <select id="tk_vt" data-nocbx>${roles.map(r=>`<option value="${r.ma}" ${r.ma===doan?'selected':''}>${r.ten} (${r.ma})</option>`).join('')}</select>
+    <div style="font-size:11.5px;color:var(--muted);margin-top:3px">Chưa có vị trí phù hợp? CEO thêm ở <b>Cấu hình → 🪪 Vị trí / chức danh</b>, rồi mở lại hộp này.</div>
     <button class="btn-sm" style="margin-top:14px" onclick="nsTaoTKLuu()">Tạo tài khoản</button>
     ${S.mode==="live"?`<div class="note" style="margin-top:14px">Nhân viên <b>đã có tài khoản</b> (tạo ở Cấu hình) nhưng chưa gắn vào hồ sơ này? Chỉ cần nhập đúng email ở trên rồi bấm:</div>
     <button class="btn-sm ghost" style="margin-top:6px" onclick="nsGanTKCoSan()">🔗 Gắn tài khoản có sẵn vào hồ sơ</button>`:''}`);
@@ -20660,8 +20669,11 @@ async function viewCauHinh(m){
   if(S.mode==="live"){
     try{[users,roles]=await Promise.all([api("/cau-hinh/nguoi-dung"),api("/cau-hinh/vai-tro")]);}
     catch(e){m.innerHTML+=`<div class="panel"><div class="empty">${e.message||'Lỗi tải danh sách'}</div></div>`;return;}
-  }else{users=DEMO_USERS;roles=Object.keys(ROLE_NAME).map(r=>({ma:r,ten:ROLE_NAME[r]}));}
+  }else{users=DEMO_USERS;roles=Object.keys(ROLE_NAME).map(r=>{const tt=!!DEMO_VT_TU_TAO[r],n=DEMO_USERS.filter(u=>u.vai_tro===r).length;
+    return {ma:r,ten:ROLE_NAME[r],tu_tao:tt,ghi_chu:tt?DEMO_VT_TU_TAO[r].ghi_chu:null,so_nguoi_dung:n,so_quyen:Object.keys(DEMO_PERM[r]||{}).length,so_kpi:0,
+            sua_duoc:tt,xoa_duoc:tt&&!n,lam_mau_duoc:r!=="CEO"&&r!=="ADMIN"};});}
   S._chUsers=users;S._chRoles=roles;
+  roles.forEach(r=>{if(r.tu_tao||!(r.ma in ROLE_NAME))ROLE_NAME[r.ma]=r.ten;});
   const hoatDong=users.filter(u=>u.trang_thai==="HOAT_DONG").length;
   m.innerHTML+=`<div class="cards">
     <div class="stat accent"><div class="k">Tổng tài khoản</div><div class="v">${users.length}</div><div class="d">Trong hệ thống</div></div>
@@ -20671,7 +20683,7 @@ async function viewCauHinh(m){
   <div class="panel"><div class="panel-h"><h3>Người dùng</h3>
     <button class="btn-sm" onclick="chMoTao()">+ Tạo người dùng</button></div>
   <div class="panel-b"><table><thead>
-    <tr><th>Email</th><th>Vai trò</th><th>Trạng thái</th><th>Hành động</th></tr></thead><tbody>
+    <tr><th>Email</th><th>Vị trí / chức danh</th><th>Trạng thái</th><th>Hành động</th></tr></thead><tbody>
     ${users.map(u=>`<tr>
       <td><b>${u.email}</b></td>
       <td>${u.ten_vai_tro} <span class="muted">(${u.vai_tro})</span></td>
@@ -20683,6 +20695,7 @@ async function viewCauHinh(m){
         <button class="btn-sm ghost" style="color:var(--red)" onclick="chXoa(${u.id})">🗑 Xóa</button>
       </td></tr>`).join('')}
   </tbody></table></div></div>
+  ${_chViTriPanel(roles)}
   ${S.mode==="demo"?`<div class="panel"><div class="panel-b" style="color:var(--muted);font-size:12.5px">
     Chế độ demo: thao tác chỉ mô phỏng, không lưu. Đăng nhập tài khoản CEO/Admin thật để quản lý người dùng thực.</div></div>`:''}`;
   // 📬 Tự quét thư hàng tuần — cấu hình + nhật ký
@@ -20703,12 +20716,114 @@ async function viewCauHinh(m){
     _dhLoadMatrix();
   }
 }
-function _chRoleOpts(sel){return S._chRoles.map(r=>`<option value="${r.ma}" ${r.ma===sel?'selected':''}>${r.ten} (${r.ma})</option>`).join('');}
-function chMoTao(){
+function _chRoleOpts(sel){return S._chRoles.map(r=>`<option value="${r.ma}" ${r.ma===sel?'selected':''}>${_chEsc(r.ten)} (${r.ma})</option>`).join('');}
+function _chEsc(v){return String(v==null?'':v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');}
+/* 🪪 VỊ TRÍ / CHỨC DANH do CEO tự tạo (anh Hiếu 16/11/2026, mig 170, app/vi_tri.py): trước đây ô chọn vị trí chỉ có danh sách
+   cố định. CEO thêm vị trí ở bảng dưới hoặc bấm «+ Thêm vị trí mới» ngay trong hộp Tạo / Sửa người dùng (xong quay lại hộp đó,
+   chọn sẵn vị trí vừa tạo). Mã tự đặt từ tên; quyền chép từ vị trí mẫu hoặc chấm ở bảng Phân quyền. Vị trí có sẵn của hệ thống
+   (mã dùng trong code) không đổi tên / không xóa; vị trí tự tạo đổi tên được, xóa khi không còn tài khoản nào dùng. */
+function _chVtThemLink(kieu,id){
+  return S.role==="CEO"?` <a href="#" onclick="chVtTuHop('${kieu}',${id||0});return false" style="font-weight:400;font-size:12px;margin-left:8px" title="Chưa có vị trí phù hợp trong danh sách? Tạo vị trí / chức danh mới rồi quay lại đây">+ Thêm vị trí mới</a>`:'';
+}
+function chVtTuHop(kieu,id){
+  if(kieu==='tao')return chMoTaoVT({kieu:'tao',email:gv('ch_email'),mk:(document.getElementById('ch_mk')||{}).value||''});
+  chMoTaoVT({kieu:'sua',id,email:gv('ch_email2')});
+}
+function _chViTriPanel(roles){
+  const ceo=S.role==="CEO", tuTao=roles.filter(r=>r.tu_tao).length;
+  const rows=roles.map(r=>`<tr>
+    <td><b>${_chEsc(r.ten)}</b>${r.ghi_chu?`<div style="font-size:11px;color:var(--muted)">${_chEsc(r.ghi_chu)}</div>`:''}</td>
+    <td><span class="muted">${_chEsc(r.ma)}</span></td>
+    <td style="text-align:center">${r.so_nguoi_dung!=null?r.so_nguoi_dung:'—'}</td>
+    <td style="text-align:center">${r.so_quyen!=null?(r.so_quyen||'<span style="color:#b45309" title="Vị trí này chưa có quyền ở module nào — chấm ở bảng Phân quyền theo vị trí">0 ⚠</span>'):'—'}</td>
+    <td>${r.tu_tao?'<span class="badge b-info">CEO tạo</span>':'<span class="badge b-cho" title="Vị trí có sẵn của hệ thống — mã được dùng trong các bước duyệt nên không đổi tên / không xóa">Có sẵn</span>'}</td>
+    <td style="white-space:nowrap">${ceo&&r.tu_tao?`<button class="btn-sm ghost" onclick="chMoSuaVT('${r.ma}')">✏️ Đổi tên</button>
+      <button class="btn-sm ghost" style="color:var(--red)" onclick="chXoaVT('${r.ma}')">🗑 Xóa</button>`:''}</td></tr>`).join('');
+  return `<div class="panel"><div class="panel-h"><h3>🪪 Vị trí / chức danh (${roles.length}${tuTao?` · ${tuTao} do CEO tạo`:''})</h3><div class="spacer"></div>
+     ${ceo?`<button class="btn-sm" onclick="chMoTaoVT()">+ Thêm vị trí / chức danh</button>`:'<span style="font-size:12px;color:var(--muted)">Chỉ CEO thêm / sửa vị trí</span>'}</div>
+   <div class="panel-b"><table><thead><tr><th>Tên vị trí / chức danh</th><th>Mã</th><th style="text-align:center">Tài khoản đang dùng</th><th style="text-align:center">Module có quyền</th><th>Nguồn</th><th></th></tr></thead>
+     <tbody>${rows}</tbody></table>
+     <div class="note" style="margin-top:8px;color:var(--muted)">Vị trí ở đây là danh sách hiện trong ô chọn khi <b>tạo / sửa người dùng</b> và quyết định <b>quyền</b> của tài khoản. Thêm vị trí mới: bấm <b>+ Thêm vị trí / chức danh</b>, nhập tên, chọn vị trí mẫu để chép quyền (hoặc để trống rồi chấm ở bảng <b>Phân quyền theo vị trí</b> bên dưới). Vị trí <b>Có sẵn</b> không đổi tên / không xóa; vị trí <b>CEO tạo</b> đổi tên được, xóa khi không còn tài khoản nào dùng.</div></div></div>`;
+}
+function chMoTaoVT(quayVe){
+  if(S.role!=="CEO")return toast("Chỉ CEO thêm vị trí / chức danh","err");
+  S._chVtQuayVe=quayVe||null;
+  const mau=(S._chRoles||[]).filter(r=>r.lam_mau_duoc!==false&&r.ma!=="CEO"&&r.ma!=="ADMIN");
+  _ktModal("🪪 Thêm vị trí / chức danh",`
+    <label>Tên vị trí / chức danh <span style="color:var(--red)">*</span></label><input id="vt_ten" maxlength="120" placeholder="VD: Kỹ sư vận hành · Trưởng nhóm thi công">
+    <label>Mã (để trống — app tự đặt từ tên)</label><input id="vt_ma" maxlength="20" placeholder="VD: KS_VAN_HANH" style="text-transform:uppercase">
+    <label>Quyền ban đầu — chép từ vị trí</label>
+    <select id="vt_mau" data-nocbx><option value="">— Không chép (chưa có quyền, chấm sau ở bảng Phân quyền) —</option>${mau.map(r=>`<option value="${r.ma}">${_chEsc(r.ten)} (${r.ma})${r.so_quyen!=null?` — ${r.so_quyen} module`:''}</option>`).join('')}</select>
+    <label>Ghi chú (tùy chọn)</label><input id="vt_gc" maxlength="300" placeholder="VD: phụ trách trạm, tổ, ca…">
+    <div class="note" style="margin-top:10px;color:var(--muted)">Vị trí mới hiện ngay trong ô chọn khi tạo / sửa người dùng, ở bảng <b>Phân quyền theo vị trí</b> và trang KPI &amp; mô tả công việc. Chép quyền chỉ là điểm bắt đầu — chỉnh từng module ở bảng Phân quyền. Không chép được từ CEO / Admin.</div>
+    <button class="btn-sm" style="margin-top:14px" onclick="chTaoVT()">Tạo vị trí</button>
+    ${quayVe?`<button class="btn-sm ghost" style="margin-top:14px" onclick="chVtQuayLai()">← Quay lại</button>`:''}`);
+  setTimeout(()=>{const e=document.getElementById('vt_ten'); if(e)e.focus();},50);
+}
+function chVtQuayLai(maMoi){
+  const qv=S._chVtQuayVe; S._chVtQuayVe=null;
+  if(qv&&qv.kieu==='tao')return chMoTao({email:qv.email,mk:qv.mk,vt:maMoi});
+  if(qv&&qv.kieu==='sua')return chMoSua(qv.id,maMoi,qv.email);
+  document.getElementById('ktModal')?.remove();
+}
+async function chTaoVT(){
+  const ten=gv('vt_ten'), ma=gv('vt_ma').toUpperCase(), mau=gv('vt_mau'), gc=gv('vt_gc');
+  if(ten.length<2)return toast("Nhập tên vị trí / chức danh","err");
+  let r;
+  if(S.mode==="live"){
+    try{r=await api("/cau-hinh/vai-tro",{method:'POST',body:JSON.stringify({ten,ma:ma||null,sao_chep_tu:mau||null,ghi_chu:gc||null})});}
+    catch(e){return toast(e.detail||e.message,"err");}
+  }else{
+    const m2=(ma||ten.normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/đ/g,'d').replace(/Đ/g,'D').toUpperCase().replace(/[^A-Z0-9]+/g,'_').replace(/^_+|_+$/g,'')).slice(0,20)||'VI_TRI';
+    if(ROLE_NAME[m2])return toast("Mã "+m2+" đã có — nhập mã khác","err");
+    if(Object.values(ROLE_NAME).some(t=>t.toLowerCase()===ten.toLowerCase()))return toast("Đã có vị trí tên này","err");
+    DEMO_PERM[m2]=Object.assign({},mau?(DEMO_PERM[mau]||{}):{}); DEMO_VT_TU_TAO[m2]={ghi_chu:gc||null};
+    const n=Object.keys(DEMO_PERM[m2]).length;
+    r={ma:m2,ten,tu_tao:true,ghi_chu:gc||null,so_nguoi_dung:0,so_quyen:n,so_kpi:0,sua_duoc:true,xoa_duoc:true,lam_mau_duoc:true,so_quyen_chep:n,sao_chep_tu:mau||null,sao_chep_ten:ROLE_NAME[mau]||null};
+  }
+  ROLE_NAME[r.ma]=r.ten; (S._chRoles=S._chRoles||[]).push(r);
+  toast(`Đã tạo vị trí «${r.ten}» (mã ${r.ma})`+(r.so_quyen_chep?` · chép ${r.so_quyen_chep} quyền từ ${r.sao_chep_ten||r.sao_chep_tu}`:' · chưa có quyền, chấm ở bảng Phân quyền')+(S.mode==="demo"?" (demo — không lưu)":""),"ok");
+  const qv=S._chVtQuayVe;
+  go('cau_hinh');                                   // nạp lại bảng vị trí + ma trận phân quyền ở nền
+  if(qv)return chVtQuayLai(r.ma);                   // mở từ hộp Tạo / Sửa người dùng → quay lại, chọn sẵn vị trí mới
+  document.getElementById('ktModal')?.remove();
+}
+function chMoSuaVT(ma){
+  const r=(S._chRoles||[]).find(x=>x.ma===ma); if(!r)return;
+  _ktModal("✏️ Đổi tên vị trí — "+r.ma,`
+    <label>Tên vị trí / chức danh</label><input id="vt_ten2" maxlength="120" value="${_chEsc(r.ten)}">
+    <label>Ghi chú</label><input id="vt_gc2" maxlength="300" value="${_chEsc(r.ghi_chu)}">
+    <div class="note" style="margin-top:10px;color:var(--muted)">Mã <b>${r.ma}</b> giữ nguyên nên tài khoản và quyền của vị trí không đổi.</div>
+    <button class="btn-sm" style="margin-top:14px" onclick="chSuaVT('${r.ma}')">Lưu</button>`);
+}
+async function chSuaVT(ma){
+  const ten=gv('vt_ten2'), gc=gv('vt_gc2');
+  if(ten.length<2)return toast("Nhập tên vị trí / chức danh","err");
+  if(S.mode==="live"){
+    try{await api("/cau-hinh/vai-tro/"+encodeURIComponent(ma),{method:'PATCH',body:JSON.stringify({ten,ghi_chu:gc})});}
+    catch(e){return toast(e.detail||e.message,"err");}
+  }else{ if(DEMO_VT_TU_TAO[ma])DEMO_VT_TU_TAO[ma].ghi_chu=gc||null; DEMO_USERS.forEach(u=>{if(u.vai_tro===ma)u.ten_vai_tro=ten;}); }
+  ROLE_NAME[ma]=ten;
+  document.getElementById('ktModal')?.remove();
+  toast("Đã đổi tên vị trí "+ma+(S.mode==="demo"?" (demo)":""),"ok"); go('cau_hinh');
+}
+async function chXoaVT(ma){
+  const r=(S._chRoles||[]).find(x=>x.ma===ma); if(!r)return;
+  if(r.so_nguoi_dung>0)return toast(`Còn ${r.so_nguoi_dung} tài khoản đang ở vị trí «${r.ten}» — chuyển họ sang vị trí khác (✏️ Sửa) rồi mới xóa`,"err");
+  if(!confirm(`Xóa vị trí «${r.ten}» (${r.ma})?\n\nQuyền${r.so_kpi?`, ${r.so_kpi} KPI`:''} và mô tả công việc của vị trí này cũng bị xóa. Không thể hoàn tác.`))return;
+  if(S.mode==="live"){
+    try{await api("/cau-hinh/vai-tro/"+encodeURIComponent(ma),{method:'DELETE'});}
+    catch(e){return toast(e.detail||e.message,"err");}
+  }else{ delete DEMO_PERM[ma]; delete DEMO_VT_TU_TAO[ma]; }
+  delete ROLE_NAME[ma];
+  toast(`Đã xóa vị trí «${r.ten}»`+(S.mode==="demo"?" (demo)":""),"ok"); go('cau_hinh');
+}
+function chMoTao(giu){
+  giu=giu||{};
   _ktModal("Tạo người dùng mới",`
-    <label>Email</label><input id="ch_email" type="email" placeholder="ten@svws.vn">
-    <label>Mật khẩu ban đầu (tối thiểu 6 ký tự)</label><input id="ch_mk" type="text" placeholder="Người dùng nên đổi sau khi nhận">
-    <label>Vai trò</label><select id="ch_vt">${_chRoleOpts("NV_KD")}</select>
+    <label>Email</label><input id="ch_email" type="email" placeholder="ten@svws.vn" value="${_chEsc(giu.email)}">
+    <label>Mật khẩu ban đầu (tối thiểu 6 ký tự)</label><input id="ch_mk" type="text" placeholder="Người dùng nên đổi sau khi nhận" value="${_chEsc(giu.mk)}">
+    <label>Vị trí / chức danh (quyết định quyền)${_chVtThemLink('tao')}</label><select id="ch_vt">${_chRoleOpts(giu.vt||"NV_KD")}</select>
     <button class="btn-sm" style="margin-top:14px" onclick="chTao()">Tạo tài khoản</button>`);
 }
 async function chTao(){
@@ -20725,11 +20840,11 @@ async function chTao(){
   document.getElementById('ktModal')?.remove();
   toast("Đã tạo tài khoản "+email+(S.mode==="demo"?" (demo — không lưu)":""));go('cau_hinh');
 }
-function chMoSua(id){
+function chMoSua(id,vtChon,emailGiu){
   const u=S._chUsers.find(x=>x.id===id);if(!u)return;
   _ktModal("Sửa người dùng — "+u.email,`
-    <label>Email</label><input id="ch_email2" type="email" value="${u.email}">
-    <label>Vai trò</label><select id="ch_vt2">${_chRoleOpts(u.vai_tro)}</select>
+    <label>Email</label><input id="ch_email2" type="email" value="${_chEsc(emailGiu||u.email)}">
+    <label>Vị trí / chức danh (quyết định quyền)${_chVtThemLink('sua',id)}</label><select id="ch_vt2">${_chRoleOpts(vtChon||u.vai_tro)}</select>
     <button class="btn-sm" style="margin-top:14px" onclick="chSua(${id})">Lưu thay đổi</button>`);
 }
 async function chSua(id){
@@ -21281,6 +21396,7 @@ function logout(){
       S={mode:"live",api:api_,token:tk,page:"dashboard"};
       api("/auth/quyen-cua-toi").then(q=>{
         S.role=q.vai_tro;S.roleName=q.ten_vai_tro;S.email=q.email;S.perm=q.quyen;
+        _napTenVaiTro();
         startApp();
       }).catch(()=>{ // token hết hạn / máy chủ đổi — quay về màn đăng nhập
         try{localStorage.removeItem('svws_token');}catch(_){}

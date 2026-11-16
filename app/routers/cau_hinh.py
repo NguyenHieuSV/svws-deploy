@@ -151,8 +151,62 @@ def danh_sach_vi_tri(
     nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN")),
     db: Session = Depends(get_db),
 ):
-    """Danh sách vị trí để chọn khi tạo/sửa người dùng."""
-    return [{"ma": v.ma, "ten": v.ten} for v in db.query(VaiTro).order_by(VaiTro.id).all()]
+    """Danh sách vị trí để chọn khi tạo/sửa người dùng + số liệu cho bảng 🪪 Vị trí / chức danh (mig 170):
+    tu_tao · so_nguoi_dung · so_quyen · so_kpi · sua_duoc · xoa_duoc · lam_mau_duoc."""
+    from ..vi_tri import danh_sach
+    return danh_sach(db)
+
+
+# ---- 🪪 CEO tự tạo vị trí / chức danh (mig 170, app/vi_tri.py — anh Hiếu 16/11/2026) ----
+class TaoViTri(BaseModel):
+    ten: str
+    ma: str | None = None             # để trống → app tự đặt từ tên
+    sao_chep_tu: str | None = None    # mã vị trí mẫu để chép quyền (không nhận CEO / ADMIN); trống = chưa có quyền
+    ghi_chu: str | None = None
+
+
+class SuaViTri(BaseModel):
+    ten: str | None = None
+    ghi_chu: str | None = None
+
+
+def _vt_goi(db: Session, ham, *a, **k):
+    """Gọi hàm của app/vi_tri.py, đổi ValueError → 400, LookupError → 404, trùng khóa → 400; commit khi xong."""
+    try:
+        kq = ham(db, *a, **k)
+        db.commit()
+        return kq
+    except ValueError as e:
+        db.rollback()
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e))
+    except LookupError as e:
+        db.rollback()
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(e))
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Không lưu được vị trí (trùng mã, hoặc vị trí đang được dữ liệu khác dùng).")
+
+
+@router.post("/vai-tro", status_code=201)
+def tao_vi_tri(p: TaoViTri, nd: NguoiDung = Depends(chi_vai_tro("CEO")), db: Session = Depends(get_db)):
+    """CEO thêm vị trí / chức danh mới: mã tự đặt từ tên (hoặc tự gõ), chép quyền từ vị trí mẫu nếu chọn."""
+    from ..vi_tri import tao
+    return _vt_goi(db, tao, nd.id, p.ten, ma=p.ma, sao_chep_tu=p.sao_chep_tu, ghi_chu=p.ghi_chu)
+
+
+@router.patch("/vai-tro/{ma}")
+def sua_vi_tri(ma: str, p: SuaViTri, nd: NguoiDung = Depends(chi_vai_tro("CEO")), db: Session = Depends(get_db)):
+    """CEO đổi tên / ghi chú vị trí TỰ TẠO (mã giữ nguyên)."""
+    from ..vi_tri import sua
+    return _vt_goi(db, sua, nd.id, ma, ten=p.ten, ghi_chu=p.ghi_chu)
+
+
+@router.delete("/vai-tro/{ma}")
+def xoa_vi_tri(ma: str, nd: NguoiDung = Depends(chi_vai_tro("CEO")), db: Session = Depends(get_db)):
+    """CEO xóa vị trí TỰ TẠO khi không còn tài khoản nào dùng và chưa có kỳ đánh giá KPI."""
+    from ..vi_tri import xoa
+    return _vt_goi(db, xoa, nd.id, ma)
 
 
 @router.get("/nguoi-dung")

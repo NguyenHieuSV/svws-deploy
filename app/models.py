@@ -18,6 +18,10 @@ class VaiTro(Base):
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     ma: Mapped[str] = mapped_column(String(20), unique=True)
     ten: Mapped[str] = mapped_column(String(120))
+    # mig 170: vị trí / chức danh do CEO tạo trong app (đổi tên / xóa được) — vị trí seed sẵn = False (mã dùng trong code)
+    tu_tao: Mapped[bool] = mapped_column(Boolean, default=False)
+    ghi_chu: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    tao_luc: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
 class NguoiDung(Base):
