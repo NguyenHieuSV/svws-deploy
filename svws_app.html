@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="vi">
 <head>
-<!-- build: po-da-mua-tim-2026-11-22 -->
+<!-- build: po-da-mua-tim-2026-11-22b -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#0f2c44">
@@ -11532,7 +11532,7 @@ function poTimLoc(nhom){
   kq.innerHTML=`<div style="color:var(--muted);font-size:12px;margin:2px 0 6px">Khớp <b>${hits.length}</b> PO — xóa ô tìm để trở lại nhóm Năm — đơn mới nhất lên trên.</div>
     <div style="overflow-x:auto"><table class="poTbl2" style="width:100%">${window.POTHEAD||''}<tbody>${hits.map(x=>x.html).join('')||'<tr><td colspan="9" class="empty" style="padding:12px">Không PO nào khớp.</td></tr>'}</tbody></table></div>`;
 }
-/* 🔎 Đã mua theo mã bán hàng: 2 ô GÕ-ĐỂ-TÌM — mã đơn đang thực hiện · mã đơn hàng ĐÃ HOÀN THÀNH (tách riêng, 22/11/2026).
+/* 🔎 Đã mua theo mã bán hàng: 2 ô GÕ-ĐỂ-TÌM — mã đơn CHƯA hoàn thành (Mới · Đang thực hiện · Đã xuất kho / hóa đơn) · mã đơn hàng ĐÃ HOÀN THÀNH (tách riêng, 22/11/2026).
    Select không gắn data-nocbx nên app tự bọc thành ô tìm kiếm (_enhanceSelects); khung bọc khóa bề rộng 250px. */
 function _daMuaChonHTML(orders){
   const xong=(orders||[]).filter(o=>o.trang_thai==='HOAN_THANH'), dang=(orders||[]).filter(o=>o.trang_thai!=='HOAN_THANH');
@@ -11540,7 +11540,7 @@ function _daMuaChonHTML(orders){
   window._daMuaOpts={damua_dh:op(dang),damua_dh_xong:op(xong)};
   const o1=(id,nhan,ph,n)=>`<div style="width:250px;max-width:100%"><div style="font-size:11.5px;color:var(--muted);margin-bottom:3px">${nhan} <b>(${n})</b></div>
       <select id="${id}" data-ph="${ph}" onchange="poDaMua('${id}')">${window._daMuaOpts[id]}</select></div>`;
-  return '<div style="display:flex;gap:12px;flex-wrap:wrap;justify-content:flex-end;align-items:flex-end">'+o1('damua_dh','Mã đơn đang thực hiện','🔍 Gõ để tìm mã đang thực hiện…',dang.length)
+  return '<div style="display:flex;gap:12px;flex-wrap:wrap;justify-content:flex-end;align-items:flex-end">'+o1('damua_dh','Mã đơn chưa hoàn thành','🔍 Gõ để tìm mã chưa hoàn thành…',dang.length)
     +o1('damua_dh_xong','✅ Mã đơn hàng đã hoàn thành',xong.length?'🔍 Gõ để tìm mã đã hoàn thành…':'Chưa có mã nào hoàn thành',xong.length)+'</div>';
 }
 async function poDaMua(src){
