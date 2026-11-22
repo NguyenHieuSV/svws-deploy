@@ -12,7 +12,7 @@ ENV:  TRN_ADMIN_KEY      (bắt buộc — khóa quản trị: duyệt tài kho�
 Giao diện: static/training/index.html
 Đăng nhập: NHÂN VIÊN và SINH VIÊN đều dùng email + mật khẩu tự đặt.
 """
-import os, re, csv, io, time, base64, secrets, hashlib, smtplib, datetime as dt
+import os, re, csv, io, time, base64, secrets, hashlib, hmac, smtplib, datetime as dt
 from email.mime.text import MIMEText
 from typing import Optional
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -188,9 +188,22 @@ def valid_phone(p: str) -> bool:
 def check_email(e: str):
     e = (e or "").strip().lower()
     if not EMAIL_RE.fullmatch(e): raise HTTPException(422, "Email không đúng định dạng.")
+    _max_len(e, 120, "Email")
     dom = e.split("@")[1]
     if dom in DISPOSABLE: raise HTTPException(422, "Không chấp nhận email dùng một lần.")
     return e, dom
+
+def _max_len(v: str, n: int, label: str) -> str:
+    """Cột VARCHAR(n) trên Postgres: quá dài -> 422 rõ ràng thay vì 500 (SQLite không kiểm độ dài)."""
+    if len(v) > n: raise HTTPException(422, "%s quá dài (tối đa %d ký tự)." % (label, n))
+    return v
+
+# Tiền tố mã do hệ thống cấp (sinh viên, kỹ sư, người đã xóa) — mã nhân viên không được trùng vì điểm
+# (trn_results.emp_code) và việc ẩn danh khi xóa tài khoản đều tra theo chuỗi mã.
+RESERVED_CODE_PREFIXES = ("SVU-", "ENG-", "DEL-")
+
+def _reserved_code(code: str) -> bool:
+    return code.upper().startswith(RESERVED_CODE_PREFIXES)
 
 _RL = {}
 def rate_limit(ip: str, limit: int = 10, window: int = 3600):
@@ -310,10 +323,20 @@ def _login(obj, password, label):
     if obj.status == "blocked": raise HTTPException(403, "Tài khoản đã bị khóa — liên hệ SVWS.")
     obj.token = secrets.token_hex(16); obj.last_login = dt.datetime.utcnow()
 
+OTP_MAX_FAILS = 5
+_OTP_FAILS = {}      # (loại TK, id) -> số lần nhập sai mã hiện hành; đủ OTP_MAX_FAILS thì hủy mã (chống dò 6 số)
+
 def _verify(s: Session, obj, otp: str):
     if not obj or not obj.otp_code: raise HTTPException(404, "Không tìm thấy yêu cầu xác minh.")
     if time.time() > obj.otp_expire: raise HTTPException(410, "Mã đã hết hạn — đăng ký lại để nhận mã mới.")
-    if otp.strip() != obj.otp_code: raise HTTPException(422, "Mã xác minh không đúng.")
+    k = (_atype_of(obj), obj.id)
+    if not hmac.compare_digest((otp or "").strip(), obj.otp_code):
+        n = _OTP_FAILS[k] = _OTP_FAILS.get(k, 0) + 1
+        if n >= OTP_MAX_FAILS:
+            obj.otp_code = ""; obj.otp_expire = 0; s.add(obj); s.commit(); _OTP_FAILS.pop(k, None)
+            raise HTTPException(422, "Nhập sai mã quá %d lần — mã đã bị hủy, tài khoản chờ SVWS duyệt." % OTP_MAX_FAILS)
+        raise HTTPException(422, "Mã xác minh không đúng.")
+    _OTP_FAILS.pop(k, None)
     obj.status = "active"; obj.otp_code = ""; obj.otp_expire = 0
     s.add(obj); _on_activated(s, _atype_of(obj), obj); s.commit()
 
@@ -415,7 +438,11 @@ def staff_register(body: StaffRegisterIn, request: Request):
     _require_terms(body.agree_terms)
     code = body.emp_code.strip().upper(); name = body.full_name.strip()
     if not code or len(code) < 3: raise HTTPException(422, "Nhập mã nhân viên (VD: SV025).")
+    _max_len(code, 30, "Mã nhân viên")
+    if _reserved_code(code):
+        raise HTTPException(422, "Mã nhân viên không được bắt đầu bằng " + " / ".join(RESERVED_CODE_PREFIXES) + " (mã dành cho sinh viên / kỹ sư).")
     if len(name) < 5 or " " not in name: raise HTTPException(422, "Nhập họ và tên đầy đủ.")
+    _max_len(name, 80, "Họ và tên")
     email, dom = check_email(body.email)
     if EMP_DOMAINS and dom not in EMP_DOMAINS:
         raise HTTPException(422, "Tài khoản nhân viên phải dùng email công ty (@" + EMP_DOMAINS[0] + ").")
@@ -445,6 +472,17 @@ def staff_verify(body: VerifyIn):
         _verify(s, s.exec(select(TrnStaff).where(TrnStaff.email == email)).first(), body.otp)
         return {"ok": True, "message": "Xác minh thành công — đăng nhập ngay bằng email và mật khẩu."}
 
+def _auto_emp_code(s: Session, local: str) -> str:
+    """Mã cho nhân viên tự tạo qua đăng nhập: phần trước @ viết hoa, nhưng không trùng mã nhân viên khác
+    (điểm tra theo mã) và không mang tiền tố SVU-/ENG-/DEL- của hệ thống."""
+    base = local.upper()
+    if _reserved_code(base): base = "NV-" + base
+    base = base[:26]
+    code, i = base, 1
+    while s.exec(select(TrnStaff.id).where(TrnStaff.emp_code == code)).first():
+        i += 1; code = "%s-%d" % (base, i)
+    return code
+
 @router.post("/api/staff/login")
 def staff_login(body: LoginEmailIn):
     email = (body.id or "").strip().lower()
@@ -456,7 +494,7 @@ def staff_login(body: LoginEmailIn):
             if EMP_DOMAINS and dom in EMP_DOMAINS and body.password == local:
                 if st is None:
                     salt = secrets.token_hex(8)
-                    st = TrnStaff(emp_code=local.upper(), full_name=local.replace(".", " ").replace("-", " ").title(),
+                    st = TrnStaff(emp_code=_auto_emp_code(s, local), full_name=local.replace(".", " ").replace("-", " ").title()[:80],
                                   email=email, salt=salt, pw_hash=hash_pw(body.password, salt), status="active")
                 elif st.status == "pending":
                     st.status = "active"; st.otp_code = ""; activated_now = True
@@ -474,15 +512,23 @@ def old_login():
 def _next_code(s: Session, prefix: str, column) -> str:
     """Mã tăng dần KHÔNG BAO GIỜ cấp lại (kể cả khi xóa đúng tài khoản mới nhất): số kế tiếp = max(số đã cấp lưu
     trong trn_code_seq, số lớn nhất còn trong bảng) + 1. Lần đầu chạy, bảng seq tự lấy mốc từ dữ liệu hiện có.
-    Không commit (người gọi commit cùng tài khoản mới)."""
+    Không commit (người gọi commit cùng tài khoản mới).
+    Đồng thời: luôn tạo sẵn dòng seq bằng INSERT … ON CONFLICT DO NOTHING rồi mới khóa FOR UPDATE — nếu không,
+    2 lượt đăng ký đầu tiên của một tiền tố cùng thấy "chưa có dòng", cùng INSERT và lượt sau lỗi 500 (trùng khóa)."""
+    dialect = s.get_bind().dialect.name
+    if dialect in ("postgresql", "sqlite"):
+        if dialect == "postgresql":
+            from sqlalchemy.dialects.postgresql import insert as _ins
+        else:
+            from sqlalchemy.dialects.sqlite import insert as _ins
+        s.execute(_ins(TrnCodeSeq).values(prefix=prefix, last=0).on_conflict_do_nothing(index_elements=["prefix"]))
     seq = s.exec(select(TrnCodeSeq).where(TrnCodeSeq.prefix == prefix).with_for_update()).first()
+    if seq is None:                     # CSDL khác (không có ON CONFLICT): giữ cách cũ
+        seq = TrnCodeSeq(prefix=prefix, last=0)
     pat = re.compile(re.escape(prefix) + r"\d+")
     nums = [int(c[len(prefix):]) for c in s.exec(select(column)).all() if pat.fullmatch(c or "")]
-    n = max([seq.last if seq else 0] + nums) + 1
-    if seq is None:
-        seq = TrnCodeSeq(prefix=prefix, last=n)
-    else:
-        seq.last = n
+    n = max([seq.last] + nums) + 1
+    seq.last = n
     s.add(seq)
     return "%s%04d" % (prefix, n)
 
@@ -495,6 +541,7 @@ def student_register(body: StudentRegisterIn, request: Request):
     _require_terms(body.agree_terms)
     name = body.full_name.strip()
     if len(name) < 5 or " " not in name: raise HTTPException(422, "Nhập họ và tên đầy đủ.")
+    _max_len(name, 80, "Họ và tên")
     phone = norm_phone(body.phone)
     if not valid_phone(phone): raise HTTPException(422, "Số điện thoại không hợp lệ (di động Việt Nam 10 số).")
     email, dom = check_email(body.email)
@@ -502,9 +549,10 @@ def student_register(body: StudentRegisterIn, request: Request):
     school = body.school.strip(); course = body.course.strip()
     if len(school) < 3: raise HTTPException(422, "Nhập tên trường.")
     if not course: raise HTTPException(422, "Nhập khóa học (VD: K2023 — Kỹ thuật Môi trường).")
+    _max_len(school, 150, "Tên trường"); _max_len(course, 100, "Khóa học")
     if len(body.password) < 6: raise HTTPException(422, "Mật khẩu tối thiểu 6 ký tự.")
     with Session(_engine) as s:
-        if s.exec(select(TrnStudent).where(or_(TrnStudent.email == email, TrnStudent.phone == phone))).first():
+        if _taken(s, email, phone):            # trùng cả với tài khoản kỹ sư / nhân viên, như đăng ký kỹ sư
             raise HTTPException(409, "Email hoặc số điện thoại đã đăng ký. Dùng nút Đăng nhập, hoặc liên hệ SVWS nếu quên mật khẩu.")
         salt = secrets.token_hex(8)
         st = TrnStudent(full_name=name, phone=phone, email=email, school=school, course=course,
@@ -553,6 +601,7 @@ def engineer_register(body: EngineerRegisterIn, request: Request):
     _require_terms(body.agree_terms)
     name = body.full_name.strip()
     if len(name) < 5 or " " not in name: raise HTTPException(422, "Nhập họ và tên đầy đủ.")
+    _max_len(name, 80, "Họ và tên")
     phone = norm_phone(body.phone)
     if not valid_phone(phone): raise HTTPException(422, "Số điện thoại không hợp lệ (di động Việt Nam 10 số).")
     email, dom = check_email(body.email)
@@ -605,8 +654,10 @@ def engineer_login(body: LoginEmailIn):
 def post_result(body: ResultIn):
     with Session(_engine) as s:
         code, name = _actor_by_token(s, body.token)
-        r = TrnResult(emp_code=code, name=name, dm=body.dm, code=body.code,
-                      tech=body.tech, score=body.score, pct=int(body.pct), kq=body.kq, d=body.d)
+        # cắt theo độ dài cột (Postgres báo 500 nếu dài hơn) + kẹp % vào 0..100 (báo cáo nguồn tính "đạt" theo pct)
+        r = TrnResult(emp_code=code, name=name[:80], dm=(body.dm or "")[:120], code=(body.code or "")[:20],
+                      tech=(body.tech or "")[:200], score=(body.score or "")[:20], pct=max(0, min(100, int(body.pct))),
+                      kq=(body.kq or "")[:20], d=(body.d or "")[:40])
         s.add(r); s.commit()
         return {"ok": True}
 
