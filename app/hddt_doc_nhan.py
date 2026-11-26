@@ -104,6 +104,9 @@ def doc_nhan(tieu_de: str, noi_dung: str) -> dict | None:
                             r"([\d.,\s]{3,}?)(?:\s*(?:vnd|d\b|dong)|\n)"))
     ma_cqt = _bat(t, r"ma (?:cua )?co quan thue\s*[:：]?\s*([a-z0-9]{16,40})\b")
     ma_tc = _bat(t, r"ma tra cuu\s*[:：]?\s*([a-z0-9_\-]{6,30})\b")
+    if ma_tc:                                    # `t` đã hạ chữ thường → lấy lại đúng chữ hoa/thường trong thư gốc (mã dùng để tải file)
+        m_goc = re.search(r"(?<![A-Za-z0-9_\-])" + re.escape(ma_tc) + r"(?![A-Za-z0-9_\-])", goc, re.I)
+        ma_tc = m_goc.group(0) if m_goc else ma_tc.upper()
     cap = _ten_mst(goc)
     ban = next(((ten, mst) for ten, mst, mua in cap if not mua), None)
     mua = next(((ten, mst) for ten, mst, mua in cap if mua), None)
@@ -120,7 +123,7 @@ def doc_nhan(tieu_de: str, noi_dung: str) -> dict | None:
             "nguoi_mua": mua[0] if mua else None, "nguoi_mua_mst": mua[1] if mua else None,
             "ky_hieu": ky_hieu.upper() if ky_hieu else None, "so_hoa_don": so_hd, "ngay": ngay,
             "so_tien": tong, "tien_thue": thue, "tien_truoc_thue": truoc, "thue_suat": thue_suat,
-            "ma_cqt": ma_cqt.upper() if ma_cqt else None, "ma_tra_cuu": ma_tc.upper() if ma_tc else None,
+            "ma_cqt": ma_cqt.upper() if ma_cqt else None, "ma_tra_cuu": ma_tc or None,
             "link_tra_cuu": link_tra_cuu(noi_dung), "mo_ta": mo_ta,
             "du": bool(so_hd and tong)}
 

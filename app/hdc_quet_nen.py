@@ -21,7 +21,7 @@ _khoa = threading.Lock()            # tạo lượt tuần tự (hai người b�
 _luong: dict[int, threading.Thread] = {}   # id → luồng (test chờ xong)
 # cộng dồn qua các lượt = việc MỚI làm ở từng lượt; khóa khác (thu_moi, trung_bo_qua, khong_khop, con_lai…) là trạng thái
 # lặp lại mỗi lượt → lấy giá trị lượt cuối (giống quet_mail_service._gop)
-_TONG = ("da_them", "ai", "doc_nhan", "hd_ban", "trung_hd", "sua_cu")
+_TONG = ("da_them", "ai", "doc_nhan", "hd_ban", "trung_hd", "sua_cu", "tu_tai")
 
 
 def to_dict(v) -> dict:

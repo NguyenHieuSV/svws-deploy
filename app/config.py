@@ -73,6 +73,7 @@ class Settings(BaseSettings):
     nhac_viec_gui_khi_tao: bool = True   # gửi ngay khi vừa đặt lời nhắc
     nhac_viec_ban_tin: bool = True       # bản tin tổng hợp đầu ngày
     nhac_viec_gio_ban_tin: int = 8       # giờ gửi bản tin (0-23, GIỜ VIỆT NAM)
+    hdc_tu_tai: bool = True              # quét thư hóa đơn: tự tải file từ link / mã tra cứu của cổng HĐĐT (tắt: HDC_TU_TAI=0)
     bao_cao_nhac_tu_dong: bool = True    # sáng hôm sau nhắc người chưa hoàn thành báo cáo ngày (Working time & Report)
     bao_cao_nhac_gio: int = 9            # từ giờ này (GIỜ VIỆT NAM) mới nhắc
     bao_cao_tinh_tu: str = "2026-10-26"  # ngày bắt đầu áp dụng báo cáo ngày: trước ngày này KHÔNG tính thiếu / tỉ lệ / nhắc
