@@ -1721,8 +1721,13 @@ class KtHoaDonCho(Base):
     ky_hieu: Mapped[str | None] = mapped_column(String(20), nullable=True)
     ncc_mst: Mapped[str | None] = mapped_column(String(20), nullable=True)
     ma_cqt: Mapped[str | None] = mapped_column(String(40), nullable=True)
-    nguon_doc: Mapped[str | None] = mapped_column(String(12), nullable=True)       # NHAN | AI | REGEX
+    nguon_doc: Mapped[str | None] = mapped_column(String(12), nullable=True)       # NHAN | AI | REGEX | XML | PDF (2 loại sau: file tự tải, mig 171)
     trung_voi_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)    # BO_QUA vì trùng dòng này
+    # mig 171: tự tải hóa đơn từ link / mã tra cứu (app/hddt_tai_ve.py) — file nằm ở tep_dinh_kem doi_tuong='KT_HDC'
+    tai_tt: Mapped[str | None] = mapped_column(String(12), nullable=True)          # OK | LOI | KHONG_HT
+    tai_lan: Mapped[int] = mapped_column(Integer, default=0)
+    tai_luc: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    tai_ghi_chu: Mapped[str | None] = mapped_column(String(300), nullable=True)
 
 
 class BgEmailCho(Base):
