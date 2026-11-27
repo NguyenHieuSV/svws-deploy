@@ -18,6 +18,7 @@ AN TOÀN (link nằm trong thư = dữ liệu KHÔNG tin cậy):
   • nhận dạng file theo CHỮ KÝ ĐẦU FILE (PDF / XML / ZIP), không tin Content-Type.
 Không ghi CSDL, không gọi AI ở đây — nơi gọi (`ke_toan_quy._hdc_tu_tai`) đọc file, đối chiếu số hóa đơn và điền dòng.
 """
+import html
 import http.cookiejar
 import io
 import json
@@ -334,7 +335,8 @@ def _easyinvoice(lan: _Lan, link: str, code: str | None):
             lan.nhan(data, cuoi)
             return
         lan.da_thu.append({"url": _ten(cuoi), "kq": "trang hóa đơn"})
-        trang = data[:600000].decode("utf-8", errors="replace")
+        # HTML thô ghi onclick="downloadXML(&#39;token&#39;)" (dấu nháy bị mã hóa) → giải mã thực thể trước khi dò
+        trang = html.unescape(data[:600000].decode("utf-8", errors="replace"))
         uc = urllib.parse.urlsplit(cuoi)
         goc = f"{uc.scheme}://{uc.netloc}"
         mx, mp = _RE_EI_XML.search(trang), _RE_EI_PDF.search(trang)

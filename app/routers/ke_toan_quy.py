@@ -1954,7 +1954,9 @@ def _hdc_tu_tai(db, r, nd_id=None, thu=False, phien=None, ncc_theo_mst=None) -> 
             nguon = "XML"
         elif ra["canh_bao"] is None:
             ra["canh_bao"] = "file XML tải về không theo dạng hóa đơn app biết đọc — mở file kiểm tra"
-    con_thieu = _hdc_tien_nghi(r) or not r.so_hoa_don or r.ngay_hd is None
+    # số hóa đơn của dòng mà KHÔNG có chữ số nào (AI đọc nhầm chữ trong thư, vd «oice») = coi như chưa có số
+    so_dong = r.so_hoa_don if _re.search(r"\d", str(r.so_hoa_don or "")) else None
+    con_thieu = _hdc_tien_nghi(r) or not so_dong or r.ngay_hd is None
     if info is None and pdf is not None and not thu and r.trang_thai == "CHO_XAC_NHAN" and con_thieu:
         from ..ai_gateway import doc_hoa_don_tep
         i2 = doc_hoa_don_tep(pdf["data"], "application/pdf", "hoa_don.pdf")
@@ -1965,8 +1967,8 @@ def _hdc_tu_tai(db, r, nd_id=None, thu=False, phien=None, ncc_theo_mst=None) -> 
     lech = None
     if info:
         mst_f, mst_r = (info.get("ncc_mst") or ""), (getattr(r, "ncc_mst", None) or "").replace("-", "").strip()
-        if info.get("so_hoa_don") and r.so_hoa_don and not _hdc_cung_so(info["so_hoa_don"], r.so_hoa_don):
-            lech = f"file tải về là hóa đơn số {info['so_hoa_don']}, dòng này ghi số {r.so_hoa_don}"
+        if info.get("so_hoa_don") and so_dong and not _hdc_cung_so(info["so_hoa_don"], so_dong):
+            lech = f"file tải về là hóa đơn số {info['so_hoa_don']}, dòng này ghi số {so_dong}"
         elif mst_f and mst_r and mst_f != mst_r:
             lech = f"file tải về của bên bán MST {mst_f}, dòng này ghi MST {mst_r}"
         ra["doc"] = {k: info.get(k) for k in ("ncc_ten", "ncc_mst", "so_hoa_don", "ky_hieu", "ngay", "so_tien",
@@ -2006,7 +2008,7 @@ def _hdc_tu_tai(db, r, nd_id=None, thu=False, phien=None, ncc_theo_mst=None) -> 
                 r.tien_truoc_thue, r.thue_suat = Decimal(str(int(round(truoc)))), Decimal(str(int(ts)))
                 r.mo_ta = ("📄 VAT theo file XML tải từ cổng HĐĐT · "
                            + str(r.mo_ta or "").replace("⚠ VAT ước 8% từ tổng — kiểm tra lại · ", ""))[:300]
-        if not r.so_hoa_don and info.get("so_hoa_don"):
+        if not so_dong and info.get("so_hoa_don"):
             r.so_hoa_don = str(info["so_hoa_don"])[:60]
         if r.ngay_hd is None and info.get("ngay"):
             try:
@@ -2031,7 +2033,7 @@ def _hdc_tu_tai(db, r, nd_id=None, thu=False, phien=None, ncc_theo_mst=None) -> 
             if nid:
                 r.nha_cung_cap_id = nid
     # ---- lưu file kèm dòng ----
-    so_ten = _re.sub(r"[^0-9A-Za-z_-]", "", str(r.so_hoa_don or "")) or f"dong{r.id}"
+    so_ten = _re.sub(r"[^0-9A-Za-z_-]", "", str(r.so_hoa_don or "")) or f"dong{r.id}"      # r.so_hoa_don lúc này đã lấy từ file nếu trước đó sai
     kh_ten = _re.sub(r"[^0-9A-Za-z_-]", "", str(getattr(r, "ky_hieu", None) or ""))
     for t in kq["tep"]:
         loai = "HDDT_XML" if t["loai"] == "xml" else "HDDT_PDF"
