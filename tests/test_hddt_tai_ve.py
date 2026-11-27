@@ -360,3 +360,16 @@ def test_doc_ca_hai_dang_xml(db):
     k = kq._hdc_tu_tai(db, r, None, phien=_Misa(ma="BDF_CZLDPQ8V", xml=XML_MISA_RIENG.encode("utf-8")))
     assert k["ok"] and k["nguon"] == "XML" and (int(r.tong_tien), int(r.tien_truoc_thue), int(r.thue_suat)) == (54014040, 50013000, 8)
     assert r.ky_hieu == "1C26TAP" and r.ncc_mst == "0314515377" and r.ngay_hd == date(2026, 10, 31)
+
+
+def test_easyinvoice_trang_ma_hoa_dau_nhay_va_so_hoa_don_rac(db):
+    # HTML thô của cổng ghi onclick="downloadXML(&#39;token&#39;)" — dấu nháy bị mã hóa thành thực thể
+    tho = TRANG_EI.decode("utf-8").replace("'", "&#39;").encode("utf-8")
+    assert b"downloadXML(&#39;" in tho
+    k = tv.tai_hoa_don(LINK_EI, phien=_Ei(trang=tho))
+    assert k["ok"] and [t["loai"] for t in k["tep"]] == ["xml", "pdf"]
+    # dòng có «số hóa đơn» không chứa chữ số (AI đọc nhầm chữ «Invoice») → coi như chưa có số, nhận số từ file
+    r = _dong(db, so="oice", tong=3465)
+    k2 = kq._hdc_tu_tai(db, r, None, phien=_Misa())
+    assert k2["ok"] and r.so_hoa_don == "15854" and "chưa đổi" in k2["canh_bao"] and int(r.tong_tien) == 3465
+    assert kq._hdc_tep(db, [r.id])[r.id][0]["ten_file"] == "HD_15854_1C26TYY.xml"
