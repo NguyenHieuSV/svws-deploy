@@ -1871,6 +1871,7 @@ def ds_hoa_don_cho(db: Session = Depends(get_db), _=Depends(yeu_cau(MODULE, "XEM
                     "trung_voi_id": getattr(r, "trung_voi_id", None),
                     "tep": tep_theo.get(r.id, []), "tai_tt": getattr(r, "tai_tt", None),
                     "tai_ghi_chu": getattr(r, "tai_ghi_chu", None), "tu_tai_duoc": _hdc_can_tu_tai(r),
+                    "tu_tai_cong": _hdc_cong_tai(r),
                     "don_hang_id": getattr(r, "don_hang_id", None),
                     "don_mua_id": r.don_mua_id, "po_khop": r.po_khop,
                     "po_so": (po.so or f"PO-{po.id}") if po else None,
@@ -1889,10 +1890,18 @@ _HDC_TEP_DT = "KT_HDC"          # tep_dinh_kem.doi_tuong của file hóa đơn t
 _HDC_TAI_NGAN_SACH = 150        # giây tối đa dành cho tự tải trong MỘT lượt quét thư
 
 
+def _hdc_cong_tai(r) -> str | None:
+    """Cổng HĐĐT app tự tải được cho dòng này ('MISA' · 'EASYINVOICE') hoặc None — theo link / mã tra cứu, không gọi mạng."""
+    from ..hddt_tai_ve import cong_ho_tro
+    if not (r.link_tra_cuu or r.ma_tra_cuu):
+        return None
+    return cong_ho_tro(r.link_tra_cuu, r.ma_tra_cuu, r.tu_email)
+
+
 def _hdc_can_tu_tai(r) -> bool:
-    """Dòng chờ còn nên TỰ TẢI: có link / mã tra cứu, chưa tải được, cổng không thuộc loại «chưa hỗ trợ», chưa thử quá 3 lần."""
-    return (r.trang_thai == "CHO_XAC_NHAN" and bool(r.link_tra_cuu or r.ma_tra_cuu)
-            and getattr(r, "tai_tt", None) not in ("OK", "KHONG_HT") and int(getattr(r, "tai_lan", 0) or 0) < 3)
+    """Dòng chờ còn nên TỰ TẢI: thuộc cổng đã hỗ trợ, chưa tải được, chưa thử quá 3 lần."""
+    return (r.trang_thai == "CHO_XAC_NHAN" and getattr(r, "tai_tt", None) != "OK"
+            and int(getattr(r, "tai_lan", 0) or 0) < 3 and _hdc_cong_tai(r) is not None)
 
 
 def _hdc_cung_so(a, b) -> bool:
@@ -1914,7 +1923,7 @@ def _hdc_tep(db, ids) -> dict:
     return ra
 
 
-def _hdc_tu_tai(db, r, nd_id=None, thu=False, lay=None, ncc_theo_mst=None) -> dict:
+def _hdc_tu_tai(db, r, nd_id=None, thu=False, phien=None, ncc_theo_mst=None) -> dict:
     """⬇ TỰ TẢI hóa đơn của MỘT dòng chờ theo link / mã tra cứu (app/hddt_tai_ve.py), rồi:
       • XML chuẩn cơ quan thuế → đọc THẲNG theo thẻ (không AI, không sai số); chỉ có PDF → AI đọc khi dòng còn thiếu số liệu;
       • file là hóa đơn SỐ KHÁC / bên bán khác → không dùng, không lưu, ghi lý do;
@@ -1922,16 +1931,15 @@ def _hdc_tu_tai(db, r, nd_id=None, thu=False, lay=None, ncc_theo_mst=None) -> di
       • lưu file kèm dòng (tep_dinh_kem · KT_HDC) để mở xem ngay trong app.
     `thu=True`: chỉ thử tải + đọc, KHÔNG ghi gì. Không commit — nơi gọi commit."""
     import re as _re
-    from ..hddt_tai_ve import tai_hoa_don
-    from ..hoa_don_ban_doc import doc_xml
+    from ..hddt_tai_ve import tai_hoa_don, doc_xml_hoa_don
     from ..luu_tru import luu as _luu, xoa as _xoa_kho
     from ..models import TepDinhKem, NhaCungCap
     from ..nhac_viec_service import gio_hien_tai
     if not (r.link_tra_cuu or r.ma_tra_cuu):
         return {"ok": False, "id": r.id, "ho_tro": False, "ly_do": "Dòng này không có link / mã tra cứu để tải",
                 "da_thu": [], "tep": [], "dien_tien": False}
-    kq = tai_hoa_don(r.link_tra_cuu, r.ma_tra_cuu, r.tu_email, lay=lay)
-    ra = {"ok": kq["ok"], "id": r.id, "ho_tro": kq["ho_tro"], "ly_do": kq["ly_do"], "da_thu": kq["da_thu"],
+    kq = tai_hoa_don(r.link_tra_cuu, r.ma_tra_cuu, r.tu_email, phien=phien)
+    ra = {"ok": kq["ok"], "id": r.id, "cong": kq.get("cong"), "ho_tro": kq["ho_tro"], "ly_do": kq["ly_do"], "da_thu": kq["da_thu"],
           "tep": [{"loai": t["loai"], "kb": max(1, round(len(t["data"]) / 1024))} for t in kq["tep"]],
           "dien_tien": False, "nguon": None, "canh_bao": None}
     xml = next((t for t in kq["tep"] if t["loai"] == "xml"), None)
@@ -1939,17 +1947,13 @@ def _hdc_tu_tai(db, r, nd_id=None, thu=False, lay=None, ncc_theo_mst=None) -> di
     info, nguon = None, None
     if xml is not None:
         try:
-            x = doc_xml(xml["data"])
-        except ValueError as e:
-            x, ra["canh_bao"] = None, str(e)[:150]
-        if x:
-            info = {"ncc_ten": x.get("ten_nguoi_ban"), "ncc_mst": (x.get("mst_nguoi_ban") or "").replace("-", "").strip() or None,
-                    "so_hoa_don": x.get("so_hoa_don"), "ky_hieu": (f"{x.get('mau_so') or ''}{x.get('ky_hieu') or ''}".strip() or None),
-                    "ngay": x.get("ngay"), "so_tien": x.get("so_tien"), "tien_truoc_thue": x.get("tien_truoc_thue"),
-                    "tien_thue": x.get("tien_thue"), "mo_ta": x.get("mo_ta")}
+            info = doc_xml_hoa_don(xml["data"])              # dạng chuẩn cơ quan thuế hoặc dạng riêng của MISA
+        except Exception as e:                               # noqa: BLE001 — XML hỏng / có DTD: giữ file, không lấy số liệu
+            info, ra["canh_bao"] = None, f"không đọc được file XML ({str(e)[:100]})"
+        if info:
             nguon = "XML"
         elif ra["canh_bao"] is None:
-            ra["canh_bao"] = "file XML tải về không phải hóa đơn điện tử chuẩn (thiếu số hóa đơn)"
+            ra["canh_bao"] = "file XML tải về không theo dạng hóa đơn app biết đọc — mở file kiểm tra"
     con_thieu = _hdc_tien_nghi(r) or not r.so_hoa_don or r.ngay_hd is None
     if info is None and pdf is not None and not thu and r.trang_thai == "CHO_XAC_NHAN" and con_thieu:
         from ..ai_gateway import doc_hoa_don_tep
@@ -2044,8 +2048,8 @@ def _hdc_tu_tai(db, r, nd_id=None, thu=False, lay=None, ncc_theo_mst=None) -> di
             db.add(TepDinhKem(doi_tuong=_HDC_TEP_DT, doi_tuong_id=r.id, loai=loai, ten_file=ten, duong_dan=ref,
                               kich_thuoc=len(t["data"]), content_type=t["content_type"]))
     r.tai_tt = "OK"
-    r.tai_ghi_chu = ("Đã tải " + " + ".join(t["loai"].upper() for t in kq["tep"])
-                     + (f" từ {kq['tep'][0].get('nguon', '')}" if kq["tep"] else "")
+    ten_cong = {"MISA": "MISA meInvoice", "EASYINVOICE": "EasyInvoice"}.get(kq.get("cong") or "", "cổng HĐĐT")
+    r.tai_ghi_chu = ("Đã tải " + " + ".join(t["loai"].upper() for t in kq["tep"]) + f" từ {ten_cong}"
                      + (f" · ⚠ {ra['canh_bao']}" if ra.get("canh_bao") else ""))[:300]
     ghi_audit(db, nd_id, "TU_TAI_HDC", "kt_hoa_don_cho", r.id,
               moi={"tep": [t["loai"] for t in kq["tep"]], "nguon": nguon, "dien_tien": ra["dien_tien"],
@@ -2054,7 +2058,7 @@ def _hdc_tu_tai(db, r, nd_id=None, thu=False, lay=None, ncc_theo_mst=None) -> di
 
 
 @router.post("/hoa-don-cho/tu-tai")
-def tu_tai_hoa_don_cho_loat(toi_da: int = 8, db: Session = Depends(get_db),
+def tu_tai_hoa_don_cho_loat(toi_da: int = 10, db: Session = Depends(get_db),
                             nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
     """⬇ Tự tải hóa đơn cho các dòng CHỜ có link / mã tra cứu mà chưa có file — dòng thiếu tiền làm trước.
     Mỗi lần gọi ≤ `toi_da` dòng và ≤ 55 giây (Render cắt request ~100 giây); `con_lai` > 0 thì giao diện gọi tiếp."""
@@ -2063,12 +2067,14 @@ def tu_tai_hoa_don_cho_loat(toi_da: int = 8, db: Session = Depends(get_db),
     ds = [r for r in db.query(KtHoaDonCho).filter_by(trang_thai="CHO_XAC_NHAN").order_by(KtHoaDonCho.id.desc()).all()
           if _hdc_can_tu_tai(r)]
     ds.sort(key=lambda r: (not _hdc_tien_nghi(r), -r.id))
-    toi_da = max(1, min(int(toi_da or 8), 15))
+    toi_da = max(1, min(int(toi_da or 10), 15))
     t0 = _t.monotonic()
     kq = {"da_xet": 0, "tai_duoc": 0, "dien_tien": 0, "loi": 0, "khong_ho_tro": 0, "chi_tiet": []}
-    for r in ds[:toi_da]:
+    for i_r, r in enumerate(ds[:toi_da]):
         if _t.monotonic() - t0 > 55:
             break
+        if i_r:
+            _t.sleep(0.4)                                    # không dồn dập lên cổng HĐĐT
         try:
             k = _hdc_tu_tai(db, r, nd.id)
         except Exception as e:                                           # noqa: BLE001 — một dòng hỏng không làm hỏng cả lượt
