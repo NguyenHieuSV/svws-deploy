@@ -1,17 +1,26 @@
-"""⬇ TỰ TẢI HÓA ĐƠN từ LINK / MÃ TRA CỨU trong thư cổng hóa đơn điện tử (anh Hiếu 26/11/2026).
+"""⬇ TỰ TẢI HÓA ĐƠN từ LINK / MÃ TRA CỨU trong thư cổng hóa đơn điện tử (anh Hiếu 26/11/2026; viết lại 27/11/2026).
 
-Thư cổng HĐĐT (MISA meInvoice, EasyInvoice…) thường KHÔNG đính kèm file: chỉ có link tra cứu + mã. Module này thử tải thẳng
-file hóa đơn (XML trước, rồi PDF) để app đọc số tiền chính xác và lưu file kèm dòng hàng chờ — kế toán khỏi mở link, dán mã.
+Thư cổng HĐĐT thường KHÔNG đính kèm file: chỉ có link tra cứu + mã. Module này tải thẳng file hóa đơn để app đọc số tiền
+chính xác và lưu file kèm dòng hàng chờ — kế toán khỏi mở link, dán mã.
+
+CHỈ tải ở cổng ĐÃ KIỂM CHỨNG cách tải với hóa đơn thật (27/11/2026) — KHÔNG dò link chung trong trang web
+(bản đầu dò link có chữ «pdf» đã nhận nhầm file hướng dẫn phần mềm của cổng là hóa đơn):
+  • MISA meInvoice — theo MÃ TRA CỨU: POST tra-cuu/GetInvoiceDataByTransactionID → JSON, trường `data` là nguyên XML hóa đơn
+    (chính lệnh trang tra cứu gọi khi mở link «?sc=<mã>» trong thư; không cần mã xác minh hình ảnh).
+  • EasyInvoice (Softdreams) — theo LINK trong thư «…/Invoice/ViewFromEmail?token=…»: trang hóa đơn có nút «Tải tệp XML»
+    (POST /Invoice/DownloadXML → fileGuid → GET /Invoice/Download) và tải PDF (/Invoice/DownloadPdf); thư kiểu cũ có
+    sẵn link «…/tai-pdf?ma=<mã>».
+Cổng khác (Viettel, VNPT, M-Invoice, BKAV… đòi mã xác minh hình ảnh / đăng nhập) → «chưa hỗ trợ», không gọi mạng.
 
 AN TOÀN (link nằm trong thư = dữ liệu KHÔNG tin cậy):
-  • chỉ tải từ các TÊN MIỀN CỔNG HĐĐT trong `MIEN_CHO_PHEP`; mọi bước chuyển hướng cũng phải thuộc danh sách;
-  • chỉ http/https cổng mặc định, mỗi lần ≤ `TIMEOUT` giây, mỗi file ≤ `GIOI_HAN` (8 MB), cả lượt ≤ `han_s` giây;
-  • nhận dạng file theo CHỮ KÝ ĐẦU FILE (PDF / XML / ZIP), không tin Content-Type; trang HTML chỉ dò link tải đúng 1 cấp;
-  • cổng đòi mã xác minh hình ảnh (captcha) hay đăng nhập thì KHÔNG tải được → trả lý do, kế toán làm tay như cũ.
-
-Không ghi CSDL, không gọi AI ở đây — nơi gọi (`ke_toan_quy._hdc_tu_tai`) đọc file và điền dòng.
+  • chỉ gọi tới tên miền trong `MIEN_CHO_PHEP`, kiểm ở MỌI chặng chuyển hướng; chỉ http/https cổng mặc định;
+  • mỗi lần gọi ≤ `TIMEOUT` giây, mỗi file ≤ `GIOI_HAN` (8 MB), cả hóa đơn ≤ `han_s` giây;
+  • nhận dạng file theo CHỮ KÝ ĐẦU FILE (PDF / XML / ZIP), không tin Content-Type.
+Không ghi CSDL, không gọi AI ở đây — nơi gọi (`ke_toan_quy._hdc_tu_tai`) đọc file, đối chiếu số hóa đơn và điền dòng.
 """
+import http.cookiejar
 import io
+import json
 import re
 import time
 import urllib.error
@@ -22,21 +31,15 @@ import zipfile
 GIOI_HAN = 8 * 1024 * 1024          # 8 MB / file
 TIMEOUT = 20                        # giây / lần gọi
 SO_CHUYEN_HUONG = 4
-UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36 SVWS-HDDT/1.0"
+UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36"
 
-# Tên miền cổng hóa đơn điện tử được phép tải (khớp đúng tên hoặc tên miền con). Cổng chưa có ở đây → «chưa hỗ trợ».
+# Tên miền được phép gọi (khớp đúng tên hoặc tên miền con) — CHỈ cổng đã có cách tải kiểm chứng ở dưới.
 MIEN_CHO_PHEP = (
     "meinvoice.vn",                              # MISA meInvoice
     "easyinvoice.com.vn", "easyinvoice.vn",      # EasyInvoice (Softdreams): <MST>hd.easyinvoice.com.vn
-    "vnpt-invoice.com.vn",                       # VNPT Invoice
-    "sinvoice.viettel.vn", "vinvoice.viettel.vn",  # Viettel
-    "ehoadon.vn",                                # BKAV eHoadon
-    "einvoice.fpt.com.vn",                       # FPT eInvoice
-    "mobifoneinvoice.vn",                        # MobiFone Invoice
-    "minvoice.com.vn", "minvoice.vn",            # M-Invoice
-    "hilo.com.vn", "vninvoice.vn", "wininvoice.vn", "cyberbill.vn", "hoadon30s.vn",
 )
-_THAM_SO_MA = ("sc", "code", "ma", "matracuu", "ma_tra_cuu", "strfkey", "fkey", "key")
+_MISA_API = "https://www.meinvoice.vn/tra-cuu/GetInvoiceDataByTransactionID"
+_THAM_SO_MA = ("sc", "code", "ma", "matracuu", "ma_tra_cuu")
 
 
 def thuoc_cong(host: str, mien=None) -> bool:
@@ -47,8 +50,13 @@ def thuoc_cong(host: str, mien=None) -> bool:
     return False
 
 
+def _sach(url: str) -> str:
+    """URL chỉ còn ký tự ASCII (link trong thư có khi chứa tên công ty có dấu ở tham số) — không mã hóa lại dấu %."""
+    return urllib.parse.quote(url or "", safe="!#$%&'()*+,/:;=?@[]~")
+
+
 def kiem_url(url: str) -> str | None:
-    """URL hợp lệ để tải → None; không hợp lệ → lý do. Chỉ http/https, cổng mặc định, tên miền cổng HĐĐT."""
+    """URL hợp lệ để gọi → None; không hợp lệ → lý do. Chỉ http/https, cổng mặc định, tên miền cổng HĐĐT được phép."""
     try:
         u = urllib.parse.urlsplit(url or "")
     except ValueError:
@@ -64,8 +72,22 @@ def kiem_url(url: str) -> str | None:
     if cong not in (None, 80, 443):
         return "link dùng cổng lạ"
     if not thuoc_cong(u.hostname or ""):
-        return f"cổng {(u.hostname or '?')[:60]} chưa nằm trong danh sách tự tải"
+        return f"cổng {(u.hostname or '?')[:60]} chưa hỗ trợ tự tải"
     return None
+
+
+def go_boc(link: str | None) -> str:
+    """Bỏ lớp bọc chuyển hướng của Gmail («https://www.google.com/url?q=<link thật>&…») để lấy link thật."""
+    link = (link or "").strip()
+    try:
+        u = urllib.parse.urlsplit(link)
+    except ValueError:
+        return link
+    if (u.hostname or "").lower() in ("www.google.com", "google.com") and u.path == "/url":
+        q = urllib.parse.parse_qs(u.query).get("q") or urllib.parse.parse_qs(u.query).get("url")
+        if q and q[0].startswith(("http://", "https://")):
+            return q[0]
+    return link
 
 
 def ma_tu_link(link: str) -> str | None:
@@ -81,37 +103,25 @@ def ma_tu_link(link: str) -> str | None:
     return None
 
 
-def ung_vien(link: str | None, ma: str | None = None, tu_email: str | None = None) -> list[str]:
-    """Các URL sẽ thử theo thứ tự (XML trước PDF, link gốc sau cùng). Chỉ gồm URL thuộc cổng được phép."""
-    link = (link or "").strip()
-    ma = (ma or "").strip()
-    ra = []
+def cong_ho_tro(link: str | None, ma: str | None = None, tu_email: str | None = None) -> str | None:
+    """Cổng app tự tải được cho link / mã này: 'MISA' · 'EASYINVOICE' · None (chưa hỗ trợ). Không gọi mạng."""
+    link = go_boc(link)
     try:
-        u = urllib.parse.urlsplit(link) if link else None
+        host = (urllib.parse.urlsplit(link).hostname or "").lower() if link else ""
     except ValueError:
-        u = None
-    host = (u.hostname or "").lower() if u else ""
+        host = ""
     mien_gui = (tu_email or "").split("@")[-1].strip().lower()
-    code = (ma_tu_link(link) if link else None) or ma
-    q = urllib.parse.quote
-    if thuoc_cong(host, "meinvoice.vn") or (not host and code and ("meinvoice" in mien_gui or "misa" in mien_gui)):
-        # MISA meInvoice: trang tra cứu có đường tải thẳng theo mã (XML chuẩn cơ quan thuế + PDF)
-        if code:
-            goc = "https://www.meinvoice.vn/tra-cuu/DownloadHandler.ashx"
-            ra += [f"{goc}?Type=xml&Code={q(code)}", f"{goc}?Type=pdf&Viewer=1&Code={q(code)}", f"{goc}?Type=pdf&Code={q(code)}"]
-    elif thuoc_cong(host, "easyinvoice.com.vn") or thuoc_cong(host, "easyinvoice.vn"):
-        # EasyInvoice: thư ghi sẵn «…/tai-pdf?ma=<mã>» để tải nhanh PDF; thử cả bản XML cùng mã
-        if code and u:
-            goc = f"{u.scheme}://{u.netloc}"
-            ra += [f"{goc}/tai-xml?ma={q(code)}", f"{goc}/tai-pdf?ma={q(code)}"]
-    if link and kiem_url(link) is None:
-        ra.append(link)
-    sach, da = [], set()
-    for x in ra:
-        if x not in da and kiem_url(x) is None:
-            da.add(x)
-            sach.append(x)
-    return sach
+    code = (ma_tu_link(link) if link else None) or (ma or "").strip()
+    if thuoc_cong(host, "meinvoice.vn") or (not host and ("meinvoice" in mien_gui or "misa" in mien_gui)):
+        return "MISA" if re.fullmatch(r"[A-Za-z0-9_\-]{6,40}", code or "") else None
+    if thuoc_cong(host, "easyinvoice.com.vn") or thuoc_cong(host, "easyinvoice.vn"):
+        try:
+            duong = urllib.parse.urlsplit(link).path.lower()
+        except ValueError:
+            return None
+        if "/invoice/viewfromemail" in duong or (code and "tra-cuu" in duong) or "tai-pdf" in duong:
+            return "EASYINVOICE"
+    return None
 
 
 class _KhongChuyenHuong(urllib.request.HTTPRedirectHandler):
@@ -119,35 +129,47 @@ class _KhongChuyenHuong(urllib.request.HTTPRedirectHandler):
         return None
 
 
-def _lay_http(url: str) -> tuple[bytes, str, str]:
-    """GET một URL (tự theo chuyển hướng ≤ SO_CHUYEN_HUONG chặng, MỖI chặng phải thuộc cổng được phép).
-    → (dữ liệu ≤ GIOI_HAN, content-type, url cuối). Lỗi → ValueError(lý do ngắn)."""
-    mo = urllib.request.build_opener(_KhongChuyenHuong)
-    for _ in range(SO_CHUYEN_HUONG + 1):
-        ly = kiem_url(url)
-        if ly:
-            raise ValueError(ly)
-        req = urllib.request.Request(url, headers={"User-Agent": UA, "Accept": "*/*", "Accept-Language": "vi,en;q=0.8"})
-        try:
-            with mo.open(req, timeout=TIMEOUT) as r:
-                data = r.read(GIOI_HAN + 1)
-                if len(data) > GIOI_HAN:
-                    raise ValueError("file lớn hơn 8 MB")
-                return data, (r.headers.get("Content-Type") or ""), url
-        except urllib.error.HTTPError as e:
-            if e.code in (301, 302, 303, 307, 308) and e.headers.get("Location"):
-                url = urllib.parse.urljoin(url, e.headers["Location"])
-                continue
-            raise ValueError(f"cổng trả lỗi HTTP {e.code}")
-        except urllib.error.URLError as e:
-            raise ValueError(f"không kết nối được cổng ({str(getattr(e, 'reason', e))[:60]})")
-        except (TimeoutError, OSError) as e:
-            raise ValueError(f"cổng không trả lời ({type(e).__name__})")
-    raise ValueError("chuyển hướng quá nhiều lần")
+class Phien:
+    """Một phiên HTTP giữ cookie cho MỘT hóa đơn (cổng cần cookie giữa các bước). Test thay bằng đối tượng giả có `.goi`."""
+
+    def __init__(self):
+        self._mo = urllib.request.build_opener(_KhongChuyenHuong,
+                                               urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
+
+    def goi(self, url: str, du_lieu: dict | None = None) -> tuple[bytes, str, str]:
+        """GET, hoặc POST dạng form khi có `du_lieu`. Tự theo chuyển hướng ≤ SO_CHUYEN_HUONG chặng (mỗi chặng phải thuộc
+        cổng được phép; sau chuyển hướng luôn là GET). → (dữ liệu ≤ GIOI_HAN, content-type, url cuối). Lỗi → ValueError."""
+        than = urllib.parse.urlencode(du_lieu).encode("utf-8") if du_lieu is not None else None
+        url = _sach(url)
+        for _ in range(SO_CHUYEN_HUONG + 1):
+            ly = kiem_url(url)
+            if ly:
+                raise ValueError(ly)
+            dau = {"User-Agent": UA, "Accept": "*/*", "Accept-Language": "vi,en;q=0.8"}
+            if than is not None:
+                dau["Content-Type"] = "application/x-www-form-urlencoded; charset=UTF-8"
+                dau["X-Requested-With"] = "XMLHttpRequest"
+            req = urllib.request.Request(url, data=than, headers=dau)
+            try:
+                with self._mo.open(req, timeout=TIMEOUT) as r:
+                    data = r.read(GIOI_HAN + 1)
+                    if len(data) > GIOI_HAN:
+                        raise ValueError("file lớn hơn 8 MB")
+                    return data, (r.headers.get("Content-Type") or ""), url
+            except urllib.error.HTTPError as e:
+                if e.code in (301, 302, 303, 307, 308) and e.headers.get("Location"):
+                    url, than = _sach(urllib.parse.urljoin(url, e.headers["Location"])), None
+                    continue
+                raise ValueError(f"cổng trả lỗi HTTP {e.code}")
+            except urllib.error.URLError as e:
+                raise ValueError(f"không kết nối được cổng ({str(getattr(e, 'reason', e))[:60]})")
+            except (TimeoutError, OSError) as e:
+                raise ValueError(f"cổng không trả lời ({type(e).__name__})")
+        raise ValueError("chuyển hướng quá nhiều lần")
 
 
 def nhan_dang(data: bytes) -> str | None:
-    """Loại file theo chữ ký đầu file: 'pdf' · 'zip' · 'xml' · 'html' · None (rỗng / lạ)."""
+    """Loại file theo chữ ký đầu file: 'zip' · 'xml' · 'html' · 'pdf' · None (rỗng / lạ)."""
     if not data:
         return None
     dau = data[:2048]
@@ -182,88 +204,196 @@ def tu_zip(data: bytes) -> list[tuple[str, bytes]]:
     return ra
 
 
-_RE_LINK = re.compile(r"""(?:href|src|data-url|data-href)\s*=\s*["']([^"'<>\s]{4,400})["']""", re.I)
-_RE_TAI = re.compile(r"xml|pdf|download|tai-|taihoadon|tai_hoa_don|getfile|export|handler", re.I)
-
-
-def link_trong_html(html: bytes, goc: str) -> list[str]:
-    """Link tải (xml / pdf / download…) trong trang tra cứu — tuyệt đối hóa theo `goc`, chỉ giữ link cổng được phép, ≤ 4."""
+def _so_f(x) -> float:
     try:
-        s = html[:400000].decode("utf-8", errors="replace")
-    except Exception:
-        return []
-    ra = []
-    for m in _RE_LINK.finditer(s):
-        h = m.group(1).replace("&amp;", "&")
-        if h.startswith(("#", "javascript:", "mailto:", "data:")) or not _RE_TAI.search(h):
-            continue
-        if re.search(r"\.(css|js|png|jpe?g|gif|svg|ico|woff2?)(\?|$)", h, re.I):
-            continue
-        u = urllib.parse.urljoin(goc, h)
-        if u not in ra and kiem_url(u) is None:
-            ra.append(u)
-        if len(ra) >= 4:
-            break
-    return ra
+        return float(str(x if x is not None else 0).replace(",", "").strip() or 0)
+    except (TypeError, ValueError):
+        return 0.0
 
 
-def _an_ma(url: str) -> str:
-    """Rút gọn URL để ghi nhật ký (không cần lộ cả mã)."""
+def doc_xml_hoa_don(data: bytes) -> dict | None:
+    """XML hóa đơn → {ncc_ten, ncc_mst, nguoi_mua, nguoi_mua_mst, so_hoa_don, ky_hieu, ngay, so_tien, tien_truoc_thue,
+    tien_thue, mo_ta}; không phải hóa đơn → None; XML hỏng / có DTD → ValueError. Đọc thẳng theo thẻ, không AI. Hai dạng:
+      • chuẩn cơ quan thuế TT78 / NĐ123 (<HDon>… SHDon, TgTTTBSo) — dùng lại hoa_don_ban_doc.doc_xml;
+      • dạng riêng của MISA (<inv:invoice>… invoiceNumber, totalAmountWithVAT) — cổng MISA trả dạng này cho một số bên bán."""
+    import xml.etree.ElementTree as ET
+    from .hoa_don_ban_doc import doc_xml
+    x = doc_xml(data)                                   # tự chặn DTD / ENTITY và báo ValueError khi XML hỏng
+    if x:
+        return {"ncc_ten": x.get("ten_nguoi_ban"), "ncc_mst": (x.get("mst_nguoi_ban") or "").replace("-", "").strip() or None,
+                "nguoi_mua": x.get("ten_nguoi_mua"), "nguoi_mua_mst": (x.get("mst_nguoi_mua") or "").replace("-", "").strip() or None,
+                "so_hoa_don": x.get("so_hoa_don"), "ky_hieu": (f"{x.get('mau_so') or ''}{x.get('ky_hieu') or ''}".strip() or None),
+                "ngay": x.get("ngay"), "so_tien": x.get("so_tien"), "tien_truoc_thue": x.get("tien_truoc_thue"),
+                "tien_thue": x.get("tien_thue"), "mo_ta": x.get("mo_ta")}
+    goc = ET.fromstring(data)                           # doc_xml ở trên đã kiểm DTD + cú pháp
+    the = {}
+    hang = []
+    for e in goc.iter():
+        ten = e.tag.rsplit("}", 1)[-1] if isinstance(e.tag, str) else ""
+        gia_tri = (e.text or "").strip()
+        if ten == "itemName" and gia_tri:
+            hang.append(gia_tri)
+        if ten and gia_tri and ten not in the:
+            the[ten] = gia_tri
+    so = the.get("invoiceNumber")
+    if not so:
+        return None
+    tong, truoc, thue = _so_f(the.get("totalAmountWithVAT")), _so_f(the.get("totalAmountWithoutVAT")), _so_f(the.get("totalVATAmount"))
+    if not tong:
+        tong = truoc + thue
+    if not truoc and tong:
+        truoc = tong - thue
+    mau, seri = (the.get("templateCode") or "").strip(), (the.get("invoiceSeries") or "").strip()
+    ky_hieu = seri if (not mau or seri.startswith(mau)) else mau + seri
+    ngay = (the.get("invoiceIssuedDate") or "")[:10]
+    return {"ncc_ten": the.get("sellerLegalName"), "ncc_mst": (the.get("sellerTaxCode") or "").replace("-", "").strip() or None,
+            "nguoi_mua": the.get("buyerLegalName"), "nguoi_mua_mst": (the.get("buyerTaxCode") or "").replace("-", "").strip() or None,
+            "so_hoa_don": so.lstrip("0") or so, "ky_hieu": ky_hieu or None,
+            "ngay": ngay if re.fullmatch(r"\d{4}-\d{2}-\d{2}", ngay) else None,
+            "so_tien": tong, "tien_truoc_thue": truoc, "tien_thue": thue,
+            "mo_ta": " · ".join(hang[:4])[:300] or None}
+
+
+def _ten(url: str) -> str:
+    """Tên ngắn của URL để ghi nhật ký (máy chủ + đường dẫn, không kèm mã / token)."""
     u = urllib.parse.urlsplit(url)
     return f"{u.hostname}{u.path}"[:90]
 
 
-def tai_hoa_don(link: str | None, ma: str | None = None, tu_email: str | None = None, lay=None, han_s: float = 45) -> dict:
-    """Thử tải file hóa đơn theo link / mã tra cứu.
-    → {ok, tep: [{loai: 'xml'|'pdf', data, content_type, nguon}], ho_tro, ly_do, da_thu: [{url, kq}]}
-    `lay(url) -> (data, content_type, url_cuoi)` thay được khi thử (mặc định gọi HTTP thật)."""
-    lay = lay or _lay_http
-    kq = {"ok": False, "tep": [], "ho_tro": True, "ly_do": None, "da_thu": []}
-    ds = ung_vien(link, ma, tu_email)
-    if not ds:
-        kq["ho_tro"] = False
-        ly = kiem_url(link) if link else None
-        kq["ly_do"] = (ly or "không có link tra cứu, mã tra cứu không đủ để tải")[:200]
-        return kq
-    co = {}
-    bat_dau = time.monotonic()
-    da_do_html = False
-    i = 0
-    while i < len(ds) and i < 8:
-        url = ds[i]
-        i += 1
-        if time.monotonic() - bat_dau > han_s:
-            kq["da_thu"].append({"url": _an_ma(url), "kq": "hết thời gian"})
-            break
+class _Lan:
+    """Gom kết quả một lần tự tải: file nhận được + nhật ký các lệnh đã gọi + hạn thời gian."""
+
+    def __init__(self, phien, han_s):
+        self.phien, self.het = phien, time.monotonic() + han_s
+        self.tep, self.da_thu, self.ly_do = {}, [], None
+
+    def goi(self, url, du_lieu=None):
+        """Gọi một lệnh; lỗi → ghi nhật ký và trả (None, '', url)."""
+        if time.monotonic() > self.het:
+            self.da_thu.append({"url": _ten(url), "kq": "hết thời gian"})
+            return None, "", url
         try:
-            data, ct, cuoi = lay(url)
+            data, ct, cuoi = self.phien.goi(url, du_lieu)
         except ValueError as e:
-            kq["da_thu"].append({"url": _an_ma(url), "kq": "lỗi: " + str(e)[:80]})
-            continue
+            self.da_thu.append({"url": _ten(url), "kq": "lỗi: " + str(e)[:80]})
+            return None, "", url
         except Exception as e:                                           # noqa: BLE001 — không để lỗi lạ làm hỏng lượt quét
-            kq["da_thu"].append({"url": _an_ma(url), "kq": f"lỗi: {type(e).__name__}"})
-            continue
-        loai = nhan_dang(data)
-        kq["da_thu"].append({"url": _an_ma(url), "kq": loai or "rỗng / không nhận ra"})
-        if loai == "zip":
-            for l2, d2 in tu_zip(data):
-                co.setdefault(l2, {"loai": l2, "data": d2, "nguon": _an_ma(url),
-                                   "content_type": "application/xml" if l2 == "xml" else "application/pdf"})
-        elif loai in ("xml", "pdf"):
-            co.setdefault(loai, {"loai": loai, "data": data, "nguon": _an_ma(url),
-                                 "content_type": "application/xml" if loai == "xml" else "application/pdf"})
-        elif loai == "html" and not da_do_html:
-            da_do_html = True                                            # dò link tải trong trang tra cứu — đúng 1 cấp
-            for u2 in link_trong_html(data, cuoi or url):
-                if u2 not in ds:
-                    ds.append(u2)
-        if "xml" in co and "pdf" in co:
-            break
-    kq["tep"] = [co[k] for k in ("xml", "pdf") if k in co]
+            self.da_thu.append({"url": _ten(url), "kq": f"lỗi: {type(e).__name__}"})
+            return None, "", url
+        return data, ct, cuoi
+
+    def nhan(self, data, url, chi=None) -> bool:
+        """Nhận file (xml / pdf / zip chứa chúng); `chi` = chỉ nhận loại này. → True khi có thêm file."""
+        loai = nhan_dang(data or b"")
+        self.da_thu.append({"url": _ten(url), "kq": loai or "rỗng / không nhận ra"})
+        cap = tu_zip(data) if loai == "zip" else [(loai, data)] if loai in ("xml", "pdf") else []
+        them = False
+        for l2, d2 in cap:
+            if (chi is None or l2 == chi) and l2 not in self.tep:
+                self.tep[l2] = {"loai": l2, "data": d2, "nguon": _ten(url),
+                                "content_type": "application/xml" if l2 == "xml" else "application/pdf"}
+                them = True
+        return them
+
+
+def _misa(lan: _Lan, code: str):
+    """MISA meInvoice: một lệnh POST theo mã tra cứu → JSON {success, errorCode, data: '<HDon>…'}."""
+    data, _ct, _u = lan.goi(_MISA_API, {"transactionID": code, "isReceiveEmail": "false"})
+    if data is None:
+        return
+    try:
+        j = json.loads(data.decode("utf-8", errors="replace"))
+    except ValueError:
+        lan.da_thu.append({"url": _ten(_MISA_API), "kq": nhan_dang(data) or "không phải JSON"})
+        lan.ly_do = "cổng MISA trả lời không đúng dạng (có thể đang chặn truy cập tự động)"
+        return
+    xml = j.get("data") if isinstance(j, dict) else None
+    if isinstance(j, dict) and j.get("success") and isinstance(xml, str) and xml.lstrip("﻿ \r\n\t").startswith("<"):
+        lan.nhan(xml.lstrip("﻿").encode("utf-8"), _MISA_API, chi="xml")
+        return
+    ma_loi = str((j or {}).get("errorCode") or "") if isinstance(j, dict) else ""
+    lan.da_thu.append({"url": _ten(_MISA_API), "kq": "cổng báo: " + (ma_loi or "không có hóa đơn")[:40]})
+    lan.ly_do = ("cổng MISA báo mã tra cứu này không có hóa đơn (mã sai hoặc hóa đơn đã bị hủy / thay thế)"
+                 if ma_loi.upper() == "INVOICENOTEXIST" else f"cổng MISA không trả hóa đơn ({ma_loi or 'không rõ lý do'})")
+
+
+_RE_EI_XML = re.compile(r"downloadXML\(\s*'([^']{10,600})'")
+_RE_EI_PDF = re.compile(r"downloadPdf\w*\(\s*'([^']{10,600})'")
+
+
+def _easyinvoice(lan: _Lan, link: str, code: str | None):
+    """EasyInvoice: link «/Invoice/ViewFromEmail?token=…» → trang hóa đơn có token tải → XML (2 bước) + PDF.
+    Thư kiểu cũ «/tra-cuu?ma=<mã>»: chỉ có link tải nhanh PDF «/tai-pdf?ma=<mã>»."""
+    u = urllib.parse.urlsplit(link)
+    duong = u.path.lower()
+    if "/invoice/viewfromemail" in duong:
+        data, _ct, cuoi = lan.goi(link)
+        if data is None:
+            return
+        if nhan_dang(data) != "html":
+            lan.nhan(data, cuoi)
+            return
+        lan.da_thu.append({"url": _ten(cuoi), "kq": "trang hóa đơn"})
+        trang = data[:600000].decode("utf-8", errors="replace")
+        uc = urllib.parse.urlsplit(cuoi)
+        goc = f"{uc.scheme}://{uc.netloc}"
+        mx, mp = _RE_EI_XML.search(trang), _RE_EI_PDF.search(trang)
+        if not mx and not mp:
+            lan.ly_do = "trang EasyInvoice không có nút tải (link trong thư đã hết hạn hoặc hóa đơn không còn)"
+            return
+        if mx:
+            d2, _c2, u2 = lan.goi(goc + "/Invoice/DownloadXML", {"token": mx.group(1)})
+            if d2 is not None:
+                try:
+                    j = json.loads(d2.decode("utf-8", errors="replace"))
+                except ValueError:
+                    j = None
+                if isinstance(j, dict) and j.get("fileGuid"):
+                    q = urllib.parse.urlencode({"fileGuid": j["fileGuid"], "fileName": j.get("fileName") or "hoadon.xml"})
+                    d3, _c3, u3 = lan.goi(goc + "/Invoice/Download?" + q)
+                    if d3 is not None:
+                        lan.nhan(d3, u3, chi="xml")
+                else:
+                    lan.da_thu.append({"url": _ten(u2), "kq": "cổng báo: " + str((j or {}).get("msg") or "không trả file")[:60]})
+        tok_pdf = (mp or mx).group(1)
+        d4, _c4, u4 = lan.goi(goc + "/Invoice/DownloadPdf?" + urllib.parse.urlencode({"token": tok_pdf}))
+        if d4 is not None:
+            lan.nhan(d4, u4, chi="pdf")
+        return
+    if code:
+        goc = f"{u.scheme}://{u.netloc}"
+        d5, _c5, u5 = lan.goi(goc + "/tai-pdf?" + urllib.parse.urlencode({"ma": code}))
+        if d5 is not None:
+            lan.nhan(d5, u5, chi="pdf")
+
+
+def tai_hoa_don(link: str | None, ma: str | None = None, tu_email: str | None = None, phien=None, han_s: float = 45) -> dict:
+    """Tải file hóa đơn theo link / mã tra cứu ở cổng đã hỗ trợ.
+    → {ok, cong, tep: [{loai: 'xml'|'pdf', data, content_type, nguon}], ho_tro, ly_do, da_thu: [{url, kq}]}
+    `phien`: đối tượng có `.goi(url, du_lieu=None) -> (data, content_type, url_cuoi)` (mặc định `Phien()` gọi HTTP thật)."""
+    link = go_boc(link)
+    kq = {"ok": False, "cong": None, "tep": [], "ho_tro": True, "ly_do": None, "da_thu": []}
+    cong = cong_ho_tro(link, ma, tu_email)
+    kq["cong"] = cong
+    if cong is None:
+        kq["ho_tro"] = False
+        try:
+            host = (urllib.parse.urlsplit(link).hostname or "") if link else ""
+        except ValueError:
+            host = ""
+        kq["ly_do"] = (f"cổng {host[:60]} chưa hỗ trợ tự tải (cần mã xác minh / đăng nhập) — bấm link tải tay rồi 📎 AI đọc" if host
+                       else "không có link tra cứu của cổng đã hỗ trợ — tải tay rồi 📎 AI đọc")[:200]
+        return kq
+    lan = _Lan(phien or Phien(), han_s)
+    code = (ma_tu_link(link) if link else None) or (ma or "").strip()
+    if cong == "MISA":
+        _misa(lan, code)
+    else:
+        _easyinvoice(lan, link, code)
+    kq["da_thu"] = lan.da_thu
+    kq["tep"] = [lan.tep[k] for k in ("xml", "pdf") if k in lan.tep]
     kq["ok"] = bool(kq["tep"])
     if not kq["ok"]:
-        co_html = any(x["kq"] == "html" for x in kq["da_thu"])
-        kq["ly_do"] = ("cổng chỉ trả trang web (cần nhập mã xác minh / đăng nhập) — tải tay rồi bấm 📎 AI đọc" if co_html
-                       else "cổng không trả file cho link / mã này" if all(not x["kq"].startswith("lỗi") for x in kq["da_thu"])
-                       else (next((x["kq"] for x in kq["da_thu"] if x["kq"].startswith("lỗi")), "không tải được")))[:200]
+        loi = next((x["kq"] for x in lan.da_thu if x["kq"].startswith("lỗi")), None)
+        kq["ly_do"] = (lan.ly_do or loi or "cổng không trả file cho link / mã này")[:200]
     return kq
