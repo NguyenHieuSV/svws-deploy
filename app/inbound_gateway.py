@@ -260,3 +260,108 @@ def _imap_lay_thu(tu_ngay=None, den_ngay=None, bao=None, bo_qua_mid=None) -> lis
 
 def lay_inbound_provider() -> InboundProvider:
     return ImapInboundProvider() if settings.inbound_provider.upper() == "IMAP" else FakeInboundProvider()
+
+
+def _hop_theo_co(M, co: str) -> str | None:
+    """Tên hộp thư mang cờ đặc biệt («All» = Tất cả thư, «Junk» = Thư rác) — Gmail và phần lớn máy chủ IMAP khai trong LIST."""
+    try:
+        typ, ds = M.list()
+    except Exception:
+        return None
+    for d in ds or []:
+        s = d.decode("utf-8", errors="replace") if isinstance(d, bytes) else str(d)
+        if co.lower() in s.lower():
+            m = _re.search(r'"([^"]+)"\s*$', s) or _re.search(r"(\S+)\s*$", s)
+            if m:
+                return m.group(1)
+    return None
+
+
+def tim_thu(tu_khoa: str, tu_ngay=None, toi_da: int = 30, ca_hop: bool = True, han_s: float = 60) -> list[dict]:
+    """🔎 TÌM THƯ trong hộp thư theo từ khóa (người gửi / tiêu đề / thân) — để soi vì sao một hóa đơn chưa vào hàng chờ.
+    Chỉ đọc (BODY.PEEK, mở hộp ở chế độ readonly) — không đánh dấu đã đọc, không đổi gì trong hộp thư.
+    Khác `_imap_lay_thu`: trả CẢ thư tự động (Auto-Submitted / Precedence: bulk — luồng quét đang bỏ qua) kèm cờ `tu_dong`;
+    `ca_hop`: tìm thêm ở «Tất cả thư» và «Thư rác» (thư không nằm trong Hộp thư đến thì luồng quét không thấy).
+    → mới nhất trước, mỗi thư: hop, ngay, tu_email, den_email, tieu_de, message_id, tu_dong, dinh_kem [{ten, kb}], noi_dung (≤ 3.000 ký tự).
+    Dừng sau `han_s` giây (request web bị cắt ~100 giây) — thư chưa kịp đọc thì bỏ, thu hẹp từ khóa / mốc ngày để tìm tiếp."""
+    import time as _time
+    tu_khoa = (tu_khoa or "").strip()
+    if len(tu_khoa) < 3:
+        raise ValueError("Từ khóa tìm thư cần ít nhất 3 ký tự")
+    if settings.inbound_provider.upper() != "IMAP":
+        return []
+    het = _time.monotonic() + han_s
+    M = imaplib.IMAP4_SSL(settings.imap_host, settings.imap_port, timeout=30)
+    M.login(settings.imap_user, settings.imap_pass)
+    ra, da_co = [], set()
+    hop_ds = [("INBOX", "Hộp thư đến")]
+    if ca_hop:
+        for co, ten in ((chr(92) + "All", "Tất cả thư (không ở Hộp thư đến)"), (chr(92) + "Junk", "Thư rác")):
+            h = _hop_theo_co(M, co)
+            if h:
+                hop_ds.append((h, ten))
+    try:
+        for hop, ten_hop in hop_ds:
+            try:
+                typ, _d = M.select(f'"{hop}"' if " " in hop or "[" in hop else hop, readonly=True)
+            except Exception:
+                continue
+            if typ != "OK":
+                continue
+            dk = ["SINCE", tu_ngay.strftime("%d-%b-%Y")] if tu_ngay is not None else []
+            try:
+                if tu_khoa.isascii():
+                    typ, data = M.search(None, *dk, "TEXT", '"' + tu_khoa.replace('"', "") + '"')
+                else:
+                    M.literal = tu_khoa.encode("utf-8")
+                    typ, data = M.search("UTF-8", *dk, "TEXT")
+            except Exception:
+                continue
+            nums = (data[0].split() if data and data[0] else [])[-max(1, min(int(toi_da or 30), 60)):]
+            # «Tất cả thư» chứa cả thư đã thấy ở Hộp thư đến → hỏi Message-ID trước (một lệnh), thư trùng khỏi tải thân
+            try:
+                mid_so = _imap_mid_theo_so(M, nums) if (hop != "INBOX" and nums and da_co) else {}
+            except Exception:
+                mid_so = {}
+            for num in reversed(nums):
+                if _time.monotonic() > het or len(ra) >= 60:
+                    break
+                if (mid_so.get(num) or "").strip() in da_co:
+                    continue
+                try:
+                    typ, md = M.fetch(num, "(BODY.PEEK[])")
+                    m = email.message_from_bytes(md[0][1])
+                except Exception:
+                    continue
+                mid = (m.get("Message-ID") or "").strip()
+                if mid and mid in da_co:
+                    continue
+                if mid:
+                    da_co.add(mid)
+                kem = []
+                for p in m.walk():
+                    fn = p.get_filename()
+                    if fn:
+                        try:
+                            kb = max(1, round(len(p.get_payload(decode=True) or b"") / 1024))
+                        except Exception:
+                            kb = None
+                        kem.append({"ten": _txt(fn)[:120], "kb": kb})
+                tu_dong = []
+                if (m.get("Auto-Submitted", "no") or "no").lower() != "no":
+                    tu_dong.append("Auto-Submitted: " + str(m.get("Auto-Submitted"))[:40])
+                if "bulk" in (m.get("Precedence", "") or "").lower():
+                    tu_dong.append("Precedence: bulk")
+                try:
+                    den = ", ".join(a for _, a in getaddresses([m.get("To") or "", m.get("Cc") or ""]) if a)[:300]
+                except Exception:
+                    den = ""
+                ra.append({"hop": ten_hop, "ngay": m.get("Date"), "tu_email": parseaddr(m.get("From"))[1], "den_email": den,
+                           "tieu_de": _txt(m.get("Subject")), "message_id": mid or None, "tu_dong": tu_dong,
+                           "dinh_kem": kem[:10], "noi_dung": (_body(m) or "")[:3000]})
+    finally:
+        try:
+            M.logout()
+        except Exception:
+            pass
+    return ra

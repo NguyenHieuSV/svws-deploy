@@ -1424,6 +1424,63 @@ def quet_hoa_don_mua_email_nen_xem(viec_id: int, db: Session = Depends(get_db), 
     return hqn.to_dict(v)
 
 
+def _hdc_vi_sao_chua_doc(thu: dict, tin_cay, them_email, mien_cty: str) -> list[str]:
+    """Vì sao luồng quét hóa đơn mua KHÔNG đọc thư này — soi đúng các bước lọc của `_imap_lay_thu` + `hdc_quet_lo`
+    (đổi bước lọc ở đó thì đổi cả ở đây). [] = thư đủ điều kiện, lượt quét có mốc ngày bao trùm thư sẽ đọc."""
+    import unicodedata
+    kd = "".join(c for c in unicodedata.normalize("NFD", thu.get("tieu_de") or "") if unicodedata.category(c) != "Mn")
+    kd = kd.replace("đ", "d").replace("Đ", "D").lower()
+    nguoi = (thu.get("tu_email") or "").strip().lower()
+    ra = []
+    if not str(thu.get("hop") or "").startswith("Hộp thư đến"):
+        ra.append("thư không nằm trong Hộp thư đến (luồng quét chỉ đọc Hộp thư đến)")
+    if thu.get("tu_dong"):
+        ra.append("thư mang nhãn thư tự động (" + " · ".join(thu["tu_dong"]) + ") — luồng quét bỏ qua loại thư này")
+    if mien_cty and nguoi.endswith("@" + mien_cty) and not any(x in kd for x in ("fw:", "fwd:", "chuyen tiep")):
+        ra.append("thư do chính công ty gửi (không phải thư chuyển tiếp) — coi là hóa đơn bán, không phải hóa đơn mua")
+    elif not (nguoi in tin_cay or nguoi in them_email or "hoa don" in kd or "invoice" in kd):
+        ra.append("người gửi chưa có trong hồ sơ NCC / danh bạ và tiêu đề không có chữ «hóa đơn» / «invoice»")
+    return ra
+
+
+@router.get("/hoa-don-cho/tim-thu")
+def tim_thu_hoa_don(tu_khoa: str, tu_ngay: date | None = None, db: Session = Depends(get_db),
+                    nd: NguoiDung = Depends(chi_vai_tro("CEO", "ADMIN"))):
+    """🔎 Tìm thư trong hộp thư nhận hóa đơn theo từ khóa (người gửi / tiêu đề / thân thư) và cho biết VÌ SAO thư chưa vào
+    hàng chờ hóa đơn mua — tìm cả «Tất cả thư» và «Thư rác», cả thư tự động mà luồng quét đang bỏ qua. Chỉ đọc, không đổi
+    gì trong hộp thư lẫn CSDL. Trả nội dung thư nên chỉ CEO / ADMIN. Mặc định tìm trong 90 ngày gần nhất."""
+    import re as _re
+    from ..inbound_gateway import tim_thu
+    from ..models import KtHoaDonCho, NhaCungCap, CtNccEmail, KtHdGuiKhach
+    from ..config import settings as _st
+    tu_khoa = (tu_khoa or "").strip()
+    if len(tu_khoa) < 3:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Từ khóa tìm thư cần ít nhất 3 ký tự")
+    tu_ngay = tu_ngay or (date.today() - timedelta(days=90))
+    try:
+        thu = tim_thu(tu_khoa, tu_ngay)
+    except Exception as e:                                               # noqa: BLE001
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Không đọc được hộp thư: {str(e)[:150]}")
+    tin_cay = {(n.email or "").strip().lower() for n in db.query(NhaCungCap).all() if (n.email or "").strip()}
+    them_email = {(e.email or "").strip().lower() for e in db.query(CtNccEmail).all()}
+    mien_cty = ((_st.email_from_ncc or _st.email_from or "").split("@")[-1] or "").strip().lower()
+    ra = []
+    for m in thu:
+        mid = (m.get("message_id") or "").strip()[:250] or None
+        hc = db.query(KtHoaDonCho).filter_by(message_id=mid).first() if mid else None
+        ban = bool(mid and db.query(KtHdGuiKhach).filter_by(message_id=mid).first() is not None)
+        link, ma = _rut_link_tra_cuu(m.get("noi_dung") or "")
+        cong = sorted({h.lower() for h in _re.findall(r"https?://([A-Za-z0-9.\-]+)", m.get("noi_dung") or "")})[:8]
+        ra.append({"hop": m["hop"], "ngay": m.get("ngay"), "tu_email": m.get("tu_email"), "den_email": m.get("den_email"),
+                   "tieu_de": m.get("tieu_de"), "tu_dong": m.get("tu_dong") or [], "dinh_kem": m.get("dinh_kem") or [],
+                   "noi_dung": (m.get("noi_dung") or "")[:1500],
+                   "trong_hang_cho": ({"id": hc.id, "trang_thai": hc.trang_thai, "so_hoa_don": hc.so_hoa_don,
+                                       "tong_tien": float(hc.tong_tien or 0)} if hc is not None else None),
+                   "la_hd_ban": ban, "co_link_tra_cuu": bool(link), "co_ma_tra_cuu": bool(ma), "ten_mien_trong_thu": cong,
+                   "vi_sao_chua_doc": [] if (hc is not None or ban) else _hdc_vi_sao_chua_doc(m, tin_cay, them_email, mien_cty)})
+    return {"tu_khoa": tu_khoa, "tu_ngay": str(tu_ngay), "so_thu": len(ra), "thu": ra}
+
+
 def hdc_quet_lo(db, nd, moc, chan_doan=False, bao_tien_do=None, den_ngay=None) -> dict:
     """Lõi quét hóa đơn mua từ email (một LƯỢT): lấy thư từ `moc` (tới trước `den_ngay` nếu có — cửa sổ của quét nền), đọc nhãn /
     AI, thêm hàng chờ; tối đa 25 thư mới mỗi lượt (con_lai = số thư mới chưa xử lý). `bao_tien_do(dict)` (tùy chọn) được gọi
