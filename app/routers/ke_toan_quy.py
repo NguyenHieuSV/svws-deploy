@@ -1481,6 +1481,7 @@ def hdc_quet_lo(db, nd, moc, chan_doan=False, bao_tien_do=None, den_ngay=None) -
     tu_tai_n, tai_s = 0, 0.0                                   # ⬇ mig 171: số hóa đơn tự tải được + giây đã dùng cho tự tải
     tu_tai_bat = bool(getattr(_st_mua, "hdc_tu_tai", True))
     nd_id_tai = getattr(nd, "id", None)
+    cong_ngung = set()                                         # cổng vừa báo giới hạn số lần gọi (HTTP 429 …) → thôi gọi trong lượt này
 
     def _thu_tu_tai(dong):
         """Tự tải file cho một dòng (trong ngân sách thời gian của lượt); lỗi gì cũng không làm hỏng lượt quét."""
@@ -1491,10 +1492,13 @@ def hdc_quet_lo(db, nd, moc, chan_doan=False, bao_tien_do=None, den_ngay=None) -
         try:
             if dong.id is None:
                 db.flush()                                     # dòng mới: cần id + giá trị mặc định (trạng thái) trước khi tải
-            if _hdc_can_tu_tai(dong):
+            if _hdc_can_tu_tai(dong) and _hdc_cong_tai(dong) not in cong_ngung:
                 with db.begin_nested():                        # dòng tự tải hỏng → chỉ lùi phần của nó
-                    if _hdc_tu_tai(db, dong, nd_id_tai, ncc_theo_mst=ncc_theo_mst)["ok"]:
+                    k_tai = _hdc_tu_tai(db, dong, nd_id_tai, ncc_theo_mst=ncc_theo_mst)
+                    if k_tai["ok"]:
                         tu_tai_n += 1
+                    elif k_tai.get("tam_ngung"):
+                        cong_ngung.add(k_tai.get("cong"))
         except Exception as e:                                 # noqa: BLE001
             print(f"[HDC] tự tải dòng {getattr(dong, 'id', '?')} lỗi: {type(e).__name__}: {str(e)[:120]}")
         tai_s += _t_tai.monotonic() - t0
@@ -1904,6 +1908,20 @@ def _hdc_can_tu_tai(r) -> bool:
             and int(getattr(r, "tai_lan", 0) or 0) < 3 and _hdc_cong_tai(r) is not None)
 
 
+# Giây nghỉ giữa hai lệnh gọi CÙNG một cổng khi tự tải hàng loạt. 28/11/2026: gọi MISA ~40 lệnh liền nhau (nghỉ 0,4 s) thì cổng
+# trả HTTP 429 cho mọi lệnh sau đó trong vài phút.
+_HDC_NGHI_CONG = {"MISA": 2.5, "EASYINVOICE": 1.0}
+_HDC_VUA_LOI_S = 600            # dòng vừa lỗi thật trong 10 phút qua → lượt hàng loạt để sau, không thử dồn
+
+
+def _hdc_vua_loi(r, nay) -> bool:
+    """Dòng vừa tự tải HỎNG (lỗi thật, đã tính lượt) trong 10 phút qua. Dòng bị cổng tạm ngưng («⏳ …») không tính."""
+    tl = getattr(r, "tai_luc", None)
+    return bool(getattr(r, "tai_tt", None) == "LOI" and tl is not None
+                and not str(getattr(r, "tai_ghi_chu", None) or "").startswith("⏳")
+                and 0 <= (nay - tl).total_seconds() < _HDC_VUA_LOI_S)
+
+
 def _hdc_cung_so(a, b) -> bool:
     """Hai số hóa đơn là một (bỏ số 0 đầu, hoa/thường; «1C26TTT-277» coi như «277»)."""
     a, b = _hdc_so_hd_chuan(a), _hdc_so_hd_chuan(b)
@@ -1941,7 +1959,8 @@ def _hdc_tu_tai(db, r, nd_id=None, thu=False, phien=None, ncc_theo_mst=None) -> 
     kq = tai_hoa_don(r.link_tra_cuu, r.ma_tra_cuu, r.tu_email, phien=phien)
     ra = {"ok": kq["ok"], "id": r.id, "cong": kq.get("cong"), "ho_tro": kq["ho_tro"], "ly_do": kq["ly_do"], "da_thu": kq["da_thu"],
           "tep": [{"loai": t["loai"], "kb": max(1, round(len(t["data"]) / 1024))} for t in kq["tep"]],
-          "dien_tien": False, "nguon": None, "canh_bao": None}
+          "dien_tien": False, "nguon": None, "canh_bao": None,
+          "tam_ngung": bool(kq.get("tam_ngung")), "cho_s": kq.get("cho_s")}
     xml = next((t for t in kq["tep"] if t["loai"] == "xml"), None)
     pdf = next((t for t in kq["tep"] if t["loai"] == "pdf"), None)
     info, nguon = None, None
@@ -1976,6 +1995,11 @@ def _hdc_tu_tai(db, r, nd_id=None, thu=False, phien=None, ncc_theo_mst=None) -> 
     if lech:
         ra.update(ok=False, ly_do=lech)
     if thu:
+        return ra
+    if ra["tam_ngung"]:
+        # cổng đang giới hạn số lần gọi / nghẽn (HTTP 429 …): không phải lỗi của hóa đơn → KHÔNG tính lượt thử, giữ nguyên trạng thái tải
+        r.tai_luc = gio_hien_tai()
+        r.tai_ghi_chu = ("⏳ " + (ra["ly_do"] or "cổng tạm ngưng phục vụ"))[:300]
         return ra
     r.tai_lan = int(getattr(r, "tai_lan", 0) or 0) + 1
     r.tai_luc = gio_hien_tai()
@@ -2063,20 +2087,31 @@ def _hdc_tu_tai(db, r, nd_id=None, thu=False, phien=None, ncc_theo_mst=None) -> 
 def tu_tai_hoa_don_cho_loat(toi_da: int = 10, db: Session = Depends(get_db),
                             nd: NguoiDung = Depends(yeu_cau(MODULE, "THAO_TAC"))):
     """⬇ Tự tải hóa đơn cho các dòng CHỜ có link / mã tra cứu mà chưa có file — dòng thiếu tiền làm trước.
-    Mỗi lần gọi ≤ `toi_da` dòng và ≤ 55 giây (Render cắt request ~100 giây); `con_lai` > 0 thì giao diện gọi tiếp."""
+    Mỗi lần gọi ≤ `toi_da` dòng và ≤ 50 giây (Render cắt request ~100 giây); `con_lai` > 0 thì giao diện gọi tiếp.
+    Gọi THƯA theo từng cổng (`_HDC_NGHI_CONG`). Cổng báo giới hạn số lần gọi (HTTP 429 …) → ngưng cổng đó trong lượt này,
+    dòng KHÔNG bị tính lỗi, trả `tam_ngung` + `cho_s` để giao diện nghỉ rồi gọi tiếp. Dòng vừa lỗi thật trong 10 phút qua
+    để lượt sau (`de_sau`) — không thử dồn 3 lần liền."""
     import time as _t
     from ..models import KtHoaDonCho
-    ds = [r for r in db.query(KtHoaDonCho).filter_by(trang_thai="CHO_XAC_NHAN").order_by(KtHoaDonCho.id.desc()).all()
-          if _hdc_can_tu_tai(r)]
+    from ..nhac_viec_service import gio_hien_tai
+    nay = gio_hien_tai()
+    tat_ca = [r for r in db.query(KtHoaDonCho).filter_by(trang_thai="CHO_XAC_NHAN").order_by(KtHoaDonCho.id.desc()).all()
+              if _hdc_can_tu_tai(r)]
+    ds = [r for r in tat_ca if not _hdc_vua_loi(r, nay)]
     ds.sort(key=lambda r: (not _hdc_tien_nghi(r), -r.id))
     toi_da = max(1, min(int(toi_da or 10), 15))
     t0 = _t.monotonic()
     kq = {"da_xet": 0, "tai_duoc": 0, "dien_tien": 0, "loi": 0, "khong_ho_tro": 0, "chi_tiet": []}
-    for i_r, r in enumerate(ds[:toi_da]):
-        if _t.monotonic() - t0 > 55:
+    ngung, lien_loi, lan_cuoi = {}, {}, {}                  # cổng tạm ngưng → giây nên chờ · số dòng hỏng kết nối liên tiếp · lúc gọi cuối
+    for r in ds:
+        if kq["da_xet"] >= toi_da or _t.monotonic() - t0 > 50:
             break
-        if i_r:
-            _t.sleep(0.4)                                    # không dồn dập lên cổng HĐĐT
+        cong = _hdc_cong_tai(r)
+        if cong in ngung:
+            continue
+        nghi = _HDC_NGHI_CONG.get(cong, 1.0) - (_t.monotonic() - lan_cuoi[cong]) if cong in lan_cuoi else 0
+        if nghi > 0:
+            _t.sleep(nghi)                                  # không dồn dập lên cổng HĐĐT
         try:
             k = _hdc_tu_tai(db, r, nd.id)
         except Exception as e:                                           # noqa: BLE001 — một dòng hỏng không làm hỏng cả lượt
@@ -2084,6 +2119,10 @@ def tu_tai_hoa_don_cho_loat(toi_da: int = 10, db: Session = Depends(get_db),
             k = {"ok": False, "ho_tro": True, "ly_do": f"{type(e).__name__}: {str(e)[:80]}", "dien_tien": False}
         else:
             db.commit()
+        lan_cuoi[cong] = _t.monotonic()
+        if k.get("tam_ngung"):
+            ngung[cong] = int(k.get("cho_s") or 60)
+            continue                                        # không tính là một dòng đã xét
         kq["da_xet"] += 1
         kq["tai_duoc"] += 1 if k["ok"] else 0
         kq["dien_tien"] += 1 if k.get("dien_tien") else 0
@@ -2091,7 +2130,14 @@ def tu_tai_hoa_don_cho_loat(toi_da: int = 10, db: Session = Depends(get_db),
         kq["khong_ho_tro"] += 1 if (not k["ok"] and not k.get("ho_tro")) else 0
         kq["chi_tiet"].append({"id": r.id, "so_hoa_don": r.so_hoa_don, "ok": k["ok"], "ly_do": k.get("ly_do"),
                                "canh_bao": k.get("canh_bao")})
+        # cầu chì: 3 dòng liên tiếp của một cổng hỏng ở tầng kết nối («lỗi: …») → coi như cổng có sự cố, ngưng cổng trong lượt này
+        lien_loi[cong] = lien_loi.get(cong, 0) + 1 if (not k["ok"] and str(k.get("ly_do") or "").startswith("lỗi:")) else 0
+        if lien_loi[cong] >= 3:
+            ngung[cong] = 60
+    kq["tam_ngung"] = sorted(ngung)
+    kq["cho_s"] = max(30, min(300, max(ngung.values()))) if ngung else 0
     kq["con_lai"] = max(0, len(ds) - kq["da_xet"])
+    kq["de_sau"] = len(tat_ca) - len(ds)
     return kq
 
 

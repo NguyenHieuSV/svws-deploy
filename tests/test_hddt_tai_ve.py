@@ -377,3 +377,98 @@ def test_easyinvoice_trang_ma_hoa_dau_nhay_va_so_hoa_don_rac(db):
     k2 = kq._hdc_tu_tai(db, r, None, phien=_Misa())
     assert k2["ok"] and r.so_hoa_don == "15854" and "chưa đổi" in k2["canh_bao"] and int(r.tong_tien) == 3465
     assert kq._hdc_tep(db, [r.id])[r.id][0]["ten_file"] == "HD_15854_1C26TYY.xml"
+
+
+# ------------------------------------------------ cổng giới hạn số lần gọi (HTTP 429) — 28/11/2026 ------------------------------------------------
+class _Chan:
+    """Cổng MISA giả: cho qua `cho_qua` lệnh đầu rồi báo giới hạn số lần gọi (như MISA trả HTTP 429 khi bị gọi dồn)."""
+
+    def __init__(self, cho_qua=0, cho_s=45):
+        self.gia, self.cho_qua, self.cho_s, self.n = _Misa(), cho_qua, cho_s, 0
+
+    def goi(self, url, du_lieu=None):
+        self.n += 1
+        if self.n > self.cho_qua:
+            raise tv.TamNgung("cổng đang giới hạn số lần gọi (HTTP 429)", self.cho_s)
+        return self.gia.goi(url, du_lieu)
+
+
+def test_http_429_la_tam_ngung_con_404_van_la_loi():
+    import urllib.error
+
+    class _Mo:
+        def __init__(self, ma, dau):
+            self.ma, self.dau = ma, dau
+
+        def open(self, req, timeout=None):
+            raise urllib.error.HTTPError(req.full_url, self.ma, "x", self.dau, None)
+    u = "https://www.meinvoice.vn/tra-cuu/GetInvoiceDataByTransactionID"
+    p = tv.Phien()
+    p._mo = _Mo(429, {"Retry-After": "45"})
+    with pytest.raises(tv.TamNgung) as e:                       # bản thật của Phien.goi ở _goi_goc (conftest tắt mạng)
+        tv.Phien._goi_goc(p, u, {"transactionID": "A"})
+    assert e.value.cho_s == 45 and "HTTP 429" in str(e.value)
+    p._mo = _Mo(503, {})
+    with pytest.raises(tv.TamNgung) as e2:
+        tv.Phien._goi_goc(p, u, {"transactionID": "A"})
+    assert e2.value.cho_s is None
+    p._mo = _Mo(404, {})
+    with pytest.raises(ValueError) as e3:
+        tv.Phien._goi_goc(p, u, {"transactionID": "A"})
+    assert not isinstance(e3.value, tv.TamNgung) and "HTTP 404" in str(e3.value)
+    k = tv.tai_hoa_don(LINK_MISA, "7NFQCZ6BA6XV", phien=_Chan())
+    assert not k["ok"] and k["tam_ngung"] and k["cho_s"] == 45 and "giới hạn số lần gọi" in k["ly_do"] and "MISA" in k["ly_do"]
+    assert tv.tai_hoa_don(LINK_MISA, "7NFQCZ6BA6XV", phien=_Misa())["tam_ngung"] is False
+
+
+def test_cong_gioi_han_thi_dong_khong_bi_tinh_luot_thu(db):
+    r = _dong(db)
+    for _ in range(5):                                           # trước đây: 3 lần 429 là dòng bị ghi «lỗi» và thôi không thử nữa
+        k = kq._hdc_tu_tai(db, r, None, phien=_Chan())
+        assert not k["ok"] and k["tam_ngung"]
+    assert (r.tai_lan or 0) == 0 and r.tai_tt is None and r.tai_ghi_chu.startswith("⏳") and kq._hdc_can_tu_tai(r) is True
+    assert int(r.tong_tien) == 0 and kq._hdc_tep(db, [r.id]) == {}
+    k = kq._hdc_tu_tai(db, r, None, phien=_Misa())               # cổng mở lại → tải bình thường
+    assert k["ok"] and r.tai_tt == "OK" and r.tai_lan == 1 and int(r.tong_tien) == 700000
+
+
+def test_hang_loat_ngung_cong_bi_gioi_han_va_goi_thua(db, monkeypatch):
+    chan, ei, ngu = _Chan(cho_qua=2), _Ei(), []
+    monkeypatch.setattr(tv.Phien, "goi", lambda self, url, du_lieu=None: (chan if "meinvoice" in url else ei).goi(url, du_lieu))
+    monkeypatch.setattr("time.sleep", lambda s: ngu.append(s))
+    for i in range(1, 6):
+        _dong(db, id_=i)                                         # 5 dòng MISA
+    r6 = _dong(db, id_=6, so="444")                              # 1 dòng EasyInvoice — cổng khác vẫn chạy khi MISA bị chặn
+    r6.link_tra_cuu, r6.ma_tra_cuu, r6.tu_email = LINK_EI, None, "hoadon-noreply@easyinvoice.vn"
+    db.commit()
+    a = kq.tu_tai_hoa_don_cho_loat(10, db, _Nd())                # thứ tự: 6 (EI) · 5 · 4 (MISA được) · 3 (MISA chặn) · 2, 1 không gọi nữa
+    assert (a["da_xet"], a["tai_duoc"], a["loi"], a["con_lai"]) == (3, 3, 0, 3)
+    assert a["tam_ngung"] == ["MISA"] and a["cho_s"] == 45 and chan.n == 3
+    assert [x["id"] for x in a["chi_tiet"]] == [6, 5, 4]
+    for i in (1, 2, 3):
+        r = db.get(m.KtHoaDonCho, i)
+        assert (r.tai_lan or 0) == 0 and r.tai_tt is None and kq._hdc_can_tu_tai(r) is True
+    assert len(ngu) == 2 and all(2 < s <= 2.5 for s in ngu)      # nghỉ ~2,5 giây giữa hai lệnh gọi MISA
+    chan.cho_qua = 99                                            # cổng mở lại → lượt sau tải nốt
+    b = kq.tu_tai_hoa_don_cho_loat(10, db, _Nd())
+    assert (b["da_xet"], b["tai_duoc"], b["con_lai"], b["tam_ngung"]) == (3, 3, 0, [])
+
+
+def test_hang_loat_de_sau_dong_vua_loi_va_cau_chi_khi_cong_hong(db, monkeypatch):
+    gia = _Misa(ma="MAKHAC")                                     # cổng báo «không có hóa đơn» → lỗi thật, tính lượt
+    monkeypatch.setattr(tv.Phien, "goi", lambda self, url, du_lieu=None: gia.goi(url, du_lieu))
+    monkeypatch.setattr("time.sleep", lambda s: None)
+    r = _dong(db)
+    a = kq.tu_tai_hoa_don_cho_loat(10, db, _Nd())
+    assert (a["da_xet"], a["loi"], a["con_lai"], a["tam_ngung"]) == (1, 1, 0, []) and r.tai_lan == 1 and r.tai_tt == "LOI"
+    b = kq.tu_tai_hoa_don_cho_loat(10, db, _Nd())                # vừa lỗi xong → để lượt sau, không thử dồn 3 lần liền
+    assert (b["da_xet"], b["de_sau"]) == (0, 1) and r.tai_lan == 1 and len(gia.goi_ds) == 1
+    # cổng hỏng ở tầng kết nối (mọi lệnh đều «lỗi: …») → 3 dòng liên tiếp là ngưng cổng, không đốt lượt của các dòng còn lại
+    def _hong(self, url, du_lieu=None):
+        raise ValueError("cổng trả lỗi HTTP 403")
+    monkeypatch.setattr(tv.Phien, "goi", _hong)
+    for i in range(11, 18):
+        _dong(db, id_=i)
+    c = kq.tu_tai_hoa_don_cho_loat(10, db, _Nd())
+    assert (c["da_xet"], c["loi"], c["tam_ngung"], c["cho_s"]) == (3, 3, ["MISA"], 60)
+    assert sum(1 for i in range(11, 18) if (db.get(m.KtHoaDonCho, i).tai_lan or 0) == 0) == 4
