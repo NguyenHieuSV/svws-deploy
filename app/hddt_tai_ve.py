@@ -125,6 +125,28 @@ def cong_ho_tro(link: str | None, ma: str | None = None, tu_email: str | None = 
     return None
 
 
+class TamNgung(ValueError):
+    """Cổng TẠM THỜI không phục vụ — giới hạn số lần gọi (HTTP 429) hoặc cổng đang nghẽn (502 / 503 / 504). Không phải lỗi của
+    hóa đơn → nơi gọi KHÔNG tính là một lần thử hỏng, ngưng gọi cổng đó một lúc rồi thử lại. `cho_s`: số giây cổng đề nghị chờ.
+    (28/11/2026: chạy hàng loạt ~40 lệnh liền nhau thì MISA trả 429; các dòng sau bị ghi «lỗi» oan và hết 3 lượt thử.)"""
+
+    def __init__(self, ly_do: str, cho_s: int | None = None):
+        super().__init__(ly_do)
+        self.cho_s = cho_s
+
+
+_MA_TAM_NGUNG = (429, 502, 503, 504)
+
+
+def _cho_s(v) -> int | None:
+    """Đầu mục Retry-After dạng số giây → int trong 1…3600; dạng khác (ngày giờ) / trống → None."""
+    try:
+        s = int(str(v or "").strip())
+    except ValueError:
+        return None
+    return s if 0 < s <= 3600 else None
+
+
 class _KhongChuyenHuong(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, *a, **k):      # tự xử lý chuyển hướng để kiểm từng chặng
         return None
@@ -161,6 +183,9 @@ class Phien:
                 if e.code in (301, 302, 303, 307, 308) and e.headers.get("Location"):
                     url, than = _sach(urllib.parse.urljoin(url, e.headers["Location"])), None
                     continue
+                if e.code in _MA_TAM_NGUNG:
+                    raise TamNgung(("cổng đang giới hạn số lần gọi" if e.code == 429 else "cổng đang nghẽn")
+                                   + f" (HTTP {e.code})", _cho_s(e.headers.get("Retry-After") if e.headers else None))
                 raise ValueError(f"cổng trả lỗi HTTP {e.code}")
             except urllib.error.URLError as e:
                 raise ValueError(f"không kết nối được cổng ({str(getattr(e, 'reason', e))[:60]})")
@@ -267,6 +292,7 @@ class _Lan:
     def __init__(self, phien, han_s):
         self.phien, self.het = phien, time.monotonic() + han_s
         self.tep, self.da_thu, self.ly_do = {}, [], None
+        self.tam_ngung, self.cho_s = None, None          # cổng tạm ngưng phục vụ (HTTP 429 …): lý do + số giây nên chờ
 
     def goi(self, url, du_lieu=None):
         """Gọi một lệnh; lỗi → ghi nhật ký và trả (None, '', url)."""
@@ -275,6 +301,10 @@ class _Lan:
             return None, "", url
         try:
             data, ct, cuoi = self.phien.goi(url, du_lieu)
+        except TamNgung as e:
+            self.tam_ngung, self.cho_s = str(e)[:80], e.cho_s
+            self.da_thu.append({"url": _ten(url), "kq": "tạm ngưng: " + str(e)[:80]})
+            return None, "", url
         except ValueError as e:
             self.da_thu.append({"url": _ten(url), "kq": "lỗi: " + str(e)[:80]})
             return None, "", url
@@ -371,10 +401,11 @@ def _easyinvoice(lan: _Lan, link: str, code: str | None):
 
 def tai_hoa_don(link: str | None, ma: str | None = None, tu_email: str | None = None, phien=None, han_s: float = 45) -> dict:
     """Tải file hóa đơn theo link / mã tra cứu ở cổng đã hỗ trợ.
-    → {ok, cong, tep: [{loai: 'xml'|'pdf', data, content_type, nguon}], ho_tro, ly_do, da_thu: [{url, kq}]}
+    → {ok, cong, tep: [{loai: 'xml'|'pdf', data, content_type, nguon}], ho_tro, ly_do, da_thu: [{url, kq}], tam_ngung, cho_s}
+    `tam_ngung` = True: cổng đang giới hạn số lần gọi / nghẽn (xem `TamNgung`) — không phải lỗi của hóa đơn, thử lại sau.
     `phien`: đối tượng có `.goi(url, du_lieu=None) -> (data, content_type, url_cuoi)` (mặc định `Phien()` gọi HTTP thật)."""
     link = go_boc(link)
-    kq = {"ok": False, "cong": None, "tep": [], "ho_tro": True, "ly_do": None, "da_thu": []}
+    kq = {"ok": False, "cong": None, "tep": [], "ho_tro": True, "ly_do": None, "da_thu": [], "tam_ngung": False, "cho_s": None}
     cong = cong_ho_tro(link, ma, tu_email)
     kq["cong"] = cong
     if cong is None:
@@ -398,4 +429,10 @@ def tai_hoa_don(link: str | None, ma: str | None = None, tu_email: str | None = 
     if not kq["ok"]:
         loi = next((x["kq"] for x in lan.da_thu if x["kq"].startswith("lỗi")), None)
         kq["ly_do"] = (lan.ly_do or loi or "cổng không trả file cho link / mã này")[:200]
+        if lan.tam_ngung:
+            kq["tam_ngung"], kq["cho_s"] = True, lan.cho_s
+            kq["ly_do"] = (f"{TEN_CONG.get(cong, cong)}: {lan.tam_ngung} — chưa tính là lỗi, app tự thử lại sau")[:200]
     return kq
+
+
+TEN_CONG = {"MISA": "MISA meInvoice", "EASYINVOICE": "EasyInvoice"}

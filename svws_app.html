@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="vi">
 <head>
-<!-- build: hdc-tu-tai-2026-11-28 -->
+<!-- build: hdc-tu-tai-429-2026-11-28 -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#0f2c44">
@@ -14213,6 +14213,7 @@ function _hdcTepHTML(x){
   const e=v=>String(v==null?'':v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');
   const tep=(x.tep||[]).map(t=>`<a href="#" title="Mở file hóa đơn app đã tự tải từ cổng HĐĐT: ${e(t.ten_file)}" onclick="tepTaiVe('/ke-toan/hoa-don-cho/tep/${Number(t.id)}','${e(t.ten_file).replace(/'/g,'')}');return false">📄 ${t.loai==='HDDT_XML'?'XML':'PDF'}</a>`).join(' · ');
   if(tep)return `<div style="font-size:11px;white-space:nowrap" title="${e(x.tai_ghi_chu||'')}">${tep}${/⚠/.test(x.tai_ghi_chu||'')?' <span style="color:#d97706">⚠</span>':''}</div>`;
+  if(/^⏳/.test(x.tai_ghi_chu||''))return `<div style="font-size:10.5px;color:var(--muted);max-width:178px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${e(x.tai_ghi_chu||'')} — không phải lỗi của hóa đơn, bấm ⬇ Tự tải lại sau ít phút">⏳ cổng đang giới hạn số lần gọi — tải lại sau</div>`;
   if(x.tai_tt==='LOI')return `<div style="font-size:10.5px;color:var(--muted);max-width:178px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${e(x.tai_ghi_chu||'')}">⬇ chưa tự tải được: ${e(x.tai_ghi_chu||'')}</div>`;
   return '';
 }
@@ -14229,15 +14230,30 @@ async function ktHdcTuTaiLoat(){
   if(window._hdcTaiDang)return toast("Đang tự tải, chờ xong đã","err");
   window._hdcTaiDang=true;
   const t={da_xet:0,tai_duoc:0,dien_tien:0,loi:0,khong_ho_tro:0};
+  const tenCong=c=>c==='MISA'?'MISA':c==='EASYINVOICE'?'EasyInvoice':c;
+  let conLai=0,ngung=[],deSau=0,lanCho=0;
   try{
-    for(let v=0;v<30;v++){
+    for(let v=0;v<60;v++){
       toast(`⏳ Đang tự tải hóa đơn… đã xong ${t.da_xet} dòng (tải được ${t.tai_duoc})`,"ok");
       let r; try{r=await api('/ke-toan/hoa-don-cho/tu-tai?toi_da=10',{method:'POST'});}catch(e){toast(e.detail||e.message,"err");break;}
       for(const k in t)t[k]+=Number(r[k]||0);
-      if(!r.da_xet||!r.con_lai)break;
+      conLai=Number(r.con_lai||0); ngung=r.tam_ngung||[]; deSau=Number(r.de_sau||0);
+      if(!conLai)break;
+      if(ngung.length&&!r.da_xet){
+        // cổng HĐĐT đang giới hạn số lần gọi (HTTP 429): dòng KHÔNG bị tính lỗi — nghỉ rồi tải tiếp, tối đa 4 lần nghỉ liền nhau
+        if(++lanCho>4)break;
+        const s=Math.min(180,Math.max(30,Number(r.cho_s||60)));
+        for(let c=s;c>0;c-=5){
+          toast(`⏸ Cổng ${ngung.map(tenCong).join(', ')} đang giới hạn số lần gọi — nghỉ ${c} giây rồi tải tiếp (đã tải được ${t.tai_duoc}, còn ${conLai})`,"ok");
+          await new Promise(z=>setTimeout(z,Math.min(5,c)*1000));
+        }
+        continue;
+      }
+      if(!r.da_xet)break;
+      lanCho=0;
     }
   }finally{window._hdcTaiDang=false;}
-  toast(`⬇ Tự tải xong ${t.da_xet} dòng: tải được ${t.tai_duoc}${t.dien_tien?` (điền tiền ${t.dien_tien} dòng)`:''}${t.loi?` · ${t.loi} dòng cổng không trả file`:''}${t.khong_ho_tro?` · ${t.khong_ho_tro} dòng cổng chưa hỗ trợ`:''}`,t.tai_duoc?"ok":"err");
+  toast(`⬇ Tự tải xong ${t.da_xet} dòng: tải được ${t.tai_duoc}${t.dien_tien?` (điền tiền ${t.dien_tien} dòng)`:''}${t.loi?` · ${t.loi} dòng cổng không trả file`:''}${t.khong_ho_tro?` · ${t.khong_ho_tro} dòng cổng chưa hỗ trợ`:''}${(conLai&&ngung.length)?` · còn ${conLai} dòng vì cổng ${ngung.map(tenCong).join(', ')} đang giới hạn số lần gọi — bấm lại sau 10–15 phút`:''}${deSau?` · ${deSau} dòng vừa lỗi để lượt sau`:''}`,t.tai_duoc?"ok":"err");
   ktRender();
 }
 function ktHdcTepChon(id){window._hdcTepId=id;const i=document.getElementById('hdcTepInput');if(i){i.value='';i.click();}}
