@@ -7,9 +7,9 @@ CHỈ tải ở cổng ĐÃ KIỂM CHỨNG cách tải với hóa đơn thật (
 (bản đầu dò link có chữ «pdf» đã nhận nhầm file hướng dẫn phần mềm của cổng là hóa đơn):
   • MISA meInvoice — theo MÃ TRA CỨU: POST tra-cuu/GetInvoiceDataByTransactionID → JSON, trường `data` là nguyên XML hóa đơn
     (chính lệnh trang tra cứu gọi khi mở link «?sc=<mã>» trong thư; không cần mã xác minh hình ảnh).
-  • EasyInvoice (Softdreams) — theo LINK trong thư «…/Invoice/ViewFromEmail?token=…»: trang hóa đơn có nút «Tải tệp XML»
-    (POST /Invoice/DownloadXML → fileGuid → GET /Invoice/Download) và tải PDF (/Invoice/DownloadPdf); thư kiểu cũ có
-    sẵn link «…/tai-pdf?ma=<mã>».
+  • EasyInvoice (Softdreams) — theo LINK trong thư «…/Invoice/ViewFromEmail?token=…»: lấy mã tải trong trang hóa đơn rồi
+    làm như nút «Tải tệp XML» (POST /Invoice/DownloadXML → fileGuid → GET /Invoice/Download, giữ cookie phiên);
+    thư kiểu cũ có sẵn link «…/tai-pdf?ma=<mã>».
 Cổng khác (Viettel, VNPT, M-Invoice, BKAV… đòi mã xác minh hình ảnh / đăng nhập) → «chưa hỗ trợ», không gọi mạng.
 
 AN TOÀN (link nằm trong thư = dữ liệu KHÔNG tin cậy):
@@ -318,12 +318,15 @@ def _misa(lan: _Lan, code: str):
                  if ma_loi.upper() == "INVOICENOTEXIST" else f"cổng MISA không trả hóa đơn ({ma_loi or 'không rõ lý do'})")
 
 
-_RE_EI_XML = re.compile(r"downloadXML\(\s*'([^']{10,600})'")
-_RE_EI_PDF = re.compile(r"downloadPdf\w*\(\s*'([^']{10,600})'")
+# Trang hóa đơn EasyInvoice (kiểm 28/11/2026 với hóa đơn thật): HTML thô KHÔNG có sẵn nút tải — nút do JS dựng từ mã tải
+# (128 ký tự, mỗi lần mở trang cấp mã mới) nằm ở đối số cuối của lời gọi nội tuyến «showInv(data.str, …, '<mã tải>');».
+_RE_EI_TOK = re.compile(r"showInv\(\s*data\.str[^;]{0,700}?'([A-Za-z0-9+/=]{40,600})'\s*\)\s*;")
+_RE_EI_XML = re.compile(r"downloadXML\(\s*'([^']{10,600})'")          # dự phòng: cổng dựng sẵn nút trong HTML
 
 
 def _easyinvoice(lan: _Lan, link: str, code: str | None):
-    """EasyInvoice: link «/Invoice/ViewFromEmail?token=…» → trang hóa đơn có token tải → XML (2 bước) + PDF.
+    """EasyInvoice: link «/Invoice/ViewFromEmail?token=…» → mã tải trong trang → POST /Invoice/DownloadXML (JSON fileGuid)
+    → GET /Invoice/Download (cần cookie của phiên — `Phien` giữ). /Invoice/DownloadPdf với mã này KHÔNG trả PDF nên không gọi.
     Thư kiểu cũ «/tra-cuu?ma=<mã>»: chỉ có link tải nhanh PDF «/tai-pdf?ma=<mã>»."""
     u = urllib.parse.urlsplit(link)
     duong = u.path.lower()
@@ -339,28 +342,25 @@ def _easyinvoice(lan: _Lan, link: str, code: str | None):
         trang = html.unescape(data[:600000].decode("utf-8", errors="replace"))
         uc = urllib.parse.urlsplit(cuoi)
         goc = f"{uc.scheme}://{uc.netloc}"
-        mx, mp = _RE_EI_XML.search(trang), _RE_EI_PDF.search(trang)
-        if not mx and not mp:
-            lan.ly_do = "trang EasyInvoice không có nút tải (link trong thư đã hết hạn hoặc hóa đơn không còn)"
+        mx = _RE_EI_TOK.search(trang) or _RE_EI_XML.search(trang)
+        if not mx:
+            lan.ly_do = "trang EasyInvoice không có mã tải (link trong thư đã hết hạn hoặc hóa đơn không còn)"
             return
-        if mx:
-            d2, _c2, u2 = lan.goi(goc + "/Invoice/DownloadXML", {"token": mx.group(1)})
-            if d2 is not None:
-                try:
-                    j = json.loads(d2.decode("utf-8", errors="replace"))
-                except ValueError:
-                    j = None
-                if isinstance(j, dict) and j.get("fileGuid"):
-                    q = urllib.parse.urlencode({"fileGuid": j["fileGuid"], "fileName": j.get("fileName") or "hoadon.xml"})
-                    d3, _c3, u3 = lan.goi(goc + "/Invoice/Download?" + q)
-                    if d3 is not None:
-                        lan.nhan(d3, u3, chi="xml")
-                else:
-                    lan.da_thu.append({"url": _ten(u2), "kq": "cổng báo: " + str((j or {}).get("msg") or "không trả file")[:60]})
-        tok_pdf = (mp or mx).group(1)
-        d4, _c4, u4 = lan.goi(goc + "/Invoice/DownloadPdf?" + urllib.parse.urlencode({"token": tok_pdf}))
-        if d4 is not None:
-            lan.nhan(d4, u4, chi="pdf")
+        d2, _c2, u2 = lan.goi(goc + "/Invoice/DownloadXML", {"token": mx.group(1)})
+        if d2 is None:
+            return
+        try:
+            j = json.loads(d2.decode("utf-8", errors="replace"))
+        except ValueError:
+            j = None
+        if not (isinstance(j, dict) and j.get("fileGuid")):
+            lan.da_thu.append({"url": _ten(u2), "kq": "cổng báo: " + str((j or {}).get("msg") or "không trả file")[:60]})
+            lan.ly_do = "cổng EasyInvoice không cấp file XML cho hóa đơn này"
+            return
+        q = urllib.parse.urlencode({"fileGuid": j["fileGuid"], "fileName": j.get("fileName") or "hoadon.xml"})
+        d3, _c3, u3 = lan.goi(goc + "/Invoice/Download?" + q)
+        if d3 is not None and not lan.nhan(d3, u3, chi="xml"):
+            lan.ly_do = "cổng EasyInvoice trả file rỗng (phiên tải không được giữ)"
         return
     if code:
         goc = f"{u.scheme}://{u.netloc}"

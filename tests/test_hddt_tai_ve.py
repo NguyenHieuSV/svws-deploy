@@ -1,7 +1,7 @@
 """
 ⬇ TỰ TẢI hóa đơn theo link / mã tra cứu của cổng HĐĐT (mig 171; viết lại 27/11/2026 theo cách tải THẬT đã kiểm chứng):
   • MISA meInvoice: POST tra-cuu/GetInvoiceDataByTransactionID theo mã → JSON, `data` = XML hóa đơn;
-  • EasyInvoice: link «/Invoice/ViewFromEmail?token=…» → token trên trang → /Invoice/DownloadXML → /Invoice/Download, PDF /Invoice/DownloadPdf.
+  • EasyInvoice: link «/Invoice/ViewFromEmail?token=…» → mã tải trong lời gọi showInv(…) của trang → /Invoice/DownloadXML → /Invoice/Download.
 Cổng giả qua tham số `phien=` (không gọi mạng); SQLite trong bộ nhớ; file lưu vào thư mục tạm.
 """
 import io
@@ -30,9 +30,13 @@ XML = """<?xml version="1.0" encoding="UTF-8"?>
 PDF = b"%PDF-1.4\n%fake hoa don\n" + b"0" * 300
 LINK_MISA = "https://www.meinvoice.vn/tra-cuu"
 LINK_EI = "http://0315297971hd.easyinvoice.com.vn/Invoice/ViewFromEmail?token=TOKENTRONGTHU123"
-TRANG_EI = ("<!DOCTYPE html><html><body>HÓA ĐƠN <button onclick=\"downloadPdfAndFileAttachFromAvailableHtml('TOKNUT/abc+def==',1)\">Tải PDF</button>"
-            "<button onclick=\"downloadXML('TOKNUT/abc+def==')\">Tải tệp XML</button>"
-            "<a href='/Files/UltraViewer_Setup_Guide.pdf'>Hướng dẫn UltraViewer</a></body></html>").encode("utf-8")
+TOK_EI = "NcMvSFyMDvoZQdh0Z4TMzeuqrqsiJ5zwziyeVa5n8p9k06pN/abc+def=="          # mã tải (thật dài 128 ký tự, có + / =)
+# trang thật: HTML thô KHÔNG có nút tải; mã tải là đối số cuối của lời gọi nội tuyến showInv(data.str, …)
+TRANG_EI = ("<!DOCTYPE html><html><body>HÓA ĐƠN<a href='/Files/UltraViewer_Setup_Guide.pdf'>Hướng dẫn UltraViewer</a>"
+            "<script>var data = {str:'<div>…</div>', cusType: 1, toolbarType: ''};\n"
+            "showInv(data.str,data.cusType,data.clientNotSign,data.idInvoice,data.pattern, false, 'R7B5JDFKP', 1, 25, data, '" + TOK_EI + "');\n"
+            "function showInv(str, cusType, clientNotSign, idInvoice, pattern, existAttachFile, fKey, invStatus, rowPerPage, data, token) {}"
+            "</script></body></html>").encode("utf-8")
 
 
 def _xml(so="15854", mst="0315341839", tong="700000"):
@@ -61,7 +65,7 @@ class _Ei:
     """Cổng EasyInvoice giả theo đúng trình tự thật: trang hóa đơn → DownloadXML (JSON fileGuid) → Download; DownloadPdf."""
 
     def __init__(self, trang=TRANG_EI, xml=None, pdf=PDF):
-        self.trang, self.xml, self.pdf, self.goi_ds = trang, xml or _xml(so="444", mst="0315297971", tong="1425600"), pdf, []
+        self.trang, self.xml, self.pdf, self.goi_ds = trang, _xml(so="444", mst="0315297971", tong="1425600") if xml is None else xml, pdf, []
 
     def goi(self, url, du_lieu=None):
         self.goi_ds.append((url, du_lieu))
@@ -70,14 +74,11 @@ class _Ei:
         if u.path == "/Invoice/ViewFromEmail":
             return self.trang, "text/html", url.replace("http://", "https://")       # cổng chuyển sang https
         if u.path == "/Invoice/DownloadXML":
-            assert du_lieu == {"token": "TOKNUT/abc+def=="} and url.startswith("https://")
+            assert du_lieu == {"token": TOK_EI} and url.startswith("https://")
             return json.dumps({"fileGuid": "g-1", "fileName": "444.xml"}).encode(), "application/json", url
         if u.path == "/Invoice/Download":
             assert urllib.parse.parse_qs(u.query) == {"fileGuid": ["g-1"], "fileName": ["444.xml"]}
             return self.xml, "application/octet-stream", url
-        if u.path == "/Invoice/DownloadPdf":
-            assert urllib.parse.parse_qs(u.query) == {"token": ["TOKNUT/abc+def=="]}
-            return self.pdf, "application/pdf", url
         if u.path == "/tai-pdf":
             return self.pdf, "application/pdf", url
         raise AssertionError("gọi lệnh lạ: " + url)
@@ -127,16 +128,19 @@ def test_misa_tai_xml_theo_ma():
 def test_easyinvoice_theo_link_trong_thu_khong_nhan_nham_file_huong_dan():
     p = _Ei()
     k = tv.tai_hoa_don(LINK_EI, "MAKHAC", phien=p)
-    assert k["ok"] and k["cong"] == "EASYINVOICE" and [t["loai"] for t in k["tep"]] == ["xml", "pdf"]
+    assert k["ok"] and k["cong"] == "EASYINVOICE" and [t["loai"] for t in k["tep"]] == ["xml"]
     duong = [urllib.parse.urlsplit(u).path for u, _ in p.goi_ds]
-    assert duong == ["/Invoice/ViewFromEmail", "/Invoice/DownloadXML", "/Invoice/Download", "/Invoice/DownloadPdf"]
+    assert duong == ["/Invoice/ViewFromEmail", "/Invoice/DownloadXML", "/Invoice/Download"]   # đúng 3 lệnh như nút «Tải tệp XML»
     assert not any("UltraViewer" in u for u, _ in p.goi_ds)                                # KHÔNG dò link chung trong trang
-    # trang không có nút tải (link hết hạn) → không tải gì, nêu lý do
+    # trang không có mã tải (link hết hạn) → không tải gì, nêu lý do
     k2 = tv.tai_hoa_don(LINK_EI, phien=_Ei(trang=b"<html><body>Loi<a href='/Files/UltraViewer_Setup_Guide.pdf'>x</a></body></html>"))
-    assert not k2["ok"] and "không có nút tải" in k2["ly_do"]
-    # DownloadPdf trả trang lỗi (HTML) → chỉ nhận XML
-    k3 = tv.tai_hoa_don(LINK_EI, phien=_Ei(pdf=b"<html><body>error</body></html>"))
-    assert k3["ok"] and [t["loai"] for t in k3["tep"]] == ["xml"]
+    assert not k2["ok"] and "không có mã tải" in k2["ly_do"]
+    # bước Download trả rỗng (mất cookie phiên) → nêu lý do, không coi là có file
+    k3 = tv.tai_hoa_don(LINK_EI, phien=_Ei(xml=b""))
+    assert not k3["ok"] and "file rỗng" in k3["ly_do"]
+    # cổng dựng sẵn nút trong HTML (dấu nháy bị mã hóa) → vẫn lấy được mã tải
+    san = ("<html><body><button onclick=\"downloadXML(&#39;" + TOK_EI + "&#39;)\">Tải tệp XML</button></body></html>").encode("utf-8")
+    assert tv.tai_hoa_don(LINK_EI, phien=_Ei(trang=san))["ok"]
     # thư kiểu cũ: /tra-cuu?ma= → tải nhanh PDF /tai-pdf?ma=
     p4 = _Ei()
     k4 = tv.tai_hoa_don("http://0315297971hd.easyinvoice.com.vn/tra-cuu?ma=7UT2SH9WV", phien=p4)
@@ -281,8 +285,8 @@ def test_easyinvoice_dien_dong_va_luu_ca_xml_pdf(db):
     r.link_tra_cuu, r.ma_tra_cuu, r.tu_email = LINK_EI, None, "hoadon-noreply@easyinvoice.vn"
     db.commit()
     k = kq._hdc_tu_tai(db, r, None, phien=_Ei())
-    assert k["ok"] and k["nguon"] == "XML" and int(r.tong_tien) == 1425600 and r.tai_ghi_chu == "Đã tải XML + PDF từ EasyInvoice"
-    assert [t["loai"] for t in kq._hdc_tep(db, [r.id])[r.id]] == ["HDDT_XML", "HDDT_PDF"]
+    assert k["ok"] and k["nguon"] == "XML" and int(r.tong_tien) == 1425600 and r.tai_ghi_chu == "Đã tải XML từ EasyInvoice"
+    assert [t["loai"] for t in kq._hdc_tep(db, [r.id])[r.id]] == ["HDDT_XML"]
 
 
 def test_chi_co_pdf_thi_nho_ai_khi_dong_con_thieu(db, monkeypatch):
@@ -363,11 +367,11 @@ def test_doc_ca_hai_dang_xml(db):
 
 
 def test_easyinvoice_trang_ma_hoa_dau_nhay_va_so_hoa_don_rac(db):
-    # HTML thô của cổng ghi onclick="downloadXML(&#39;token&#39;)" — dấu nháy bị mã hóa thành thực thể
+    # HTML thô ghi dấu nháy thành thực thể &#39; → vẫn dò ra mã tải
     tho = TRANG_EI.decode("utf-8").replace("'", "&#39;").encode("utf-8")
-    assert b"downloadXML(&#39;" in tho
+    assert b"showInv(data.str" in tho and b"&#39;" in tho
     k = tv.tai_hoa_don(LINK_EI, phien=_Ei(trang=tho))
-    assert k["ok"] and [t["loai"] for t in k["tep"]] == ["xml", "pdf"]
+    assert k["ok"] and [t["loai"] for t in k["tep"]] == ["xml"]
     # dòng có «số hóa đơn» không chứa chữ số (AI đọc nhầm chữ «Invoice») → coi như chưa có số, nhận số từ file
     r = _dong(db, so="oice", tong=3465)
     k2 = kq._hdc_tu_tai(db, r, None, phien=_Misa())
