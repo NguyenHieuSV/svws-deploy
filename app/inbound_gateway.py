@@ -277,18 +277,21 @@ def _hop_theo_co(M, co: str) -> str | None:
     return None
 
 
-def tim_thu(tu_khoa: str, tu_ngay=None, toi_da: int = 30, ca_hop: bool = True) -> list[dict]:
+def tim_thu(tu_khoa: str, tu_ngay=None, toi_da: int = 30, ca_hop: bool = True, han_s: float = 60) -> list[dict]:
     """🔎 TÌM THƯ trong hộp thư theo từ khóa (người gửi / tiêu đề / thân) — để soi vì sao một hóa đơn chưa vào hàng chờ.
     Chỉ đọc (BODY.PEEK, mở hộp ở chế độ readonly) — không đánh dấu đã đọc, không đổi gì trong hộp thư.
     Khác `_imap_lay_thu`: trả CẢ thư tự động (Auto-Submitted / Precedence: bulk — luồng quét đang bỏ qua) kèm cờ `tu_dong`;
     `ca_hop`: tìm thêm ở «Tất cả thư» và «Thư rác» (thư không nằm trong Hộp thư đến thì luồng quét không thấy).
-    → mới nhất trước, mỗi thư: hop, ngay, tu_email, den_email, tieu_de, message_id, tu_dong, dinh_kem [{ten, kb}], noi_dung (≤ 3.000 ký tự)."""
+    → mới nhất trước, mỗi thư: hop, ngay, tu_email, den_email, tieu_de, message_id, tu_dong, dinh_kem [{ten, kb}], noi_dung (≤ 3.000 ký tự).
+    Dừng sau `han_s` giây (request web bị cắt ~100 giây) — thư chưa kịp đọc thì bỏ, thu hẹp từ khóa / mốc ngày để tìm tiếp."""
+    import time as _time
     tu_khoa = (tu_khoa or "").strip()
     if len(tu_khoa) < 3:
         raise ValueError("Từ khóa tìm thư cần ít nhất 3 ký tự")
     if settings.inbound_provider.upper() != "IMAP":
         return []
-    M = imaplib.IMAP4_SSL(settings.imap_host, settings.imap_port, timeout=IMAP_TIMEOUT)
+    het = _time.monotonic() + han_s
+    M = imaplib.IMAP4_SSL(settings.imap_host, settings.imap_port, timeout=30)
     M.login(settings.imap_user, settings.imap_pass)
     ra, da_co = [], set()
     hop_ds = [("INBOX", "Hộp thư đến")]
@@ -315,7 +318,16 @@ def tim_thu(tu_khoa: str, tu_ngay=None, toi_da: int = 30, ca_hop: bool = True) -
             except Exception:
                 continue
             nums = (data[0].split() if data and data[0] else [])[-max(1, min(int(toi_da or 30), 60)):]
+            # «Tất cả thư» chứa cả thư đã thấy ở Hộp thư đến → hỏi Message-ID trước (một lệnh), thư trùng khỏi tải thân
+            try:
+                mid_so = _imap_mid_theo_so(M, nums) if (hop != "INBOX" and nums and da_co) else {}
+            except Exception:
+                mid_so = {}
             for num in reversed(nums):
+                if _time.monotonic() > het or len(ra) >= 60:
+                    break
+                if (mid_so.get(num) or "").strip() in da_co:
+                    continue
                 try:
                     typ, md = M.fetch(num, "(BODY.PEEK[])")
                     m = email.message_from_bytes(md[0][1])
@@ -323,8 +335,9 @@ def tim_thu(tu_khoa: str, tu_ngay=None, toi_da: int = 30, ca_hop: bool = True) -
                     continue
                 mid = (m.get("Message-ID") or "").strip()
                 if mid and mid in da_co:
-                    continue                              # «Tất cả thư» chứa cả thư đã thấy ở Hộp thư đến
-                da_co.add(mid)
+                    continue
+                if mid:
+                    da_co.add(mid)
                 kem = []
                 for p in m.walk():
                     fn = p.get_filename()
@@ -346,8 +359,6 @@ def tim_thu(tu_khoa: str, tu_ngay=None, toi_da: int = 30, ca_hop: bool = True) -
                 ra.append({"hop": ten_hop, "ngay": m.get("Date"), "tu_email": parseaddr(m.get("From"))[1], "den_email": den,
                            "tieu_de": _txt(m.get("Subject")), "message_id": mid or None, "tu_dong": tu_dong,
                            "dinh_kem": kem[:10], "noi_dung": (_body(m) or "")[:3000]})
-                if len(ra) >= 60:
-                    break
     finally:
         try:
             M.logout()
